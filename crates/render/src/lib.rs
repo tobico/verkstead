@@ -8,11 +8,11 @@
 //! only has to put in the page.
 //!
 //! The rest of what the viewer is handed lives here for the same reason, even
-//! where no markdown is involved: the two lists' rows carry dates the server has
-//! already worded, and the outcomes of answering and archiving are named states
-//! the viewer says in words. Taken together these types *are* the viewer's side
-//! of the wire, which is what makes this the one crate the TypeScript is
-//! generated from — see the `typescript` feature in the manifest.
+//! where no markdown is involved: a Timeline's Events and the outcomes of
+//! answering and archiving are named states the viewer says in words. Taken
+//! together these types *are* the viewer's side of the wire, which is what makes
+//! this the one crate the TypeScript is generated from — see the `typescript`
+//! feature in the manifest.
 //!
 //! Nothing here knows about the store, the router or the viewer. Given a
 //! [`verkstead_schema::QuestionSet`] and where the Set stands, [`set_view`]
@@ -21,13 +21,11 @@
 
 mod answering;
 mod conversations;
-mod lists;
 mod profiles;
 mod push;
 mod repos;
 mod update;
 mod view;
-mod when;
 
 pub use answering::{Archived, Submitted};
 pub use conversations::{
@@ -37,7 +35,6 @@ pub use conversations::{
     TimelineEvent, Transcript, Worktree, agent_output_event, brief_event, moved_event,
     question_set_event,
 };
-pub use lists::{ArchiveEntry, PendingEntry};
 pub use profiles::{
     AgentType, Broken, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
     ProfileSaved,
@@ -46,7 +43,6 @@ pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry};
 pub use update::UpdateNotice;
 pub use view::{Answered, AskView, DiffView, OptionView, QuestionView, SetView, Standing};
-pub use when::{relative_age, settled_age, utc_stamp};
 
 pub mod diff;
 pub mod markdown;

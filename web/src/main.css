@@ -147,9 +147,9 @@ main {
   max-width: calc(var(--measure) + 2rem);
 }
 
-/* The two lists' pages, whole: a row carries a title and a line of provenance,
-   and neither ever wanted more room than the reading column — so the page
-   keeps to it, and sits in the middle of whatever the window offers past it. */
+/* A list page, whole: a row carries a name and a line of provenance, and never
+   wanted more room than the reading column — so the page keeps to it, and sits
+   in the middle of whatever the window offers past it. */
 .list-page {
   max-width: calc(var(--measure) + 2rem);
   margin-inline: auto;
@@ -300,9 +300,9 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-/* The two lists of Sets — what is waiting and what was decided — are drawn as
-   the same card, because they are read the same way and the same Set is looked
-   at in both. Only the last thing on the meta line differs. */
+/* The list pages — the Repos and the Agent Profiles — are drawn as the same
+   card, because they are read the same way: a name, and a line of what the row
+   is settled against. Only the last thing on the meta line differs. */
 
 .set-list {
   list-style: none;
@@ -339,34 +339,17 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
-.set-row .project {
-  color: var(--accent);
-  font-weight: 500;
-}
-
 .set-row .branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* A word rather than a light, because the list is scanned on a phone and
-   "agent disconnected" has to read as itself without a legend. Waiting is the
-   ordinary state and stays as quiet as the rest of the line; only the Set nobody
-   is listening on speaks up. */
-.pending-set .liveness.disconnected,
+/* A word rather than a light, because a Set is read on a phone and "agent
+   disconnected" has to read as itself without a legend. Waiting is the ordinary
+   state and stays as quiet as the rest of the line; only the Set nobody is
+   listening on speaks up. */
 .standing .liveness.disconnected {
   color: var(--removed);
   font-weight: 500;
-}
-
-.pending-set .age,
-.archived-set .decided-at {
-  margin-left: auto;
-}
-
-/* A Set that was closed without ever being answered is not a decision, and the
-   log must not be skimmed as though it were. */
-.archived-set.unanswered .decided-at {
-  font-style: italic;
 }
 
 .empty,
@@ -379,19 +362,18 @@ textarea::placeholder {
 }
 
 /* Where else there is to go, in the same slot on every page: back out of a Set,
-   and between the lists. */
+   and out to the pages a Conversation is settled against. */
 
 .back,
-.to-archive,
-.to-pending,
-.to-repos {
+.to-repos,
+.to-profiles {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
 }
 
-/* More than one of them on a line, which is the pending list alone. */
+/* More than one of them on a line, which is the conversations sidebar alone. */
 .elsewhere {
   display: flex;
   flex-wrap: wrap;

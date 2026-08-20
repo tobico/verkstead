@@ -27,10 +27,10 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    ArchiveEntry, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, Lifecycle, NewConversation, PendingEntry,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing,
-    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted, ConversationEntry,
+    ConversationView, GrillingStarted, Lifecycle, NewConversation, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -42,8 +42,6 @@ use crate::{AppState, store};
 /// the same registry of held waits.
 pub(crate) fn routes() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/api/ui/pending", get(pending))
-        .route("/api/ui/archive", get(archive))
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/archive", post(archive_set))
@@ -89,65 +87,6 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/update", get(update))
 }
 
-/// `GET /api/ui/pending` — the Sets still waiting on the human, newest first.
-async fn pending(State(state): State<AppState>) -> HttpResponse {
-    let now = OffsetDateTime::now_utc();
-
-    let pending = match store::pending_sets(&state.pool).await {
-        Ok(pending) => pending,
-        Err(error) => {
-            tracing::error!(error = ?error, "reading the pending Sets failed");
-            return unavailable("the pending Sets could not be read");
-        }
-    };
-
-    let rows: Vec<PendingEntry> = pending
-        .into_iter()
-        .map(|set| PendingEntry {
-            id: set.id,
-            title: set.title,
-            project: set.project,
-            branch: set.branch,
-            // All three already decided here rather than sent as timestamps:
-            // this is the side with the clock and with the registry of held
-            // waits.
-            age: verkstead_render::relative_age(&set.created_at, now),
-            created_stamp: verkstead_render::utc_stamp(&set.created_at),
-            liveness: state.waits.liveness(set.id, &set.created_at, now),
-        })
-        .collect();
-
-    Json(rows).into_response()
-}
-
-/// `GET /api/ui/archive` — the Sets that have been settled, newest first.
-async fn archive(State(state): State<AppState>) -> HttpResponse {
-    let now = OffsetDateTime::now_utc();
-
-    let archived = match store::archived_sets(&state.pool).await {
-        Ok(archived) => archived,
-        Err(error) => {
-            tracing::error!(error = ?error, "reading the Archive failed");
-            return unavailable("the Archive could not be read");
-        }
-    };
-
-    let rows: Vec<ArchiveEntry> = archived
-        .into_iter()
-        .map(|set| ArchiveEntry {
-            id: set.id,
-            title: set.title,
-            project: set.project,
-            branch: set.branch,
-            settled_at: verkstead_render::settled_age(&set.settled_at, now),
-            settled_stamp: verkstead_render::utc_stamp(&set.settled_at),
-            unanswered: set.settled == store::Settled::ArchivedUnanswered,
-        })
-        .collect();
-
-    Json(rows).into_response()
-}
-
 /// `GET /api/ui/sets/{id}` — one Set, rendered, with where it stands.
 ///
 /// Where it stands travels with it rather than being asked for afterwards:
@@ -178,6 +117,22 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         }
     };
 
+    // Which Conversation it was asked from, which is where this page leads back
+    // to. A stored Set always has one — it and its Timeline Event are written in
+    // the one transaction — so a Set without one is a record this server cannot
+    // make a whole page out of rather than a Set that is simply somewhere else.
+    let conversation = match store::asked_from(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(set_id = id, "a stored Question Set is on no Timeline");
+            return unavailable("the Question Set could not be read");
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "reading which Conversation a Set was asked from failed");
+            return unavailable("the Question Set could not be read");
+        }
+    };
+
     let standing = standing(
         &state,
         id,
@@ -188,7 +143,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
-    let view: SetView = verkstead_render::set_view(stored.id, stored.set, standing);
+    let view: SetView = verkstead_render::set_view(stored.id, conversation, stored.set, standing);
 
     Json(view).into_response()
 }

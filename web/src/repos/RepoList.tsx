@@ -12,7 +12,12 @@
 //! happen. Which reason it was comes from the server as a named outcome, and
 //! this file is where each of them is said.
 //!
-//! Plain for now. This list is the workbench's to hold once there is one.
+//! It is also where the two switches that are about this device and this server
+//! rather than about any one Conversation now live — whether the phone is told
+//! about a Question Set, and whether a newer Verkstead has been released. They
+//! were on the pending list, because that was the page open often enough to be
+//! noticed on; with that page retired they belong beside the other thing settled
+//! once and then left alone.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
@@ -20,6 +25,8 @@ import { For, Match, Show, Switch, createSignal } from "solid-js";
 
 import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
+import { Notifications } from "../push/Notifications";
+import { UpdateNotice } from "../update/UpdateNotice";
 
 /// What each way of being refused says, once, wherever it is met.
 ///
@@ -93,9 +100,21 @@ export function RepoList() {
       <A class="back" href="/">
         ← Workbench
       </A>
+      {/* On the title's line rather than buried in a settings page of its own:
+          whether this device is told about a Question Set is settled once and
+          then left alone, which is the same kind of thing as which repositories
+          Verkstead may touch — and a switch is small enough to live in the space
+          the heading was leaving empty anyway. */}
       <div class="page-head">
         <h1>Repos</h1>
+        <Notifications />
       </div>
+      {/* Above the list and under the heading: it is about the server the whole
+          page came from rather than about anything on it, and it asks for
+          nothing — so it is read on the way past, once, and then it is the
+          list's page again. Drawn only when there is a release waiting; this is
+          nothing at all the rest of the time. */}
+      <UpdateNotice />
 
       <form class="add-repo" onSubmit={add}>
         <label for="repo-path">Absolute path of a git repository</label>

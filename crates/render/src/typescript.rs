@@ -17,11 +17,11 @@
 use ts_rs::TS;
 
 use crate::{
-    ArchiveEntry, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, ConversationAborted, ConversationEntry, ConversationView,
-    GrillingStarted, NewConversation, PendingEntry, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PushKey, Registered, Registration, RepoEntry, SetView,
-    Started, Submitted, Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
+    Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
+    ConversationAborted, ConversationEntry, ConversationView, GrillingStarted, NewConversation,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey,
+    Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -35,9 +35,8 @@ fn the_viewers_types_are_written_from_these() {
     // see `.cargo/config.toml`, which is where both are said once.
     let config = ts_rs::Config::from_env();
 
-    // The two lists, and one Set.
-    PendingEntry::export_all(&config).unwrap();
-    ArchiveEntry::export_all(&config).unwrap();
+    // One Set, whole — which is what both the standalone page and the details
+    // pane of the Timeline it landed on are drawn from.
     SetView::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of

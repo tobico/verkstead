@@ -13,16 +13,19 @@ import { expect } from "vitest";
 
 import type { AskView, SetView } from "../src/api/types";
 import { SetPage } from "../src/set/SetPage";
-import { json, serving } from "./serving";
+import { json, serving, whenever } from "./serving";
 
-/// Where a Set leads when it is done with: the pending list and the Archive.
-/// Neither is this page's subject, so they are stand-ins — what a test asks is
-/// which of them the page went to, which is `history.get()`.
+/// Where a Set leads back to: the Conversation it was asked from. Not this
+/// page's subject, so it is a stand-in — what a test asks is where the way out
+/// points, which is the link's `href`.
 const Elsewhere = () => <p class="elsewhere" />;
 
-/// The page on its own route, so the id it fetches is the one the URL names,
-/// and inside a router, because the way back out of a Set is a link — and,
-/// once it is answered or archived, a navigation.
+/// The page on its own route, so the id it fetches is the one the URL names, and
+/// inside a router, because the way back out of a Set is a link.
+///
+/// Settling a Set is not a navigation and never was one to this page: answering
+/// it or closing it unanswered leaves the human where they are, reading the same
+/// sheet back as the record of what became of it.
 export function mount(id = "1") {
   // No retries: a test that asked for a refusal should see it at once, rather
   // than after the three attempts a real page is right to make.
@@ -38,8 +41,7 @@ export function mount(id = "1") {
       <QueryClientProvider client={client}>
         <MemoryRouter history={history}>
           <Route path="/sets/:id" component={SetPage} />
-          <Route path="/pending" component={Elsewhere} />
-          <Route path="/archive" component={Elsewhere} />
+          <Route path="/conversations/:id" component={Elsewhere} />
         </MemoryRouter>
       </QueryClientProvider>
     )),
@@ -60,22 +62,43 @@ export async function reading(set: SetView): Promise<HTMLElement> {
   return container;
 }
 
-/// The same page, kept hold of for the tests that fill it in: the Set is served
-/// first and whatever follows answers the submit or the archive it goes on to
-/// make.
+/// The same page, kept hold of for the tests that fill it in: every read of the
+/// Set is answered with the Set, and the answers given are what the submit or
+/// the archive the page goes on to make comes back with.
+///
+/// The reads are held to their own path rather than left in the order the
+/// answers are handed out, because settling a Set does not take the page
+/// anywhere: it reads the Set again where it stands, and a sequence would hand
+/// that read whatever the submit was answered with.
 ///
 /// The fetch mock comes back with it, because what a sheet was filled in with is
-/// read off the request it sent — and so does the history, because a Set that
-/// has been settled leaves the page.
+/// read off the request it sent — and so does the history, so a test can say the
+/// page stayed where it was.
 export async function answering(
   set: SetView,
   ...answers: Array<() => Promise<globalThis.Response>>
 ) {
   cleanup();
-  const fetching = serving(json(set), ...answers);
+
+  /// How the Set reads back right now, which `settles` moves on: a test that
+  /// answers a Set is a test whose next read of it is the record.
+  let standing = set;
+
+  const fetching = serving(
+    whenever(`/api/ui/sets/${set.id}`, () => json(standing)()),
+    ...answers,
+  );
   const { container, history } = mount(String(set.id));
   await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
-  return { page: container, fetching, history };
+
+  return {
+    page: container,
+    fetching,
+    history,
+    settles: (into: SetView) => {
+      standing = into;
+    },
+  };
 }
 
 /// The same Set, closing with a Postscript.
@@ -155,10 +178,23 @@ export function withTable(set: SetView): SetView {
   };
 }
 
-/// The body of the last request the page sent, as JSON — what it actually put
-/// on the wire, rather than what it was asked to.
+/// Everything the page has *sent* — the submits and the archives, and never the
+/// reads it makes around them.
+///
+/// The two are counted apart because a settled Set is read back where it stands:
+/// the page does not leave, so a submit is followed by the read that redraws the
+/// sheet as the record. A test counting every call would be counting that too,
+/// and would say "the Response was sent twice" when it was sent once.
+export function posts(
+  fetching: ReturnType<typeof serving>,
+): Array<Parameters<typeof fetch>> {
+  return fetching.mock.calls.filter(([, init]) => init?.method === "POST");
+}
+
+/// The body of the last thing the page sent, as JSON — what it actually put on
+/// the wire, rather than what it was asked to.
 export function sent(fetching: ReturnType<typeof serving>): unknown {
-  const last = fetching.mock.calls.at(-1);
+  const last = posts(fetching).at(-1);
   expect(last, "expected the page to have sent something").toBeTruthy();
   return JSON.parse(String(last![1]?.body));
 }

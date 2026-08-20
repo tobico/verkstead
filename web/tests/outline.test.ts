@@ -30,6 +30,7 @@ import {
 function everySection(): SetView {
   return {
     id: 1,
+    conversation: 1,
     title: "Rate limiting for the public API",
     project: "verkstead",
     branch: "solid-viewer",

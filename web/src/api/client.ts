@@ -7,7 +7,6 @@
 
 import type {
   ApiError,
-  ArchiveEntry,
   Archived,
   BaseRecorded,
   BranchRenamed,
@@ -16,7 +15,6 @@ import type {
   ConversationEntry,
   ConversationView,
   GrillingStarted,
-  PendingEntry,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -50,17 +48,6 @@ export class RefusedError extends Error {
     this.status = status;
     this.violations = refusal.violations ?? [];
   }
-}
-
-/// The Sets still waiting on the human, newest first.
-export function listPending(): Promise<PendingEntry[]> {
-  return get<PendingEntry[]>("/api/ui/pending");
-}
-
-/// The Sets that have been settled, newest first — answered or closed
-/// unanswered, which is the whole of the Archive.
-export function listArchive(): Promise<ArchiveEntry[]> {
-  return get<ArchiveEntry[]>("/api/ui/archive");
 }
 
 /// One Set, rendered, with where it stands.

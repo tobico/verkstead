@@ -105,17 +105,18 @@ $ cat examples/questions.yaml | cargo run -p verkstead-cli -- ask
 
 ### 5. Answer (in the browser)
 
-This is the human's part. Open <http://127.0.0.1:8422/pending> and the Set from
-step 4 is on the pending list, with its project, its branch, and `agent
-waiting` — that last one being the CLI still holding its long-poll. Open it.
+This is the human's part. Open <http://127.0.0.1:8422/> and pick the
+Conversation the Set was asked from: it is on that Conversation's Timeline,
+summarised as the table of number, question and answer, and badged `waiting on
+you` — the CLI is still holding its long-poll. Press the row and the details
+pane is the whole ask.
 
-(It is also on the Timeline of the Conversation it was asked from, summarised
-as the table of number, question and answer — open the Conversation in the
-workbench and press the row to answer it there instead. The pending list is a
-second way in, kept for as long as the phone's answering flow has not moved
-over; the workbench's sidebar links to it.)
+(A Set is also a page of its own at `/sets/<id>`, which is what a push
+notification opens on a phone. It draws the same sheet and answers through the
+same endpoint; what it has that the pane does not is a way back to the
+Conversation it belongs to.)
 
-The page is the whole ask: the Preface, the Diff of the working tree the agent
+The sheet is the whole ask: the Preface, the Diff of the working tree the agent
 asked from, and each Question with its Options. Pick one, or write your own
 words, or both — an Option with a ★ is the agent's Recommendation, and
 **Accept all ★ Recommendations** fills in every question you have not answered

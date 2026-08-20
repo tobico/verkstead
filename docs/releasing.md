@@ -77,7 +77,7 @@ newcomer actually follows.
    records why it is the one write to `main` that skips review.
 
 5. **The Update Notice**, on a server still running the previous version: the
-   pending list gains a banner naming the new one, and the README's `## Updating`
+   Repo list gains a banner naming the new one, and the README's `## Updating`
    section is where its link lands — so that section has to exist by then. The
    server asks GitHub at startup and daily after, so restart the old server
    rather than waiting a day.

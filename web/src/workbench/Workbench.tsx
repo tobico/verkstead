@@ -34,6 +34,13 @@ import { Details } from "./Details";
 import { Output } from "./Output";
 import { Timeline } from "./Timeline";
 
+/// How often the open page reads its Conversation again, in milliseconds.
+///
+/// The Timeline has to keep up with a session that is writing into it and with
+/// a Question Set that arrives while nobody is touching the page — and while the
+/// page is asking, it also brings a Set answered on another device into view.
+const REFRESH = 10_000;
+
 /// Which level of the hierarchy a narrow window is showing.
 export type Pane = "conversations" | "timeline" | "details";
 
@@ -112,6 +119,16 @@ export function Workbench(): JSX.Element {
     queryKey: ["conversation", selected()],
     queryFn: () => loadConversation(selected()),
     enabled: selected() !== "",
+    // The fallback underneath both Nudge channels (ADR-0005), which this page
+    // inherited when the pending list retired: a Timeline is where a Question
+    // Set arrives now, and where a session's output grows while it runs. The
+    // stream is instant while the page is alive and the relayed push survives
+    // an iOS PWA being suspended; neither has to work, because this is here.
+    //
+    // The query keeps the last Conversation while the next one is in flight, so
+    // a refetch every ten seconds swaps Events rather than blinking the pane
+    // through a loading state the human is trying to read past.
+    refetchInterval: REFRESH,
   }));
 
   return (

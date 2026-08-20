@@ -1075,73 +1075,11 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 /// A viewer test fed by a hand-written mock proves only that the mock and the
 /// component agree — these files are what the endpoint actually said.
 ///
-/// Everything a clock would otherwise decide is pinned, so that a run today
-/// and a run next week write the same bytes. The worded times are pinned by
-/// arrangement — each row is created or settled at a distance from now whose
-/// wording never moves, "just now" or "3h ago" or far enough back to be said
-/// as its date — and the exact stamps behind them, which would carry the run's
-/// own clock, are overwritten with stated minutes after the fact.
+/// Everything a clock would otherwise decide is pinned, so that a run today and
+/// a run next week write the same bytes: every settling stamp is overwritten
+/// with a stated minute after the fact, and it is the viewer that words one.
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
-    let now = time::OffsetDateTime::now_utc();
-
-    // The pending list: one Set whose agent has just sent it, and one nothing has
-    // waited on for hours — the two badges, and two ages worth wording.
-    let (_dir, pool, app) = fresh_app().await;
-    put(&pool, &full_grammar_set()).await.unwrap();
-    let mut stale_set = full_grammar_set();
-    stale_set.title = "Retry policy for the outbound queue".to_owned();
-    stale_set.branch = Some("outbound-retries".to_owned());
-    let stale = put(&pool, &stale_set).await.unwrap();
-    stamp(
-        &pool,
-        "UPDATE question_sets SET created_at = ? WHERE id = ?",
-        &rfc3339(now - time::Duration::hours(3)),
-        stale.id,
-    )
-    .await;
-    write(
-        "pending.json",
-        &pin_rows(
-            &get(&app, "/api/ui/pending").await,
-            "created_stamp",
-            &["2026-08-03 06:16 UTC", "2026-08-03 09:16 UTC"],
-        ),
-    );
-
-    // The Archive: a decision, and a Set nobody was ever going to answer — one
-    // settled a moment ago and one long since, which are also the two ways a
-    // settling is worded: the age while it is fresh, and the date once it is
-    // not. Long since rather than days ago, because "4d ago" would say
-    // something different next week and these bytes must not.
-    let (_dir, pool, app) = fresh_app().await;
-    let decided = put(&pool, &full_grammar_set()).await.unwrap();
-    store::insert_response(&pool, decided.id, &decided_every_way())
-        .await
-        .unwrap()
-        .unwrap();
-    stamp(
-        &pool,
-        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
-        "2025-08-03T09:07:11.000Z",
-        decided.id,
-    )
-    .await;
-    let mut orphan_set = full_grammar_set();
-    orphan_set.title = "Backfill for the archived rows".to_owned();
-    let orphan = put(&pool, &orphan_set).await.unwrap();
-    store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
-        .await
-        .unwrap();
-    write(
-        "archive.json",
-        &pin_rows(
-            &get(&app, "/api/ui/archive").await,
-            "settled_stamp",
-            &["2026-08-03 17:31 UTC", "2025-08-03 09:07 UTC"],
-        ),
-    );
-
     // A Set to answer: every feature of the question grammar, the agent's markup
     // throughout, and a Diff attached.
     let (_dir, pool, app) = fresh_app().await;
@@ -1461,25 +1399,6 @@ fn pin_timeline(json: &str) -> String {
     serde_json::to_string(&payload).unwrap()
 }
 
-/// Pin a list's exact stamps to stated minutes, one value per row in order, so
-/// the fixture does not carry the run's own clock. The worded times beside
-/// them need no pinning — the rows are arranged so their wording never moves.
-fn pin_rows(json: &str, field: &str, values: &[&str]) -> String {
-    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
-
-    let rows = payload.as_array_mut().unwrap();
-    assert_eq!(rows.len(), values.len(), "one stated minute per row");
-    for (row, value) in rows.iter_mut().zip(values) {
-        assert!(
-            row.get(field).is_some(),
-            "no {field} on this row to pin:\n{row}"
-        );
-        row[field] = (*value).into();
-    }
-
-    serde_json::to_string(&payload).unwrap()
-}
-
 /// Pin the one stamp a settled Set carries, so the fixture does not change with
 /// the clock. It is the only value in these payloads the server hands over
 /// raw — the viewer words it, against its own clock — so it is pinned far
@@ -1497,23 +1416,6 @@ fn pinned(json: &str) -> String {
     }
 
     serde_json::to_string(&payload).unwrap()
-}
-
-/// A time as the store holds one. Written out by hand because `time` is built
-/// here for parsing only — as it is in the server, which words its dates the
-/// same way rather than formatting them.
-fn rfc3339(when: time::OffsetDateTime) -> String {
-    let when = when.to_offset(time::UtcOffset::UTC);
-
-    format!(
-        "{}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
-        when.year(),
-        u8::from(when.month()),
-        when.day(),
-        when.hour(),
-        when.minute(),
-        when.second(),
-    )
 }
 
 async fn stamp(pool: &SqlitePool, query: &str, stamp: &str, id: i64) {

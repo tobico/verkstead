@@ -128,8 +128,9 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 
 **Question Set**:
 A batch of Questions submitted together by one agent, with a Preface and a
-title. The unit that appears in the pending list, gets answered, and is
-archived.
+title. The unit that lands on a Conversation's Timeline, gets answered, and is
+archived. Reached through the Conversation it was asked from and nowhere else:
+a second way in would be a second thing to keep true.
 _Avoid_: request, batch, ticket
 
 **Preface**:
@@ -238,8 +239,10 @@ required reading, never optional.
 _Avoid_: section, chapter
 
 **Archive**:
-Where Question Sets live after their Response is delivered (or after manual
-archiving of an orphaned Set). Permanent, browsable decision history.
+What Question Sets become once their Response is delivered (or once an orphaned
+Set is manually archived). Permanent decision history, and no longer a place of
+its own to browse: a settled Set stays on the Timeline it was asked from,
+saying what became of it. Nothing leaves a Timeline.
 _Avoid_: history, log
 
 **Liveness**:

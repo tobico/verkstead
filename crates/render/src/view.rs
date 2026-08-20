@@ -21,6 +21,16 @@ use ts_rs::TS;
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SetView {
     pub id: i64,
+
+    /// The Conversation this Set was asked from — where it lives, and what a
+    /// page reached by the Set's own id leads back to.
+    ///
+    /// It travels with the Set rather than being looked up beside it, because a
+    /// page opened from a push notification knows the Set and nothing else, and
+    /// a way back that arrived a moment later would be a page that briefly led
+    /// nowhere.
+    pub conversation: i64,
+
     pub title: String,
     pub project: Option<String>,
     pub branch: Option<String>,
@@ -183,7 +193,12 @@ pub struct Answered {
 /// `standing` is the caller's to decide — it comes from the store's settlement
 /// and the registry of held waits, neither of which is any of this crate's
 /// business. Everything else on the way out is rendering, which is all of it.
-pub fn set_view(id: i64, set: verkstead_schema::QuestionSet, standing: Standing) -> SetView {
+pub fn set_view(
+    id: i64,
+    conversation: i64,
+    set: verkstead_schema::QuestionSet,
+    standing: Standing,
+) -> SetView {
     use crate::diff;
 
     // An empty Preface is the same as none at all: no point drawing the section
@@ -196,6 +211,7 @@ pub fn set_view(id: i64, set: verkstead_schema::QuestionSet, standing: Standing)
 
     SetView {
         id,
+        conversation,
         title: set.title,
         project: set.project,
         branch: set.branch,

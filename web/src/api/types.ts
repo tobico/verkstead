@@ -87,25 +87,6 @@ error: string,
 violations?: Array<Violation>, };
 
 /**
- * One row of the Archive.
- *
- * No Liveness, because nothing is waiting on a settled Set. Its time is
- * worded like the pending list's — an age while the settling is fresh, and
- * the plain date once it is not, because this is a permanent log and old ages
- * stop meaning anything.
- */
-export type ArchiveEntry = { id: number, title: string, project: string | null, branch: string | null, settled_at: string, 
-/**
- * The minute it was settled, exactly — the tooltip behind the words.
- */
-settled_stamp: string, 
-/**
- * Whether it got here without a Response — archived unanswered by the
- * human, rather than decided.
- */
-unanswered: boolean, };
-
-/**
  * What became of the human closing a Set unanswered.
  */
 export type Archived = "Closed" | "AlreadyAnswered" | "AlreadyArchived" | "NoSuchSet";
@@ -303,8 +284,8 @@ export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" |
 export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done" | "Aborted";
 
 /**
- * What the pending list says about a Set: whether an agent is currently
- * waiting on it, or nothing is holding a wait any more.
+ * What a Set still waiting on the human says about itself: whether an agent is
+ * currently waiting on it, or nothing is holding a wait any more.
  *
  * Display state only (ADR-0001). A disconnected Set is still answerable and is
  * never withdrawn on its own — the CLI reconnects through transient drops, and
@@ -361,19 +342,6 @@ text_html: string, recommended: boolean,
  * and a block in one of its cells would break the row apart.
  */
 cells: Array<string>, };
-
-/**
- * One row of the pending list.
- *
- * The Liveness arrives already decided, like the age: the registry of held
- * waits is the server's, and this way the viewer draws a badge rather than
- * working one out.
- */
-export type PendingEntry = { id: number, title: string, project: string | null, branch: string | null, age: string, 
-/**
- * The minute the Set arrived, exactly — the tooltip behind the age.
- */
-created_stamp: string, liveness: Liveness, };
 
 /**
  * Which Profile a Conversation is choosing for one of its two roles.
@@ -591,7 +559,17 @@ answer: string, };
  * source, and so does the Diff: the server has the markdown parser and the diff
  * highlighter, and this way the browser needs neither.
  */
-export type SetView = { id: number, title: string, project: string | null, branch: string | null, preface_html: string | null, diff: DiffView | null, questions: Array<QuestionView>, 
+export type SetView = { id: number, 
+/**
+ * The Conversation this Set was asked from — where it lives, and what a
+ * page reached by the Set's own id leads back to.
+ *
+ * It travels with the Set rather than being looked up beside it, because a
+ * page opened from a push notification knows the Set and nothing else, and
+ * a way back that arrived a moment later would be a page that briefly led
+ * nowhere.
+ */
+conversation: number, title: string, project: string | null, branch: string | null, preface_html: string | null, diff: DiffView | null, questions: Array<QuestionView>, 
 /**
  * What the agent closed the Set with, for the page to draw above the
  * set-level comment box. Rendered here like the Preface, because it is the

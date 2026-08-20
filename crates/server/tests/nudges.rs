@@ -3,7 +3,7 @@
 //!
 //! Read off the wire rather than off the channel behind it, because what has to
 //! hold is that a page listening over HTTP hears each durable change — the
-//! three that move a Set on or off the pending list, and nothing else. A Nudge
+//! three that settle a Set or put a new one to the human, and nothing else. A Nudge
 //! is contentless, so every assertion here is about *how many* arrived and
 //! *when*, never about what one said.
 

@@ -4,9 +4,7 @@ import { Route, Router } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
-import { ArchiveList } from "./archive/ArchiveList";
 import { listenForNudges } from "./nudge";
-import { PendingList } from "./pending/PendingList";
 import { ProfileList } from "./profiles/ProfileList";
 import { RepoList } from "./repos/RepoList";
 import { SetPage } from "./set/SetPage";
@@ -44,15 +42,15 @@ export function App(): JSX.Element {
             same page draws both. */}
         <Route path="/" component={Workbench} />
         <Route path="/conversations/:id" component={Workbench} />
-        {/* The phone's answering flow, which the workbench does not touch. Both
-            of these are transitional: they retire once Question Sets are reached
-            through the Conversation they belong to. */}
-        <Route path="/pending" component={PendingList} />
-        <Route path="/archive" component={ArchiveList} />
         <Route path="/repos" component={RepoList} />
         {/* What a session runs under. Reached from the sidebar beside the
             repos, because both are things a conversation is settled against. */}
         <Route path="/profiles" component={ProfileList} />
+        {/* One Set as a page of its own, which is what a push notification
+            opens: a phone woken by one is being asked about that Set and
+            nothing else, so it lands on the Set rather than on the workbench
+            around it. The same Set is reached in the workbench as the details
+            pane of the Timeline Event it landed on. */}
         <Route path="/sets/:id" component={SetPage} />
         <Route path="*" component={NoSuchPage} />
       </Router>

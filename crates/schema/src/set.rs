@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionSet {
-    /// Short line for the pending list.
+    /// Short line for the row this Set gets on its Conversation's Timeline.
     pub title: String,
 
     /// Markdown context, enough to answer the Questions without seeing the

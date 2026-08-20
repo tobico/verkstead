@@ -17,6 +17,7 @@ import type { SetView, Submitted } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import {
   answering,
+  posts,
   sent,
   texts,
   withHeading,
@@ -188,7 +189,7 @@ describe("the sheet a waiting Set is answered on", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     const response = sent(fetching) as { answers: Array<{ label: string }> };
 
     expect(
@@ -476,7 +477,7 @@ describe("a question whose Options were declared as a table", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     // Indistinguishable from the list-mode Set answered the same way — which is
     // the Response the store took and the agent was handed as YAML.
     expect(sent(fetching)).toEqual(DECIDED);
@@ -495,10 +496,13 @@ describe("a question whose Options were declared as a table", () => {
 
 describe("submitting a Response", () => {
   it("sends the Set answered in the browser as the Response the server records", async () => {
-    const { page, fetching, history } = await answering(
+    const { page, fetching, history, settles } = await answering(
       WAITING,
       submitted("Accepted"),
     );
+    // What the page reads back once the Response has been taken: it stays put,
+    // so the sheet it redraws is the record of what was decided.
+    settles(ANSWERED);
 
     answerLikeTheFixture(page);
     press(page, "Submit");
@@ -506,17 +510,19 @@ describe("submitting a Response", () => {
     // human and the send.
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
-    const [path, init] = fetching.mock.calls[1]!;
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
+    const [path, init] = posts(fetching)[0]!;
     expect(path).toBe(`/api/ui/sets/${WAITING.id}/response`);
     expect(init?.method).toBe("POST");
     // The Response the answered fixture carries, which is what the store took
     // and what the agent was handed as YAML.
     expect(sent(fetching)).toEqual(DECIDED);
 
-    // Back to the pending list, where the Set's absence is the confirmation
-    // that the agent has its answer.
-    await waitFor(() => expect(history.get()).toBe("/pending"));
+    // And the page stays on the Set, read back as the decision that was made —
+    // which is the confirmation that the agent has its answer. There is no list
+    // for the Set's absence to be the confirmation on any more.
+    await waitFor(() => expect(page.querySelector(".answered-at")).toBeTruthy());
+    expect(history.get()).toBe(`/sets/${WAITING.id}`);
   });
 
   it("sends a Set with every choice made without asking anything first", async () => {
@@ -531,7 +537,7 @@ describe("submitting a Response", () => {
       page.querySelector(".confirm"),
       "no offered choice was overlooked, so there is nothing to warn about",
     ).toBeNull();
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
   });
 
   it("names every offered choice being left open, and lets the human go back", async () => {
@@ -549,7 +555,7 @@ describe("submitting a Response", () => {
 
     press(page, "Keep answering");
     expect(page.querySelector(".confirm")).toBeNull();
-    expect(fetching, "nothing was sent").toHaveBeenCalledTimes(1);
+    expect(posts(fetching), "nothing was sent").toHaveLength(0);
   });
 
   it("sends a comment and nothing else as the counter-question it is", async () => {
@@ -562,7 +568,7 @@ describe("submitting a Response", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     expect(sent(fetching)).toEqual({
       answers: ["Q1", "Q2", "Q2a", "Q2b", "Q3"].map((label) => ({
         label,
@@ -584,7 +590,7 @@ describe("submitting a Response", () => {
     expect(button.textContent).toBe("Sending…");
     expect(button.disabled).toBe(true);
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
   });
 });
 
@@ -596,7 +602,7 @@ describe("a submit that did not land", () => {
       fireEvent.click(option(page, label, 1));
     }
     press(page, "Submit");
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() => expect(page.querySelector(".submit .error")).toBeTruthy());
     return page;
   }
@@ -643,7 +649,7 @@ describe("a submit that did not land", () => {
     }
     press(page, "Submit");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(".submit .error")!.textContent).toContain(
         "the Response could not be taken",
@@ -740,7 +746,7 @@ describe("the draft between visits", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
   });
 
@@ -756,7 +762,7 @@ describe("the draft between visits", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     // This Set will take no Response from here, so a half-filled sheet would
     // only resurface stale and unsendable on some later visit.
     await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
@@ -774,7 +780,7 @@ describe("the draft between visits", () => {
     press(page, "Submit");
     press(page, "Send anyway");
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await screen.findByText(/Q2b is unaccounted for/);
     expect(localStorage.getItem(KEY)).toBeTruthy();
   });

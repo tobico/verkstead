@@ -43,17 +43,17 @@ export function SetPage(): JSX.Element {
   );
 }
 
-/// Back to the list this Set is on: a settled one is off the pending list for
-/// good and lives in the Archive, so that is where reading it leads back to.
+/// Back to the Conversation this Set was asked from, which is where it lives:
+/// settled or waiting, a Set is an Event on one Timeline and there is nowhere
+/// else for reading it to lead.
 ///
-/// The page's own and not the sheet's: a Set reached through its Conversation
-/// came from a Timeline, and leads back there instead.
+/// The page's own and not the sheet's. In the workbench this same sheet is the
+/// details pane of the Timeline Event it belongs to, and the way back out of
+/// that is the pane's header rather than a link to the page it is already on.
 function Back(props: { set: SetView }): JSX.Element {
-  const decided = () => !("Waiting" in props.set.standing);
-
   return (
-    <A href={decided() ? "/archive" : "/pending"} class="back">
-      {decided() ? "← Archive" : "← Pending"}
+    <A href={`/conversations/${props.set.conversation}`} class="back">
+      ← Conversation
     </A>
   );
 }

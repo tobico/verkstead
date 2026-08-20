@@ -494,17 +494,14 @@ describe("the record of a settled Set", () => {
     expect(page.querySelectorAll(".option .star")).toHaveLength(1);
   });
 
-  it("leads back to the list the Set is on", async () => {
-    const waiting = await reading(WAITING);
-    const back = waiting.querySelector("a.back")!;
-    expect(back.getAttribute("href")).toBe("/pending");
-    expect(back.textContent).toBe("← Pending");
-
-    for (const settled of [ANSWERED, ARCHIVED]) {
-      const page = await reading(settled);
+  it("leads back to the Conversation the Set was asked from", async () => {
+    // The same way out however the Set stands: settled or waiting, it is an
+    // Event on one Timeline and there is nowhere else for reading it to lead.
+    for (const set of [WAITING, ANSWERED, ARCHIVED]) {
+      const page = await reading(set);
       const out = page.querySelector("a.back")!;
-      expect(out.getAttribute("href")).toBe("/archive");
-      expect(out.textContent).toBe("← Archive");
+      expect(out.getAttribute("href")).toBe(`/conversations/${set.conversation}`);
+      expect(out.textContent).toBe("← Conversation");
     }
   });
 

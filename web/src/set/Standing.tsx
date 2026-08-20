@@ -8,15 +8,23 @@
 //! thumb's width from the questions. It is confirmed besides: it is the only
 //! thing on this page that cannot be taken back.
 
-import { useNavigate } from "@solidjs/router";
-import { useMutation } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { Show, createMemo, createSignal, onCleanup } from "solid-js";
 
 import { archiveSet } from "../api/client";
 import type { Archived, Liveness } from "../api/types";
-import { BADGE } from "../pending/PendingList";
 import { clearDraft } from "./sheet";
+
+/// What the badge says. The word that colours it is the Liveness itself, which
+/// is the class on the span.
+///
+/// Worded about the agent rather than about the connection: what the human
+/// wants to know before answering is whether anyone is still on the other end.
+export const BADGE: Record<Liveness, string> = {
+  waiting: "agent waiting",
+  disconnected: "agent disconnected",
+};
 
 /// What the human is asked before a Set is closed unanswered.
 ///
@@ -24,9 +32,9 @@ import { clearDraft } from "./sheet";
 /// stop saying — that this cannot be taken back — can be held to. Archiving is
 /// the only irreversible act in the whole UI.
 export const ARCHIVE_WARNING =
-  "It leaves the pending list for good and goes into the Archive with no " +
-  "Response. An agent still waiting on it is told the Set was archived. This " +
-  "cannot be undone.";
+  "It stops waiting on you for good and stands on its Conversation's timeline " +
+  "with no Response. An agent still waiting on it is told the Set was " +
+  "archived. This cannot be undone.";
 
 /// The badge, and the one thing to do about a Set nobody is coming back for,
 /// folded behind it as a menu. Drawn on the provenance line, which the
@@ -42,7 +50,7 @@ export function Standing(props: {
   // they answer it.
   const [confirming, setConfirming] = createSignal(false);
 
-  const navigate = useNavigate();
+  const queries = useQueryClient();
 
   const archive = useMutation(() => ({
     mutationFn: () => archiveSet(props.id),
@@ -52,13 +60,15 @@ export function Standing(props: {
       }
 
       // A Set that can never take a Response has no use for a half-filled
-      // sheet, and the page is leaving anyway.
+      // sheet.
       clearDraft(props.id);
 
-      // To the Archive rather than to the pending list: this Set was not
-      // discarded, it was filed, and seeing it filed unanswered is the
-      // confirmation that nothing was lost.
-      navigate("/archive");
+      // And the page stays where it is, read back as the Set nobody ever
+      // answered: it was not discarded, it was closed, and seeing it closed on
+      // its own Timeline is the confirmation that nothing was lost. Everything
+      // is invalidated because the row this Set is on has changed as well as
+      // the Set itself.
+      void queries.invalidateQueries();
     },
   }));
 
@@ -159,7 +169,8 @@ export function Standing(props: {
 }
 
 /// Why the Set was not archived, when it was not. A Set that was says nothing
-/// here — the page is already on its way to the Archive.
+/// here — the page is redrawing as the record of a Set nobody answered, and
+/// that is the whole of what there is to say about it.
 function unarchived(
   outcome: Archived | undefined,
   error: Error | null,
@@ -173,7 +184,7 @@ function unarchived(
     case "Closed":
       return null;
     case "AlreadyAnswered":
-      return "This Set was answered while this page was open, so it was not archived: it is in the Archive as a decision.";
+      return "This Set was answered while this page was open, so it was not archived: it stands as the decision that was made.";
     case "AlreadyArchived":
       return "This Set has already been archived.";
     case "NoSuchSet":

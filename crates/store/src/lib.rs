@@ -4,8 +4,8 @@
 //! A Set and a Response are each kept as one JSON body — JSON rather than YAML
 //! because it preserves a Preface's whitespace exactly, and the Preface is
 //! markdown the human reads back verbatim. `title`, `project` and `branch` are
-//! lifted into columns beside the Set so the pending list can be drawn without
-//! deserializing every Set.
+//! lifted into columns beside the body, so that what a Set is *about* can be
+//! read without deserializing it.
 //!
 //! Every Set is asked from a Conversation and lands on its Timeline — see
 //! [`ask`], which is the one way one is stored. What answering it does is here
@@ -33,9 +33,10 @@ mod waits;
 
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Edited, Event, Grilling, Lifecycle,
-    SetOnTimeline, TimelineEvent, abort_conversation, ask, conversations, load_conversation,
-    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
-    set_implementation_profile, set_state, start_conversation, start_grilling, timeline,
+    SetOnTimeline, TimelineEvent, abort_conversation, ask, asked_from, conversations,
+    load_conversation, rename_branch, save_brief, set_asked_from, set_base_commit,
+    set_grilling_profile, set_implementation_profile, set_state, start_conversation,
+    start_grilling, timeline,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -64,44 +65,6 @@ pub struct StoredResponse {
     pub set_id: i64,
     pub submitted_at: String,
     pub response: Response,
-}
-
-/// One row of the pending list: a Set still waiting on the human, drawn from
-/// the lifted columns without touching its body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingSet {
-    pub id: i64,
-    pub created_at: String,
-    pub title: String,
-    pub project: Option<String>,
-    pub branch: Option<String>,
-}
-
-/// One row of the Archive: a Set that has been settled, drawn from the lifted
-/// columns and the stamp of whichever event settled it, without touching any
-/// body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchivedSet {
-    pub id: i64,
-    pub settled_at: String,
-    pub settled: Settled,
-    pub title: String,
-    pub project: Option<String>,
-    pub branch: Option<String>,
-}
-
-/// What put a Set in the Archive.
-///
-/// The two are kept apart because they are not the same thing to read back: one
-/// is a decision that was made, the other is a Set nobody ever answered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Settled {
-    /// The human answered it, and the Archive holds what they decided.
-    Answered,
-
-    /// The human closed it unanswered, because nobody was ever going to answer
-    /// it. There is no Response and there never will be.
-    ArchivedUnanswered,
 }
 
 /// How a Set was settled, for whoever is waiting to hear that it was.
@@ -214,16 +177,16 @@ pub async fn submit_response(
 /// What became of archiving a Set unanswered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Archiving {
-    /// Closed: the Set is off the pending list, in the Archive, and anyone
-    /// holding a wait on it has been told.
+    /// Closed: the Set has stopped waiting on the human, and anyone holding a
+    /// wait on it has been told.
     Archived(SetArchived),
 
     /// There is no Set with that id to archive.
     NoSuchSet,
 
-    /// The Set has a Response, so it is in the Archive as a decision already.
-    /// Archiving unanswered is for a Set nobody will ever answer, and it does
-    /// not touch what is already filed.
+    /// The Set has a Response, so it is a decision already. Archiving
+    /// unanswered is for a Set nobody will ever answer, and it does not touch
+    /// what was decided.
     AlreadyAnswered,
 
     /// The Set was archived before this arrived — from another device, or
@@ -231,8 +194,8 @@ pub enum Archiving {
     AlreadyArchived,
 }
 
-/// Close a Set the human is never going to be able to answer: file it in the
-/// Archive unanswered, and tell whoever is waiting on it.
+/// Close a Set the human is never going to be able to answer: settle it
+/// unanswered, and tell whoever is waiting on it.
 ///
 /// Only a human may do this (ADR-0001): a disconnected agent is never enough,
 /// because the CLI reconnects through transient drops. Nothing here consults
@@ -377,97 +340,6 @@ pub async fn set_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
         .with_context(|| format!("looking for Question Set {id}"))?;
 
     Ok(found.is_some())
-}
-
-/// The Sets still waiting on the human, newest first.
-///
-/// A Set leaves this list by being answered or by being archived unanswered:
-/// either way it is settled, and the point of the list is that everything on it
-/// is really still waiting.
-///
-/// Ordered by id rather than `created_at`: the id is handed out in submission
-/// order, so it says "newest" without two Sets stamped in the same millisecond
-/// coming back in an arbitrary order.
-pub async fn pending_sets(pool: &SqlitePool) -> Result<Vec<PendingSet>> {
-    /// The lifted columns in the order the query below selects them.
-    type Row = (i64, String, String, Option<String>, Option<String>);
-
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT s.id, s.created_at, s.title, s.project, s.branch
-         FROM question_sets s
-         LEFT JOIN responses r ON r.set_id = s.id
-         LEFT JOIN archivings a ON a.set_id = s.id
-         WHERE r.set_id IS NULL AND a.set_id IS NULL
-         ORDER BY s.id DESC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("listing the pending Question Sets")?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(id, created_at, title, project, branch)| PendingSet {
-            id,
-            created_at,
-            title,
-            project,
-            branch,
-        })
-        .collect())
-}
-
-/// The Sets in the Archive, newest first: everything that has been answered,
-/// and everything the human archived unanswered.
-///
-/// Ordered by when each Set was settled rather than by when it was asked: in the
-/// Archive the day it was closed is what the log is read along, whichever event
-/// closed it. Two stamps can agree to the millisecond, so the id — handed out in
-/// submission order, and unique — breaks the tie.
-///
-/// Like the pending list, drawn from the lifted columns alone: the Archive is
-/// permanent and only grows, and a list is scanned rather than read.
-pub async fn archived_sets(pool: &SqlitePool) -> Result<Vec<ArchivedSet>> {
-    /// The columns in the order the query below selects them, the third being
-    /// whether this row is here without a Response.
-    type Row = (i64, String, i64, String, Option<String>, Option<String>);
-
-    // An archived Set that somehow also had a Response would be one Set in the
-    // log twice, so the second half excludes it — the answering is the decision,
-    // and it is the one already filed.
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT s.id AS id, r.submitted_at AS settled_at, 0 AS unanswered,
-                s.title, s.project, s.branch
-         FROM question_sets s
-         JOIN responses r ON r.set_id = s.id
-         UNION ALL
-         SELECT s.id, a.archived_at, 1, s.title, s.project, s.branch
-         FROM question_sets s
-         JOIN archivings a ON a.set_id = s.id
-         LEFT JOIN responses r ON r.set_id = s.id
-         WHERE r.set_id IS NULL
-         ORDER BY settled_at DESC, id DESC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("listing the archived Question Sets")?;
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, settled_at, unanswered, title, project, branch)| ArchivedSet {
-                id,
-                settled_at,
-                settled: if unanswered == 0 {
-                    Settled::Answered
-                } else {
-                    Settled::ArchivedUnanswered
-                },
-                title,
-                project,
-                branch,
-            },
-        )
-        .collect())
 }
 
 /// Store the Response to a Set, stamping it with a submission time.

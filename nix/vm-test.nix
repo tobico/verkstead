@@ -267,16 +267,25 @@ testers.runNixOSTest {
 
         # Two Responses of the same shape, distinguishable in the CLI's output, so
         # a test that answers two Sets can tell which answer reached which agent.
-        "verkstead-vm-test/first-response.yaml".text = ''
-          answers:
-            - label: Q1
-              selected: 1
-            - label: Q2
-              free_text: The first Set came back to the agent that asked it.
-
-          comment: |
-            Posted through the same API the web UI posts through.
-        '';
+        #
+        # JSON rather than YAML, because they go in the way the browser sends
+        # one: the human answers in the viewer, and the viewer's own namespace
+        # is what it posts to. The agents' half of the wire speaks YAML and is
+        # exercised on the way *out* — the CLI submits its Set that way, and
+        # reads its Response back that way.
+        "verkstead-vm-test/first-response.json".text = builtins.toJSON {
+          answers = [
+            {
+              label = "Q1";
+              selected = 1;
+            }
+            {
+              label = "Q2";
+              free_text = "The first Set came back to the agent that asked it.";
+            }
+          ];
+          comment = "Posted through the same API the web UI posts through.\n";
+        };
 
         # What the human puts in the service's home, and the two things a session
         # reads out of it: who a commit is by, and what `gh` is logged in as.
@@ -291,16 +300,19 @@ testers.runNixOSTest {
               user: nobody
         '';
 
-        "verkstead-vm-test/second-response.yaml".text = ''
-          answers:
-            - label: Q1
-              selected: 1
-            - label: Q2
-              free_text: The second agent recovered its wait across the restart.
-
-          comment: |
-            Answered after the service had been stopped and started under it.
-        '';
+        "verkstead-vm-test/second-response.json".text = builtins.toJSON {
+          answers = [
+            {
+              label = "Q1";
+              selected = 1;
+            }
+            {
+              label = "Q2";
+              free_text = "The second agent recovered its wait across the restart.";
+            }
+          ];
+          comment = "Answered after the service had been stopped and started under it.\n";
+        };
       };
     };
 
@@ -357,40 +369,75 @@ testers.runNixOSTest {
         )
 
 
+    def timeline():
+        """The Conversation the agents here ask from, as the workbench reads it —
+        which is where a Set arrives now that there is no list of them."""
+        return json.loads(
+            machine.succeed(
+                "curl -sf"
+                f" http://127.0.0.1:8422/api/ui/conversations/{ASKING_FROM}"
+            )
+        )["timeline"]
+
+
+    def sets_on_timeline():
+        """Every Question Set on that Timeline, oldest first."""
+        return [
+            event["QuestionSet"] for event in timeline() if "QuestionSet" in event
+        ]
+
+
     def waiting(name):
         """The id of the Set the agent in `name` submitted, once the server has
         taken it.
 
         Asked of the server rather than of the agent: a wait that goes to plan
         is silent, so the CLI says nothing between submitting a Set and printing
-        the Response. The pending list is where an arrival shows, and it carries
-        only Sets that are neither answered nor archived — so with one agent
-        asking at a time, the Set listed there is that agent's.
+        the Response. The Timeline of the Conversation it was asked from is
+        where an arrival shows, and a Set that is neither answered nor archived
+        reads there as `Waiting` — so with one agent asking at a time, the Set
+        waiting there is that agent's.
         """
         machine.wait_until_succeeds(
-            "curl -sf http://127.0.0.1:8422/api/ui/pending | grep -q '\"id\"'"
+            "curl -sf"
+            f" http://127.0.0.1:8422/api/ui/conversations/{ASKING_FROM}"
+            " | grep -q Waiting"
         )
-        listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/pending")
-        ids = [int(found) for found in re.findall(r'"id":(\d+)', listed)]
-        assert len(ids) == 1, f"expected the one Set {name} asked, got:\n{listed}"
+        asked = sets_on_timeline()
+        still_waiting = [
+            found for found in asked if "Waiting" in found["standing"]
+        ]
+        assert len(still_waiting) == 1, (
+            f"expected the one Set {name} asked to be waiting, got:\n{asked}"
+        )
 
         # The agent has to still be there to be answered: a CLI that submitted
-        # and then died would leave the Set pending just the same.
+        # and then died would leave the Set waiting just the same.
         assert not machine.succeed(
             f"test -e /root/{name}/status && cat /root/{name}/status || true"
         ).strip(), f"{name} exited before its Set was answered"
 
-        return ids[0]
+        return still_waiting[0]["set_id"]
 
 
     def answer(set_id, fixture):
-        """Post a Response over the API, reached through the Conversation the Set
-        was asked from."""
-        machine.succeed(
-            "curl -sf -X POST -H 'Content-Type: application/yaml'"
+        """Answer a Set the way the human does: the viewer's own namespace, in
+        JSON, which is the one route a browser posts a Response through from the
+        workbench and from a phone alike.
+
+        Not scoped to a Conversation, unlike everything the agents' half does: a
+        Set is answered by whoever has its id, and which Conversation it belongs
+        to is the server's to know. The outcome comes back in the body rather
+        than as a status — every one of them is something the viewer has to say
+        in words — so `curl -sf` proves nothing on its own and the answer is
+        read.
+        """
+        outcome = machine.succeed(
+            "curl -sf -X POST -H 'Content-Type: application/json'"
             f" --data-binary @/etc/verkstead-vm-test/{fixture}"
-            f" {asking_from()}/api/v1/sets/{set_id}/response"
-        )
+            f" http://127.0.0.1:8422/api/ui/sets/{set_id}/response"
+        ).strip()
+        assert outcome == '"Accepted"', f"the Response was answered {outcome}"
 
 
     def collect(name):
@@ -555,20 +602,26 @@ testers.runNixOSTest {
         ask("first")
         first = waiting("first")
 
-        # The viewer's own namespace is where the Set surfaces — carrying what the
-        # CLI derived from the working directory rather than anything the Set
-        # claimed. Asked of the API rather than of a page, because the page is
+        # The Set surfaces on the Timeline of the Conversation it was asked
+        # from, which is the whole of the attribution: nothing about the Set
+        # says which Conversation it belongs to, only the base URL the session
+        # was given. Asked of the API rather than of a page, because the page is
         # drawn in the browser and a `curl` of it is the empty document above.
-        pending = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/pending")
-        assert "Does the module hold up in a VM?" in pending, "the Set is not listed"
-        assert "vm-project" in pending, "the CLI did not derive the project"
-        assert BRANCH in pending, "the CLI did not derive the branch"
+        titles = [found["title"] for found in sets_on_timeline()]
+        assert titles == ["Does the module hold up in a VM?"], (
+            f"the Set is not on the Conversation's Timeline: {titles}"
+        )
 
-        # The third derived field comes with the Set itself rather than with its row.
+        # What the CLI derived from the working directory, rather than anything
+        # the Set claimed, comes with the Set itself: the Timeline carries the
+        # table of what was asked, and the document is what the pane showing it
+        # fetches.
         detail = machine.succeed(f"curl -sf http://127.0.0.1:8422/api/ui/sets/{first}")
+        assert "vm-project" in detail, "the CLI did not derive the project"
+        assert BRANCH in detail, "the CLI did not derive the branch"
         assert "uncommitted" in detail, "the CLI did not derive the Diff"
 
-        answer(first, "first-response.yaml")
+        answer(first, "first-response.json")
         printed = collect("first")
 
         assert "The first Set came back" in printed, f"the CLI printed:\n{printed}"
@@ -614,7 +667,7 @@ testers.runNixOSTest {
         # The agent did not fail when the server went away; it reconnects its
         # wait, so answering now still reaches it.
         machine.succeed("test ! -e /root/second/status")
-        answer(pending, "second-response.yaml")
+        answer(pending, "second-response.json")
         printed = collect("second")
 
         assert "recovered its wait" in printed, f"the CLI printed:\n{printed}"

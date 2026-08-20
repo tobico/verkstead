@@ -882,6 +882,33 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
     Ok(found.is_some())
 }
 
+/// Which Conversation a Set was asked from, or `None` if it is on no Timeline
+/// at all.
+///
+/// The other direction of [`set_asked_from`], and the one a Set opened by its
+/// own id needs: a page reached from a push notification knows the Set and
+/// nothing else, and where it leads back to is the Conversation it belongs to.
+///
+/// `None` cannot happen for a stored Set — [`ask`] writes the Set, its Event and
+/// the row joining them in one transaction — so it is a broken record rather
+/// than a Set that simply has no Conversation.
+pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT e.conversation_id
+         FROM set_events s
+         JOIN timeline_events e ON e.id = s.event_id
+         WHERE s.set_id = ?",
+    )
+    .bind(set_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("looking for the Conversation Question Set {set_id} was asked from")
+    })?;
+
+    Ok(found.map(|(id,)| id))
+}
+
 /// Rewrite a drafting Conversation's Brief.
 ///
 /// The Brief Event is edited in place rather than added to: while a Conversation

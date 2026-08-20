@@ -39,10 +39,10 @@ self.addEventListener("push", (event) => {
         // delivers the same push twice then replaces the notification instead of
         // stacking a second one over it.
         tag: notice.id ? `verkstead-set-${notice.id}` : "verkstead",
-        // The pending list rather than the root, which is the workbench: a push
-        // that could not say which Set it was about is still about a Set, and
-        // the list of them is the nearest thing to an answer.
-        data: { url: notice.id ? `/sets/${notice.id}` : "/pending" },
+        // The workbench where a push could not say which Set it was about: a
+        // Set is reached through the Conversation it was asked from, and the
+        // workbench is where every Conversation is.
+        data: { url: notice.id ? `/sets/${notice.id}` : "/" },
       }),
       nudge(),
     ]),
@@ -53,7 +53,7 @@ self.addEventListener("push", (event) => {
 // there if there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(open((event.notification.data || {}).url || "/pending"));
+  event.waitUntil(open((event.notification.data || {}).url || "/"));
 });
 
 // Tell every open Verkstead that the pending world moved. The page reacts to

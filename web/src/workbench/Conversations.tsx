@@ -11,7 +11,7 @@
 //! they can change while it is still drafting.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
-//! workbench has the root now: the pending list and the Repos are a line at the
+//! workbench has the root: the Repos and the Agent Profiles are a line at the
 //! bottom of it rather than a page of their own to find.
 
 import { A } from "@solidjs/router";
@@ -147,13 +147,11 @@ export function Conversations(props: {
         </Match>
       </Switch>
 
-      {/* The rest of Verkstead. The pending list is where the phone answers, and
-          it is a page of its own for as long as Question Sets are not yet on a
-          Timeline — see the workbench roadmap. */}
+      {/* The rest of Verkstead: the two things a Conversation is settled
+          against, and nothing else. What is waiting on the human is not among
+          them — a Question Set is reached through the Conversation it was asked
+          from, which is the list above. */}
       <nav class="elsewhere">
-        <A class="to-pending" href="/pending">
-          Pending →
-        </A>
         <A class="to-repos" href="/repos">
           Repos →
         </A>

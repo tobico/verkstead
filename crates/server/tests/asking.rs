@@ -296,6 +296,36 @@ async fn another_conversations_set_is_not_reachable_through_this_one() {
     );
 }
 
+/// A Set opened by its own id — which is what a push notification opens on a
+/// phone — says which Conversation it belongs to, because that is the only way
+/// back from it.
+#[tokio::test]
+async fn a_set_read_by_its_own_id_names_the_conversation_it_was_asked_from() {
+    let (_dir, _pool, app, first, second) = two_conversations().await;
+
+    let its_own = asked(&app, first, SET).await;
+    let the_others = asked(&app, second, SET).await;
+
+    for (id, expected) in [(its_own, first), (the_others, second)] {
+        let (status, body) = fetch(
+            &app,
+            Request::builder()
+                .uri(format!("/api/ui/sets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let view: verkstead_render::SetView =
+            serde_json::from_str(&body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"));
+        assert_eq!(
+            view.conversation, expected,
+            "Set {id} should lead back to the Conversation it was asked from",
+        );
+    }
+}
+
 /// The design's summary for a Question Set: a table of number, question and
 /// answer. Every Question and Sub-question gets a row, including the Heading
 /// that asks nothing — its text is what the rows under it are read against.
