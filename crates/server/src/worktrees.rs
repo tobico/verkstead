@@ -139,6 +139,30 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
     .is_some()
 }
 
+/// The git directory `worktree` shares with the repository it was made from, in
+/// full.
+///
+/// The *common* one, which is the repository's own `.git` rather than the
+/// worktree's: what sits in a worktree is a file pointing back into
+/// `…/.git/worktrees/<name>`, and a sandbox given only that would have a
+/// checkout with no object database behind it. Asking git rather than joining
+/// `.git` onto the Repo's path, because where a repository keeps its git
+/// directory is git's answer to give — a `.git` file, a separated directory, a
+/// worktree of a worktree.
+///
+/// `None` where git will not say, which is a directory that is not a worktree at
+/// all.
+pub(crate) fn common_git_dir(worktree: &Path) -> Option<PathBuf> {
+    let dir = git(
+        worktree,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+
+    let dir = dir.trim();
+
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
+}
+
 /// Take the worktree at `path` away, and tell `repo` it has gone.
 ///
 /// True when there is no longer a worktree there, which includes there never

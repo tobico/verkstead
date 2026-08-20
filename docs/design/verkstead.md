@@ -76,7 +76,14 @@ flowchart LR
   profiles before grilling starts: one for grilling, one for implementation
   work (today's split: grill on fable, implement on opus).
 - **Sandbox configuration** (extra read-write binds such as build caches,
-  network policy) lives in global defaults with per-repo overrides.
+  network policy) lives in global defaults with per-repo overrides. *Settled
+  2026-08-20, building stage 02*: it is configured where the watched paths are —
+  `--sandbox-bind DIR` for every sandbox, `--sandbox-bind NAME=DIR` for the repo
+  registered under that name — because each bind is a hole in the boundary and
+  widening one is the installer's to do. Letting a **conversation** allow another
+  repository into its own sandbox, chosen while the brief is drafted, is wanted
+  and is not built: the sandbox takes a composed list, so it is a source to add
+  rather than anything to undo.
 - **Repo files stay the source of truth** for task lists (`.tasks/`) and
   roadmaps (`docs/roadmaps/`). Verkstead parses and renders them; it never
   owns them. *Why:* keeps the skills' formats and the done-signal design
@@ -130,6 +137,10 @@ flowchart LR
     the profile's claude pair at `~/.claude` and `~/.claude.json`
   - **ro:** `/nix` and system paths, `~/.gitconfig`, gh config
   - **tmpfs:** `/tmp`; everything else in HOME absent
+  - `~` inside is the home of whoever runs the server, at the same path — which
+    is where that gitconfig and gh config are read from (*settled 2026-08-20,
+    building stage 02*), so the packaged unit has to be given a home worth
+    reading
   - per-repo extra binds from sandbox configuration
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)

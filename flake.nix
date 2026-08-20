@@ -112,6 +112,14 @@
               # The CLI derives `project`, `branch` and the Diff by shelling out
               # to git, so git is a runtime dependency and not just a habit.
               git
+              # What a session runs inside. Verkstead is Linux-and-bwrap only by
+              # design, and the sandbox's own tests prove the surface by running
+              # a probe in one rather than by reading the flags.
+              bubblewrap
+              # The probe's one tool: it proves the sandbox is on the host's
+              # network by reaching a listener the test itself is holding open,
+              # which is the sharing proved without touching the internet.
+              curl
               # The PWA icons are one SVG rasterized to the PNG sizes the manifest
               # and iOS need — see tools/generate-icons.sh.
               resvg

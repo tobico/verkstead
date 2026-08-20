@@ -19,6 +19,13 @@ mod push;
 mod reply;
 mod repos;
 mod responses;
+/// What a session can reach: the bwrap surface built around one Conversation's
+/// worktree.
+///
+/// Public because it is the product's boundary rather than an implementation
+/// detail of the endpoints — and because what proves a boundary is a probe run
+/// inside it, which is a test standing where the orchestrator does.
+pub mod sandbox;
 mod sets;
 mod ui;
 mod updates;
@@ -119,6 +126,23 @@ pub struct Config {
     /// the one directory a packaged unit is already given to write.
     #[arg(long, env = "VERKSTEAD_STATE_DIR", value_name = "DIR")]
     pub state_dir: Option<PathBuf>,
+
+    /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
+    /// the Repo registered under that name gets. Repeat the flag, or separate
+    /// several with `:` in the environment variable.
+    ///
+    /// This is the Sandbox Configuration: the build caches and the like a
+    /// session needs beyond its own worktree. Each is a hole in the boundary a
+    /// sandbox is, which is why they are configured here beside the Watched
+    /// Paths rather than anywhere a session or a browser could reach — and why a
+    /// bind that is not there refuses startup rather than being skipped.
+    #[arg(
+        long = "sandbox-bind",
+        env = "VERKSTEAD_SANDBOX_BINDS",
+        value_delimiter = ':',
+        value_name = "DIR|NAME=DIR"
+    )]
+    pub sandbox_binds: Vec<String>,
 
     /// Don't ask GitHub whether a newer Verkstead has been released, and so
     /// never show the Update Notice. The check is one unauthenticated request
@@ -290,6 +314,21 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 pub async fn run(config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
+    // Both resolved at startup for the reason the Watched Paths are: a bind that
+    // names nothing, and a HOME the unit never said, are misconfigurations to
+    // report now rather than sessions that fail to start weeks later with nobody
+    // watching. The home is where a sandbox reads who git commits as and what
+    // `gh` is logged in as, so a server without one can run no session at all.
+    //
+    // Nothing runs one yet: what these are handed to is the orchestrator, which
+    // is the next stage's. Resolving them here is what turns a mistyped bind
+    // into a server that refuses to come up.
+    let sandbox = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
+    let home = sandbox::Home::of_the_server().context(
+        "no HOME is set: a session reads the machine's git identity and gh login out of \
+         the home directory of whoever runs Verkstead, so the unit has to say what it is",
+    )?;
+
     // Made at startup for the reason the Watched Paths are resolved at startup:
     // a directory Verkstead cannot write to is a misconfiguration to report now
     // rather than one to discover as a failed grilling weeks later.
@@ -309,6 +348,8 @@ pub async fn run(config: Config) -> Result<()> {
         state_dir = %state_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
+        home = %home.path.display(),
+        sandbox_binds = sandbox.count(),
         "verkstead is listening",
     );
 

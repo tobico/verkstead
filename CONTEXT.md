@@ -52,6 +52,24 @@ Watched Path and not the same kind of thing: a Watched Path bounds what the
 human may point Verkstead at, and this is Verkstead's own.
 _Avoid_: data dir, work dir, scratch space, cache
 
+**Sandbox**:
+What a session runs inside: its Conversation's Worktree and the Repo's git
+directory writable, the Agent Profile's pair at `~/.claude` and
+`~/.claude.json`, the system read-only, and nothing else of the machine at all
+— not even the checkout the Worktree was made from. The filesystem is the
+boundary and the network is not: inside, it is the host's own, whole and
+unfiltered, because what stops a session doing harm is that there is nothing
+within reach to harm.
+_Avoid_: container, jail, isolation, environment
+
+**Sandbox Configuration**:
+The extra writable binds a Sandbox gets beyond that surface — a build cache, a
+package registry's — as one global set every Sandbox gets plus a per-Repo set
+composed over it. Configured where the Watched Paths are rather than anywhere
+the workbench can reach: every one of them is a hole in the boundary, and
+widening a boundary is the installer's to do.
+_Avoid_: sandbox settings, mounts, extra paths
+
 **Brief**:
 The editable markdown document a Conversation starts from, and its first
 Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief

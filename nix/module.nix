@@ -18,6 +18,11 @@ let
   # systemd creates and owns this, and the database defaults inside it. Named
   # once because the sandbox, the working directory and that default all say it.
   stateDir = "/var/lib/verkstead";
+
+  # The directory half of a `sandboxBinds` entry: a plain path is the whole of
+  # it, and `name=path` is the part after the `=` — the same rule the server
+  # reads them by, so what the unit binds in is what the server hands out.
+  bindPath = bind: if lib.hasPrefix "/" bind then bind else lib.last (lib.splitString "=" bind);
 in
 
 {
@@ -113,6 +118,35 @@ in
       '';
     };
 
+    sandboxBinds = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = lib.literalExpression ''
+        [
+          "/var/cache/shared"
+          "verkstead=/var/cache/verkstead-cargo"
+        ]
+      '';
+      description = ''
+        Extra read-write directories every sandboxed session gets, as
+        `--sandbox-bind`. A plain path is given to every session; `name=path`
+        is given only to sessions working in the Repo registered under that
+        name, so a repository that needs a build cache can have one without
+        every repository getting it.
+
+        This is the Sandbox Configuration. A session otherwise sees its own
+        worktree, its Repo's git directory and its Agent Profile's claude pair
+        and nothing else of the machine, so each entry here is a hole in that
+        boundary — which is why it is set at installation, beside the watched
+        paths, rather than anywhere the web UI can reach.
+
+        Each is bound into the service's own sandbox as well, for the reason
+        the watched paths are: the hardening leaves nothing but the state
+        directory reachable, and a directory the service cannot see is not one
+        it can hand to a session. A path that is not there refuses startup.
+      '';
+    };
+
     updateCheck = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -180,6 +214,10 @@ in
             "--watched-path"
             "${path}"
           ]) cfg.watchedPaths
+          ++ lib.concatMap (bind: [
+            "--sandbox-bind"
+            bind
+          ]) cfg.sandboxBinds
           ++ lib.optional (!cfg.updateCheck) "--no-update-check"
         );
 
@@ -265,7 +303,10 @@ in
         # Not prefixed with `-`, so a directory that has gone missing fails the
         # unit. The server refuses to start on one too; both of them saying so
         # beats a service that comes up watching nothing.
-        BindPaths = map (path: "${path}") cfg.watchedPaths;
+        #
+        # The Sandbox Configuration's binds come in the same way and for the
+        # same reason: what the service cannot see it cannot hand to a session.
+        BindPaths = map (path: "${path}") cfg.watchedPaths ++ map bindPath cfg.sandboxBinds;
       };
     };
   };
