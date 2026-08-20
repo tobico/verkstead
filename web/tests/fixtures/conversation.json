@@ -1,0 +1,22 @@
+{
+  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "branch": "rate-limiting",
+  "id": 1,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Draft",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>Rate limiting for the public API</h1>\n<p><code>POST /v1/messages</code> has no rate limit. One client sent 40k requests in a\nminute and the queue was backed up for twenty.</p>\n<ul>\n<li>decide where the counter lives</li>\n<li>decide what a refused request is told</li>\n</ul>\n",
+        "id": 1,
+        "markdown": "# Rate limiting for the public API\n\n`POST /v1/messages` has no rate limit. One client sent 40k requests in a\nminute and the queue was backed up for twenty.\n\n- decide where the counter lives\n- decide what a refused request is told\n"
+      }
+    }
+  ]
+}

@@ -101,6 +101,93 @@ text_html: string,
 columns: Array<string>, options: Array<OptionView>, };
 
 /**
+ * The commit to branch from, or `null` to go back to the default-branch rule.
+ */
+export type BaseCommitOverride = { 
+/**
+ * Whatever names a commit in the repository — a short hash, a tag, a branch
+ * — which the server resolves before it records anything.
+ */
+commit: string | null, };
+
+/**
+ * What became of overriding the base commit.
+ */
+export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCommit";
+
+/**
+ * What the branch is to be called.
+ */
+export type BranchRename = { branch: string, };
+
+/**
+ * What became of naming the branch.
+ */
+export type BranchRenamed = "Renamed" | "NoSuchConversation" | "NotDrafting" | "NotABranchName";
+
+/**
+ * A Brief as the human has just written it.
+ */
+export type BriefEdit = { markdown: string, };
+
+/**
+ * The Brief as the page receives it: rendered for reading, and as it was
+ * written for editing.
+ */
+export type BriefEvent = { id: number, 
+/**
+ * When it was written, RFC 3339.
+ */
+at: string, 
+/**
+ * The markdown the human last wrote, for the field they write it in.
+ */
+markdown: string, 
+/**
+ * The same, as HTML — rendered and sanitized by the server on the way out.
+ */
+html: string, };
+
+/**
+ * What became of an edit to a Brief.
+ */
+export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
+
+/**
+ * One row of the conversations sidebar.
+ *
+ * The branch is the row's name: a Conversation has no title of its own, and of
+ * what it does have the branch is the short line the human chose.
+ */
+export type ConversationEntry = { id: number, branch: string, 
+/**
+ * What the Repo this Conversation is against is called.
+ */
+repo: string, state: Lifecycle, };
+
+/**
+ * One Conversation, whole: what it is attached to, what the human has settled
+ * about it, and everything that has happened to it.
+ */
+export type ConversationView = { id: number, 
+/**
+ * The Repo, in the shape the Repo list already sends one — the workbench
+ * shows the same three facts about it, and a second shape for the same
+ * thing would be a second opinion about what a Repo is.
+ */
+repo: RepoEntry, branch: string, 
+/**
+ * The commit the work will branch from, where the human overrode the rule.
+ * `null` is the rule itself: the default branch's tip, as it stands when
+ * grilling starts — which is why there is no value here to show instead.
+ */
+base_commit: string | null, state: Lifecycle, 
+/**
+ * Oldest first, which is reading order and puts the Brief at the top.
+ */
+timeline: Array<TimelineEvent>, };
+
+/**
  * The Diff as the browser receives it: the HTML the server rendered, and the
  * path of each file in it, in Diff order — `paths[0]` is what `#diff-1` shows.
  *
@@ -115,6 +202,15 @@ columns: Array<string>, options: Array<OptionView>, };
 export type DiffView = { html: string, paths: Array<string>, };
 
 /**
+ * Where a Conversation has got to.
+ *
+ * The whole ladder, though only [`Lifecycle::Draft`] is reachable yet: the
+ * states are the domain's, and the page says which one a Conversation is in
+ * rather than assuming the only one it can currently be.
+ */
+export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done";
+
+/**
  * What the pending list says about a Set: whether an agent is currently
  * waiting on it, or nothing is holding a wait any more.
  *
@@ -126,6 +222,15 @@ export type DiffView = { html: string, paths: Array<string>, };
  * the registry of held waits; the browser only draws what it is told.
  */
 export type Liveness = "waiting" | "disconnected";
+
+/**
+ * Starting a Conversation: the Repo it is against, and nothing else.
+ *
+ * The branch name is not the browser's to send. It is prefilled randomly, and a
+ * prefill the page invented would be one the server never saw — the record is
+ * the server's from the moment it exists.
+ */
+export type NewConversation = { repo_id: number, };
 
 /**
  * One Option as the page draws it: the number a Response answers by, its text
@@ -289,6 +394,11 @@ standing: Standing, };
 export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "ArchivedUnanswered": string };
 
 /**
+ * What became of starting one.
+ */
+export type Started = { "Started": { id: number, } } | "NoSuchRepo";
+
+/**
  * What became of the human's Response.
  */
 export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Archived" | { "Rejected": Array<string> };
@@ -308,6 +418,15 @@ export type Subscribed = "Stored" | "Incomplete";
  * something the server has any reason to learn.
  */
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
+
+/**
+ * One entry in a Timeline.
+ *
+ * A tagged kind rather than a struct with a nullable field per kind: what the
+ * details pane draws is decided by which kind an Event is, and the stages after
+ * this one add their kinds here.
+ */
+export type TimelineEvent = { "Brief": BriefEvent };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

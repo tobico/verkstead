@@ -28,6 +28,12 @@ anyhow = "1"
 # protocol both speak.
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
+# The one thing in Verkstead that is picked rather than derived: the random
+# branch name a Conversation is prefilled with. The operating system's own
+# generator and nothing around it — there is no distribution to sample and no
+# sequence to reproduce, so a whole random-number crate would be a generator, a
+# seeding strategy and a trait hierarchy for one call.
+getrandom = "0.4"
 # Generating the VAPID keypair, which is a P-256 one because Web Push says so.
 # Default features off drops the ECDSA half: nothing here signs anything — the
 # key is generated, encoded, and stored.

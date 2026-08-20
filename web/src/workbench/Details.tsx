@@ -1,0 +1,240 @@
+//! The details pane: what a Conversation is, beside the Timeline of what has
+//! happened to it.
+//!
+//! The Repo it is attached to, the branch the work will be done on, and the
+//! commit it will branch from. All three are facts about the Conversation rather
+//! than about any one Event, and two of them are the human's to change for as
+//! long as it is still drafting — which is why the pane that is neither the list
+//! nor the record is where they are settled.
+//!
+//! The Brief has no place here on purpose: it is inline in the Timeline, because
+//! there is nothing of it the Timeline does not already show. What will stand
+//! here is the full self of the Events that do have one — a transcript, a
+//! Question Set, a diff — as each of those stages lands.
+
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { Show, createSignal, type JSX } from "solid-js";
+
+import { renameBranch, setBaseCommit } from "../api/client";
+import type {
+  BaseRecorded,
+  BranchRenamed,
+  ConversationView,
+} from "../api/types";
+
+/// What each way of being refused a branch name says.
+export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
+  Renamed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The branch exists by now, so its name is not a text field any more.",
+  NotABranchName: "Git will not take that as a branch name.",
+};
+
+/// And a base commit.
+export const BASE_REFUSAL: Record<BaseRecorded, string> = {
+  Recorded: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "The base commit was captured when grilling started.",
+  NoSuchCommit: "That repo has nothing by that name.",
+};
+
+export function Details(props: {
+  conversation: ConversationView;
+  back: () => void;
+}): JSX.Element {
+  return (
+    <>
+      <div class="pane-head">
+        <button type="button" class="pane-back" onClick={props.back}>
+          ← Timeline
+        </button>
+        <h1>Details</h1>
+      </div>
+
+      {/* The repository, as the Repo list shows one: what it is called, where it
+          is, and what a Conversation branches from unless it says otherwise.
+          Nothing here is editable — a Conversation is attached to a Repo when it
+          is started, and moving it to another would be starting a different
+          piece of work. */}
+      <dl class="conversation-facts">
+        <dt>Repo</dt>
+        <dd class="repo">{props.conversation.repo.name}</dd>
+        <dt>Path</dt>
+        <dd class="path">{props.conversation.repo.path}</dd>
+        <dt>State</dt>
+        <dd class="state">{props.conversation.state}</dd>
+      </dl>
+
+      <BranchName conversation={props.conversation} />
+      <BaseCommit conversation={props.conversation} />
+    </>
+  );
+}
+
+/// The branch the work will be done on: prefilled with a random name when the
+/// Conversation was started, and the human's to change until grilling begins.
+///
+/// Nothing is created by naming it. The branch itself arrives with the stage
+/// that starts grilling; this is the name it will be given.
+function BranchName(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [named, setNamed] = createSignal<string | null>(null);
+  const [refused, setRefused] = createSignal<BranchRenamed | null>(null);
+
+  /// What is in the field: what has been typed, or the name as it stands.
+  const branch = () => named() ?? props.conversation.branch;
+
+  const rename = useMutation(() => ({
+    mutationFn: (branch: string) =>
+      renameBranch(props.conversation.id, branch),
+    onSuccess: (outcome: BranchRenamed) => {
+      if (outcome !== "Renamed") {
+        setRefused(outcome);
+        return;
+      }
+
+      // The field goes back to following the Conversation, which is about to
+      // come back saying what this asked for.
+      setRefused(null);
+      setNamed(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <form
+      class="branch-name"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        rename.mutate(branch());
+      }}
+    >
+      <label for="branch">Branch</label>
+      <div class="field-line">
+        <input
+          id="branch"
+          type="text"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          value={branch()}
+          onInput={(ev) => {
+            setNamed(ev.currentTarget.value);
+            setRefused(null);
+          }}
+        />
+        <button
+          type="submit"
+          disabled={rename.isPending || branch() === props.conversation.branch}
+        >
+          Rename
+        </button>
+      </div>
+      <Show when={refused()}>
+        {(outcome) => <p class="error">{BRANCH_REFUSAL[outcome()]}</p>}
+      </Show>
+      <Show when={rename.isError}>
+        <p class="error">
+          The branch could not be named: {rename.error?.message}
+        </p>
+      </Show>
+    </form>
+  );
+}
+
+/// The commit the work branches from.
+///
+/// Empty is not a missing value: it is the rule — the default branch's tip as it
+/// stands when grilling starts — which is why the field says which branch that
+/// is rather than leaving the human to guess what nothing means.
+function BaseCommit(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [typed, setTyped] = createSignal<string | null>(null);
+  const [refused, setRefused] = createSignal<BaseRecorded | null>(null);
+
+  const commit = () => typed() ?? props.conversation.base_commit ?? "";
+
+  const record = useMutation(() => ({
+    mutationFn: (commit: string) =>
+      // Emptied is the override taken away rather than a commit called nothing.
+      setBaseCommit(props.conversation.id, commit.trim() === "" ? null : commit),
+    onSuccess: (outcome: BaseRecorded) => {
+      if (outcome !== "Recorded") {
+        setRefused(outcome);
+        return;
+      }
+
+      setRefused(null);
+      setTyped(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  return (
+    <form
+      class="base-commit"
+      onSubmit={(ev) => {
+        ev.preventDefault();
+        record.mutate(commit());
+      }}
+    >
+      <label for="base-commit">Base commit</label>
+      <div class="field-line">
+        <input
+          id="base-commit"
+          type="text"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          placeholder={`${props.conversation.repo.default_branch} at grill start`}
+          value={commit()}
+          onInput={(ev) => {
+            setTyped(ev.currentTarget.value);
+            setRefused(null);
+          }}
+        />
+        <button
+          type="submit"
+          disabled={
+            record.isPending ||
+            commit() === (props.conversation.base_commit ?? "")
+          }
+        >
+          Record
+        </button>
+      </div>
+      <p class="note">
+        <Show
+          when={props.conversation.base_commit}
+          fallback={
+            <>
+              Left empty, the work branches from{" "}
+              <span class="default-branch">
+                {props.conversation.repo.default_branch}
+              </span>{" "}
+              as it stands when grilling starts.
+            </>
+          }
+        >
+          Pinned. Empty the field to go back to branching from{" "}
+          <span class="default-branch">
+            {props.conversation.repo.default_branch}
+          </span>
+          .
+        </Show>
+      </p>
+      <Show when={refused()}>
+        {(outcome) => <p class="error">{BASE_REFUSAL[outcome()]}</p>}
+      </Show>
+      <Show when={record.isError}>
+        <p class="error">
+          The base commit could not be recorded: {record.error?.message}
+        </p>
+      </Show>
+    </form>
+  );
+}

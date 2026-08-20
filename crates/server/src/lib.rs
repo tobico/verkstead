@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod conversations;
 mod nudge;
 mod push;
 mod reply;

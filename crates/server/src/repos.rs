@@ -129,7 +129,11 @@ fn name(path: &Path) -> String {
 }
 
 /// Run git in `dir` and take its stdout, or `None` if it failed.
-fn git(dir: &Path, args: &[&str]) -> Option<String> {
+///
+/// Shared with [`crate::conversations`], which asks git the two questions a
+/// Conversation raises — whether a name is one it would take for a branch, and
+/// what commit something resolves to.
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")
         // Reading a repository should never take a lock on it: an agent may well
         // be working in this one right now.

@@ -17,8 +17,10 @@
 use ts_rs::TS;
 
 use crate::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, Registered, Registration, RepoEntry, SetView,
-    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, ConversationEntry, ConversationView, NewConversation, PendingEntry,
+    PushKey, Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -47,6 +49,21 @@ fn the_viewers_types_are_written_from_these() {
     RepoEntry::export_all(&config).unwrap();
     Registration::export_all(&config).unwrap();
     Registered::export_all(&config).unwrap();
+
+    // The workbench: the sidebar, one Conversation with its Timeline, and the
+    // three things the human changes about a drafting one. Each edit brings its
+    // own request shape and its own named outcome, because each of them is a
+    // different sentence to put in front of the human.
+    ConversationEntry::export_all(&config).unwrap();
+    ConversationView::export_all(&config).unwrap();
+    NewConversation::export_all(&config).unwrap();
+    Started::export_all(&config).unwrap();
+    BriefEdit::export_all(&config).unwrap();
+    BriefSaved::export_all(&config).unwrap();
+    BranchRename::export_all(&config).unwrap();
+    BranchRenamed::export_all(&config).unwrap();
+    BaseCommitOverride::export_all(&config).unwrap();
+    BaseRecorded::export_all(&config).unwrap();
 
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();

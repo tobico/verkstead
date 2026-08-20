@@ -124,7 +124,7 @@ export function Answering(props: {
         // Back to the pending list, where the Set's absence is the confirmation
         // that the agent has its answer. Nothing is invalidated on the way: the
         // list fetches as it mounts, and this page is leaving.
-        navigate("/");
+        navigate("/pending");
       }
     },
   }));

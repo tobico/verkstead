@@ -27,8 +27,9 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, Registration, RepoEntry, SetView, Standing,
-    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, BaseCommitOverride, BriefEdit, BranchRename, ConversationEntry,
+    ConversationView, Lifecycle, NewConversation, PendingEntry, PushKey, Registration, RepoEntry,
+    SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -46,6 +47,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/archive", post(archive_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
+        .route(
+            "/api/ui/conversations",
+            get(conversations).post(start_conversation),
+        )
+        .route("/api/ui/conversations/{id}", get(conversation))
+        .route("/api/ui/conversations/{id}/brief", post(save_brief))
+        .route("/api/ui/conversations/{id}/branch", post(rename_branch))
+        .route("/api/ui/conversations/{id}/base", post(set_base_commit))
         // Not a thing to fetch but a thing to listen on — see [`crate::nudge`].
         .route("/api/ui/nudges", get(crate::nudge::nudges))
         .route("/api/ui/push/key", get(push_key))
@@ -274,6 +283,174 @@ async fn register_repo(
     }
 }
 
+/// `GET /api/ui/conversations` — the sidebar, newest first.
+async fn conversations(State(state): State<AppState>) -> HttpResponse {
+    let conversations = match store::conversations(&state.pool).await {
+        Ok(conversations) => conversations,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the Conversations failed");
+            return unavailable("the Conversations could not be read");
+        }
+    };
+
+    let rows: Vec<ConversationEntry> = conversations
+        .into_iter()
+        .map(|conversation| ConversationEntry {
+            id: conversation.id,
+            branch: conversation.branch,
+            repo: conversation.repo,
+            state: lifecycle(conversation.state),
+        })
+        .collect();
+
+    Json(rows).into_response()
+}
+
+/// `POST /api/ui/conversations` — start one against a registered Repo.
+async fn start_conversation(
+    State(state): State<AppState>,
+    Json(new): Json<NewConversation>,
+) -> HttpResponse {
+    match crate::conversations::start(&state.pool, new.repo_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "starting a Conversation failed");
+            unavailable("the Conversation could not be started")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}` — one Conversation with its Timeline.
+///
+/// The Timeline travels with it rather than being fetched beside it: it is what
+/// the middle pane *is*, and a Conversation whose Timeline arrived a moment
+/// later would draw an empty pane first every time one is opened.
+async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // An id that is not a number cannot name a Conversation, so it gets the same
+    // answer as one that names none — the id comes out of a URL the human may
+    // have typed.
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_conversation(&id);
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_such_conversation(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    let timeline = match store::timeline(&state.pool, id).await {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Timeline failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    let view = ConversationView {
+        id: conversation.id,
+        repo: RepoEntry {
+            id: conversation.repo.id,
+            name: conversation.repo.name,
+            // Stored as UTF-8 in the first place — a path that is not cannot be
+            // registered — so nothing is lost putting it back on the wire.
+            path: conversation.repo.path.to_string_lossy().into_owned(),
+            default_branch: conversation.repo.default_branch,
+        },
+        branch: conversation.branch,
+        base_commit: conversation.base_commit,
+        state: lifecycle(conversation.state),
+        timeline: timeline
+            .into_iter()
+            .map(|event| match event.event {
+                // The one kind there is. Rendered on the way out like everything
+                // else made of markdown — see [`verkstead_render`].
+                store::Event::Brief(markdown) => {
+                    verkstead_render::brief_event(event.id, event.at, markdown)
+                }
+            })
+            .collect(),
+    };
+
+    Json(view).into_response()
+}
+
+/// `POST /api/ui/conversations/{id}/brief` — save what the human has written.
+async fn save_brief(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<BriefEdit>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::BriefSaved::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::save_brief(&state.pool, id, &edit.markdown).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
+            unavailable("the Brief could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/branch` — name the branch the work will be
+/// done on.
+async fn rename_branch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(rename): Json<BranchRename>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::BranchRenamed::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::rename_branch(&state.pool, id, &rename.branch).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "renaming a branch failed");
+            unavailable("the branch could not be named")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/base` — override the base commit, or put the
+/// Conversation back on the default-branch rule.
+async fn set_base_commit(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(override_): Json<BaseCommitOverride>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::BaseRecorded::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::set_base_commit(&state.pool, id, override_.commit.as_deref()).await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "recording a base commit failed");
+            unavailable("the base commit could not be recorded")
+        }
+    }
+}
+
+/// The store's lifecycle state as the viewer receives it. One word either side,
+/// and this is where the two vocabularies are held to each other.
+fn lifecycle(state: store::Lifecycle) -> Lifecycle {
+    match state {
+        store::Lifecycle::Draft => Lifecycle::Draft,
+        store::Lifecycle::Grilling => Lifecycle::Grilling,
+        store::Lifecycle::Direction => Lifecycle::Direction,
+        store::Lifecycle::Implementing => Lifecycle::Implementing,
+        store::Lifecycle::Wrapping => Lifecycle::Wrapping,
+        store::Lifecycle::Done => Lifecycle::Done,
+    }
+}
+
 /// `GET /api/ui/push/key` — the public half of the server's VAPID keypair.
 async fn push_key(State(state): State<AppState>) -> HttpResponse {
     match store::vapid_keys(&state.pool).await {
@@ -353,6 +530,15 @@ fn no_such_set(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Question Set {id}")),
+    )
+}
+
+/// There is no such Conversation to read. Worded like the Set's, and for the
+/// same reason: what was asked for is what a typed URL held.
+fn no_such_conversation(id: &str) -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new(format!("there is no Conversation {id}")),
     )
 }
 

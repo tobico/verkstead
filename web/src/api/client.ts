@@ -9,12 +9,18 @@ import type {
   ApiError,
   ArchiveEntry,
   Archived,
+  BaseRecorded,
+  BranchRenamed,
+  BriefSaved,
+  ConversationEntry,
+  ConversationView,
   PendingEntry,
   PushKey,
   Registered,
   RepoEntry,
   Response as Decided,
   SetView,
+  Started,
   Submitted,
   Subscribed,
   Subscription,
@@ -91,6 +97,53 @@ export function listRepos(): Promise<RepoEntry[]> {
 /// the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// The Conversations in the sidebar, newest first.
+export function listConversations(): Promise<ConversationEntry[]> {
+  return get<ConversationEntry[]>("/api/ui/conversations");
+}
+
+/// One Conversation with its Timeline.
+///
+/// The id is whatever the URL held, unparsed, as a Set's is: one that is not a
+/// number cannot name a Conversation, and the server answers for that the way it
+/// answers for one that names none.
+export function loadConversation(id: string): Promise<ConversationView> {
+  return get<ConversationView>(
+    `/api/ui/conversations/${encodeURIComponent(id)}`,
+  );
+}
+
+/// Start a Conversation against a registered Repo.
+///
+/// The branch name is not sent: it is prefilled by the server, because the
+/// record is the server's from the moment it exists.
+export function startConversation(repoId: number): Promise<Started> {
+  return post<Started>("/api/ui/conversations", { repo_id: repoId });
+}
+
+/// Save what the human has written into a Brief.
+export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
+  return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
+}
+
+/// Name the branch the work will be done on. Whether git would take the name is
+/// the server's to say, so this is another outcome to read rather than a status.
+export function renameBranch(
+  id: number,
+  branch: string,
+): Promise<BranchRenamed> {
+  return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
+}
+
+/// Override the commit the work branches from, or pass `null` to put the
+/// Conversation back on the default-branch rule.
+export function setBaseCommit(
+  id: number,
+  commit: string | null,
+): Promise<BaseRecorded> {
+  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { commit });
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

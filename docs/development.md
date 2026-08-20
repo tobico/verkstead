@@ -77,9 +77,14 @@ $ cat examples/questions.yaml | cargo run -p verkstead-cli -- ask
 
 ### 4. Answer (in the browser)
 
-This is the human's part. Open <http://127.0.0.1:8422/> and the Set from step 3
-is on the pending list, with its project, its branch, and `agent waiting` —
-that last one being the CLI still holding its long-poll. Open it.
+This is the human's part. Open <http://127.0.0.1:8422/pending> and the Set from
+step 3 is on the pending list, with its project, its branch, and `agent
+waiting` — that last one being the CLI still holding its long-poll. Open it.
+
+(The root is the **workbench**, which is where Conversations are started and
+briefs are written. The pending list is a page of its own for as long as
+Question Sets are not yet on a Conversation's Timeline; the workbench's sidebar
+links to it.)
 
 The page is the whole ask: the Preface, the Diff of the working tree the agent
 asked from, and each Question with its Options. Pick one, or write your own

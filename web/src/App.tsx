@@ -9,6 +9,7 @@ import { listenForNudges } from "./nudge";
 import { PendingList } from "./pending/PendingList";
 import { RepoList } from "./repos/RepoList";
 import { SetPage } from "./set/SetPage";
+import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
 /// the cache lives, and a page that rebuilt it would have no cache at all.
@@ -36,7 +37,16 @@ export function App(): JSX.Element {
   return (
     <QueryClientProvider client={queries}>
       <Router root={Shell}>
-        <Route path="/" component={PendingList} />
+        {/* The workbench has the root: it is what Verkstead is for, and what a
+            device with a window opens on. The Conversation in the URL is a
+            record of which one is open rather than a document of its own — the
+            same page draws both. */}
+        <Route path="/" component={Workbench} />
+        <Route path="/conversations/:id" component={Workbench} />
+        {/* The phone's answering flow, which the workbench does not touch. Both
+            of these are transitional: they retire once Question Sets are reached
+            through the Conversation they belong to. */}
+        <Route path="/pending" component={PendingList} />
         <Route path="/archive" component={ArchiveList} />
         <Route path="/repos" component={RepoList} />
         <Route path="/sets/:id" component={SetPage} />

@@ -49,11 +49,11 @@ export function PendingList() {
     <div class="list-page">
       {/* Where else there is to go, in the slot the set view's "← Pending" sits
           in: every page here starts with that, so nothing needs a typed URL to
-          be reached. The Repos are here rather than anywhere better because
-          there is nowhere better yet — the workbench is what will hold them. */}
+          be reached. The workbench comes first because it has the root, and this
+          list is now a page reached from it. */}
       <nav class="elsewhere">
-        <A class="to-repos" href="/repos">
-          Repos →
+        <A class="back" href="/">
+          ← Workbench
         </A>
         <A class="to-archive" href="/archive">
           Archive →

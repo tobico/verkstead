@@ -2863,6 +2863,7 @@ dependencies = [
  "axum",
  "base64",
  "clap",
+ "getrandom 0.4.3",
  "http",
  "http-body-util",
  "p256",

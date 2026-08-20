@@ -19,10 +19,16 @@ use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 
+mod conversations;
 mod push;
 mod repos;
 mod waits;
 
+pub use conversations::{
+    Conversation, ConversationRow, Edited, Event, Lifecycle, TimelineEvent, conversations,
+    load_conversation, rename_branch, save_brief, set_base_commit, set_state, start_conversation,
+    timeline,
+};
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
@@ -311,6 +317,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
     // The Repos registered from inside the Watched Paths.
     repos::apply_schema(pool).await?;
+
+    // The Conversations attached to them, and their Timelines. After the Repos,
+    // because a Conversation's row references one.
+    conversations::apply_schema(pool).await?;
 
     Ok(())
 }

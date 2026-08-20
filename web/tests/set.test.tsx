@@ -497,7 +497,7 @@ describe("the record of a settled Set", () => {
   it("leads back to the list the Set is on", async () => {
     const waiting = await reading(WAITING);
     const back = waiting.querySelector("a.back")!;
-    expect(back.getAttribute("href")).toBe("/");
+    expect(back.getAttribute("href")).toBe("/pending");
     expect(back.textContent).toBe("← Pending");
 
     for (const settled of [ANSWERED, ARCHIVED]) {

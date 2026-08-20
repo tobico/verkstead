@@ -87,10 +87,11 @@ export function RepoList() {
 
   return (
     <div class="list-page">
-      {/* The way back to what is waiting, in the slot every page keeps for
-          where else there is to go. */}
+      {/* The way back to the workbench, in the slot every page keeps for where
+          else there is to go — this list is reached from its sidebar, which is
+          what a Conversation is started against. */}
       <A class="back" href="/">
-        ← Pending
+        ← Workbench
       </A>
       <div class="page-head">
         <h1>Repos</h1>

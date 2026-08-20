@@ -516,7 +516,7 @@ describe("submitting a Response", () => {
 
     // Back to the pending list, where the Set's absence is the confirmation
     // that the agent has its answer.
-    await waitFor(() => expect(history.get()).toBe("/"));
+    await waitFor(() => expect(history.get()).toBe("/pending"));
   });
 
   it("sends a Set with every choice made without asking anything first", async () => {

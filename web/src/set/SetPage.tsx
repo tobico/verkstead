@@ -194,7 +194,7 @@ function Sheet(props: { set: SetView }): JSX.Element {
 
   // Back to the list this Set is on: a settled one is off the pending list for
   // good and lives in the Archive, so that is where reading it leads back to.
-  const back = () => (decided() ? "/archive" : "/");
+  const back = () => (decided() ? "/archive" : "/pending");
   const out = () => (decided() ? "← Archive" : "← Pending");
 
   return (

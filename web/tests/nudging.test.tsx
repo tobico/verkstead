@@ -177,7 +177,7 @@ afterEach(() => {
 
 describe("the Nudge stream", () => {
   it("listens on the server's stream for as long as the app is running", () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     serving(CURRENT, json(SETS));
     const { unmount } = render(() => <App />);
 
@@ -190,7 +190,7 @@ describe("the Nudge stream", () => {
   });
 
   it("shows the Set a Nudge is about without waiting on the poll", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS), json([ARRIVAL, ...SETS]));
     render(() => <App />);
     await waitFor(() => screen.getByText(SETS[0]!.title));
@@ -205,7 +205,7 @@ describe("the Nudge stream", () => {
   });
 
   it("reads everything back when a dropped stream reconnects", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     // Answered from another device while the stream was dead — so what the page
     // has to catch up on is a Set leaving the list, which no Nudge arrived to
     // say. The reconnect is the whole of the news.
@@ -220,7 +220,7 @@ describe("the Nudge stream", () => {
   });
 
   it("asks for nothing when the stream first opens", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS));
     render(() => <App />);
     await waitFor(() => screen.getByText(SETS[0]!.title));
@@ -234,7 +234,7 @@ describe("the Nudge stream", () => {
   });
 
   it("leaves the poll running underneath it", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS));
     render(() => <App />);
     await waitFor(() => screen.getByText(SETS[0]!.title));
@@ -250,7 +250,7 @@ describe("the Nudge stream", () => {
 
 describe("a Nudge relayed by the worker", () => {
   it("shows the Set the push was about, with no stream to hear it on", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     // The list as the server would answer for it now, which the arrival changes
     // under the open page exactly as it does in the world.
     let listed = SETS;
@@ -290,7 +290,7 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("ignores a message that is not a Nudge", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS));
     const container = attaches();
     render(() => <App />);
@@ -308,7 +308,7 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("stops listening when the app goes", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     serving(CURRENT, json(SETS));
     const container = attaches();
     const { unmount } = render(() => <App />);
@@ -322,7 +322,7 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("shrugs where the browser has no worker at all", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     serving(CURRENT, json(SETS));
 
     // No `attaches()`: jsdom has no `navigator.serviceWorker`, which is the same

@@ -20,6 +20,7 @@
 //! viewer, this is the one place the rendering happens.
 
 mod answering;
+mod conversations;
 mod lists;
 mod push;
 mod repos;
@@ -28,6 +29,11 @@ mod view;
 mod when;
 
 pub use answering::{Archived, Submitted};
+pub use conversations::{
+    BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
+    BriefSaved, ConversationEntry, ConversationView, Lifecycle, NewConversation, Started,
+    TimelineEvent, brief_event,
+};
 pub use lists::{ArchiveEntry, PendingEntry};
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry};

@@ -383,6 +383,7 @@ textarea::placeholder {
 
 .back,
 .to-archive,
+.to-pending,
 .to-repos {
   display: inline-block;
   margin-bottom: 0.75rem;
@@ -467,6 +468,373 @@ textarea::placeholder {
 
 .repo-row .path {
   font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* The workbench: conversations, the selected one's timeline, and the details of
+   what the timeline cannot show.
+
+   A hierarchy rather than three columns that happen to sit together — a
+   conversation is picked, then read, then its details are looked at — so a
+   narrow window shows one level of it at a time and a wide one shows the levels
+   side by side. Which level is showing is `data-pane` on the frame, put there by
+   the page; below the first breakpoint it is the whole of what decides what is
+   drawn, and above the last it decides nothing.
+
+   The panes are always in the document. A pane that was rendered away would
+   have to be rebuilt — and its scroll position found again — every time the
+   human walked back into it. */
+
+/* The one page that wants the window rather than the reading column: three
+   panes side by side have nothing to do with the measure. */
+main:has(.workbench) {
+  max-width: none;
+  padding: 0;
+}
+
+.workbench {
+  display: grid;
+}
+
+.pane {
+  padding: 1.25rem 1rem 3rem;
+  min-width: 0;
+}
+
+/* Phone-first, as everything here is: one pane, and it is whichever one the
+   page says. */
+.workbench > .pane {
+  display: none;
+}
+
+.workbench[data-pane="conversations"] > .conversations-pane,
+.workbench[data-pane="timeline"] > .timeline-pane,
+.workbench[data-pane="details"] > .details-pane {
+  display: block;
+}
+
+/* A pane's title with the ways out of it either side. Wrapping, so a narrow
+   pane puts the title under the way back rather than squeezing both onto one
+   line. */
+.pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.pane-head h1 {
+  margin: 0;
+}
+
+/* The ways between the panes: back out of this level, and on to the next.
+   Buttons rather than links, because moving between panes is not going
+   anywhere — the workbench is one page, and the URL follows the conversation
+   rather than the pane. Drawn as the links they stand in for. */
+.pane-back,
+.pane-forward {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The way back sits above the title rather than beside it, in the slot every
+   other page's "← Pending" sits in. */
+.pane-back {
+  flex-basis: 100%;
+}
+
+/* Starting a conversation: which repo the work is in, and nothing else — the
+   branch name is prefilled by the server and the brief is written in the
+   timeline. */
+.start-conversation {
+  margin-bottom: 1.5rem;
+}
+
+.start-conversation label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.start-conversation-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.start-conversation select {
+  flex: 1 1 8rem;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.start-conversation button,
+.field-line button,
+.edit-brief-buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.start-conversation button:disabled,
+.field-line button:disabled,
+.edit-brief-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, so it is drawn as the outline of
+   the one beside it. */
+.edit-brief-buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+/* The conversations themselves, drawn as the set lists' rows are: the whole card
+   is the target, and a line of provenance under the name. */
+.conversation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.conversation-row button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+/* Which one is open, said with the accent down the near edge rather than with a
+   fill: the row is read, and a wash behind it would fight the words. */
+.conversation-row.selected button {
+  border-color: var(--accent);
+  box-shadow: inset 0.2rem 0 0 var(--accent);
+}
+
+.conversation-row .title {
+  font-weight: 600;
+}
+
+.conversation-row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The timeline: everything that has happened, in order, each event a card of its
+   own. */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.timeline-event > * {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* An event's own heading with its one control on the other end of the line. */
+.event-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.event-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.edit-brief {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.edit-brief-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* The brief is prose, and reads at the measure like every other block of it. */
+.brief-body {
+  max-width: var(--measure);
+}
+
+/* What a conversation is, beside what has happened to it: the repo it is
+   attached to, and where it has got to. Read rather than changed — a
+   conversation is attached to a repo when it is started. */
+.conversation-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+}
+
+.conversation-facts dt {
+  color: var(--ink-soft);
+}
+
+.conversation-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-facts .path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* And what is still the human's to change while it drafts: the branch name and
+   the base commit, each a field with the button that records it. */
+.branch-name,
+.base-commit {
+  margin-bottom: 1.5rem;
+}
+
+.branch-name label,
+.base-commit label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.field-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.field-line input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* What an empty field means, which is a rule rather than a missing value — so it
+   is said in words under the field rather than left to be guessed. */
+.note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.note .default-branch,
+.base-commit input {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.branch-name .error,
+.base-commit .error,
+.start-conversation .error,
+.edit-brief-form .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* From 60rem the window holds the sidebar beside the level being read: the
+   conversations stay, and the second column is the timeline or the details.
+   Each pane scrolls on its own from here, because two columns of one page's
+   scroll would move the list the human is not reading. */
+@media (min-width: 60rem) {
+  .workbench {
+    grid-template-columns: 20rem minmax(0, 1fr);
+    height: 100dvh;
+  }
+
+  .pane {
+    overflow-y: auto;
+  }
+
+  .workbench > .conversations-pane {
+    display: block;
+    border-right: 1px solid var(--edge);
+  }
+
+  .workbench:not([data-pane="details"]) > .timeline-pane,
+  .workbench[data-pane="details"] > .details-pane {
+    display: block;
+  }
+
+  /* The conversations are on screen, so the timeline needs no way back to
+     them. The details still do: they are what the second column gives up to. */
+  .timeline-pane .pane-back {
+    display: none;
+  }
+}
+
+/* And from 80rem all three stand together, which is the workbench as it is
+   meant to be read: pick, read, and look into. Nothing is anywhere else to go
+   to, so the ways between the panes go away. */
+@media (min-width: 80rem) {
+  .workbench {
+    grid-template-columns: 20rem minmax(0, 1fr) 24rem;
+  }
+
+  .workbench > .pane {
+    display: block;
+  }
+
+  .workbench > .details-pane {
+    border-left: 1px solid var(--edge);
+  }
+
+  .pane-back,
+  .pane-forward {
+    display: none;
+  }
 }
 
 /* The set view: one long column, read top to bottom and answered on the way

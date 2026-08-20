@@ -33,8 +33,9 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   // The one test that mounts the whole app navigates the document's own URL, and
-  // the next test starts at the top of the app.
-  window.history.pushState({}, "", "/");
+  // the next test starts on the pending list — which is where the phone's
+  // answering flow starts now that the workbench has the root.
+  window.history.pushState({}, "", "/pending");
 });
 
 describe("the Archive", () => {
@@ -184,7 +185,7 @@ describe("the way between the two lists", () => {
 
     fireEvent.click(screen.getByText("← Pending"));
 
-    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    await waitFor(() => expect(window.location.pathname).toBe("/pending"));
     // Waited for rather than read: the URL changes as the route does, and the
     // list it landed on is a fetch behind that.
     await waitFor(() => screen.getByText(PENDING[0]!.title));

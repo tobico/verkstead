@@ -16,21 +16,21 @@ import { vi } from "vitest";
 /// out.
 export function serving(...answers: Array<Answer>) {
   const asked: Array<() => Promise<Response>> = [];
-  const paths = new Map<string, () => Promise<Response>>();
+  const held = new Map<string, () => Promise<Response>>();
   for (const answer of answers) {
     if (typeof answer === "function") {
       asked.push(answer);
     } else {
-      paths.set(answer.path, answer.answer);
+      held.set(answer.key, answer.answer);
     }
   }
 
   let taken = 0;
   // Typed as `fetch` is called rather than as a bare thunk, so a test can read
   // back what a page put on the wire and not just that it asked.
-  const fetching = vi.fn((path: RequestInfo | URL, _init?: RequestInit) => {
-    const held = paths.get(String(path));
-    return held ? held() : asked[Math.min(taken++, asked.length - 1)]!();
+  const fetching = vi.fn((path: RequestInfo | URL, init?: RequestInit) => {
+    const answer = held.get(`${init?.method ?? "GET"} ${String(path)}`);
+    return answer ? answer() : asked[Math.min(taken++, asked.length - 1)]!();
   });
   vi.stubGlobal("fetch", fetching);
   return fetching;
@@ -50,16 +50,24 @@ export function askedFor(
 }
 
 /// What a test hands [`serving`]: an answer in the sequence, or one belonging to
-/// a path.
-type Answer = (() => Promise<Response>) | { path: string; answer: () => Promise<Response> };
+/// a request.
+type Answer =
+  | (() => Promise<Response>)
+  | { key: string; answer: () => Promise<Response> };
 
-/// One answer for one path, however often and whenever it is asked for. For the
+/// One answer for one request, however often and whenever it is made. For the
 /// endpoint a page fetches alongside the one a test is about.
+///
+/// The method is part of what it belongs to, because a path is not: one path
+/// answers to a GET and a POST both — the workbench's Conversations do — and an
+/// answer held for the reading of a list must not also be what the server said
+/// about writing to it.
 export function whenever(
   path: string,
   answer: () => Promise<Response>,
+  method = "GET",
 ): Answer {
-  return { path, answer };
+  return { key: `${method} ${path}`, answer };
 }
 
 /// One answer, as the server would have written it.

@@ -38,7 +38,7 @@ export function ArchiveList() {
       {/* The way back to what is still waiting, in the slot the set view's
           "← Pending" sits in: every page here starts with where else there is to
           go, so neither list needs a typed URL to reach the other. */}
-      <A class="back" href="/">
+      <A class="back" href="/pending">
         ← Pending
       </A>
       <div class="page-head">

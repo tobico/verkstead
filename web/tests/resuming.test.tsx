@@ -83,7 +83,7 @@ function reopened(): void {
 
 describe("coming back to the app", () => {
   it("shows the Set that arrived while it was away", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS), json([ARRIVAL, ...SETS]));
     render(() => <App />);
     await waitFor(() => screen.getByText(SETS[0]!.title));
@@ -114,7 +114,7 @@ describe("coming back to the app", () => {
   });
 
   it("asks for nothing while the app is away", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/pending");
     const fetching = serving(CURRENT, json(SETS));
     render(() => <App />);
     await waitFor(() => screen.getByText(SETS[0]!.title));

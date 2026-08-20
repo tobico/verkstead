@@ -38,7 +38,7 @@ export function mount(id = "1") {
       <QueryClientProvider client={client}>
         <MemoryRouter history={history}>
           <Route path="/sets/:id" component={SetPage} />
-          <Route path="/" component={Elsewhere} />
+          <Route path="/pending" component={Elsewhere} />
           <Route path="/archive" component={Elsewhere} />
         </MemoryRouter>
       </QueryClientProvider>

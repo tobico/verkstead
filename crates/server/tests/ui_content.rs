@@ -1140,6 +1140,81 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
     write("repos.json", &get(&app, "/api/ui/repos").await);
+
+    // The workbench: the sidebar, and one Conversation opened — a Brief written,
+    // a branch named, and the base commit overridden, which is the whole of what
+    // a drafting Conversation carries. Put in through the store for the reason
+    // the Repos are: going in the front way means a git repository inside a
+    // Watched Path, which is `conversations.rs`'s subject and not this one's.
+    let (_dir, pool, app) = fresh_app().await;
+    let mut repos = Vec::new();
+    for (path, name, branch) in [
+        ("/srv/repos/verkstead", "verkstead", "main"),
+        ("/srv/repos/askance", "askance", "trunk"),
+    ] {
+        repos.push(
+            store::register_repo(&pool, std::path::Path::new(path), name, branch)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+
+    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+    store::save_brief(
+        &pool,
+        drafting,
+        "# Rate limiting for the public API\n\n\
+         `POST /v1/messages` has no rate limit. One client sent 40k requests in a\n\
+         minute and the queue was backed up for twenty.\n\n\
+         - decide where the counter lives\n\
+         - decide what a refused request is told\n",
+    )
+    .await
+    .unwrap();
+    store::set_base_commit(
+        &pool,
+        drafting,
+        Some("6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7"),
+    )
+    .await
+    .unwrap();
+
+    // A second one, so the sidebar is a list rather than a row — and against the
+    // other Repo, because what a row names beside the branch is which repository
+    // the work is in.
+    store::start_conversation(&pool, repos[1].id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    write(
+        "conversations.json",
+        &get(&app, "/api/ui/conversations").await,
+    );
+    write(
+        "conversation.json",
+        &pin_timeline(&get(&app, &format!("/api/ui/conversations/{drafting}")).await),
+    );
+}
+
+/// Pin the times a Conversation's Timeline carries, so the fixture does not
+/// change with the clock. Every Event gets the one stated minute: what the
+/// viewer's tests read off these is what an Event says, not when this run
+/// happened to write it.
+fn pin_timeline(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    for event in payload["timeline"].as_array_mut().unwrap() {
+        // Each Event is its kind and its body — the stamp is inside.
+        let (_, body) = event.as_object_mut().unwrap().iter_mut().next().unwrap();
+        body["at"] = "2026-08-03T09:07:11.000Z".into();
+    }
+
+    serde_json::to_string(&payload).unwrap()
 }
 
 /// Pin a list's exact stamps to stated minutes, one value per row in order, so
