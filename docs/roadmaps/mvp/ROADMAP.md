@@ -23,7 +23,7 @@ up by one.
 
 ## Stages
 
-- [ ] 01: Workbench — [brief](01-workbench.md) *(in progress — `workbench`)*
+- [x] 01: Workbench — [brief](01-workbench.md)
 - [ ] 02: Grilling — [brief](02-grilling.md)
 - [ ] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
