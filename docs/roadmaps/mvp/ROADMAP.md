@@ -24,7 +24,7 @@ up by one.
 ## Stages
 
 - [x] 01: Workbench — [brief](01-workbench.md)
-- [ ] 02: Grilling — [brief](02-grilling.md)
+- [ ] 02: Grilling — [brief](02-grilling.md) *(in progress, `grilling`)*
 - [ ] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
 - [ ] 05: Refinement — [brief](05-refinement.md)
