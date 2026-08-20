@@ -379,14 +379,94 @@ textarea::placeholder {
 }
 
 /* Where else there is to go, in the same slot on every page: back out of a Set,
-   and between the two lists. */
+   and between the lists. */
 
 .back,
-.to-archive {
+.to-archive,
+.to-repos {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
+}
+
+/* More than one of them on a line, which is the pending list alone. */
+.elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+}
+
+/* Registering a repo: a path typed, and the button that sends it. The label
+   stands over both, because what has to be understood before typing is that the
+   path is an absolute one. */
+
+.add-repo {
+  margin-bottom: 1.5rem;
+}
+
+.add-repo label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* Wrapping, so a phone puts the button under the field rather than squeezing a
+   path into what is left of the line. */
+.add-repo-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.add-repo input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.add-repo button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.add-repo button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.add-repo .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A registered repo is a list row with nowhere to go yet, so the card is the
+   row's own rather than a link's. */
+.repo-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.repo-row .path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 /* The set view: one long column, read top to bottom and answered on the way

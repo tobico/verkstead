@@ -27,8 +27,8 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, PendingEntry, PushKey, Registration, RepoEntry, SetView, Standing,
+    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -45,6 +45,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/archive", post(archive_set))
+        .route("/api/ui/repos", get(repos).post(register_repo))
         // Not a thing to fetch but a thing to listen on — see [`crate::nudge`].
         .route("/api/ui/nudges", get(crate::nudge::nudges))
         .route("/api/ui/push/key", get(push_key))
@@ -228,6 +229,49 @@ async fn archive_set(State(state): State<AppState>, Path(id): Path<String>) -> H
         store::Archiving::NoSuchSet => Archived::NoSuchSet,
     })
     .into_response()
+}
+
+/// `GET /api/ui/repos` — the Repos Verkstead has been told about, by name.
+async fn repos(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    let rows: Vec<RepoEntry> = repos
+        .into_iter()
+        .map(|repo| RepoEntry {
+            id: repo.id,
+            name: repo.name,
+            // Stored as UTF-8 in the first place — a path that is not cannot be
+            // registered — so nothing is lost putting it back on the wire.
+            path: repo.path.to_string_lossy().into_owned(),
+            default_branch: repo.default_branch,
+        })
+        .collect();
+
+    Json(rows).into_response()
+}
+
+/// `POST /api/ui/repos` — take on the repository at a path.
+///
+/// Every refusal is the server's: the Watched Paths are a security boundary, and
+/// a boundary a request could reach around by not going through the form would
+/// not be one. See [`crate::repos`] for what is checked.
+async fn register_repo(
+    State(state): State<AppState>,
+    Json(registration): Json<Registration>,
+) -> HttpResponse {
+    match crate::repos::register(&state.pool, &state.watched, &registration.path).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "registering a Repo failed");
+            unavailable("the Repo could not be registered")
+        }
+    }
 }
 
 /// `GET /api/ui/push/key` — the public half of the server's VAPID keypair.

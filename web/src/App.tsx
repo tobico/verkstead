@@ -7,6 +7,7 @@ import { onCleanup, onMount, type JSX } from "solid-js";
 import { ArchiveList } from "./archive/ArchiveList";
 import { listenForNudges } from "./nudge";
 import { PendingList } from "./pending/PendingList";
+import { RepoList } from "./repos/RepoList";
 import { SetPage } from "./set/SetPage";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -37,6 +38,7 @@ export function App(): JSX.Element {
       <Router root={Shell}>
         <Route path="/" component={PendingList} />
         <Route path="/archive" component={ArchiveList} />
+        <Route path="/repos" component={RepoList} />
         <Route path="/sets/:id" component={SetPage} />
         <Route path="*" component={NoSuchPage} />
       </Router>

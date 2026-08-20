@@ -17,8 +17,8 @@
 use ts_rs::TS;
 
 use crate::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Submitted, Subscribed, Subscription,
-    Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, PendingEntry, PushKey, Registered, Registration, RepoEntry, SetView,
+    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -42,6 +42,11 @@ fn the_viewers_types_are_written_from_these() {
     // answered Set is read back with.
     Submitted::export_all(&config).unwrap();
     Archived::export_all(&config).unwrap();
+
+    // The Repos Verkstead has been told about, and adding one by path.
+    RepoEntry::export_all(&config).unwrap();
+    Registration::export_all(&config).unwrap();
+    Registered::export_all(&config).unwrap();
 
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();

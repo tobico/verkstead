@@ -11,6 +11,8 @@ import type {
   Archived,
   PendingEntry,
   PushKey,
+  Registered,
+  RepoEntry,
   Response as Decided,
   SetView,
   Submitted,
@@ -74,6 +76,21 @@ export function submitResponse(
 /// path.
 export function archiveSet(id: number): Promise<Archived> {
   return post<Archived>(`/api/ui/sets/${id}/archive`);
+}
+
+/// The Repos Verkstead has been told about, by name.
+export function listRepos(): Promise<RepoEntry[]> {
+  return get<RepoEntry[]>("/api/ui/repos");
+}
+
+/// Ask Verkstead to take on the repository at an absolute path.
+///
+/// Like answering a Set, the outcome is the answer's body rather than its
+/// status: a path outside the Watched Paths is the boundary doing its job and
+/// not an error, and every refusal is a different sentence to put in front of
+/// the human.
+export function registerRepo(path: string): Promise<Registered> {
+  return post<Registered>("/api/ui/repos", { path });
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

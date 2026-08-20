@@ -3,6 +3,7 @@
 //! defaults.
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::path::PathBuf;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -65,7 +66,7 @@ async fn health_route_answers_ok() {
 
 #[test]
 fn config_defaults_to_localhost() {
-    let config = Config::parse_from(["verkstead serve"]);
+    let config = Config::parse_from(["verkstead serve", "--watched-path", "/srv/repos"]);
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert!(!config.database.as_os_str().is_empty());
@@ -79,8 +80,42 @@ fn config_is_overridable_by_flag() {
         "0.0.0.0:9999",
         "--database",
         "/srv/verkstead/state.db",
+        "--watched-path",
+        "/srv/repos",
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
     assert_eq!(config.database.to_str().unwrap(), "/srv/verkstead/state.db");
+}
+
+/// The one piece of configuration with no default: what Verkstead may touch is
+/// the machine owner's to say, and a guess at it is a guess at a security
+/// boundary.
+#[test]
+fn config_refuses_to_parse_without_a_watched_path() {
+    assert!(Config::try_parse_from(["verkstead serve"]).is_err());
+}
+
+/// Several of them, as `PATH` is written — which is how they arrive from a
+/// service unit, where there is one string and not a repeatable flag.
+#[test]
+fn watched_paths_are_a_list_however_they_are_given() {
+    let repeated = Config::parse_from([
+        "verkstead serve",
+        "--watched-path",
+        "/srv/repos",
+        "--watched-path",
+        "/srv/scratch",
+    ]);
+    let separated = Config::parse_from([
+        "verkstead serve",
+        "--watched-path",
+        "/srv/repos:/srv/scratch",
+    ]);
+
+    assert_eq!(repeated.watched_paths, separated.watched_paths);
+    assert_eq!(
+        repeated.watched_paths,
+        [PathBuf::from("/srv/repos"), PathBuf::from("/srv/scratch")]
+    );
 }

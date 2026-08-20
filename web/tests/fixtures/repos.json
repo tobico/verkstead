@@ -1,0 +1,14 @@
+[
+  {
+    "default_branch": "trunk",
+    "id": 2,
+    "name": "askance",
+    "path": "/srv/repos/askance"
+  },
+  {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  }
+]

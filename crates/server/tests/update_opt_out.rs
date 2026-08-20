@@ -16,7 +16,7 @@ fn the_env_var_turns_the_update_check_off() {
     // reading the environment while it is written.
     unsafe { std::env::set_var("VERKSTEAD_NO_UPDATE_CHECK", "1") };
 
-    let config = Config::parse_from(["verkstead serve"]);
+    let config = Config::parse_from(["verkstead serve", "--watched-path", "/srv/repos"]);
 
     assert!(config.no_update_check);
     assert_eq!(

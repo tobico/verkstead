@@ -47,13 +47,18 @@ export function PendingList() {
     // window that offers more, the whole page keeps to that and sits in the
     // middle of it.
     <div class="list-page">
-      {/* The way through to what was already decided, in the slot the set
-          view's "← Pending" sits in: every page here starts with where else
-          there is to go, so neither list needs a typed URL to reach the
-          other. */}
-      <A class="to-archive" href="/archive">
-        Archive →
-      </A>
+      {/* Where else there is to go, in the slot the set view's "← Pending" sits
+          in: every page here starts with that, so nothing needs a typed URL to
+          be reached. The Repos are here rather than anywhere better because
+          there is nowhere better yet — the workbench is what will hold them. */}
+      <nav class="elsewhere">
+        <A class="to-repos" href="/repos">
+          Repos →
+        </A>
+        <A class="to-archive" href="/archive">
+          Archive →
+        </A>
+      </nav>
       {/* On the title's line rather than buried in a settings page: this is the
           one page open often enough to be where the human notices that the
           phone is not being told, and a switch is small enough to live in the

@@ -83,6 +83,10 @@ impl Serve {
     }
 
     /// The plain form: the flags every test but the environment one uses.
+    ///
+    /// `dir` is the Watched Path as well as the working directory. The server
+    /// refuses to start without one, and a test that is not about the boundary
+    /// still has to give it something real to watch.
     fn with_flags(dir: &Path, port: u16, database: &Path) -> Self {
         Self::start(
             dir,
@@ -92,6 +96,8 @@ impl Serve {
                 &format!("127.0.0.1:{port}"),
                 "--database",
                 database.to_str().unwrap(),
+                "--watched-path",
+                dir.to_str().unwrap(),
             ],
             &[],
         )
@@ -181,6 +187,67 @@ fn run(args: &[&str]) -> Output {
         .expect("the verkstead binary should be built for its own tests")
 }
 
+/// Start the server with `args` and expect it to give up rather than serve.
+///
+/// The environment is cleared of what the flags stand in for, so a machine that
+/// happens to have Verkstead configured for real is not what the test reads.
+fn refused_to_start(args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_verkstead"))
+        .arg("serve")
+        .args(args)
+        .env_remove("RUST_LOG")
+        .env_remove("VERKSTEAD_WATCHED_PATHS")
+        .env_remove("VERKSTEAD_DATABASE")
+        .env_remove("VERKSTEAD_LISTEN")
+        .output()
+        .expect("the verkstead binary should be built for its own tests");
+
+    assert!(
+        !output.status.success(),
+        "the server should not have started, got {:?}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+    );
+
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+/// The one piece of configuration with no default and no guess behind it: a
+/// server that has not been told what it may touch has no business coming up,
+/// because the alternative to a stated boundary is an assumed one.
+#[test]
+fn serving_without_a_watched_path_refuses_to_start() {
+    let refusal = refused_to_start(&[]);
+
+    assert!(
+        refusal.contains("--watched-path"),
+        "the refusal should name the flag that is missing, got:\n{refusal}"
+    );
+}
+
+/// A Watched Path that is not there covers nothing, so every repo inside it
+/// would be refused with no hint as to why. Said at startup instead, where it
+/// can be fixed.
+#[test]
+fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tmp.path().join("never-made");
+
+    let refusal = refused_to_start(&[
+        "--listen",
+        &format!("127.0.0.1:{}", free_port()),
+        "--database",
+        tmp.path().join("unused.db").to_str().unwrap(),
+        "--watched-path",
+        missing.to_str().unwrap(),
+    ]);
+
+    assert!(
+        refusal.contains(missing.to_str().unwrap()),
+        "the refusal should name the path it could not resolve, got:\n{refusal}"
+    );
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).unwrap()
 }
@@ -263,6 +330,7 @@ fn the_listen_address_and_database_come_from_the_environment_too() {
         &[
             ("VERKSTEAD_LISTEN", &format!("127.0.0.1:{port}")),
             ("VERKSTEAD_DATABASE", database.to_str().unwrap()),
+            ("VERKSTEAD_WATCHED_PATHS", tmp.path().to_str().unwrap()),
         ],
     );
 
@@ -284,8 +352,10 @@ fn the_help_describes_the_flags_and_their_defaults() {
     for phrase in [
         "--listen",
         "--database",
+        "--watched-path",
         "VERKSTEAD_LISTEN",
         "VERKSTEAD_DATABASE",
+        "VERKSTEAD_WATCHED_PATHS",
         "127.0.0.1:8422",
         "verkstead.db",
     ] {
@@ -343,6 +413,8 @@ fn rust_log_overrides_the_default_filter() {
             &format!("127.0.0.1:{port}"),
             "--database",
             tmp.path().join("quiet.db").to_str().unwrap(),
+            "--watched-path",
+            tmp.path().to_str().unwrap(),
         ],
         &[("RUST_LOG", "error")],
     );

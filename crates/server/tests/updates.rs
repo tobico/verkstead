@@ -280,7 +280,12 @@ async fn a_server_told_not_to_check_asks_nobody() {
     assert_eq!(github.times_asked(), 1);
 
     // Turned off, there is nowhere to ask — with a GitHub standing right there.
-    let off = Config::parse_from(["verkstead serve", "--no-update-check"]);
+    let off = Config::parse_from([
+        "verkstead serve",
+        "--no-update-check",
+        "--watched-path",
+        "/srv/repos",
+    ]);
     assert_eq!(off.releases(), None, "turned off leaves nowhere to ask");
 
     let (_quiet_dir, quiet) = fresh_app(off.releases()).await;

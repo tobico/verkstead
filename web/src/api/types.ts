@@ -204,6 +204,34 @@ heading: boolean,
 nav_text: string, };
 
 /**
+ * What became of a registration.
+ *
+ * The refusals are the server's and not the form's: a check the browser made
+ * is a courtesy, and every request reaching this endpoint is decided here
+ * whether or not a form was involved.
+ */
+export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPaths" | "NotARepository" | "NoDefaultBranch" | "AlreadyRegistered";
+
+/**
+ * A repository the human is asking Verkstead to take on, named by its absolute
+ * path.
+ *
+ * A path and nothing else: the name and the default branch are read off the
+ * repository rather than claimed, for the same reason the CLI derives a Set's
+ * `project` and `branch` instead of trusting them.
+ */
+export type Registration = { path: string, };
+
+/**
+ * One row of the Repo list.
+ *
+ * The path is the resolved one the server recorded rather than whatever was
+ * typed to register it: that is the directory Verkstead will actually work in,
+ * so it is the one worth showing.
+ */
+export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
+
+/**
  * The submitted collection of Answers and Unanswered markers for one Question
  * Set, plus an optional set-level comment.
  *

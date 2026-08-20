@@ -1124,6 +1124,22 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = set_json(&app, &pool, &diagrammed_set()).await;
     write("set-diagram.json", &json);
+
+    // The Repo list: two registrations, put in through the store rather than
+    // through the endpoint, because what is being written here is the shape of a
+    // row — and going in the front way would mean building a git repository
+    // inside a Watched Path, which is `repos.rs`'s subject and not this one's.
+    let (_dir, pool, app) = fresh_app().await;
+    for (path, name, branch) in [
+        ("/srv/repos/verkstead", "verkstead", "main"),
+        ("/srv/repos/askance", "askance", "trunk"),
+    ] {
+        store::register_repo(&pool, std::path::Path::new(path), name, branch)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    write("repos.json", &get(&app, "/api/ui/repos").await);
 }
 
 /// Pin a list's exact stamps to stated minutes, one value per row in order, so

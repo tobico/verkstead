@@ -20,12 +20,14 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 
 mod push;
+mod repos;
 mod waits;
 
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
 };
+pub use repos::{Repo, register_repo, registered_repos};
 pub use waits::{WaitHeld, Waits};
 
 /// A Set as the store holds it: the agent's Set plus the identity the server
@@ -306,6 +308,9 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The push identity and the devices subscribed to it, which also generates
     // the keypair when this is the database's first run.
     push::apply_schema(pool).await?;
+
+    // The Repos registered from inside the Watched Paths.
+    repos::apply_schema(pool).await?;
 
     Ok(())
 }

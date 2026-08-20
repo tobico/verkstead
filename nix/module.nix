@@ -89,6 +89,30 @@ in
       '';
     };
 
+    watchedPaths = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      example = lib.literalExpression ''[ "/home/you/src" ]'';
+      description = ''
+        The directories Verkstead is permitted to operate inside, as
+        `--watched-path`.
+
+        A security boundary rather than a convenience: nothing outside these
+        directories is ever touched, and a Repo is registered only from within
+        one. There is no default and no scan — the server refuses to start until
+        this says what it may have, because guessing at what a machine's owner
+        meant to expose is not a guess worth making.
+
+        Each is resolved at startup, so it has to exist; symlinks and `..` are
+        taken out of every path checked against them, and a path that merely
+        reads as inside one is refused.
+
+        Each is bound into the service's sandbox, and nothing beside it is: the
+        hardening otherwise leaves nothing but the state directory reachable,
+        so a watched path under `/home` would be one the service cannot see at
+        all. What the sandbox exposes is therefore exactly this list.
+      '';
+    };
+
     updateCheck = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -106,6 +130,20 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    # Said here as well as by the server itself, because a boundary nobody drew
+    # is worth refusing at build time rather than at the first start.
+    assertions = [
+      {
+        assertion = cfg.watchedPaths != [ ];
+        message = ''
+          services.verkstead.watchedPaths must name at least one directory.
+          Verkstead operates only inside the directories it is given, so with
+          none of them it has nothing it may touch and the server refuses to
+          start.
+        '';
+      }
+    ];
+
     # The binary lands on `PATH`; an agent asks with it, and `verkstead serve
     # --help` is how a human finds out what this unit is passing it.
     environment.systemPackages = [ cfg.package ];
@@ -135,6 +173,13 @@ in
             "--database"
             "${cfg.database}"
           ]
+          # One flag per directory rather than the `:`-separated form the
+          # environment variable takes: a path with a colon in it would split
+          # in two, and this is the list that says what may be touched.
+          ++ lib.concatMap (path: [
+            "--watched-path"
+            "${path}"
+          ]) cfg.watchedPaths
           ++ lib.optional (!cfg.updateCheck) "--no-update-check"
         );
 
@@ -167,7 +212,11 @@ in
         PrivateUsers = true;
         ProtectClock = true;
         ProtectControlGroups = true;
-        ProtectHome = true;
+        # `tmpfs` rather than `true`: both leave the home directories empty, and
+        # only this one composes with the `BindPaths` below. systemd.exec(5) says
+        # it outright — a bind mount cannot be nested under `/home` with
+        # `ProtectHome=yes`, and `ProtectHome=tmpfs` is what to use instead.
+        ProtectHome = "tmpfs";
         ProtectHostname = true;
         ProtectKernelLogs = true;
         ProtectKernelModules = true;
@@ -203,6 +252,20 @@ in
         ReadWritePaths = lib.optional (!lib.hasPrefix "${stateDir}/" "${cfg.database}") (
           builtins.dirOf "${cfg.database}"
         );
+
+        # The Watched Paths, and nothing else of the filesystem they sit in.
+        #
+        # Bind mounts rather than `ReadWritePaths`, because a Watched Path is
+        # usually somewhere under `/home` and `ProtectHome` replaces that with
+        # an empty tmpfs: a path merely permitted under one is a path that is
+        # not there to permit. Bound in, it exists inside the namespace and
+        # nothing beside it does — which is the sandbox saying exactly what the
+        # server says, rather than something wider that the server then narrows.
+        #
+        # Not prefixed with `-`, so a directory that has gone missing fails the
+        # unit. The server refuses to start on one too; both of them saying so
+        # beats a service that comes up watching nothing.
+        BindPaths = map (path: "${path}") cfg.watchedPaths;
       };
     };
   };

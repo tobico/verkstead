@@ -1,0 +1,315 @@
+//! Registering a Repo over the viewer's namespace: what gets on the list, and
+//! everything that is refused before it can.
+//!
+//! Every refusal here is asked of the *server*, through the endpoint, rather
+//! than of the boundary type underneath it — which is the point of the Watched
+//! Paths being a security boundary. A browser that skipped the form, or a `curl`
+//! that never saw one, meets the same answers.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use http_body_util::BodyExt;
+use serde::de::DeserializeOwned;
+use tower::ServiceExt;
+use verkstead_render::{Registered, RepoEntry};
+use verkstead_server::{WatchedPaths, open_database, router_watching};
+
+/// A router watching `watched`, plus the directory holding its database alive.
+async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
+
+    (dir, router_watching(pool, watched))
+}
+
+/// A git repository at `path`, with one commit on `main` so it has a branch to
+/// call its default.
+fn repository(path: PathBuf) -> PathBuf {
+    std::fs::create_dir_all(&path).unwrap();
+    git(&path, &["init", "--initial-branch", "main"]);
+    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Verkstead Test"]);
+    std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+    git(&path, &["add", "README.md"]);
+    git(&path, &["commit", "-m", "first"]);
+
+    path
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(status.success(), "git {args:?} failed in {}", dir.display());
+}
+
+/// Ask to register a path, and read back what the server made of it.
+async fn register(app: &Router, path: &Path) -> Registered {
+    post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await
+}
+
+/// The same, for a path that is not one the filesystem can hand back — a string
+/// typed into the form.
+async fn register_text(app: &Router, path: &str) -> Registered {
+    post(app, "/api/ui/repos", &serde_json::json!({ "path": path })).await
+}
+
+async fn listed(app: &Router) -> Vec<RepoEntry> {
+    get(app, "/api/ui/repos").await
+}
+
+async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder().uri(path).body(Body::empty()).unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "GET {path} failed: {body}");
+    read(&body)
+}
+
+async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::Value) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(serde_json::to_vec(body).unwrap()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "POST {path} failed: {body}");
+    read(&body)
+}
+
+async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+fn read<T: DeserializeOwned>(body: &str) -> T {
+    serde_json::from_str(body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"))
+}
+
+#[tokio::test]
+async fn a_repo_inside_a_watched_path_registers_and_appears_on_the_list() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    let repos = listed(&app).await;
+    assert_eq!(repos.len(), 1);
+    assert_eq!(repos[0].name, "verkstead");
+    assert_eq!(
+        repos[0].path,
+        repo.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert_eq!(repos[0].default_branch, "main");
+}
+
+#[tokio::test]
+async fn nothing_is_registered_to_begin_with() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    assert!(listed(&app).await.is_empty());
+}
+
+/// The boundary itself: a perfectly good repository, refused for being
+/// somewhere Verkstead was never given.
+#[tokio::test]
+async fn a_repo_outside_the_watched_paths_is_refused_by_the_server() {
+    let root = tempfile::tempdir().unwrap();
+    let watched = root.path().join("watched");
+    std::fs::create_dir(&watched).unwrap();
+    let (_dir, app) = app_watching(&watched).await;
+
+    let elsewhere = repository(root.path().join("elsewhere"));
+
+    assert_eq!(
+        register(&app, &elsewhere).await,
+        Registered::OutsideWatchedPaths
+    );
+    assert!(listed(&app).await.is_empty());
+}
+
+/// A path that reads as inside a Watched Path and is not: the symlink is
+/// followed before the boundary is consulted.
+#[tokio::test]
+async fn a_repo_reached_through_a_symlink_out_of_a_watched_path_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let watched = root.path().join("watched");
+    std::fs::create_dir(&watched).unwrap();
+    let (_dir, app) = app_watching(&watched).await;
+
+    let elsewhere = repository(root.path().join("elsewhere"));
+    let inside = watched.join("looks-inside");
+    std::os::unix::fs::symlink(&elsewhere, &inside).unwrap();
+
+    assert_eq!(
+        register(&app, &inside).await,
+        Registered::OutsideWatchedPaths
+    );
+    assert!(listed(&app).await.is_empty());
+}
+
+/// The other way of reading as inside one: `..` climbs back out.
+#[tokio::test]
+async fn a_repo_reached_by_climbing_out_with_dot_dot_is_refused() {
+    let root = tempfile::tempdir().unwrap();
+    let watched = root.path().join("watched");
+    std::fs::create_dir(&watched).unwrap();
+    let (_dir, app) = app_watching(&watched).await;
+
+    repository(root.path().join("elsewhere"));
+    let climbed = watched.join("..").join("elsewhere");
+
+    assert_eq!(
+        register(&app, &climbed).await,
+        Registered::OutsideWatchedPaths
+    );
+    assert!(listed(&app).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_directory_that_is_not_a_git_repository_is_refused() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    let plain = watched.path().join("notes");
+    std::fs::create_dir(&plain).unwrap();
+
+    assert_eq!(register(&app, &plain).await, Registered::NotARepository);
+}
+
+/// A directory *in* a repository is not the repository: everything Verkstead
+/// later builds hangs off the root, so a subdirectory would put a Conversation's
+/// worktree somewhere nobody meant.
+#[tokio::test]
+async fn a_subdirectory_of_a_repository_is_not_the_repository() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    let inside = repo.join("crates");
+    std::fs::create_dir(&inside).unwrap();
+
+    assert_eq!(register(&app, &inside).await, Registered::NotARepository);
+}
+
+#[tokio::test]
+async fn a_path_with_nothing_at_it_is_refused_as_missing() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    assert_eq!(
+        register(&app, &watched.path().join("never-made")).await,
+        Registered::Missing
+    );
+}
+
+#[tokio::test]
+async fn a_relative_path_is_refused_rather_than_resolved() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    repository(watched.path().join("verkstead"));
+
+    assert_eq!(
+        register_text(&app, "verkstead").await,
+        Registered::NotAbsolute
+    );
+}
+
+#[tokio::test]
+async fn a_repo_already_registered_is_refused_however_its_path_is_spelled() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+
+    // The same directory, spelled its way out and back again.
+    let roundabout = repo.join("..").join("verkstead");
+    assert_eq!(
+        register(&app, &roundabout).await,
+        Registered::AlreadyRegistered
+    );
+
+    assert_eq!(listed(&app).await.len(), 1);
+}
+
+/// The closed state the server refuses to start in, asked of the router
+/// directly: with no Watched Path there is nowhere a Repo could be registered
+/// from, and every path is outside.
+#[tokio::test]
+async fn a_server_watching_nothing_registers_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let app = router_watching(pool, WatchedPaths::none());
+
+    let repo = repository(dir.path().join("verkstead"));
+
+    assert_eq!(register(&app, &repo).await, Registered::OutsideWatchedPaths);
+}
+
+/// What a Conversation branches from: the remote's idea of the default branch
+/// wins over whatever happens to be checked out, because that is what everyone
+/// working on the repository means by it.
+#[tokio::test]
+async fn the_default_branch_is_what_the_remote_calls_it() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    // A remote of its own, pointing back at itself: enough for `origin/HEAD` to
+    // exist and name a branch, without a network anywhere.
+    git(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(
+        &repo,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+    git(&repo, &["checkout", "--quiet", "-b", "some-feature"]);
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    assert_eq!(listed(&app).await[0].default_branch, "main");
+}
+
+/// A repository with nothing checked out has no branch to work from, and
+/// inventing one would put work on a branch nobody chose.
+#[tokio::test]
+async fn a_repository_with_no_branch_to_call_its_default_is_refused() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    git(&repo, &["checkout", "--quiet", "--detach", "HEAD"]);
+
+    assert_eq!(register(&app, &repo).await, Registered::NoDefaultBranch);
+}

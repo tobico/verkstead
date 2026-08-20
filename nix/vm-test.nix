@@ -37,6 +37,22 @@ testers.runNixOSTest {
     # the binary would download here perfectly well.
     services.verkstead.package = package;
 
+    # The module refuses to build without a Watched Path, and the service
+    # refuses to start with one that is not there. Two of them, so that the
+    # sandbox is exercised where it has real work to do: one under `/home`,
+    # which the hardening replaces with an empty tmpfs and the module then binds
+    # back through, and one outside it. The unit coming up at all is what says
+    # both arrived.
+    services.verkstead.watchedPaths = [
+      "/srv/repos"
+      "/home/watched"
+    ];
+
+    systemd.tmpfiles.rules = [
+      "d /srv/repos 0755 root root -"
+      "d /home/watched 0755 root root -"
+    ];
+
     # The CLI finds its own git through the package's wrapper; this one is here
     # so the test can build the repository the CLI then reads.
     environment.systemPackages = [ git ];
@@ -237,6 +253,49 @@ testers.runNixOSTest {
         assert notice == '"Current"', f"the Update Notice said {notice}"
         machine.succeed("systemctl is-active --quiet verkstead.service")
 
+    def committed(path, branch=BRANCH):
+        """A git repository at `path`, with one commit on `branch`."""
+        machine.succeed(f"git -c init.defaultBranch={branch} init -q {path}")
+        machine.succeed(f"echo committed > {path}/tracked.txt")
+        machine.succeed(f"git -C {path} add -A")
+        machine.succeed(
+            f"git -C {path} -c user.name=Verkstead -c user.email=vm@verkstead.invalid"
+            " -c commit.gpgsign=false commit -q -m init"
+        )
+
+
+    def register(path):
+        """Ask the server to take on the repository at `path`, and hand back the
+        outcome it named."""
+        return machine.succeed(
+            "curl -sf -X POST -H 'Content-Type: application/json'"
+            f" -d '{{\"path\":\"{path}\"}}'"
+            " http://127.0.0.1:8422/api/ui/repos"
+        ).strip()
+
+
+    with subtest("a repo inside a watched path registers, and one outside cannot"):
+        # Both watched paths, because they are exposed to the sandbox two
+        # different ways: `/srv/repos` is somewhere the hardening leaves in
+        # place, and `/home/watched` is under a directory it replaces with an
+        # empty tmpfs and the module binds back through. A service that cannot
+        # see the second would refuse it exactly as it refuses one outside.
+        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
+            committed(watched)
+            outcome = register(watched)
+            assert outcome == '"Added"', f"{watched} was answered {outcome}"
+
+        # And the boundary itself, from inside the running service rather than
+        # from a unit test. `/srv/elsewhere` is somewhere the service can see
+        # perfectly well and was not given, so what refuses it is the boundary
+        # and not the sandbox — which is the half worth proving here.
+        committed("/srv/elsewhere")
+        outcome = register("/srv/elsewhere")
+        assert outcome == '"OutsideWatchedPaths"', f"/srv/elsewhere was answered {outcome}"
+
+        listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
+        assert "/srv/elsewhere" not in listed, f"a refused repo is on the list:\n{listed}"
+
     # The repository an agent always asks from, and which the CLI reads
     # `project`, `branch` and the Diff out of by shelling out to git.
     machine.succeed(f"git -c init.defaultBranch={BRANCH} init -q {REPO}")
@@ -303,6 +362,13 @@ testers.runNixOSTest {
             f"curl -sf 'http://127.0.0.1:8422/api/v1/sets/{first}/response?hold=0'"
             " | grep -q 'The first Set came back'"
         )
+
+        # And so did the repos registered before it: a registration is a thing
+        # done once and expected to hold, so a service that forgot them on a
+        # restart would be one nobody could rely on.
+        listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
+        for watched in ["/srv/repos/inside", "/home/watched/inside"]:
+            assert watched in listed, f"{watched} was forgotten:\n{listed}"
 
         # The agent did not fail when the server went away; it reconnects its
         # wait, so answering now still reaches it.

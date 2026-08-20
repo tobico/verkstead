@@ -26,9 +26,16 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 
 ```console
 $ (cd web && pnpm install && pnpm build)
-$ cargo run -p verkstead-cli -- serve
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 database=verkstead.db
+$ cargo run -p verkstead-cli -- serve --watched-path ~/src
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 database=verkstead.db watched=["/home/you/src"]
 ```
+
+`--watched-path` is the one flag with no default. It names a directory
+Verkstead may operate inside, and it is a security boundary rather than a
+convenience: nothing outside the paths given is touched, and a repo is
+registered only from within one. Repeat the flag for more than one, or set
+`VERKSTEAD_WATCHED_PATHS` with them separated by `:`. The server refuses to
+start with none.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
