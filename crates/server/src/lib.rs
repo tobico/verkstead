@@ -28,6 +28,13 @@ mod responses;
 pub mod sandbox;
 mod sessions;
 mod sets;
+/// What a session is grilled by: the skills Verkstead ships and installs into
+/// every sandbox.
+///
+/// Public for the reason the sandbox is — they are part of the surface a session
+/// runs on rather than an implementation detail of an endpoint, and standing a
+/// router up that runs sessions means saying where they are installed.
+pub mod skills;
 mod transcript;
 mod ui;
 mod updates;
@@ -374,6 +381,12 @@ pub async fn run(config: Config) -> Result<()> {
     std::fs::create_dir_all(&state_dir)
         .with_context(|| format!("creating state directory {}", state_dir.display()))?;
 
+    // And the skills written out into it, before anything can ask for a session:
+    // they are what a grilling session is pointed at, and this binary's are what
+    // every sandbox gets, whatever an earlier one left there.
+    let skills = skills::Skills::installed(&state_dir)
+        .context("installing the skills every sandbox is given")?;
+
     let pool = open_database(&config.database).await?;
 
     let listener = tokio::net::TcpListener::bind(config.listen)
@@ -388,6 +401,7 @@ pub async fn run(config: Config) -> Result<()> {
         watched = ?watched.paths(),
         home = %home.path.display(),
         sandbox_binds = binds.count(),
+        skills = %skills.path().display(),
         "verkstead is listening",
     );
 
@@ -398,7 +412,7 @@ pub async fn run(config: Config) -> Result<()> {
             config.releases(),
             watched,
             state_dir,
-            Agents::new(home, binds),
+            Agents::new(home, binds, skills),
         ),
     )
     .await

@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use verkstead_server::sandbox::{Home, Sandbox, SandboxConfig, under_dev_shell};
+use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
@@ -45,14 +46,24 @@ struct Grilling {
 
     conversation: store::Conversation,
     profile: store::Profile,
+
+    /// The bundled skills, installed where the server installs them: under the
+    /// State Directory, at startup.
+    skills: Skills,
 }
 
 impl Grilling {
     /// The sandbox this Conversation's session would run in, with `extra` as
     /// whatever Sandbox Configuration asked for.
     fn sandbox(&self, extra: Vec<PathBuf>) -> Sandbox {
-        Sandbox::for_conversation(&self.conversation, &self.profile, self.home(), extra)
-            .expect("a grilling Conversation has a worktree to build a sandbox around")
+        Sandbox::for_conversation(
+            &self.conversation,
+            &self.profile,
+            self.home(),
+            &self.skills,
+            extra,
+        )
+        .expect("a grilling Conversation has a worktree to build a sandbox around")
     }
 
     /// The host home the sandbox reads out of — the fixture's rather than
@@ -108,6 +119,18 @@ async fn grilling() -> Grilling {
     std::fs::create_dir_all(home.path().join(".ssh")).unwrap();
     std::fs::write(home.path().join(".ssh/id_ed25519"), "a private key\n").unwrap();
 
+    // The skills the host keeps for its own agents, in the checkout every one of
+    // these sessions used to be given. Verkstead ships its own now, and this is
+    // here so that "no `~/src/tobico-skills`" is a claim about a directory that
+    // exists on the host rather than about one nobody made.
+    std::fs::create_dir_all(home.path().join("src/tobico-skills/skills/grilling")).unwrap();
+    std::fs::write(
+        home.path()
+            .join("src/tobico-skills/skills/grilling/SKILL.md"),
+        "# the host's own\n",
+    )
+    .unwrap();
+
     let repo = repository(watched.path().join("verkstead"));
     let sibling = repository(watched.path().join("something-else"));
 
@@ -125,6 +148,16 @@ async fn grilling() -> Grilling {
     std::fs::create_dir_all(&claude_dir).unwrap();
     std::fs::write(claude_dir.join("settings.json"), "{}\n").unwrap();
     std::fs::write(&config_file, "{}\n").unwrap();
+
+    // And a skill of the account's own, where Verkstead's are about to be
+    // mounted: what a session is grilled by is the product's, so this is what
+    // being hidden looks like from inside.
+    std::fs::create_dir_all(claude_dir.join("skills/the-accounts-own")).unwrap();
+    std::fs::write(
+        claude_dir.join("skills/the-accounts-own/SKILL.md"),
+        "# the account's own\n",
+    )
+    .unwrap();
 
     let profile = store::create_profile(
         &pool,
@@ -177,6 +210,8 @@ async fn grilling() -> Grilling {
         .unwrap()
         .expect("the Conversation is there");
 
+    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+
     Grilling {
         watched,
         state,
@@ -185,6 +220,7 @@ async fn grilling() -> Grilling {
         sibling,
         conversation,
         profile,
+        skills,
     }
 }
 
@@ -379,6 +415,52 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(
         reported["home"], ".claude .claude.json .config .gitconfig ",
         "everything else in HOME is simply not there"
+    );
+}
+
+#[tokio::test]
+async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            file "$HOME/.claude/skills/grilling/SKILL.md" grilling
+            file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
+            file "$HOME/.claude/CLAUDE.md" claude-md
+            dir {tobico} tobico-skills
+            if {grep} -q 'verkstead ask' "$HOME/.claude/skills/grilling/SKILL.md"; then
+                say ask-instruction inside
+            else
+                say ask-instruction missing
+            fi
+            "#,
+            tobico = quoted(&fixture.home_path().join("src/tobico-skills")),
+            grep = quoted(&on_the_host("grep")),
+        ),
+    );
+
+    assert_eq!(
+        reported["grilling"], "read",
+        "the bundled grilling skill is installed, and is not a session's to rewrite"
+    );
+    assert_eq!(
+        reported["the-accounts-own"], "absent",
+        "what a session is grilled by is the product's, not whatever the account keeps"
+    );
+    assert_eq!(
+        reported["tobico-skills"], "absent",
+        "the host's own checkout of the skills is no longer bound in"
+    );
+    assert_eq!(
+        reported["claude-md"], "absent",
+        "there is no global CLAUDE.md in here to say how to reach the human"
+    );
+    assert_eq!(
+        reported["ask-instruction"], "inside",
+        "so the bundled skill has to carry the instruction itself"
     );
 }
 

@@ -24,6 +24,7 @@ use verkstead_render::{
 
 use crate::AppState;
 use crate::repos::git;
+use crate::skills;
 use crate::store;
 use crate::worktrees;
 
@@ -243,10 +244,20 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Logged rather than raised: by here the branch is made and the Brief is
     // frozen, and answering the button with a failure would say that none of it
     // happened.
+    //
+    // What it is started on is the Brief under the line that sends it into the
+    // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
+    // session is for, so the prompt is where it is said — see [`crate::skills`].
     if let Some(profile) = conversation.grilling_profile.clone()
         && let Err(error) = state
             .sessions
-            .start(pool, &state.nudges, &conversation, &profile, &brief)
+            .start(
+                pool,
+                &state.nudges,
+                &conversation,
+                &profile,
+                &skills::grilling(&brief),
+            )
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");

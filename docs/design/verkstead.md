@@ -170,7 +170,15 @@ flowchart LR
   the host.
 - **Skills are bundled.** Verkstead ships its own adapted fork of the
   tobico-skills set (gates removed, wrap-up added) and installs it into each
-  sandbox; `~/src/tobico-skills` is no longer bound in.
+  sandbox; `~/src/tobico-skills` is no longer bound in. *How, settled
+  2026-08-20 building stage 02*: they ride inside the binary as the viewer
+  does, are written out under the state directory at startup — replacing
+  whatever an earlier binary left — and every sandbox binds that directory
+  read-only over `~/.claude/skills`, hiding any the account itself keeps. What
+  puts a session *inside* a skill is the prompt: installing one is not invoking
+  one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
+  so the prompt names the skill by path above the Brief and the skill carries
+  the ask instruction in its own text.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), reusing existing auth. Agents keep using `gh` inside
   the sandbox for push/PR as today.

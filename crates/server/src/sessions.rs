@@ -37,6 +37,7 @@ use tokio::task::JoinHandle;
 
 use crate::nudge::Nudges;
 use crate::sandbox::{Home, Sandbox, SandboxConfig, under_dev_shell};
+use crate::skills::Skills;
 use crate::store;
 use crate::transcript::Reading;
 
@@ -52,15 +53,16 @@ const CHUNK: usize = 8 * 1024;
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
-/// identity out of, the extra binds Sandbox Configuration asks for, and what an
-/// agent is on the command line.
+/// identity out of, the extra binds Sandbox Configuration asks for, the skills
+/// every sandbox is given, and what an agent is on the command line.
 ///
 /// Resolved once at startup and shared by every session, because each of the
-/// three is a fact about the machine rather than about any one Conversation.
+/// four is a fact about the machine rather than about any one Conversation.
 #[derive(Debug, Clone)]
 pub struct Agents {
     home: Home,
     config: SandboxConfig,
+    skills: Skills,
 
     /// What a Profile's agent is run as, before its model and its prompt.
     ///
@@ -76,15 +78,21 @@ pub struct Agents {
 
 impl Agents {
     /// The real thing: claude, under whichever account the Profile names.
-    pub fn new(home: Home, config: SandboxConfig) -> Agents {
-        Agents::running(vec!["claude".to_owned()], home, config)
+    pub fn new(home: Home, config: SandboxConfig, skills: Skills) -> Agents {
+        Agents::running(vec!["claude".to_owned()], home, config, skills)
     }
 
     /// The same, with something else where claude goes — see [`Agents::agent`].
-    pub fn running(agent: Vec<String>, home: Home, config: SandboxConfig) -> Agents {
+    pub fn running(
+        agent: Vec<String>,
+        home: Home,
+        config: SandboxConfig,
+        skills: Skills,
+    ) -> Agents {
         Agents {
             home,
             config,
+            skills,
             agent,
         }
     }
@@ -201,10 +209,12 @@ impl Sessions {
             let conversation = conversation.clone();
             let profile = profile.clone();
             let home = agents.home.clone();
+            let skills = agents.skills.clone();
             let extra = agents.config.binds_for(&conversation.repo.name);
 
             move || {
-                let sandbox = Sandbox::for_conversation(&conversation, &profile, home, extra)?;
+                let sandbox =
+                    Sandbox::for_conversation(&conversation, &profile, home, &skills, extra)?;
                 let worktree = conversation.worktree.clone()?;
 
                 Some((sandbox, under_dev_shell(&worktree, &argv)))
@@ -505,7 +515,7 @@ mod tests {
         }
     }
 
-    fn agents(agent: Vec<String>) -> Agents {
+    fn agents(agent: Vec<String>, state: &std::path::Path) -> Agents {
         Agents::running(
             agent,
             Home {
@@ -513,14 +523,17 @@ mod tests {
                 gh_config: PathBuf::from("/home/verkstead/.config/gh"),
             },
             SandboxConfig::default(),
+            Skills::installed(state).expect("this binary carries skills"),
         )
     }
 
-    /// The Brief is what the grilling starts from, and an interactive claude
+    /// The prompt is what the grilling starts from, and an interactive claude
     /// takes what it is to start on as its last argument.
     #[test]
-    fn a_session_runs_the_profiles_model_on_the_brief() {
-        let argv = agents(vec!["claude".to_owned()]).argv(&profile(), "# Rate limiting\n");
+    fn a_session_runs_the_profiles_model_on_the_prompt() {
+        let state = tempfile::tempdir().unwrap();
+        let argv =
+            agents(vec!["claude".to_owned()], state.path()).argv(&profile(), "# Rate limiting\n");
 
         assert_eq!(
             argv,

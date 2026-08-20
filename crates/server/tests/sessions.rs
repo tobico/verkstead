@@ -28,6 +28,7 @@ use verkstead_render::{
     Lifecycle, ProfileSaved, Registered, Started, TimelineEvent, Transcript,
 };
 use verkstead_server::sandbox::{Home, SandboxConfig};
+use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, WatchedPaths, open_database, router_running_sessions};
 
 /// The Brief every Conversation here is started from, and what the stub agent
@@ -141,6 +142,7 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
             gh_config: home.path().join(".config/gh"),
         },
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
+        Skills::installed(state.path()).expect("this binary carries skills"),
     );
 
     let app = router_running_sessions(
@@ -318,15 +320,15 @@ fn read<T: DeserializeOwned>(body: &str) -> T {
 }
 
 /// The whole of what pressing the button now does: the Profile's agent, on the
-/// Profile's model, running in the Conversation's worktree, primed with the
-/// Brief.
+/// Profile's model, running in the Conversation's worktree, sent into the
+/// bundled grilling skill and primed with the Brief.
 #[tokio::test]
 async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree() {
     let fixture = grilling(
         r#"
         printf 'model=%s\n' "$1"
         printf 'where=%s\n' "$(pwd)"
-        printf 'brief=%s' "$2"
+        printf 'prompt=%s' "$2"
         "#,
     )
     .await;
@@ -343,8 +345,13 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         "the grilling Profile's model is what the session runs on, not the implementation one's: {said:?}"
     );
     assert!(
-        said.contains(&format!("brief={BRIEF}")),
-        "the Brief is what the grilling starts from: {said:?}"
+        said.contains("~/.claude/skills/grilling/SKILL.md"),
+        "the session is sent into the bundled grilling skill by the prompt, there being no \
+         global CLAUDE.md inside to say what it is for: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and the Brief is what the grilling starts from: {said:?}"
     );
 
     let worktree = PathBuf::from(
@@ -466,6 +473,7 @@ async fn a_transcript_survives_the_server_restarting() {
                 gh_config: PathBuf::from("/nonexistent/.config/gh"),
             },
             SandboxConfig::default(),
+            Skills::installed(fixture.state.path()).expect("this binary carries skills"),
         ),
     );
 

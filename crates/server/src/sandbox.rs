@@ -12,7 +12,8 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, `~/.gitconfig`, the gh config
+//! - **read-only** — `/nix` and the system paths, `~/.gitconfig`, the gh config,
+//!   and the bundled skills over `~/.claude/skills`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //!
 //! The network is not a boundary here: it is shared with the host, whole and
@@ -27,6 +28,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::skills::{self, Skills};
 use crate::store;
 
 /// The system directories a sandbox gets read-only, in the order bwrap is told
@@ -247,6 +249,11 @@ pub struct Sandbox {
     /// accounts apart, so the two travel together or not at all.
     config_file: PathBuf,
 
+    /// The bundled skills, mounted read-only inside the Profile's directory at
+    /// `~/.claude/skills` — see [`crate::skills`] for why they are Verkstead's
+    /// rather than the account's, and why they are read-only.
+    skills: PathBuf,
+
     home: Home,
 
     /// The extra read-write binds Sandbox Configuration asks for, global ones
@@ -271,6 +278,7 @@ impl Sandbox {
         conversation: &store::Conversation,
         profile: &store::Profile,
         home: Home,
+        skills: &Skills,
         extra: Vec<PathBuf>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
@@ -281,6 +289,7 @@ impl Sandbox {
             git_dir,
             claude_dir: profile.claude_dir.clone(),
             config_file: profile.config_file.clone(),
+            skills: skills.path().to_owned(),
             home,
             extra,
         })
@@ -337,6 +346,15 @@ impl Sandbox {
             .arg("--bind")
             .arg(&self.config_file)
             .arg(self.home.path.join(".claude.json"));
+
+        // After the Profile's directory, and inside it: a bind is applied in the
+        // order it is given, so this one lands over whatever `~/.claude/skills`
+        // the account itself keeps. Read-only, because what a session is grilled
+        // by is the product's and not a file the session can rewrite mid-run.
+        bwrap
+            .arg("--ro-bind")
+            .arg(&self.skills)
+            .arg(self.home.path.join(skills::INSIDE_HOME));
 
         // The two host things a session reads and never writes.
         //
