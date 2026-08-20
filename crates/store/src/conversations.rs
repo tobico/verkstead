@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
+use verkstead_schema::{QuestionSet, SetCreated};
 
 /// Where a Conversation has got to.
 ///
@@ -148,6 +149,14 @@ pub struct ConversationRow {
     pub state: Lifecycle,
 }
 
+/// The word the `kind` column holds for a Question Set.
+///
+/// A constant, alone among the kinds, because it is the one that has to be
+/// written without an Event to hand: [`ask`] inserts the Event and the Set in
+/// one transaction, and the Set is not yet a [`SetOnTimeline`] at the moment the
+/// row is written.
+const QUESTION_SET: &str = "question-set";
+
 /// One entry in a Conversation's Timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineEvent {
@@ -184,6 +193,39 @@ pub enum Event {
     /// that was rewritten whole on every chunk would cost more the longer the
     /// session went on.
     AgentOutput(super::Summary),
+
+    /// A Question Set the session put to the human, with however far it has got.
+    ///
+    /// Its body is not in the `body` column either, and for a different reason
+    /// from the transcript's: a Set is already a row of its own in
+    /// `question_sets`, answered through the same tables whether it is reached
+    /// through a Conversation or through `curl`. A second copy on the Timeline
+    /// would be a second thing to keep true.
+    ///
+    /// Boxed, alone among the variants: a Set is the whole of what an agent
+    /// asked, and an enum every Brief and every move was as large as would cost
+    /// a Timeline's worth of memory to hold the one kind that needs it.
+    QuestionSet(Box<SetOnTimeline>),
+}
+
+/// A Question Set as its Timeline Event holds it: which Set, what it asked, and
+/// how far it has got.
+///
+/// The whole Set rather than a summary written down beside it, unlike the
+/// transcript's. What the Timeline shows of a Set is a table of its Questions
+/// against their Answers, and both halves of that move — the Questions when the
+/// Set arrives and the Answers when the human replies — so a stored summary
+/// would be two write paths for one row. A Conversation's Sets are counted in
+/// tens, and this is a `JOIN` and a `serde_json` per one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetOnTimeline {
+    pub set_id: i64,
+
+    /// What the agent asked.
+    pub set: QuestionSet,
+
+    /// How it was settled, or `None` while it is still waiting on the human.
+    pub settlement: Option<super::Settlement>,
 }
 
 impl Event {
@@ -195,6 +237,7 @@ impl Event {
             Self::Brief(_) => "brief",
             Self::Moved(_) => "moved",
             Self::AgentOutput(_) => "agent-output",
+            Self::QuestionSet(_) => QUESTION_SET,
         }
     }
 
@@ -206,23 +249,34 @@ impl Event {
             // Nothing: what a session printed is in the transcript tables, and
             // what the Timeline shows of it is read back from there too.
             Self::AgentOutput(_) => "",
+            // Nothing either, and for the nearer reason: a Set is a row in
+            // `question_sets` already.
+            Self::QuestionSet(_) => "",
         }
     }
 
-    /// The Event a row holds, with the summary read alongside it where the row
-    /// is an agent-output one.
+    /// The Event a row holds, with whatever was joined in beside it — the
+    /// summary for an agent-output row, the Set for a question-set one.
     ///
-    /// A transcript's summary row is written in the same transaction as its
-    /// Event, so one without the other is a database somebody has been in by
-    /// hand — worth saying rather than reading as a session that printed
-    /// nothing.
-    fn read(kind: &str, body: String, summary: Option<super::Summary>) -> Result<Self> {
+    /// Each of those is written in the same transaction as its Event, so one
+    /// without the other is a database somebody has been in by hand — worth
+    /// saying rather than reading as a session that printed nothing or a Set
+    /// that asked nothing.
+    fn read(
+        kind: &str,
+        body: String,
+        summary: Option<super::Summary>,
+        set: Option<SetOnTimeline>,
+    ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
             "moved" => Self::Moved(Lifecycle::read(&body)?),
             "agent-output" => Self::AgentOutput(
                 summary.ok_or_else(|| anyhow!("a session's output has no transcript beside it"))?,
             ),
+            QUESTION_SET => Self::QuestionSet(Box::new(
+                set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
+            )),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -358,6 +412,25 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the worktrees table")?;
+
+    // Which Timeline Event a Question Set landed on, and so — through the Event —
+    // which Conversation it was asked from. A table of its own rather than a
+    // column on `question_sets` for the reason the worktree is not a column on
+    // `conversations`: there is no migration machinery here and that table is
+    // STRICT and left alone.
+    //
+    // One Set per Event and one Event per Set, by the primary key and the unique
+    // index: a Set is put once, and an Event that held two of them would be a row
+    // of the Timeline that could not say which it was.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS set_events (
+             set_id   INTEGER PRIMARY KEY REFERENCES question_sets(id),
+             event_id INTEGER NOT NULL UNIQUE REFERENCES timeline_events(id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the set_events table")?;
 
     Ok(())
 }
@@ -604,15 +677,39 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// A transcript's summary is joined in rather than fetched per Event, and no
 /// transcript itself is: a Timeline is read every time an open page looks again,
 /// and what a session printed is megabytes the middle pane never shows.
+///
+/// A Question Set's whole body *is* joined in, which is the one place this pays
+/// for a deserialization per Event — see [`SetOnTimeline`] for why there is
+/// nothing cheaper to read instead. One query all the same: the Sets, their
+/// Responses and their archivings hang off the same Event rows, and asking per
+/// Set would be a read for every Question the human has ever been put.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
-    /// The columns in the order the query below selects them: the Event, and
-    /// the transcript summary that is there for one kind of Event and no other.
-    type Row = (i64, String, String, String, Option<i64>, Option<String>);
+    /// The columns in the order the query below selects them: the Event, the
+    /// transcript summary that is there for one kind of Event, and the Set with
+    /// however it was settled that is there for another.
+    type Row = (
+        i64,
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT e.id, e.at, e.kind, e.body, t.lines, t.latest
+        "SELECT e.id, e.at, e.kind, e.body, t.lines, t.latest,
+                q.id, q.body, r.submitted_at, r.body, a.archived_at
          FROM timeline_events e
          LEFT JOIN transcripts t ON t.event_id = e.id
+         LEFT JOIN set_events s ON s.event_id = e.id
+         LEFT JOIN question_sets q ON q.id = s.set_id
+         LEFT JOIN responses r ON r.set_id = s.set_id
+         LEFT JOIN archivings a ON a.set_id = s.set_id
          WHERE e.conversation_id = ?
          ORDER BY e.id",
     )
@@ -622,18 +719,167 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
     rows.into_iter()
-        .map(|(id, at, kind, body, lines, latest)| {
+        .map(|row| {
+            let (
+                id,
+                at,
+                kind,
+                body,
+                lines,
+                latest,
+                set_id,
+                set_body,
+                answered_at,
+                answer,
+                archived_at,
+            ) = row;
+
             let summary = lines
                 .zip(latest)
                 .map(|(lines, latest)| super::Summary { lines, latest });
 
+            let set = set_id
+                .zip(set_body)
+                .map(|(set_id, body)| -> Result<SetOnTimeline> {
+                    Ok(SetOnTimeline {
+                        set_id,
+                        set: serde_json::from_str(&body).with_context(|| {
+                            format!("deserialising stored Question Set {set_id}")
+                        })?,
+                        settlement: settled(set_id, answered_at, answer, archived_at)?,
+                    })
+                })
+                .transpose()?;
+
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body, summary)?,
+                event: Event::read(&kind, body, summary, set)?,
             })
         })
         .collect()
+}
+
+/// How a Set on the Timeline was settled, out of the two rows that can settle
+/// one, or `None` while it is still waiting on the human.
+///
+/// The Response wins where both are somehow there, exactly as the Archive's own
+/// listing has it: the answering is the decision, and it is the one already
+/// filed.
+fn settled(
+    set_id: i64,
+    answered_at: Option<String>,
+    answer: Option<String>,
+    archived_at: Option<String>,
+) -> Result<Option<super::Settlement>> {
+    if let Some((submitted_at, body)) = answered_at.zip(answer) {
+        let response = serde_json::from_str(&body).with_context(|| {
+            format!("deserialising the stored Response to Question Set {set_id}")
+        })?;
+
+        return Ok(Some(super::Settlement::Answered(super::StoredResponse {
+            set_id,
+            submitted_at,
+            response,
+        })));
+    }
+
+    Ok(archived_at.map(|archived_at| {
+        super::Settlement::ArchivedUnanswered(super::SetArchived {
+            set_id,
+            archived_at,
+        })
+    }))
+}
+
+/// Put a Question Set on a Conversation's Timeline, stamping it with an id and a
+/// creation time.
+///
+/// `None` means there is no such Conversation to ask from. The Event is inserted
+/// by selecting from `conversations` rather than by checking first, as a
+/// Conversation's own Repo is: SQLite enforces a foreign key only when asked to,
+/// and a Set attributed to a Conversation that is not there is one nobody could
+/// ever reach to answer.
+///
+/// One transaction, because a Set stored without its Event would be a Set no
+/// Timeline showed and no human would ever see — and the agent would be blocked
+/// on it.
+///
+/// The Set is expected to have been validated already — the store is not where
+/// the question grammar is enforced.
+pub async fn ask(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    set: &QuestionSet,
+) -> Result<Option<SetCreated>> {
+    let body = serde_json::to_string(set).context("serialising the Question Set")?;
+
+    let mut tx = pool.begin().await.context("putting a Question Set")?;
+
+    let event: Option<(i64,)> = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ''
+         FROM conversations WHERE id = ?
+         RETURNING id",
+    )
+    .bind(QUESTION_SET)
+    .bind(conversation_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("putting a Question Set to Conversation {conversation_id}"))?;
+
+    let Some((event_id,)) = event else {
+        return Ok(None);
+    };
+
+    // The same insert the standalone one was, stamped by SQLite as it assigns
+    // the id so that both come from one place.
+    let (id, created_at): (i64, String) = sqlx::query_as(
+        "INSERT INTO question_sets (created_at, title, project, branch, body)
+         VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?)
+         RETURNING id, created_at",
+    )
+    .bind(&set.title)
+    .bind(&set.project)
+    .bind(&set.branch)
+    .bind(body)
+    .fetch_one(&mut *tx)
+    .await
+    .context("storing the Question Set")?;
+
+    sqlx::query("INSERT INTO set_events (set_id, event_id) VALUES (?, ?)")
+        .bind(id)
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("putting Question Set {id} on the Timeline"))?;
+
+    tx.commit().await.context("putting a Question Set")?;
+
+    Ok(Some(SetCreated { id, created_at }))
+}
+
+/// Whether this Set is on this Conversation's Timeline.
+///
+/// What makes the agents' endpoints conversation-scoped mean anything: a session
+/// reaches Verkstead through its own Conversation's base URL, and a Set id that
+/// belongs to another Conversation names nothing there.
+pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT s.set_id
+         FROM set_events s
+         JOIN timeline_events e ON e.id = s.event_id
+         WHERE s.set_id = ? AND e.conversation_id = ?",
+    )
+    .bind(set_id)
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("looking for Question Set {set_id} on Conversation {conversation_id}")
+    })?;
+
+    Ok(found.is_some())
 }
 
 /// Rewrite a drafting Conversation's Brief.

@@ -25,6 +25,7 @@
 //! the seam for it is that nothing here reads the network's absence.
 
 use std::ffi::OsStr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -103,6 +104,50 @@ impl Home {
         };
 
         Some(Home { path, gh_config })
+    }
+}
+
+/// Where Verkstead is reachable from inside a sandbox, before the Conversation a
+/// session is asking from.
+///
+/// The one thing a session is given that is not a directory. The network inside a
+/// sandbox is the host's own — see this module's own documentation — so what a
+/// session dials is what anything else on the machine would.
+///
+/// An address the server was told to listen on for the sake of the tailnet is
+/// still that address. An unspecified one — `0.0.0.0`, `[::]` — is every
+/// interface at once, and there is no such thing to put in a URL: the loopback
+/// is the one of them certain to answer, and it is the one a session shares.
+#[derive(Debug, Clone)]
+pub struct Reachable {
+    base: String,
+}
+
+impl Reachable {
+    /// Where a server listening on `listen` can be reached.
+    pub fn at(listen: SocketAddr) -> Reachable {
+        let host = match listen.ip() {
+            IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+            IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+            named => named,
+        };
+
+        Reachable {
+            // Through `SocketAddr` rather than by hand, because that is what puts
+            // the brackets round an IPv6 address — `[::1]:8422` is a URL and
+            // `::1:8422` is not a number anything could parse.
+            base: format!("http://{}", SocketAddr::new(host, listen.port())),
+        }
+    }
+
+    /// The base URL a session on `conversation_id` is given, which is what makes
+    /// its Question Sets that Conversation's.
+    ///
+    /// Explicit rather than inferred: the CLI derives the project and the branch
+    /// from the working directory, and two Conversations against one Repo would
+    /// be indistinguishable by either.
+    pub(crate) fn asking_from(&self, conversation_id: i64) -> String {
+        format!("{}{}/{conversation_id}", self.base, crate::ASKING_FROM)
     }
 }
 
@@ -256,6 +301,10 @@ pub struct Sandbox {
 
     home: Home,
 
+    /// Where the session inside reaches Verkstead: this Conversation's own base
+    /// URL, which is what `verkstead ask` puts its Sets to.
+    server: String,
+
     /// The extra read-write binds Sandbox Configuration asks for, global ones
     /// first and the Repo's own after them.
     extra: Vec<PathBuf>,
@@ -278,6 +327,7 @@ impl Sandbox {
         conversation: &store::Conversation,
         profile: &store::Profile,
         home: Home,
+        reachable: &Reachable,
         skills: &Skills,
         extra: Vec<PathBuf>,
     ) -> Option<Sandbox> {
@@ -291,6 +341,7 @@ impl Sandbox {
             config_file: profile.config_file.clone(),
             skills: skills.path().to_owned(),
             home,
+            server: reachable.asking_from(conversation.id),
             extra,
         })
     }
@@ -404,6 +455,14 @@ impl Sandbox {
             .arg("--setenv")
             .arg("SHELL")
             .arg(SHELL)
+            // What makes a session's Question Sets its own Conversation's. The
+            // variable the bundled CLI reads, scoped to one Conversation, so
+            // nothing is inferred from the project or the branch — two
+            // Conversations against one Repo would be indistinguishable by
+            // either.
+            .arg("--setenv")
+            .arg("VERKSTEAD_SERVER")
+            .arg(&self.server)
             .args(argv);
 
         bwrap

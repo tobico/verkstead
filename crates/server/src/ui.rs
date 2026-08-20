@@ -178,7 +178,34 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         }
     };
 
-    let standing = match settlement {
+    let standing = standing(
+        &state,
+        id,
+        settlement,
+        &stored.created_at,
+        OffsetDateTime::now_utc(),
+    );
+
+    // Everything the agent wrote, rendered — which is the whole of what is left
+    // to do, and none of it this crate's.
+    let view: SetView = verkstead_render::set_view(stored.id, stored.set, standing);
+
+    Json(view).into_response()
+}
+
+/// Where a Set stands, as both its own page and its row on a Timeline read it.
+///
+/// The Liveness comes out of the registry of held waits, which is the same
+/// registry either way: whichever of the two the human is looking at, it is the
+/// page they act on.
+fn standing(
+    state: &AppState,
+    set_id: i64,
+    settlement: Option<store::Settlement>,
+    created_at: &str,
+    now: OffsetDateTime,
+) -> Standing {
+    match settlement {
         Some(store::Settlement::Answered(answered)) => {
             Standing::Answered(verkstead_render::Answered {
                 submitted_at: answered.submitted_at,
@@ -188,20 +215,8 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         Some(store::Settlement::ArchivedUnanswered(archived)) => {
             Standing::ArchivedUnanswered(archived.archived_at)
         }
-        // The same verdict the pending list's row carries, from the same
-        // registry: this is the page it is acted on.
-        None => Standing::Waiting(state.waits.liveness(
-            id,
-            &stored.created_at,
-            OffsetDateTime::now_utc(),
-        )),
-    };
-
-    // Everything the agent wrote, rendered — which is the whole of what is left
-    // to do, and none of it this crate's.
-    let view: SetView = verkstead_render::set_view(stored.id, stored.set, standing);
-
-    Json(view).into_response()
+        None => Standing::Waiting(state.waits.liveness(set_id, created_at, now)),
+    }
 }
 
 /// `POST /api/ui/sets/{id}/response` — answer a Set.
@@ -438,6 +453,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // that is over.
     let writing = state.sessions.writing(id);
 
+    // One clock for the whole Timeline: every Set on it is aged against the same
+    // moment, so two rows written a millisecond apart cannot come back reading as
+    // if they were read at different times.
+    let now = OffsetDateTime::now_utc();
+
     let view = ConversationView {
         id: conversation.id,
         repo: RepoEntry {
@@ -476,6 +496,24 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     summary.latest,
                     writing == Some(event.id),
                 ),
+                // The table of what was asked against what was decided, and no
+                // more: the whole document is what the details pane fetches,
+                // from the endpoint one Set has always been read through.
+                //
+                // The Event's own stamp is what the Liveness verdict is aged
+                // against. It is the Set's creation time — both are written in
+                // the one transaction that puts a Set on a Timeline.
+                store::Event::QuestionSet(asked) => {
+                    let standing = standing(&state, asked.set_id, asked.settlement, &event.at, now);
+
+                    verkstead_render::question_set_event(
+                        event.id,
+                        event.at,
+                        asked.set_id,
+                        &asked.set,
+                        standing,
+                    )
+                }
             })
             .collect(),
     };

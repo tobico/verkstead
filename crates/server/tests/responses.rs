@@ -1,6 +1,7 @@
 //! Answering a Question Set: what the API accepts as a Response, and how it
 //! reaches the agent still waiting on the other end.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -12,6 +13,10 @@ use tower::ServiceExt;
 use verkstead_schema::{ApiError, Response, ResponseAccepted, SetCreated};
 use verkstead_server::store;
 use verkstead_server::{open_database, router};
+
+/// The Conversation every Set in this file is asked from, made by [`fresh_pool`]
+/// over a database with nothing in it.
+const ASKING_FROM: i64 = 1;
 
 /// Two Questions, one of them with Sub-questions, so a Response has to cover
 /// `Q1`, `Q2`, `Q2a` and `Q2b`.
@@ -46,6 +51,20 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
+
+    // Somewhere for the Sets to land: every Set is asked from a Conversation, and
+    // the agents' endpoints are reached through the one that asked.
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     (dir, pool)
 }
 
@@ -63,7 +82,7 @@ async fn post_set(app: &Router, yaml: &str) -> i64 {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -81,7 +100,9 @@ async fn post_response(app: &Router, set_id: i64, yaml: &str) -> axum::response:
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/api/v1/sets/{set_id}/response"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{set_id}/response"
+                ))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -94,7 +115,9 @@ async fn wait_for_response(app: &Router, set_id: i64, hold: u64) -> axum::respon
     app.clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{set_id}/response?hold={hold}"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{set_id}/response?hold={hold}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -458,10 +481,9 @@ async fn close_unanswered(pool: &SqlitePool, id: i64) {
 
 #[tokio::test]
 async fn a_response_outlives_a_restart() {
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, pool) = fresh_pool().await;
     let path = dir.path().join("verkstead.db");
 
-    let pool = open_database(&path).await.unwrap();
     let app = router(pool.clone());
     let id = post_set(&app, SET).await;
     assert_eq!(

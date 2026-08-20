@@ -57,7 +57,12 @@ pub(crate) async fn serve<V: Embed>(uri: Uri) -> Response {
     // Anything under the API's own namespaces reaching this far is a path neither
     // half answers to. An agent that mistyped an endpoint has to be told so: a
     // 200 of HTML would reach `verkstead ask` as a Response it could not parse.
-    if path == "api" || path.starts_with("api/") {
+    //
+    // Wherever it appears, not only at the front: the agent contract hangs off
+    // the Conversation a session is asking from, so `verkstead ask` calls
+    // `/conversations/7/api/v1/sets` and a typo in there is as much an agent's
+    // mistyped endpoint as one at the root would be.
+    if path == "api" || path.starts_with("api/") || path.contains("/api/") {
         return StatusCode::NOT_FOUND.into_response();
     }
 

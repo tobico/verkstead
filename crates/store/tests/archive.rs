@@ -5,11 +5,14 @@
 //! Archiving is here too, on both sides of it: what leaves the pending list, what
 //! arrives in the Archive, and what an archived Set will no longer accept.
 
+use std::path::Path;
+
 use sqlx::SqlitePool;
-use verkstead_schema::{QuestionSet, Response};
+use verkstead_schema::{QuestionSet, Response, SetCreated};
 use verkstead_store::{
-    Archiving, Settled, Settlements, Submission, archive_set, archived_sets, insert_response,
-    insert_set, open_database, pending_sets, submit_response,
+    Archiving, Settled, Settlements, Submission, archive_set, archived_sets, ask, conversations,
+    insert_response, open_database, pending_sets, register_repo, start_conversation,
+    submit_response,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -40,9 +43,34 @@ fn set(title: &str) -> QuestionSet {
     }
 }
 
+/// Put a Set to the human, which is the one way there is to store one: every Set
+/// is asked from a Conversation and lands on its Timeline.
+///
+/// The Conversation is made on the first ask and reused after it. Which one it is
+/// does not matter here — what the Archive is read by is the settling, and these
+/// tests are about that.
+async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    let conversation = match conversations(pool).await?.first() {
+        Some(row) => row.id,
+        None => {
+            let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+                .await?
+                .expect("nothing is registered at that path yet");
+
+            start_conversation(pool, repo.id, "answering-conveniences")
+                .await?
+                .expect("the Repo was just registered")
+        }
+    };
+
+    Ok(ask(pool, conversation, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
+}
+
 /// Store a Set and answer it, which is the one way a Set reaches the Archive.
 async fn answer(pool: &SqlitePool, title: &str) -> i64 {
-    let stored = insert_set(pool, &set(title)).await.unwrap();
+    let stored = asked(pool, &set(title)).await.unwrap();
     insert_response(pool, stored.id, &Response::default())
         .await
         .unwrap()
@@ -85,7 +113,7 @@ async fn pending(pool: &SqlitePool) -> Vec<String> {
 async fn an_answered_set_is_archived_with_its_lifted_columns_and_the_time_it_was_answered() {
     let (_dir, pool) = fresh_pool().await;
 
-    let created = insert_set(&pool, &set("Where the request counter lives"))
+    let created = asked(&pool, &set("Where the request counter lives"))
         .await
         .unwrap();
     let accepted = insert_response(&pool, created.id, &Response::default())
@@ -113,7 +141,7 @@ async fn a_set_still_waiting_is_not_in_the_archive() {
     let (_dir, pool) = fresh_pool().await;
 
     answer(&pool, "already answered").await;
-    insert_set(&pool, &set("still waiting")).await.unwrap();
+    asked(&pool, &set("still waiting")).await.unwrap();
 
     assert_eq!(
         titles(&pool).await,
@@ -183,7 +211,7 @@ async fn listing_the_archive_does_not_read_a_single_set_body() {
 async fn nothing_answered_means_an_empty_archive() {
     let (_dir, pool) = fresh_pool().await;
 
-    insert_set(&pool, &set("still waiting")).await.unwrap();
+    asked(&pool, &set("still waiting")).await.unwrap();
 
     assert!(archived_sets(&pool).await.unwrap().is_empty());
 }
@@ -191,10 +219,10 @@ async fn nothing_answered_means_an_empty_archive() {
 #[tokio::test]
 async fn archiving_a_set_moves_it_off_the_pending_list_and_into_the_archive_unanswered() {
     let (_dir, pool) = fresh_pool().await;
-    let orphan = insert_set(&pool, &set("the one whose agent died"))
+    let orphan = asked(&pool, &set("the one whose agent died"))
         .await
         .unwrap();
-    insert_set(&pool, &set("still waiting")).await.unwrap();
+    asked(&pool, &set("still waiting")).await.unwrap();
 
     assert_eq!(
         pending(&pool).await,
@@ -250,7 +278,7 @@ async fn an_answered_set_cannot_be_archived_unanswered() {
 #[tokio::test]
 async fn an_archived_set_will_not_take_a_response() {
     let (_dir, pool) = fresh_pool().await;
-    let orphan = insert_set(&pool, &set("closed unanswered")).await.unwrap();
+    let orphan = asked(&pool, &set("closed unanswered")).await.unwrap();
     archive_set(&pool, &settlements(), orphan.id).await.unwrap();
 
     assert_eq!(
@@ -269,7 +297,7 @@ async fn an_archived_set_will_not_take_a_response() {
 #[tokio::test]
 async fn archiving_a_set_twice_leaves_the_first_archiving_standing() {
     let (_dir, pool) = fresh_pool().await;
-    let orphan = insert_set(&pool, &set("closed unanswered")).await.unwrap();
+    let orphan = asked(&pool, &set("closed unanswered")).await.unwrap();
 
     let Archiving::Archived(first) = archive_set(&pool, &settlements(), orphan.id).await.unwrap()
     else {
@@ -306,7 +334,7 @@ async fn the_archive_reads_along_the_settling_whichever_settled_each_set() {
     let (_dir, pool) = fresh_pool().await;
 
     let decided = answer(&pool, "answered at nine").await;
-    let orphan = insert_set(&pool, &set("archived at noon")).await.unwrap();
+    let orphan = asked(&pool, &set("archived at noon")).await.unwrap();
     let also_decided = answer(&pool, "answered at five").await;
     archive_set(&pool, &settlements(), orphan.id).await.unwrap();
 

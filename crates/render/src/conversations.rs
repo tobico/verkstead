@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{ProfileEntry, RepoEntry};
+use crate::{ProfileEntry, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -142,6 +142,12 @@ pub enum TimelineEvent {
     /// separately, by the details pane and only when one is opened — see
     /// [`Transcript`].
     AgentOutput(AgentOutputEvent),
+
+    /// A Question Set the session put to the human, summarised as the table of
+    /// what was asked against what was decided. The whole document is fetched
+    /// separately, by the details pane, from the same endpoint the standalone
+    /// Set page reads.
+    QuestionSet(QuestionSetEvent),
 }
 
 /// A move as the page receives it: when, and to what.
@@ -209,6 +215,68 @@ pub struct AgentOutputEvent {
     pub running: bool,
 }
 
+/// A Question Set as the Timeline shows it: what it was called, the table of
+/// what was asked against what was decided, and where it stands.
+///
+/// The table and not the Set. The design gives a Question Set a summary of
+/// number, question and answer in the Timeline and the whole document in the
+/// details pane, and the two are different sizes: a Set carries a Preface, every
+/// Option of every Question and the whole uncommitted Diff of the repository it
+/// was asked from, and the Timeline is re-read every time an open page hears the
+/// world moved.
+///
+/// `set_id` is what the details pane fetches the document by — the same
+/// `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
+/// reached another way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct QuestionSetEvent {
+    pub id: i64,
+
+    /// When the Set was put, RFC 3339.
+    pub at: String,
+
+    pub set_id: i64,
+
+    pub title: String,
+
+    /// One row per Question and Sub-question, in the order the agent asked
+    /// them.
+    pub rows: Vec<SetRow>,
+
+    /// Whether it is still waiting on the human, and what became of it if not.
+    /// The same verdict the Set's own page carries, from the same registry of
+    /// held waits — this is a Timeline the human answers from.
+    pub standing: Standing,
+}
+
+/// One row of a Question Set's Timeline table: the number it answers to, what
+/// was asked, and what was decided.
+///
+/// Plain words in both columns rather than the rendered HTML the Set page draws.
+/// A row is one line in a list of Events — the markup would have to come back
+/// out to fit, which means a parser on the browser's side of the wire, the one
+/// thing rendering on the server is for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SetRow {
+    /// `Q7` for a Question, `Q7a` for a Sub-question.
+    pub name: String,
+
+    /// Whether this row is a Sub-question, so the table can indent it under the
+    /// Question it belongs to.
+    pub nested: bool,
+
+    /// What was asked, as plain words.
+    pub question: String,
+
+    /// What was decided, as plain words: the Option that was chosen, whatever
+    /// was written, or both. Empty where nothing was — a Question left open, a
+    /// Heading that asked nothing, or a Set still waiting on the human. Which of
+    /// those it is, the Set's `standing` says.
+    pub answer: String,
+}
+
 /// One session's transcript, whole, as the details pane receives it.
 ///
 /// Byte for byte, control sequences and all: what a terminal was sent is what a
@@ -242,6 +310,111 @@ pub fn agent_output_event(
         latest,
         running,
     })
+}
+
+/// A Question Set as an Event, summarised on the way.
+///
+/// The Answers come out of `standing` rather than beside it: a Set that has not
+/// settled has none, one that was archived unanswered never will have, and one
+/// that was answered carries them — so the one field decides both what the table
+/// says and how it reads.
+pub fn question_set_event(
+    id: i64,
+    at: String,
+    set_id: i64,
+    set: &verkstead_schema::QuestionSet,
+    standing: Standing,
+) -> TimelineEvent {
+    let response = match &standing {
+        Standing::Answered(answered) => Some(&answered.response),
+        Standing::Waiting(_) | Standing::ArchivedUnanswered(_) => None,
+    };
+
+    TimelineEvent::QuestionSet(QuestionSetEvent {
+        id,
+        at,
+        set_id,
+        title: set.title.clone(),
+        rows: asked(set, response),
+        standing,
+    })
+}
+
+/// The Set's Questions and Sub-questions as the Timeline's table, in the order
+/// the agent asked them, each against whatever became of it.
+fn asked(
+    set: &verkstead_schema::QuestionSet,
+    response: Option<&verkstead_schema::Response>,
+) -> Vec<SetRow> {
+    let mut rows = Vec::new();
+
+    for question in &set.questions {
+        rows.push(SetRow {
+            name: question.name().to_owned(),
+            nested: false,
+            question: crate::markdown::to_plain(&question.text),
+            // A Heading has no Answer and never will: it heads its
+            // Sub-questions rather than asking anything. Nothing is done about
+            // that here — there is no entry to find, so the column comes out
+            // empty on its own.
+            answer: decided(response, question.name(), &question.options),
+        });
+
+        for subquestion in &question.subquestions {
+            let name = subquestion.name(question);
+
+            rows.push(SetRow {
+                answer: decided(response, &name, &subquestion.options),
+                name,
+                nested: true,
+                question: crate::markdown::to_plain(&subquestion.text),
+            });
+        }
+    }
+
+    rows
+}
+
+/// What became of one question, as the one line the table gives it: the Option
+/// that was chosen, whatever was written, or both.
+///
+/// Empty where nothing was decided, which the row is drawn from rather than
+/// worded here — a question left open on an answered Set and one on a Set nobody
+/// has reached yet are the same emptiness, and the Set's standing is what tells
+/// them apart.
+fn decided(
+    response: Option<&verkstead_schema::Response>,
+    name: &str,
+    options: &[verkstead_schema::QuestionOption],
+) -> String {
+    let Some(answer) = response.and_then(|response| {
+        response
+            .answers
+            .iter()
+            .find(|answer| answer.label.trim() == name)
+    }) else {
+        return String::new();
+    };
+
+    let chosen = answer
+        .selected
+        .and_then(|n| options.iter().find(|option| option.n == n))
+        .map(|option| crate::markdown::to_plain(&option.text));
+
+    let said = answer
+        .free_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|said| !said.is_empty())
+        .map(crate::markdown::to_plain);
+
+    // Both where the human picked an Option and said why, which is the ordinary
+    // shape of an Answer that carries a qualification.
+    match (chosen, said) {
+        (Some(chosen), Some(said)) => format!("{chosen} — {said}"),
+        (Some(only), None) | (None, Some(only)) => only,
+        (None, None) => String::new(),
+    }
 }
 
 /// The Brief as an Event, rendered on the way.

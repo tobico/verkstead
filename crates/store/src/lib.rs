@@ -7,6 +7,11 @@
 //! lifted into columns beside the Set so the pending list can be drawn without
 //! deserializing every Set.
 //!
+//! Every Set is asked from a Conversation and lands on its Timeline — see
+//! [`ask`], which is the one way one is stored. What answering it does is here
+//! all the same: a Response reaches the waiting agent the same way whether it
+//! came from the workbench, from a phone or from `curl`.
+//!
 //! The store sits below both the agent API and the web UI: the UI's server
 //! functions live in the shared `verkstead-app` crate, which cannot reach back
 //! into the server binary that links it.
@@ -17,7 +22,7 @@ use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
-use verkstead_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
+use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
 mod conversations;
 mod profiles;
@@ -28,9 +33,9 @@ mod waits;
 
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Edited, Event, Grilling, Lifecycle,
-    TimelineEvent, abort_conversation, conversations, load_conversation, rename_branch, save_brief,
-    set_base_commit, set_grilling_profile, set_implementation_profile, set_state,
-    start_conversation, start_grilling, timeline,
+    SetOnTimeline, TimelineEvent, abort_conversation, ask, conversations, load_conversation,
+    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
+    set_implementation_profile, set_state, start_conversation, start_grilling, timeline,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -338,31 +343,6 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     transcripts::apply_schema(pool).await?;
 
     Ok(())
-}
-
-/// Store a Set, stamping it with an id and a creation time.
-///
-/// The Set is expected to have been validated already — the store is not where
-/// the question grammar is enforced.
-pub async fn insert_set(pool: &SqlitePool, set: &QuestionSet) -> Result<SetCreated> {
-    let body = serde_json::to_string(set).context("serialising the Question Set")?;
-
-    // SQLite stamps the time as it assigns the id, so both come from one place.
-    // `%f` gives seconds to the millisecond, making the whole string RFC 3339.
-    let (id, created_at): (i64, String) = sqlx::query_as(
-        "INSERT INTO question_sets (created_at, title, project, branch, body)
-         VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?)
-         RETURNING id, created_at",
-    )
-    .bind(&set.title)
-    .bind(&set.project)
-    .bind(&set.branch)
-    .bind(body)
-    .fetch_one(pool)
-    .await
-    .context("storing the Question Set")?;
-
-    Ok(SetCreated { id, created_at })
 }
 
 /// Read a Set back, or `None` if no Set has that id.

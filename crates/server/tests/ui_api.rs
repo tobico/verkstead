@@ -9,6 +9,7 @@
 //! nor the waits are their own files': the Nudge stream, which is listened on
 //! rather than asked, is `nudges.rs`'s, and `/api/ui/update` is `updates.rs`'s.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -57,6 +58,15 @@ questions:
 /// nothing of its own, so no entry comes back for it.
 const QUESTIONS: [&str; 3] = ["Q1", "Q2a", "Q2b"];
 
+/// The Conversation every Set in this file is asked from.
+///
+/// Every Set is asked from one — that is what the base URL a session is given
+/// says — so a test that wants a Set needs somewhere for it to land. [`fresh_app`]
+/// makes it over a database with nothing in it, so it is always the first
+/// Conversation there is, which is what lets the helpers below name it without
+/// threading it through every test. What it is about matters to nothing here.
+const ASKING_FROM: i64 = 1;
+
 /// One router over a fresh database, shared by every request in a test: a wait
 /// held through one clone has to hear a submit made through another, which is
 /// the whole point of the two namespaces sharing their state.
@@ -65,6 +75,18 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     (dir, pool.clone(), router(pool))
 }
 
@@ -119,7 +141,7 @@ async fn post_set(app: &Router, yaml: &str) -> i64 {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -137,7 +159,9 @@ async fn wait_for_response(app: &Router, id: i64, hold: u64) -> axum::response::
     app.clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{id}/response?hold={hold}"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response?hold={hold}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -215,6 +239,14 @@ fn decided() -> Response {
     }
 }
 
+/// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
+/// store one — the endpoint above is the same thing with a router in front.
+async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    Ok(store::ask(pool, ASKING_FROM, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
+}
+
 /// A Set with nothing but a title, for the lists, which never look inside one.
 fn bare(title: &str) -> QuestionSet {
     QuestionSet {
@@ -232,7 +264,7 @@ fn bare(title: &str) -> QuestionSet {
 async fn every_waiting_set_is_listed_newest_first_with_its_age_and_its_liveness() {
     let (_dir, pool, app) = fresh_app().await;
     for title in ["the older ask", "the newer ask"] {
-        store::insert_set(&pool, &bare(title)).await.unwrap();
+        asked(&pool, &bare(title)).await.unwrap();
     }
 
     let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
@@ -259,9 +291,7 @@ async fn every_waiting_set_is_listed_newest_first_with_its_age_and_its_liveness(
 #[tokio::test]
 async fn a_set_nothing_has_waited_on_for_long_enough_reads_as_disconnected() {
     let (_dir, pool, app) = fresh_app().await;
-    let stored = store::insert_set(&pool, &bare("nobody is listening"))
-        .await
-        .unwrap();
+    let stored = asked(&pool, &bare("nobody is listening")).await.unwrap();
     // Old enough that the window measured from its creation has closed, and no
     // wait was ever held on it.
     backdate_created(&pool, stored.id, "2026-08-03T09:00:00.000Z").await;
@@ -280,7 +310,7 @@ async fn a_set_nothing_has_waited_on_for_long_enough_reads_as_disconnected() {
 async fn the_badge_is_the_wait_the_agents_half_is_genuinely_holding() {
     let (_dir, pool, app) = fresh_app().await;
     let waited_on = post_set(&app, SET).await;
-    let orphan = store::insert_set(&pool, &bare("the one whose agent went"))
+    let orphan = asked(&pool, &bare("the one whose agent went"))
         .await
         .unwrap()
         .id;
@@ -348,12 +378,8 @@ async fn a_disconnected_set_is_still_answerable_from_the_viewer() {
 #[tokio::test]
 async fn an_answered_set_leaves_the_pending_list_for_the_archive() {
     let (_dir, pool, app) = fresh_app().await;
-    let answered = store::insert_set(&pool, &bare("already answered"))
-        .await
-        .unwrap();
-    store::insert_set(&pool, &bare("still waiting"))
-        .await
-        .unwrap();
+    let answered = asked(&pool, &bare("already answered")).await.unwrap();
+    asked(&pool, &bare("still waiting")).await.unwrap();
     store::insert_response(&pool, answered.id, &Response::default())
         .await
         .unwrap()
@@ -378,7 +404,7 @@ async fn the_archive_words_each_settling_and_says_which_were_never_answered() {
 
     // Settled long ago, so however far today drifts from the stamp, it stays
     // past the week that ends the relative wording: this row is dated.
-    let decided_set = store::insert_set(&pool, &bare("decided")).await.unwrap();
+    let decided_set = asked(&pool, &bare("decided")).await.unwrap();
     store::insert_response(&pool, decided_set.id, &Response::default())
         .await
         .unwrap()
@@ -386,9 +412,7 @@ async fn the_archive_words_each_settling_and_says_which_were_never_answered() {
     settle_at(&pool, decided_set.id, "2025-08-03T09:07:00.000Z").await;
 
     // Archived just now, which is inside the week: this row is aged.
-    let orphan = store::insert_set(&pool, &bare("nobody ever answered"))
-        .await
-        .unwrap();
+    let orphan = asked(&pool, &bare("nobody ever answered")).await.unwrap();
     store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
         .await
         .unwrap();
@@ -765,7 +789,9 @@ async fn the_agents_contract_still_speaks_its_own_language() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{id}/response?hold=0"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response?hold=0"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

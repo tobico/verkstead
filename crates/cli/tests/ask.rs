@@ -63,6 +63,10 @@ comment: |
   The agent parses stdout; keep the noise on stderr.
 ";
 
+/// The Conversation these Sets are asked from, made by the server fixture over a
+/// database with nothing in it — so it is always the first there is.
+const ASKING_FROM: i64 = 1;
+
 /// A third level of nesting, which the question grammar forbids. The CLI has
 /// to refuse this itself, before anything reaches the server.
 const THREE_LEVELS_DEEP: &str = "
@@ -106,6 +110,26 @@ impl Server {
             let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
             let addr = listener.local_addr().unwrap();
             let pool = verkstead_server::open_database(&database).await.unwrap();
+
+            // Somewhere for the Sets to land. Every Set is asked from a
+            // Conversation, and the base URL a session is given is what says
+            // which — so a test standing in for a session has to be given the
+            // same thing. Made only where there is none: this server is brought
+            // up twice over one database, and the second time is a restart.
+            if store::conversations(&pool).await.unwrap().is_empty() {
+                let repo =
+                    store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+                        .await
+                        .unwrap()
+                        .expect("nothing is registered at that path yet");
+
+                let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
+                    .await
+                    .unwrap()
+                    .expect("the Repo was just registered");
+                assert_eq!(conversation, ASKING_FROM);
+            }
+
             (listener, addr, pool)
         });
 
@@ -120,8 +144,16 @@ impl Server {
         }
     }
 
-    fn url(&self) -> String {
+    /// Where the server is, whole — the viewer's namespace hangs off this, and
+    /// it is nobody's Conversation.
+    fn base(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// And what a session is given as `VERKSTEAD_SERVER`: the same server,
+    /// scoped to the Conversation it is asking from.
+    fn url(&self) -> String {
+        format!("{}/conversations/{ASKING_FROM}", self.base())
     }
 
     fn block_on<F: Future>(&self, future: F) -> F::Output {
@@ -182,7 +214,7 @@ impl Server {
     /// viewer's namespace and nowhere else: the agent API has no route for it,
     /// because only a human may close a Set nobody is going to answer.
     fn archive(&self, id: i64) {
-        let reply = ureq::post(format!("{}/api/ui/sets/{id}/archive", self.url()))
+        let reply = ureq::post(format!("{}/api/ui/sets/{id}/archive", self.base()))
             .header("Content-Type", "application/json")
             .send("{}")
             .unwrap();

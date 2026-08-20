@@ -3,7 +3,12 @@
 #
 #   curl -X POST --data-binary @examples/response.yaml \
 #     -H 'Content-Type: application/yaml' \
-#     http://127.0.0.1:8422/api/v1/sets/1/response
+#     http://127.0.0.1:8422/conversations/1/api/v1/sets/1/response
+#
+# The agents' API hangs off the Conversation the Set was asked from — that is
+# what the base URL a session is given says — so answering one is reached the
+# same way. The web UI posts to `/api/ui/sets/1/response` instead, which is the
+# human's half of the same store.
 #
 # Every Question and Sub-question in the Set appears exactly once — Q1, Q2,
 # Q2a and Q3 — each with a selected Option, free text, both, or the

@@ -3,12 +3,15 @@
 //! answers the agent API, hands over the viewer, and is pointed at its socket
 //! and its database exactly as the server binary this verb replaced was.
 
+mod support;
+
 use std::io::Write;
 use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
+use support::repo_with_a_commit;
 use verkstead_schema::Response;
 
 /// A Set small enough to be answered by the Response below, and legal without a
@@ -118,15 +121,72 @@ impl Serve {
         }
     }
 
+    /// A Conversation to ask from, made the way the workbench makes one: a Repo
+    /// registered from inside the Watched Path, and a Conversation against it.
+    ///
+    /// Every Set is asked from one, and the base URL a session is given is what
+    /// says which — so a test standing in for a session has to have one to be
+    /// given.
+    fn asking_from(&self, repo: &Path) -> i64 {
+        let registered: serde_json::Value = self.through_the_viewer(
+            "/api/ui/repos",
+            &serde_json::json!({ "path": repo.to_str().unwrap() }),
+        );
+        assert_eq!(registered, serde_json::json!("Added"));
+
+        let listed: serde_json::Value = serde_json::from_str(&self.read("/api/ui/repos")).unwrap();
+        let repo_id = listed[0]["id"]
+            .as_i64()
+            .expect("the Repo was just registered");
+
+        let started: serde_json::Value = self.through_the_viewer(
+            "/api/ui/conversations",
+            &serde_json::json!({ "repo_id": repo_id }),
+        );
+
+        started["Started"]["id"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("the Conversation should have started: {started}"))
+    }
+
+    /// Tell the viewer's namespace something, in the JSON a browser would send.
+    fn through_the_viewer(&self, path: &str, body: &serde_json::Value) -> serde_json::Value {
+        let mut reply = ureq::post(format!("{}{path}", self.url))
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .unwrap_or_else(|error| panic!("POST {path}: {error}"));
+
+        assert_eq!(reply.status().as_u16(), 200);
+
+        serde_json::from_str(&reply.body_mut().read_to_string().unwrap()).unwrap()
+    }
+
+    fn read(&self, path: &str) -> String {
+        ureq::get(format!("{}{path}", self.url))
+            .call()
+            .unwrap_or_else(|error| panic!("GET {path}: {error}"))
+            .body_mut()
+            .read_to_string()
+            .unwrap()
+    }
+
+    /// What a session on `conversation` is given as `VERKSTEAD_SERVER`.
+    fn asking_url(&self, conversation: i64) -> String {
+        format!("{}/conversations/{conversation}", self.url)
+    }
+
     /// Answer Set `id` the way the human's device does, retrying until the Set
     /// the CLI is submitting has landed.
-    fn await_answer(&self, id: i64, yaml: &str) {
+    fn await_answer(&self, conversation: i64, id: i64, yaml: &str) {
         let deadline = Instant::now() + PATIENCE;
         loop {
-            let submitted = ureq::post(format!("{}/api/v1/sets/{id}/response", self.url))
-                .header("Content-Type", "application/yaml")
-                .send(yaml)
-                .is_ok_and(|reply| reply.status().as_u16() == 201);
+            let submitted = ureq::post(format!(
+                "{}/api/v1/sets/{id}/response",
+                self.asking_url(conversation)
+            ))
+            .header("Content-Type", "application/yaml")
+            .send(yaml)
+            .is_ok_and(|reply| reply.status().as_u16() == 201);
             if submitted {
                 return;
             }
@@ -160,11 +220,12 @@ impl Drop for Serve {
     }
 }
 
-/// `verkstead ask`, pointed at the serving process, fed `SET` on stdin.
-fn ask(serving: &Serve, dir: &Path) -> Child {
+/// `verkstead ask`, pointed at the serving process as a session is — at the
+/// Conversation it is asking from — and fed `SET` on stdin.
+fn ask(serving: &Serve, conversation: i64, dir: &Path) -> Child {
     let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .arg("ask")
-        .env("VERKSTEAD_SERVER", &serving.url)
+        .env("VERKSTEAD_SERVER", serving.asking_url(conversation))
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -259,8 +320,10 @@ fn the_served_api_round_trips_an_ask() {
     let port = free_port();
     let mut serving = Serve::with_flags(tmp.path(), port, &database);
 
-    let waiting = ask(&serving, tmp.path());
-    serving.await_answer(1, ANSWER);
+    let conversation = serving.asking_from(&repo_with_a_commit(tmp.path()));
+
+    let waiting = ask(&serving, conversation, tmp.path());
+    serving.await_answer(conversation, 1, ANSWER);
 
     let output = waiting.wait_with_output().unwrap();
     eprintln!(

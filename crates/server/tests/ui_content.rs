@@ -14,6 +14,8 @@
 //! that nobody carried across shows up as a failing fixture rather than as a
 //! viewer that draws the wrong thing.
 
+use std::path::Path;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -22,18 +24,57 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{Answered, SetView, Standing};
 use verkstead_schema::{
-    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, Subquestion,
+    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
 };
 use verkstead_server::{open_database, router, store};
 
-/// A router over a fresh database, plus the pool and the directory keeping it
-/// alive.
-async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
+/// The Conversation every Set in this file is asked from.
+///
+/// Every Set is asked from one, so a test that wants a Set needs somewhere for it
+/// to land. [`fresh_app`] makes it over a database with nothing in it, so it is
+/// always the first Conversation there is — and what it is about matters to
+/// nothing here, which is all about the rendering of a Set.
+const ASKING_FROM: i64 = 1;
+
+/// A router over a database with nothing in it at all, plus the pool and the
+/// directory keeping it alive.
+///
+/// What the fixtures of the workbench are written over: a sidebar carrying the
+/// Conversation [`fresh_app`] keeps for its own bookkeeping would be a list with
+/// a stranger in it.
+async fn empty_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
+
     (dir, pool.clone(), router(pool))
+}
+
+/// The same, with somewhere for a Set to be asked from — see [`ASKING_FROM`].
+async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
+    let (dir, pool, app) = empty_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
+    (dir, pool, app)
+}
+
+/// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
+/// store one.
+async fn put(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    Ok(store::ask(pool, ASKING_FROM, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
 }
 
 fn option(n: u32, text: &str, recommended: bool) -> QuestionOption {
@@ -258,7 +299,7 @@ fn modified_and_untracked_diff() -> String {
 /// HTML *not* reaching the viewer, and the cheapest honest way to say "nowhere in
 /// this payload" is to look at the payload.
 async fn set_json(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     fetch_set(app, stored.id).await
 }
 
@@ -298,7 +339,7 @@ async fn answered_set(
         .validate(set)
         .expect("the Response a test answers with has to resolve its Set");
 
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     store::insert_response(pool, stored.id, response)
         .await
         .unwrap()
@@ -310,7 +351,7 @@ async fn answered_set(
 /// A Set the human closed unanswered: the third standing, and the one with no
 /// Response behind it.
 async fn archived_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     let archiving = store::archive_set(pool, &store::Settlements::new(1), stored.id)
         .await
         .unwrap();
@@ -1047,11 +1088,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // The pending list: one Set whose agent has just sent it, and one nothing has
     // waited on for hours — the two badges, and two ages worth wording.
     let (_dir, pool, app) = fresh_app().await;
-    store::insert_set(&pool, &full_grammar_set()).await.unwrap();
+    put(&pool, &full_grammar_set()).await.unwrap();
     let mut stale_set = full_grammar_set();
     stale_set.title = "Retry policy for the outbound queue".to_owned();
     stale_set.branch = Some("outbound-retries".to_owned());
-    let stale = store::insert_set(&pool, &stale_set).await.unwrap();
+    let stale = put(&pool, &stale_set).await.unwrap();
     stamp(
         &pool,
         "UPDATE question_sets SET created_at = ? WHERE id = ?",
@@ -1074,7 +1115,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // not. Long since rather than days ago, because "4d ago" would say
     // something different next week and these bytes must not.
     let (_dir, pool, app) = fresh_app().await;
-    let decided = store::insert_set(&pool, &full_grammar_set()).await.unwrap();
+    let decided = put(&pool, &full_grammar_set()).await.unwrap();
     store::insert_response(&pool, decided.id, &decided_every_way())
         .await
         .unwrap()
@@ -1088,7 +1129,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await;
     let mut orphan_set = full_grammar_set();
     orphan_set.title = "Backfill for the archived rows".to_owned();
-    let orphan = store::insert_set(&pool, &orphan_set).await.unwrap();
+    let orphan = put(&pool, &orphan_set).await.unwrap();
     store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
         .await
         .unwrap();
@@ -1129,7 +1170,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // through the endpoint, because what is being written here is the shape of a
     // row — and going in the front way would mean building a git repository
     // inside a Watched Path, which is `repos.rs`'s subject and not this one's.
-    let (_dir, pool, app) = fresh_app().await;
+    let (_dir, pool, app) = empty_app().await;
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
         ("/srv/repos/askance", "askance", "trunk"),
@@ -1146,7 +1187,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // a drafting Conversation carries. Put in through the store for the reason
     // the Repos are: going in the front way means a git repository inside a
     // Watched Path, which is `conversations.rs`'s subject and not this one's.
-    let (_dir, pool, app) = fresh_app().await;
+    let (_dir, pool, app) = empty_app().await;
     let mut repos = Vec::new();
     for (path, name, branch) in [
         ("/srv/repos/verkstead", "verkstead", "main"),
@@ -1287,6 +1328,35 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And the two Question Sets that session put to the human: one answered and
+    // one still waiting, which are the two ways a Set reads on a Timeline. Both
+    // are needed, because what the row draws turns on which — the answered one
+    // has an answer against every question and the waiting one has none, and it
+    // is the waiting one the human is offered a sheet for.
+    let mut asked = full_grammar_set();
+    asked.title = "Retry policy for the outbound queue".to_owned();
+    asked.branch = Some("outbound-retries".to_owned());
+    let answered = store::ask(&pool, grilling, &asked).await.unwrap().unwrap();
+    store::insert_response(&pool, answered.id, &decided_every_way())
+        .await
+        .unwrap()
+        .unwrap();
+    stamp(
+        &pool,
+        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
+        "2026-08-03T09:07:11.000Z",
+        answered.id,
+    )
+    .await;
+
+    let mut waiting = full_grammar_set();
+    waiting.title = "What a delivery that has failed forty times becomes".to_owned();
+    waiting.branch = Some("outbound-retries".to_owned());
+    store::ask(&pool, grilling, &waiting)
+        .await
+        .unwrap()
+        .unwrap();
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,
@@ -1376,6 +1446,16 @@ fn pin_timeline(json: &str) -> String {
         // Each Event is its kind and its body — the stamp is inside.
         let (_, body) = event.as_object_mut().unwrap().iter_mut().next().unwrap();
         body["at"] = "2026-08-03T09:07:11.000Z".into();
+
+        // And a Question Set carries a second one, in the standing of a Set that
+        // has been answered. It is the only value in these payloads the server
+        // hands over raw — the viewer words it, against its own clock.
+        if let Some(answered) = body
+            .get_mut("standing")
+            .and_then(|standing| standing.get_mut("Answered"))
+        {
+            answered["submitted_at"] = "2026-08-03T09:07:11.000Z".into();
+        }
     }
 
     serde_json::to_string(&payload).unwrap()

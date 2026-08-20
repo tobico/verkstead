@@ -25,6 +25,8 @@ import type {
   GrillingStarted,
   ProfileEntry,
   RepoEntry,
+  SetView,
+  Submitted,
   TimelineEvent,
   Transcript,
 } from "../src/api/types";
@@ -36,7 +38,13 @@ import grilling from "./fixtures/conversation-grilling.json" with { type: "json"
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
+import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
+
+/// The renderer is a page's own doing and neither Set fixture has a Diagram;
+/// mocked so nothing here loads megabytes of mermaid.
+vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
@@ -879,7 +887,15 @@ describe("a move on the timeline", () => {
       [...container.querySelectorAll(".timeline-event > *")].map(
         (event) => event.className.split(" ")[0],
       ),
-    ).toEqual(["brief", "moved", "agent-output"]);
+    ).toEqual([
+      "brief",
+      "moved",
+      "agent-output",
+      // The two Sets that session put to the human, in the order it asked
+      // them: the answered one, and the one still waiting.
+      "question-set",
+      "question-set",
+    ]);
   });
 });
 
@@ -1102,5 +1118,187 @@ describe("a conversation's worktree", () => {
 
     expect(OPEN.worktree).toBeNull();
     expect(container.querySelector(".conversation-worktree")).toBeNull();
+  });
+});
+
+/// The two Question Sets the grilling conversation's session put to the human:
+/// one answered, and one still waiting. Both are needed, because what a row
+/// draws turns on which — and it is the waiting one the human is offered a sheet
+/// for.
+const ASKED = (() => {
+  const found = GRILLING.timeline.flatMap((event) =>
+    "QuestionSet" in event ? [event.QuestionSet] : [],
+  );
+  if (found.length !== 2) {
+    throw new Error("the fixture should hold an answered Set and a waiting one");
+  }
+  return found;
+})();
+
+const ANSWERED_SET = ASKED.find((asked) => "Answered" in asked.standing)!;
+const WAITING_SET = ASKED.find((asked) => "Waiting" in asked.standing)!;
+
+/// The whole document behind each, which is what the details pane fetches. The
+/// two Set fixtures are the same shapes read back from the same endpoint — the
+/// standing is what decides whether the pane draws a sheet or a record, and
+/// these are the two.
+const DOCUMENT = answeredSet as SetView;
+const SHEET = answeringSet as SetView;
+
+/// The workbench with the grilling conversation open and both of its Sets
+/// answerable, which is what the details pane fetches when one is opened.
+function theGrillingSets(...answers: Parameters<typeof serving>) {
+  return theGrilling(
+    whenever(`/api/ui/sets/${ANSWERED_SET.set_id}`, json(DOCUMENT)),
+    whenever(`/api/ui/sets/${WAITING_SET.set_id}`, json(SHEET)),
+    ...answers,
+  );
+}
+
+/// The rows of one Question Set's summary, as the three columns the design gives
+/// it: the number, the question, and what became of it.
+function summarised(card: ParentNode): string[][] {
+  return [...card.querySelectorAll(".asked tr")].map((row) =>
+    [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? ""),
+  );
+}
+
+describe("a question set on the timeline", () => {
+  it("is summarised as the table of number, question and answer", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, ".question-set");
+
+    expect(summarised(card)).toEqual(
+      ANSWERED_SET.rows.map((row) => [
+        row.name,
+        row.question,
+        // A question the human left open — and the Heading, which was never
+        // asked. The row says so rather than leaving a blank, because a blank
+        // on a settled Set would read as an Answer of nothing.
+        row.answer === "" ? "unanswered" : row.answer,
+      ]),
+    );
+  });
+
+  it("says which set it is, so a timeline of rounds reads as a conversation", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, ".question-set");
+
+    expect(card.querySelector(".set-title")!.textContent).toBe(
+      ANSWERED_SET.title,
+    );
+  });
+
+  /// The one thing on a timeline that is asking for something rather than
+  /// recording it.
+  it("marks the one still waiting on the human", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const cards = [...container.querySelectorAll(".question-set")];
+
+    expect(cards.map((card) => card.classList.contains("waiting"))).toEqual([
+      false,
+      true,
+    ]);
+    expect(screen.getByText("waiting on you")).toBeTruthy();
+  });
+
+  /// A column of blanks would read as a Set that was answered with nothing.
+  it("draws no answers at all on one nothing has been decided about", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const waiting = [...container.querySelectorAll(".question-set")][1]!;
+
+    expect(
+      summarised(waiting).map(([, , answer]) => answer),
+    ).toEqual(WAITING_SET.rows.map(() => "—"));
+  });
+
+  /// The summary is a line each; the document is a Preface, every Option of
+  /// every Question, and the Diff the ask was about.
+  it("opens the whole document in the details pane", async () => {
+    const fetching = theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".question-set"));
+
+    const pane = screen.getByLabelText("Details");
+    await waitFor(() => {
+      if (!pane.querySelector(".preface")) {
+        throw new Error("the document has not been drawn");
+      }
+    });
+
+    expect(fetching).toHaveBeenCalledWith(
+      `/api/ui/sets/${ANSWERED_SET.set_id}`,
+      expect.anything(),
+    );
+    expect(pane.querySelector("h1")!.textContent).toBe(DOCUMENT.title);
+    expect(frame(container).dataset.pane).toBe("details");
+  });
+
+  /// The point of the whole stage: the loop closes without leaving the GUI.
+  it("answers the one still waiting, which is what ends the session's wait", async () => {
+    const fetching = theGrillingSets(
+      whenever(`/api/ui/sets/${SHEET.id}/response`, json("Accepted" satisfies Submitted)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    fireEvent.click([...container.querySelectorAll(".question-set")][1]!);
+
+    const pane = screen.getByLabelText("Details");
+    const chosen = await waitFor(() => {
+      const radio = pane.querySelector<HTMLInputElement>(
+        'input[name="Q1-option"][value="2"]',
+      );
+      if (!radio) {
+        throw new Error("the sheet has not been drawn");
+      }
+      return radio;
+    });
+
+    fireEvent.click(chosen);
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    // The rest of the Set is being left open, which the sheet asks about before
+    // it sends — the same warning it gives on a page of its own.
+    fireEvent.click(screen.getByRole("button", { name: "Send anyway" }));
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        `/api/ui/sets/${SHEET.id}/response`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+
+    expect(sent(fetching, `/api/ui/sets/${SHEET.id}/response`)).toMatchObject({
+      answers: expect.arrayContaining([{ label: "Q1", selected: 2 }]),
+    });
+  });
+
+  /// The table of contents is a description of a column the whole window wide,
+  /// and a details pane is a column beside two others.
+  it("leaves the page's own table of contents to the page", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".question-set"));
+
+    const pane = screen.getByLabelText("Details");
+    await waitFor(() => {
+      if (!pane.querySelector(".preface")) {
+        throw new Error("the document has not been drawn");
+      }
+    });
+
+    expect(pane.querySelector(".contents")).toBeNull();
   });
 });

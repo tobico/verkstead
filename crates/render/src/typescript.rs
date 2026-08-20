@@ -74,6 +74,8 @@ fn the_viewers_types_are_written_from_these() {
 
     // What a session printed. The summary rides on the Timeline; the transcript
     // is its own payload, because it is fetched by the one pane that shows it.
+    // A Question Set on the Timeline is the same arrangement, and its full self
+    // is the `SetView` above.
     Transcript::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and

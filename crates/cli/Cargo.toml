@@ -32,5 +32,8 @@ ureq = "3"
 # The tests run the real server in-process, so the round trip they check is the
 # one the agent gets.
 axum = "0.8"
+# For the one test that drives a running server the way the workbench does — the
+# viewer's namespace speaks JSON where the agents' half speaks YAML.
+serde_json.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net", "time"] }

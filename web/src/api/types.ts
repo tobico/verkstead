@@ -444,6 +444,38 @@ export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" 
 export type PushKey = { key: string, };
 
 /**
+ * A Question Set as the Timeline shows it: what it was called, the table of
+ * what was asked against what was decided, and where it stands.
+ *
+ * The table and not the Set. The design gives a Question Set a summary of
+ * number, question and answer in the Timeline and the whole document in the
+ * details pane, and the two are different sizes: a Set carries a Preface, every
+ * Option of every Question and the whole uncommitted Diff of the repository it
+ * was asked from, and the Timeline is re-read every time an open page hears the
+ * world moved.
+ *
+ * `set_id` is what the details pane fetches the document by — the same
+ * `/api/ui/sets/{id}` the standalone page reads, because it is the same Set
+ * reached another way.
+ */
+export type QuestionSetEvent = { id: number, 
+/**
+ * When the Set was put, RFC 3339.
+ */
+at: string, set_id: number, title: string, 
+/**
+ * One row per Question and Sub-question, in the order the agent asked
+ * them.
+ */
+rows: Array<SetRow>, 
+/**
+ * Whether it is still waiting on the human, and what became of it if not.
+ * The same verdict the Set's own page carries, from the same registry of
+ * held waits — this is a Timeline the human answers from.
+ */
+standing: Standing, };
+
+/**
  * One Question as the page draws it, with its Sub-questions nested one level
  * under it.
  */
@@ -521,6 +553,37 @@ answers: Array<Answer>,
 comment?: string | null, };
 
 /**
+ * One row of a Question Set's Timeline table: the number it answers to, what
+ * was asked, and what was decided.
+ *
+ * Plain words in both columns rather than the rendered HTML the Set page draws.
+ * A row is one line in a list of Events — the markup would have to come back
+ * out to fit, which means a parser on the browser's side of the wire, the one
+ * thing rendering on the server is for.
+ */
+export type SetRow = { 
+/**
+ * `Q7` for a Question, `Q7a` for a Sub-question.
+ */
+name: string, 
+/**
+ * Whether this row is a Sub-question, so the table can indent it under the
+ * Question it belongs to.
+ */
+nested: boolean, 
+/**
+ * What was asked, as plain words.
+ */
+question: string, 
+/**
+ * What was decided, as plain words: the Option that was chosen, whatever
+ * was written, or both. Empty where nothing was — a Question left open, a
+ * Heading that asked nothing, or a Set still waiting on the human. Which of
+ * those it is, the Set's `standing` says.
+ */
+answer: string, };
+
+/**
  * One Question Set as the browser receives it.
  *
  * Everything the agent wrote — the Preface, every Question's and Sub-question's
@@ -590,7 +653,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

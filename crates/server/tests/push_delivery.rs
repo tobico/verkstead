@@ -24,6 +24,10 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_schema::SetCreated;
 use verkstead_server::{open_database, router, store};
+
+/// The Conversation every Set in this file is asked from, made by [`fresh_app`]
+/// over a database with nothing in it.
+const ASKING_FROM: i64 = 1;
 use web_push_native::Auth;
 
 const SET: &str = r#"
@@ -164,6 +168,25 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
+
+    // Somewhere for the Sets to land: every Set is asked from a Conversation,
+    // and what is pushed is the news that one arrived.
+    let repo = store::register_repo(
+        &pool,
+        std::path::Path::new("/srv/verkstead"),
+        "verkstead",
+        "main",
+    )
+    .await
+    .unwrap()
+    .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "push")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     let app = router(pool.clone());
     (dir, pool, app)
 }
@@ -204,7 +227,7 @@ async fn post_set(app: &Router, yaml: &str) -> (StatusCode, SetCreated) {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),

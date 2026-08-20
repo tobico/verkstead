@@ -6,7 +6,7 @@
 //! to know which Set to open, and nothing that would put a Question in a
 //! notification the phone shows on a lock screen.
 //!
-//! Sending happens behind the answer to `POST /api/v1/sets`, never in front of
+//! Sending happens behind the answer to `POST …/api/v1/sets`, never in front of
 //! it. Delivery goes out through the browser vendors' push services, which is
 //! the one place Verkstead reaches the public internet, and none of it is
 //! reliable enough to make an agent's submission depend on: a service that

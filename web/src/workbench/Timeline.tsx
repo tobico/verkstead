@@ -30,6 +30,7 @@ import type {
   GrillingStarted,
   Lifecycle,
   MovedEvent,
+  QuestionSetEvent,
 } from "../api/types";
 
 /// What each way of being refused a Brief says.
@@ -133,6 +134,18 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
+                <Match when={"QuestionSet" in event && event.QuestionSet}>
+                  {(asked) => (
+                    <QuestionSet
+                      asked={asked()}
+                      selected={props.selected === asked().id}
+                      open={() => {
+                        props.select(asked().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
               </Switch>
             </li>
           )}
@@ -204,6 +217,71 @@ function AgentOutput(props: {
           {props.output.latest}
         </Show>
       </span>
+    </button>
+  );
+}
+
+/// A Question Set the session put to the human: the table of what was asked
+/// against what was decided.
+///
+/// A button, as a session's output is, and for the same reason: the whole
+/// document is in the details pane, and this is how it is opened. What the row
+/// shows is the design's summary — the number, the question and the answer —
+/// which is what makes a Timeline readable as the record of a conversation
+/// rather than as a list of things to go and open.
+///
+/// A Set still waiting says so instead of drawing a column of blanks: nothing
+/// has been decided yet, and an empty answer column would read as a Set that was
+/// answered with nothing.
+function QuestionSet(props: {
+  asked: QuestionSetEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  const waiting = () => "Waiting" in props.asked.standing;
+  const archived = () => "ArchivedUnanswered" in props.asked.standing;
+
+  return (
+    <button
+      type="button"
+      class="question-set"
+      classList={{ selected: props.selected, waiting: waiting() }}
+      aria-pressed={props.selected}
+      onClick={props.open}
+    >
+      <span class="event-head">
+        <span class="what">Question set</span>
+        <span class="set-title">{props.asked.title}</span>
+        <Show when={waiting()}>
+          <span class="live">waiting on you</span>
+        </Show>
+        <Show when={archived()}>
+          <span class="closed">closed unanswered</span>
+        </Show>
+      </span>
+
+      <table class="asked">
+        <tbody>
+          <For each={props.asked.rows}>
+            {(row) => (
+              <tr classList={{ nested: row.nested }}>
+                <td class="n">{row.name}</td>
+                <td class="question">{row.question}</td>
+                <td class="answer">
+                  <Show
+                    when={row.answer !== ""}
+                    fallback={
+                      <span class="open">{waiting() ? "—" : "unanswered"}</span>
+                    }
+                  >
+                    {row.answer}
+                  </Show>
+                </td>
+              </tr>
+            )}
+          </For>
+        </tbody>
+      </table>
     </button>
   );
 }

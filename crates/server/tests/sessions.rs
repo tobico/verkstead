@@ -13,6 +13,7 @@
 //! model, and then the Brief. So `$1` is the model it was told to run and `$2`
 //! is the Brief it was primed with — which is how these read them back.
 
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -27,13 +28,20 @@ use verkstead_render::{
     AgentOutputEvent, BriefSaved, ConversationAborted, ConversationView, GrillingStarted,
     Lifecycle, ProfileSaved, Registered, Started, TimelineEvent, Transcript,
 };
-use verkstead_server::sandbox::{Home, SandboxConfig};
+use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, WatchedPaths, open_database, router_running_sessions};
 
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
 const BRIEF: &str = "# Rate limiting\n\nThe API has none.\n";
+
+/// Where the server these sessions belong to would be listening.
+///
+/// Nothing here dials it — a router driven by `oneshot` has no socket — but it is
+/// what a session inside the sandbox is told to reach Verkstead at, which is a
+/// thing worth reading back.
+const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
 /// How long to wait for something a session does. Generously long, because what
 /// is being waited on is a process starting: the flush that carries its output
@@ -141,6 +149,7 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
             path: home.path().to_owned(),
             gh_config: home.path().join(".config/gh"),
         },
+        Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
     );
@@ -472,6 +481,7 @@ async fn a_transcript_survives_the_server_restarting() {
                 path: PathBuf::from("/nonexistent"),
                 gh_config: PathBuf::from("/nonexistent/.config/gh"),
             },
+            Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
         ),

@@ -23,7 +23,12 @@ import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
 
 import { loadConversation } from "../api/client";
-import type { AgentOutputEvent, ConversationView } from "../api/types";
+import type {
+  AgentOutputEvent,
+  ConversationView,
+  QuestionSetEvent,
+} from "../api/types";
+import { Asked } from "./Asked";
 import { Conversations } from "./Conversations";
 import { Details } from "./Details";
 import { Output } from "./Output";
@@ -31,6 +36,26 @@ import { Timeline } from "./Timeline";
 
 /// Which level of the hierarchy a narrow window is showing.
 export type Pane = "conversations" | "timeline" | "details";
+
+/// An Event with a full self, as the details pane holds it: which kind, and the
+/// Event itself.
+type Opened = { output: AgentOutputEvent } | { asked: QuestionSetEvent };
+
+/// The Event inside, whichever kind it turned out to be — what the two have in
+/// common is the id the pane was opened by.
+function which(open: Opened): AgentOutputEvent | QuestionSetEvent {
+  return "output" in open ? open.output : open.asked;
+}
+
+/// And each kind on its own, for the pane that draws it: the Event where this is
+/// one of that kind, and nothing where it is the other.
+function outputIn(open: Opened): AgentOutputEvent | undefined {
+  return "output" in open ? open.output : undefined;
+}
+
+function setIn(open: Opened): QuestionSetEvent | undefined {
+  return "asked" in open ? open.asked : undefined;
+}
 
 export function Workbench(): JSX.Element {
   const params = useParams();
@@ -63,14 +88,24 @@ export function Workbench(): JSX.Element {
   /// The Event the details pane is showing, where it is one that has a full
   /// self to show. An id whose Event has gone shows the Conversation instead,
   /// which is what the pane says when nothing is open.
-  const opened = (
-    conversation: ConversationView,
-  ): AgentOutputEvent | undefined => {
+  ///
+  /// Two kinds have one: a session's output, whose full self is its transcript,
+  /// and a Question Set, whose full self is the document it was asked as. The
+  /// kind travels with it, because it is what decides which pane is drawn.
+  const opened = (conversation: ConversationView): Opened | undefined => {
     const id = event();
 
     return conversation.timeline
-      .map((entry) => ("AgentOutput" in entry ? entry.AgentOutput : undefined))
-      .find((output) => output !== undefined && output.id === id);
+      .map((entry): Opened | undefined => {
+        if ("AgentOutput" in entry) {
+          return { output: entry.AgentOutput };
+        }
+        if ("QuestionSet" in entry) {
+          return { asked: entry.QuestionSet };
+        }
+        return undefined;
+      })
+      .find((open) => open !== undefined && which(open).id === id);
   };
 
   const conversation = useQuery(() => ({
@@ -132,13 +167,28 @@ export function Workbench(): JSX.Element {
                 />
               }
             >
-              {(output) => (
-                <Output
-                  conversation={conversation()}
-                  output={output()}
-                  back={() => setPane("timeline")}
-                  close={() => setEvent(null)}
-                />
+              {(open) => (
+                <Switch>
+                  <Match when={outputIn(open())}>
+                    {(output) => (
+                      <Output
+                        conversation={conversation()}
+                        output={output()}
+                        back={() => setPane("timeline")}
+                        close={() => setEvent(null)}
+                      />
+                    )}
+                  </Match>
+                  <Match when={setIn(open())}>
+                    {(asked) => (
+                      <Asked
+                        asked={asked()}
+                        back={() => setPane("timeline")}
+                        close={() => setEvent(null)}
+                      />
+                    )}
+                  </Match>
+                </Switch>
               )}
             </Show>
           )}

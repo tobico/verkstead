@@ -1,9 +1,14 @@
 //! The pending list's query: which Sets are still waiting on the human, in
 //! the order they should be shown, drawn from the lifted columns alone.
 
+use std::path::Path;
+
 use sqlx::SqlitePool;
-use verkstead_schema::{QuestionSet, Response};
-use verkstead_store::{insert_response, insert_set, open_database, pending_sets};
+use verkstead_schema::{QuestionSet, Response, SetCreated};
+use verkstead_store::{
+    ask, conversations, insert_response, open_database, pending_sets, register_repo,
+    start_conversation,
+};
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -26,11 +31,36 @@ fn set(title: &str) -> QuestionSet {
     }
 }
 
+/// Put a Set to the human, which is the one way there is to store one: every Set
+/// is asked from a Conversation and lands on its Timeline.
+///
+/// The Conversation is made on the first ask and reused after it. Which one it is
+/// does not matter here — the pending list is drawn from the lifted columns, and
+/// these tests are about those.
+async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    let conversation = match conversations(pool).await?.first() {
+        Some(row) => row.id,
+        None => {
+            let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+                .await?
+                .expect("nothing is registered at that path yet");
+
+            start_conversation(pool, repo.id, "answering-web-ui")
+                .await?
+                .expect("the Repo was just registered")
+        }
+    };
+
+    Ok(ask(pool, conversation, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
+}
+
 #[tokio::test]
 async fn a_stored_set_is_pending_with_its_lifted_columns() {
     let (_dir, pool) = fresh_pool().await;
 
-    let created = insert_set(&pool, &set("Storage layout for the pending list"))
+    let created = asked(&pool, &set("Storage layout for the pending list"))
         .await
         .unwrap();
 
@@ -50,7 +80,7 @@ async fn pending_sets_come_back_newest_first() {
     let (_dir, pool) = fresh_pool().await;
 
     for title in ["oldest", "middle", "newest"] {
-        insert_set(&pool, &set(title)).await.unwrap();
+        asked(&pool, &set(title)).await.unwrap();
     }
 
     let titles: Vec<String> = pending_sets(&pool)
@@ -67,8 +97,8 @@ async fn pending_sets_come_back_newest_first() {
 async fn an_answered_set_is_no_longer_pending() {
     let (_dir, pool) = fresh_pool().await;
 
-    let answered = insert_set(&pool, &set("already answered")).await.unwrap();
-    insert_set(&pool, &set("still waiting")).await.unwrap();
+    let answered = asked(&pool, &set("already answered")).await.unwrap();
+    asked(&pool, &set("still waiting")).await.unwrap();
 
     insert_response(&pool, answered.id, &Response::default())
         .await

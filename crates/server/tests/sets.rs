@@ -1,5 +1,7 @@
 //! Submitting a Question Set: what the store keeps, and what the API refuses.
 
+use std::path::Path;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
@@ -50,12 +52,36 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     (dir, pool)
 }
 
+/// The Conversation these Sets are asked from, made once per database and found
+/// again after that.
+///
+/// Every Set is asked from one — that is what the base URL a session is given
+/// says — so a test posting one needs somewhere for it to land. What the
+/// Conversation is does not matter to anything here; that there is one does.
+async fn asking_from(pool: &SqlitePool) -> i64 {
+    if let Some(row) = store::conversations(pool).await.unwrap().first() {
+        return row.id;
+    }
+
+    let repo = store::register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    store::start_conversation(pool, repo.id, "api-core-and-cli")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered")
+}
+
 async fn post_set(pool: &SqlitePool, yaml: &str) -> Response {
+    let conversation = asking_from(pool).await;
+
     router(pool.clone())
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{conversation}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -342,7 +368,11 @@ async fn the_schema_is_applied_to_an_existing_database() {
 
     let pool = open_database(&path).await.unwrap();
     let set = QuestionSet::from_yaml(VALID_SET).unwrap();
-    let created = store::insert_set(&pool, &set).await.unwrap();
+    let conversation = asking_from(&pool).await;
+    let created = store::ask(&pool, conversation, &set)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
     pool.close().await;
 
     let pool = open_database(&path).await.unwrap();

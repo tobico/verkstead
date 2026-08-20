@@ -66,6 +66,19 @@ pub use rust_embed::Embed;
 /// attaches the whole uncommitted Diff to every Set.
 const MAX_SET_BYTES: usize = 32 * 1024 * 1024;
 
+/// What the agents' API hangs off, before the id of the Conversation asking.
+///
+/// Every Set is asked from a Conversation and lands on its Timeline, so the
+/// whole of the agent contract is under here: a session is handed this and its
+/// own id as `VERKSTEAD_SERVER` — see [`sandbox::Reachable`] — and the bundled
+/// CLI then names the Conversation in every request it makes without knowing it
+/// is doing so.
+///
+/// The same word the viewer routes a Conversation on, because it is the same
+/// Conversation: `/conversations/7` in a browser is the workbench open on the
+/// one whose sessions ask here.
+pub(crate) const ASKING_FROM: &str = "/conversations";
+
 /// The longest a client may ask to have a wait held open. There is no expiry
 /// on the waiting itself — the client owns retry (ADR-0001), so it picks the
 /// hold length and the server only bounds it.
@@ -291,13 +304,17 @@ fn routed(
     sessions: sessions::Sessions,
 ) -> Router {
     Router::new()
+        // The one route that is nobody's Conversation: whether the server is up
+        // is not a question about a piece of work.
         .route("/api/v1/health", get(health))
+        // And the rest of the agent contract, under the Conversation the session
+        // asking is running for — see [`ASKING_FROM`].
         .route(
-            "/api/v1/sets",
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/sets"),
             post(sets::create_set).layer(DefaultBodyLimit::max(MAX_SET_BYTES)),
         )
         .route(
-            "/api/v1/sets/{id}/response",
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/sets/{{id}}/response"),
             post(responses::submit_response).get(responses::wait_for_response),
         )
         // The viewer's half. It shares this state rather than holding its own:
@@ -412,7 +429,7 @@ pub async fn run(config: Config) -> Result<()> {
             config.releases(),
             watched,
             state_dir,
-            Agents::new(home, binds, skills),
+            Agents::new(home, sandbox::Reachable::at(config.listen), binds, skills),
         ),
     )
     .await

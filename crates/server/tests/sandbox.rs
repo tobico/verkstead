@@ -16,13 +16,17 @@
 
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::net::TcpListener;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use verkstead_server::sandbox::{Home, Sandbox, SandboxConfig, under_dev_shell};
+use verkstead_server::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
+
+/// Where the server this Conversation belongs to is listening — which is what a
+/// session inside is told to put its Question Sets to.
+const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
 /// Path, a Profile to run as, and a worktree under Verkstead's own state
@@ -47,6 +51,11 @@ struct Grilling {
     conversation: store::Conversation,
     profile: store::Profile,
 
+    /// The store the Conversation was written into, for the test that stands a
+    /// real server up over it and lets a session inside the sandbox ask it
+    /// something.
+    pool: sqlx::SqlitePool,
+
     /// The bundled skills, installed where the server installs them: under the
     /// State Directory, at startup.
     skills: Skills,
@@ -56,10 +65,17 @@ impl Grilling {
     /// The sandbox this Conversation's session would run in, with `extra` as
     /// whatever Sandbox Configuration asked for.
     fn sandbox(&self, extra: Vec<PathBuf>) -> Sandbox {
+        self.sandbox_reaching(LISTENING, extra)
+    }
+
+    /// The same, for a server that is really listening somewhere — which is what
+    /// a session inside has to be able to reach to ask anything.
+    fn sandbox_reaching(&self, listening: SocketAddr, extra: Vec<PathBuf>) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
             &self.profile,
             self.home(),
+            &Reachable::at(listening),
             &self.skills,
             extra,
         )
@@ -220,6 +236,7 @@ async fn grilling() -> Grilling {
         sibling,
         conversation,
         profile,
+        pool,
         skills,
     }
 }
@@ -548,6 +565,101 @@ async fn the_network_is_the_hosts_own() {
     );
 
     answering.join().unwrap();
+}
+
+/// The one thing a session is given that is not a directory, and the whole of
+/// what makes its Question Sets its own Conversation's.
+///
+/// Asked from inside rather than read off the flags the sandbox was built with,
+/// like every other claim in this file: what settles whether a session can reach
+/// Verkstead is a session trying to, and a Set that lands on the right Timeline
+/// is the only evidence that it did.
+///
+/// The server is real and listening on the host's loopback, which the sandbox
+/// shares — see [`the_network_is_the_hosts_own`]. Everything but the agent is
+/// real too: `curl` inside the sandbox is standing in for the bundled CLI, which
+/// posts exactly this to exactly this URL.
+#[tokio::test]
+async fn a_session_puts_a_set_to_its_own_conversation_and_nothing_else() {
+    let fixture = grilling().await;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listening = listener.local_addr().unwrap();
+
+    let serving = tokio::spawn({
+        let pool = fixture.pool.clone();
+        async move {
+            let _ = axum::serve(listener, verkstead_server::router(pool)).await;
+        }
+    });
+
+    let sandbox = fixture.sandbox_reaching(listening, vec![]);
+
+    // Every part of the sandbox blocks, and this one is a process talking to a
+    // server on the runtime this test is on.
+    let reported = tokio::task::spawn_blocking(move || {
+        probe(
+            &sandbox,
+            &format!(
+                r#"
+                say server "$VERKSTEAD_SERVER"
+
+                {curl} --silent --show-error --fail \
+                    --header 'Content-Type: application/yaml' \
+                    --data-binary @- \
+                    --output /tmp/created \
+                    "$VERKSTEAD_SERVER/api/v1/sets" <<'YAML'
+title: What a delivery that has failed forty times becomes
+questions:
+  - label: Q1
+    text: How many failures before an endpoint is given up on?
+    options:
+      - n: 1
+        text: Five
+        recommended: true
+YAML
+
+                say submitted "$?"
+                "#,
+                curl = quoted(&on_the_host("curl")),
+            ),
+        )
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        reported["server"],
+        format!(
+            "http://{listening}/conversations/{}",
+            fixture.conversation.id
+        ),
+        "a session is pointed at its own Conversation, explicitly"
+    );
+    assert_eq!(
+        reported["submitted"], "0",
+        "the server should have taken the Set"
+    );
+
+    let timeline = store::timeline(&fixture.pool, fixture.conversation.id)
+        .await
+        .unwrap();
+
+    let asked: Vec<&store::SetOnTimeline> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::QuestionSet(asked) => Some(asked.as_ref()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(asked.len(), 1, "the Timeline it landed on is its own");
+    assert_eq!(
+        asked[0].set.title,
+        "What a delivery that has failed forty times becomes"
+    );
+
+    serving.abort();
 }
 
 #[tokio::test]

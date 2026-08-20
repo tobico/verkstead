@@ -52,6 +52,120 @@
         "lines": 3,
         "running": false
       }
+    },
+    {
+      "QuestionSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 6,
+        "rows": [
+          {
+            "answer": "In-process, per instance.",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "A 429 plus RateLimit headers. — and document them in the changelog",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "keep them short",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
+        "set_id": 1,
+        "standing": {
+          "Answered": {
+            "response": {
+              "answers": [
+                {
+                  "label": "Q1",
+                  "selected": 1
+                },
+                {
+                  "free_text": "and document them in the changelog",
+                  "label": "Q2",
+                  "selected": 2
+                },
+                {
+                  "label": "Q2a",
+                  "unanswered": true
+                },
+                {
+                  "free_text": "keep them short",
+                  "label": "Q2b"
+                },
+                {
+                  "label": "Q3",
+                  "unanswered": true
+                }
+              ],
+              "comment": "Do the in-process one first; we can move it later."
+            },
+            "submitted_at": "2026-08-03T09:07:11.000Z"
+          }
+        },
+        "title": "Retry policy for the outbound queue"
+      }
+    },
+    {
+      "QuestionSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 7,
+        "rows": [
+          {
+            "answer": "",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
+        "set_id": 2,
+        "standing": {
+          "Waiting": "waiting"
+        },
+        "title": "What a delivery that has failed forty times becomes"
+      }
     }
   ],
   "worktree": {

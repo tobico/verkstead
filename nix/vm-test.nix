@@ -319,13 +319,28 @@ testers.runNixOSTest {
     BRANCH = "vm-branch"
 
 
+    # The Conversation the agents here ask from, filled in once there is a Repo
+    # to hang one off. Every Set is asked from one, and what says which is the
+    # base URL a session is given — see `asking_from` below.
+    ASKING_FROM = None
+
+
+    def asking_from():
+        """The base URL a session on the Conversation above is given, which is
+        what the sandbox sets `VERKSTEAD_SERVER` to."""
+        assert ASKING_FROM is not None, "no Conversation to ask from yet"
+        return f"http://127.0.0.1:8422/conversations/{ASKING_FROM}"
+
+
     def ask(name):
         """Start `verkstead ask` the way an agent does — in the background, so the
         wait outlives the caller — and leave its stdout, stderr and exit status
         in a directory of its own.
 
-        Nothing is set in the environment: the CLI has only its own default,
-        `http://127.0.0.1:8422`, to find the server by.
+        `VERKSTEAD_SERVER` is what a session's sandbox is given: the server,
+        scoped to the Conversation it is asking from. Nothing else in the
+        environment is set, and nothing about the Set says which Conversation it
+        belongs to — the URL is the whole of the attribution.
 
         Every descriptor of the backgrounded subshell is redirected, the two the
         agent's own output goes to and the rest besides: anything it inherited
@@ -334,7 +349,8 @@ testers.runNixOSTest {
         """
         machine.succeed(f"mkdir -p /root/{name}")
         machine.succeed(
-            f"( cd {REPO} && verkstead ask /etc/verkstead-vm-test/set.yaml"
+            f"( cd {REPO} && VERKSTEAD_SERVER={asking_from()}"
+            " verkstead ask /etc/verkstead-vm-test/set.yaml"
             f" > /root/{name}/response.yaml 2> /root/{name}/log;"
             f" echo $? > /root/{name}/status )"
             " < /dev/null > /dev/null 2>&1 &"
@@ -368,11 +384,12 @@ testers.runNixOSTest {
 
 
     def answer(set_id, fixture):
-        """Post a Response over the API the web UI posts through."""
+        """Post a Response over the API, reached through the Conversation the Set
+        was asked from."""
         machine.succeed(
             "curl -sf -X POST -H 'Content-Type: application/yaml'"
             f" --data-binary @/etc/verkstead-vm-test/{fixture}"
-            f" http://127.0.0.1:8422/api/v1/sets/{set_id}/response"
+            f" {asking_from()}/api/v1/sets/{set_id}/response"
         )
 
 
@@ -479,6 +496,16 @@ testers.runNixOSTest {
         ).strip()
 
 
+    def post(path, body):
+        """POST a JSON body to the viewer's own namespace, and hand back what
+        came back — which is what the workbench would have received."""
+        return machine.succeed(
+            "curl -sf -X POST -H 'Content-Type: application/json'"
+            f" -d {shlex.quote(json.dumps(body))}"
+            f" http://127.0.0.1:8422{path}"
+        ).strip()
+
+
     with subtest("a repo inside a watched path registers, and one outside cannot"):
         # Both watched paths, because they are exposed to the sandbox two
         # different ways: `/srv/repos` is somewhere the hardening leaves in
@@ -500,6 +527,17 @@ testers.runNixOSTest {
 
         listed = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos")
         assert "/srv/elsewhere" not in listed, f"a refused repo is on the list:\n{listed}"
+
+    # Somewhere for the agents' Sets to land. Every Set is asked from a
+    # Conversation, and the base URL a session is given is what says which — so a
+    # test standing in for a session has to be given the same thing.
+    #
+    # Against a registered Repo, which is the only kind there is; the directory
+    # the CLI derives `project`, `branch` and the Diff from is the agent's own
+    # working directory below, and deliberately not this one.
+    repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
+    started = json.loads(post("/api/ui/conversations", {"repo_id": repos[0]["id"]}))
+    ASKING_FROM = started["Started"]["id"]
 
     # The repository an agent always asks from, and which the CLI reads
     # `project`, `branch` and the Diff out of by shelling out to git.
@@ -557,14 +595,12 @@ testers.runNixOSTest {
 
         # The Set outlived the process that took it: 204 is "still pending, come
         # back", where a database that had not survived would answer 404.
-        code = status_code(
-            f"http://127.0.0.1:8422/api/v1/sets/{pending}/response?hold=0"
-        )
+        code = status_code(f"{asking_from()}/api/v1/sets/{pending}/response?hold=0")
         assert code == "204", f"the pending Set answered {code} after the restart"
 
         # And so did the Set that was answered before the restart.
         machine.succeed(
-            f"curl -sf 'http://127.0.0.1:8422/api/v1/sets/{first}/response?hold=0'"
+            f"curl -sf '{asking_from()}/api/v1/sets/{first}/response?hold=0'"
             " | grep -q 'The first Set came back'"
         )
 
@@ -582,16 +618,6 @@ testers.runNixOSTest {
         printed = collect("second")
 
         assert "recovered its wait" in printed, f"the CLI printed:\n{printed}"
-
-    def post(path, body):
-        """POST a JSON body to the viewer's own namespace, and hand back what
-        came back — which is what the workbench would have received."""
-        return machine.succeed(
-            "curl -sf -X POST -H 'Content-Type: application/json'"
-            f" -d {shlex.quote(json.dumps(body))}"
-            f" http://127.0.0.1:8422{path}"
-        ).strip()
-
 
     with subtest("the running service makes a worktree in its state directory"):
         # Everything a grilling needs, done through the same endpoints the

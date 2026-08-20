@@ -51,11 +51,39 @@ address. Skip it if only the API matters — the server starts either way, and
 says on every page that the viewer was not built. While working on the viewer
 itself, `pnpm dev` is the better half of this: see [The dev loop](#the-dev-loop).
 
-### 3. Ask (terminal 2)
+### 3. Start a conversation (in the browser)
+
+Every Question Set is asked *from* a Conversation and lands on its Timeline, so
+there has to be one before an agent can ask anything. Open
+<http://127.0.0.1:8422/>, add a repo from inside the watched path, and press
+**New conversation**. The URL then names it — `/conversations/1` — and that
+number is the one below.
+
+The same two steps over the API, which is what a script does:
 
 ```console
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"path":"'"$HOME"'/src/verkstead"}' \
+    http://127.0.0.1:8422/api/ui/repos
+"Added"
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"repo_id":1}' http://127.0.0.1:8422/api/ui/conversations
+{"Started":{"id":1}}
+```
+
+### 4. Ask (terminal 2)
+
+```console
+$ export VERKSTEAD_SERVER=http://127.0.0.1:8422/conversations/1
 $ cargo run -p verkstead-cli -- ask examples/questions.yaml
 ```
+
+`VERKSTEAD_SERVER` is the whole of what says which Conversation is asking. A
+real session never sets it by hand: the orchestrator injects it into the
+sandbox, scoped to the Conversation the session is running for, so the bundled
+CLI attributes every Set explicitly without knowing it is doing so. Nothing is
+inferred from the project or the branch — two Conversations against one repo
+would be indistinguishable by either.
 
 A wait that goes to plan is silent, and the little the CLI does have to say —
 reconnecting, or refusing a Set — is on **stderr**, written as a YAML comment.
@@ -75,16 +103,17 @@ A Set can also arrive on stdin, which is how an agent usually sends one:
 $ cat examples/questions.yaml | cargo run -p verkstead-cli -- ask
 ```
 
-### 4. Answer (in the browser)
+### 5. Answer (in the browser)
 
 This is the human's part. Open <http://127.0.0.1:8422/pending> and the Set from
-step 3 is on the pending list, with its project, its branch, and `agent
+step 4 is on the pending list, with its project, its branch, and `agent
 waiting` — that last one being the CLI still holding its long-poll. Open it.
 
-(The root is the **workbench**, which is where Conversations are started and
-briefs are written. The pending list is a page of its own for as long as
-Question Sets are not yet on a Conversation's Timeline; the workbench's sidebar
-links to it.)
+(It is also on the Timeline of the Conversation it was asked from, summarised
+as the table of number, question and answer — open the Conversation in the
+workbench and press the row to answer it there instead. The pending list is a
+second way in, kept for as long as the phone's answering flow has not moved
+over; the workbench's sidebar links to it.)
 
 The page is the whole ask: the Preface, the Diff of the working tree the agent
 asked from, and each Question with its Options. Pick one, or write your own
@@ -105,7 +134,7 @@ test or a script does — see
 Question in the example Set, leaves one explicitly open, and adds a set-level
 comment.
 
-### 5. Delivery
+### 6. Delivery
 
 Back in terminal 2, the still-waiting CLI has printed the Response and exited —
 this is what it prints for the answers in `examples/response.yaml`:
@@ -134,10 +163,10 @@ $ echo $?
 0
 ```
 
-That is the loop. Run step 3 again and Question Set 2 appears on the pending
-list to be answered the same way. To answer it from your phone instead, put
-`tailscale serve --bg 8422` in front of the server and open the `ts.net` url —
-push notifications need the HTTPS that gives you.
+That is the loop. Run step 4 again and Question Set 2 appears on the same
+Conversation's Timeline, to be answered the same way. To answer it from your
+phone instead, put `tailscale serve --bg 8422` in front of the server and open
+the `ts.net` url — push notifications need the HTTPS that gives you.
 
 ## The dev loop
 
