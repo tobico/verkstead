@@ -23,6 +23,7 @@ mod conversations;
 mod profiles;
 mod push;
 mod repos;
+mod transcripts;
 mod waits;
 
 pub use conversations::{
@@ -40,6 +41,7 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{Repo, register_repo, registered_repos};
+pub use transcripts::{Summary, append_transcript, start_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
 
 /// A Set as the store holds it: the agent's Set plus the identity the server
@@ -330,6 +332,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The Conversations attached to them, and their Timelines. After the Repos
     // and the Profiles, because a Conversation's row references all three.
     conversations::apply_schema(pool).await?;
+
+    // What the sessions run against them printed. After the Timelines, because a
+    // transcript hangs off the Event it is the full self of.
+    transcripts::apply_schema(pool).await?;
 
     Ok(())
 }

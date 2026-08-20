@@ -137,6 +137,11 @@ pub enum TimelineEvent {
     /// grill and aborting are both this Event, because both are the work
     /// changing hands and the state is the only thing that differs.
     Moved(MovedEvent),
+
+    /// What a session printed, summarised. The whole of it is fetched
+    /// separately, by the details pane and only when one is opened — see
+    /// [`Transcript`].
+    AgentOutput(AgentOutputEvent),
 }
 
 /// A move as the page receives it: when, and to what.
@@ -173,10 +178,70 @@ pub struct BriefEvent {
     pub html: String,
 }
 
+/// A session's output as the Timeline shows it: how much there is, the last
+/// thing that was said, and whether more is coming.
+///
+/// The summary and not the transcript. A grilling session prints megabytes over
+/// an hour, and the Timeline is re-read every time an open page hears the world
+/// moved — so what a Conversation carries is these two lines, and the transcript
+/// is fetched by the pane that shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AgentOutputEvent {
+    pub id: i64,
+
+    /// When the session started, RFC 3339.
+    pub at: String,
+
+    /// How many lines it has printed.
+    pub lines: i64,
+
+    /// The last of them that said anything, with the terminal's own control
+    /// sequences taken out. Empty where nothing has been printed yet.
+    pub latest: String,
+
+    /// Whether the session writing this is still running.
+    ///
+    /// Not something the record holds: a running session is a process, and what
+    /// knows about one is the server that started it. A Verkstead that has been
+    /// restarted has no sessions, which is why this is read off what is running
+    /// rather than off what was written.
+    pub running: bool,
+}
+
+/// One session's transcript, whole, as the details pane receives it.
+///
+/// Byte for byte, control sequences and all: what a terminal was sent is what a
+/// session said, and a transcript that had been tidied up would be a record of
+/// something else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Transcript {
+    pub text: String,
+}
+
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent { id, at, state })
+}
+
+/// A session's output as an Event. Nothing to render either — the summary was
+/// worked out as the output arrived — and here for the same reason as the move.
+pub fn agent_output_event(
+    id: i64,
+    at: String,
+    lines: i64,
+    latest: String,
+    running: bool,
+) -> TimelineEvent {
+    TimelineEvent::AgentOutput(AgentOutputEvent {
+        id,
+        at,
+        lines,
+        latest,
+        running,
+    })
 }
 
 /// The Brief as an Event, rendered on the way.

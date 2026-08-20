@@ -1011,6 +1011,95 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
+/* What a session has printed, summarised. A button, because the whole of it is
+   in the details pane and this is how it is opened — so it is a card that says
+   it can be pressed rather than one with a control in it. */
+.timeline-event > .agent-output {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event > .agent-output.selected {
+  border-color: var(--accent);
+}
+
+.agent-output .event-head {
+  margin-bottom: 0.35rem;
+  justify-content: flex-start;
+}
+
+.agent-output .what {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.agent-output .lines {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* A session that is still talking. The colour the accent already is, because
+   what this says is that something is happening here rather than that something
+   is wrong. */
+.live {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+/* The last thing the agent said, on one line: what it said before that is what
+   the details pane is for. */
+.agent-output .latest {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* One session's output, opened: what the terminal was sent, as it was sent.
+   Wrapped rather than scrolled sideways — a pane on a phone is narrow, and a
+   transcript nobody can read the right-hand end of is one line of it. */
+.transcript-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.transcript {
+  margin: 0;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.close-event {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
 /* What happens next, under everything that has happened so far. Outside the
    list, because it is not an event — and an event is exactly what it would look
    like sitting at the end of one. */

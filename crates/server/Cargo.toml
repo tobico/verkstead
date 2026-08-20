@@ -49,7 +49,16 @@ serde-saphyr.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 time.workspace = true
-tokio = { workspace = true, features = ["signal", "sync", "time"] }
+# `process` and `io-util` are the session half: a grilling session is a child
+# process whose output is read as it arrives, and neither the spawning nor the
+# reading can block the runtime the server is answering requests on.
+tokio = { workspace = true, features = [
+    "io-util",
+    "process",
+    "signal",
+    "sync",
+    "time",
+] }
 # The Nudge stream is a broadcast channel turned into a `Stream` for axum's SSE
 # response, which is the `sync` feature and nothing else here uses.
 tokio-stream = { version = "0.1", features = ["sync"] }

@@ -31,10 +31,10 @@ mod when;
 
 pub use answering::{Archived, Submitted};
 pub use conversations::{
-    BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
-    BriefSaved, ConversationAborted, ConversationEntry, ConversationView, GrillingStarted,
-    Lifecycle, MovedEvent, NewConversation, Started, TimelineEvent, Worktree, brief_event,
-    moved_event,
+    AgentOutputEvent, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
+    BriefEvent, BriefSaved, ConversationAborted, ConversationEntry, ConversationView,
+    GrillingStarted, Lifecycle, MovedEvent, NewConversation, Started, TimelineEvent, Transcript,
+    Worktree, agent_output_event, brief_event, moved_event,
 };
 pub use lists::{ArchiveEntry, PendingEntry};
 pub use profiles::{

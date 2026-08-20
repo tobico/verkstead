@@ -26,12 +26,19 @@ mod responses;
 /// detail of the endpoints — and because what proves a boundary is a probe run
 /// inside it, which is a test standing where the orchestrator does.
 pub mod sandbox;
+mod sessions;
 mod sets;
+mod transcript;
 mod ui;
 mod updates;
 mod viewer;
 mod watched;
 mod worktrees;
+
+/// How this server runs a Conversation's agents. Public for the reason the
+/// sandbox is: what a session is launched as is the product's business rather
+/// than an endpoint's, and standing a router up is choosing it.
+pub use sessions::Agents;
 
 /// The security boundary every filesystem path is decided against. Public
 /// because starting the server is choosing what it may touch, and a caller
@@ -62,17 +69,18 @@ const MAX_HOLD: Duration = Duration::from_secs(60);
 /// Set settled, for a single human settling them: this is generous.
 const SETTLEMENT_BACKLOG: usize = 64;
 
-/// What the handlers share: the store, word of Sets that have just arrived or
-/// have just been settled — so held waits need not poll for the one and open
-/// pages hear about both — which Sets a wait is being held on, whether a newer
-/// Verkstead has been released than this one, and which directories any of it
-/// may touch.
+/// What the handlers share: the store, word of what has just moved — so held
+/// waits need not poll for a Set arriving and open pages hear about everything
+/// else — which Sets a wait is being held on, which sessions are running,
+/// whether a newer Verkstead has been released than this one, and which
+/// directories any of it may touch.
 #[derive(Clone)]
 pub(crate) struct AppState {
     pool: SqlitePool,
-    creations: nudge::Creations,
+    nudges: nudge::Nudges,
     settlements: Settlements,
     waits: Waits,
+    sessions: sessions::Sessions,
     updates: updates::Updates,
     watched: WatchedPaths,
 
@@ -203,17 +211,41 @@ pub fn router(pool: SqlitePool) -> Router {
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
         nowhere(),
+        sessions::Sessions::none(),
     )
 }
 
 /// The same, permitted inside `watched` — the directories a Repo may be
 /// registered from — and keeping what it makes in `state_dir`.
+///
+/// It runs no sessions: starting a grilling makes the branch and the worktree
+/// and records that it did, and there is nothing here to launch inside them.
+/// See [`router_running_sessions`] for the one that does.
 pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathBuf) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
         watched,
         state_dir,
+        sessions::Sessions::none(),
+    )
+}
+
+/// And the same again, running its sessions under `agents` — which is what the
+/// served router does, and what a test asking whether a session's output reaches
+/// the Timeline has to stand up for itself.
+pub fn router_running_sessions(
+    pool: SqlitePool,
+    watched: WatchedPaths,
+    state_dir: PathBuf,
+    agents: Agents,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        watched,
+        state_dir,
+        sessions::Sessions::under(agents),
     )
 }
 
@@ -240,6 +272,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         updates::watching(releases),
         WatchedPaths::none(),
         nowhere(),
+        sessions::Sessions::none(),
     )
 }
 
@@ -248,6 +281,7 @@ fn routed(
     updates: updates::Updates,
     watched: WatchedPaths,
     state_dir: PathBuf,
+    sessions: sessions::Sessions,
 ) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
@@ -266,9 +300,10 @@ fn routed(
         .merge(ui::routes())
         .with_state(AppState {
             pool,
-            creations: nudge::Creations::new(),
+            nudges: nudge::Nudges::new(),
             settlements: Settlements::new(SETTLEMENT_BACKLOG),
             waits: Waits::new(),
+            sessions,
             updates,
             watched,
             state_dir,
@@ -294,9 +329,16 @@ pub fn router_with_ui(
     releases: Option<&str>,
     watched: WatchedPaths,
     state_dir: PathBuf,
+    agents: Agents,
 ) -> Router {
-    routed(pool, updates::watching(releases), watched, state_dir)
-        .fallback(viewer::serve::<viewer::Built>)
+    routed(
+        pool,
+        updates::watching(releases),
+        watched,
+        state_dir,
+        sessions::Sessions::under(agents),
+    )
+    .fallback(viewer::serve::<viewer::Built>)
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
@@ -319,11 +361,7 @@ pub async fn run(config: Config) -> Result<()> {
     // report now rather than sessions that fail to start weeks later with nobody
     // watching. The home is where a sandbox reads who git commits as and what
     // `gh` is logged in as, so a server without one can run no session at all.
-    //
-    // Nothing runs one yet: what these are handed to is the orchestrator, which
-    // is the next stage's. Resolving them here is what turns a mistyped bind
-    // into a server that refuses to come up.
-    let sandbox = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
+    let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
     let home = sandbox::Home::of_the_server().context(
         "no HOME is set: a session reads the machine's git identity and gh login out of \
          the home directory of whoever runs Verkstead, so the unit has to say what it is",
@@ -349,13 +387,19 @@ pub async fn run(config: Config) -> Result<()> {
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         home = %home.path.display(),
-        sandbox_binds = sandbox.count(),
+        sandbox_binds = binds.count(),
         "verkstead is listening",
     );
 
     axum::serve(
         listener,
-        router_with_ui(pool, config.releases(), watched, state_dir),
+        router_with_ui(
+            pool,
+            config.releases(),
+            watched,
+            state_dir,
+            Agents::new(home, binds),
+        ),
     )
     .await
     .context("serving Verkstead")

@@ -11,17 +11,22 @@
 //! The attribute rather than a rendered-or-not pane, because walking back out
 //! should not throw away what the pane it came from had drawn.
 //!
-//! Nothing here starts anything. A Conversation is a record a grilling session
-//! will be run against, and the button that runs one arrives with the stage that
-//! has something to run.
+//! Which Event is open is held here rather than in the Timeline, because it is
+//! what the third pane is *about*: with none open the pane says what the
+//! Conversation is, and with one open it shows that Event's full self. The
+//! selection is not in the URL — an Event opened is a place in a page rather
+//! than a page, and a Conversation whose Timeline has moved on is not one to
+//! restore a scroll position into.
 
 import { useNavigate, useParams } from "@solidjs/router";
 import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
 
 import { loadConversation } from "../api/client";
+import type { AgentOutputEvent, ConversationView } from "../api/types";
 import { Conversations } from "./Conversations";
 import { Details } from "./Details";
+import { Output } from "./Output";
 import { Timeline } from "./Timeline";
 
 /// Which level of the hierarchy a narrow window is showing.
@@ -33,6 +38,9 @@ export function Workbench(): JSX.Element {
 
   const [pane, setPane] = createSignal<Pane>("conversations");
 
+  /// Which Timeline Event the details pane is showing, where one is open.
+  const [event, setEvent] = createSignal<number | null>(null);
+
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
   /// nothing.
@@ -42,9 +50,28 @@ export function Workbench(): JSX.Element {
   // the workbench route walks it back out. Written as an effect on the URL
   // rather than done in the click handler, because Back is a way of changing the
   // selection too and it never goes through one.
+  //
+  // Whatever Event was open closes with it: an Event belongs to one
+  // Conversation, and an id kept across the change would name nothing.
   createEffect(
-    on(selected, (id) => setPane(id === "" ? "conversations" : "timeline")),
+    on(selected, (id) => {
+      setPane(id === "" ? "conversations" : "timeline");
+      setEvent(null);
+    }),
   );
+
+  /// The Event the details pane is showing, where it is one that has a full
+  /// self to show. An id whose Event has gone shows the Conversation instead,
+  /// which is what the pane says when nothing is open.
+  const opened = (
+    conversation: ConversationView,
+  ): AgentOutputEvent | undefined => {
+    const id = event();
+
+    return conversation.timeline
+      .map((entry) => ("AgentOutput" in entry ? entry.AgentOutput : undefined))
+      .find((output) => output !== undefined && output.id === id);
+  };
 
   const conversation = useQuery(() => ({
     queryKey: ["conversation", selected()],
@@ -82,6 +109,8 @@ export function Workbench(): JSX.Element {
                 conversation={conversation()}
                 back={() => setPane("conversations")}
                 details={() => setPane("details")}
+                selected={event()}
+                select={setEvent}
               />
             )}
           </Match>
@@ -94,10 +123,24 @@ export function Workbench(): JSX.Element {
           fallback={<p class="empty">Nothing to show yet.</p>}
         >
           {(conversation) => (
-            <Details
-              conversation={conversation()}
-              back={() => setPane("timeline")}
-            />
+            <Show
+              when={opened(conversation())}
+              fallback={
+                <Details
+                  conversation={conversation()}
+                  back={() => setPane("timeline")}
+                />
+              }
+            >
+              {(output) => (
+                <Output
+                  conversation={conversation()}
+                  output={output()}
+                  back={() => setPane("timeline")}
+                  close={() => setEvent(null)}
+                />
+              )}
+            </Show>
           )}
         </Show>
       </section>

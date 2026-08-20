@@ -1,9 +1,13 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
-//! Two kinds of Event so far — the Brief and a move — drawn as a list of Events
-//! rather than as a Brief with a list under it. The stages after this one put
-//! agent output, Question Sets and commits on the same list, and a Timeline
-//! built around its first Event would have to be taken apart to hold the second.
+//! Three kinds of Event so far — the Brief, a move, and what a session printed —
+//! drawn as a list of Events rather than as a Brief with a list under it. The
+//! stages after this one put Question Sets and commits on the same list.
+//!
+//! An Event that has a full self shows its summary here and is opened in the
+//! details pane, which is why this takes a way of selecting one. The Brief has
+//! no full self beyond what is already drawn, so it is the one Event nothing
+//! opens.
 //!
 //! The Timeline is also where the grilling is started from, because that is
 //! where the reason to start it is: the button sits under the Brief it will
@@ -18,6 +22,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { abortConversation, saveBrief, startGrilling } from "../api/client";
 import type {
+  AgentOutputEvent,
   BriefEvent,
   BriefSaved,
   ConversationAborted,
@@ -82,6 +87,10 @@ export function Timeline(props: {
   conversation: ConversationView;
   back: () => void;
   details: () => void;
+
+  /// Which Event the details pane is showing, and how to change it.
+  selected: number | null;
+  select: (event: number) => void;
 }): JSX.Element {
   return (
     <>
@@ -112,6 +121,18 @@ export function Timeline(props: {
                 <Match when={"Moved" in event && event.Moved}>
                   {(moved) => <Moved moved={moved()} />}
                 </Match>
+                <Match when={"AgentOutput" in event && event.AgentOutput}>
+                  {(output) => (
+                    <AgentOutput
+                      output={output()}
+                      selected={props.selected === output().id}
+                      open={() => {
+                        props.select(output().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
               </Switch>
             </li>
           )}
@@ -135,6 +156,55 @@ function Moved(props: { moved: MovedEvent }): JSX.Element {
     <p class="moved" classList={{ [props.moved.state.toLowerCase()]: true }}>
       {MOVED[props.moved.state]}
     </p>
+  );
+}
+
+/// What a session has printed: how much of it there is, and the last thing it
+/// said.
+///
+/// A button, because the whole of it is in the details pane and this is how it
+/// is opened — the summary is a line, and a grilling session's transcript is an
+/// hour of terminal output nobody wants in the middle pane.
+///
+/// It moves while the session runs, which is the point: the page hears the world
+/// moved and reads this back, so a session that has just asked something says so
+/// here rather than at the end of an hour.
+function AgentOutput(props: {
+  output: AgentOutputEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      class="agent-output"
+      classList={{
+        selected: props.selected,
+        running: props.output.running,
+      }}
+      aria-pressed={props.selected}
+      onClick={props.open}
+    >
+      <span class="event-head">
+        <span class="what">Agent output</span>
+        <span class="lines">
+          {props.output.lines} {props.output.lines === 1 ? "line" : "lines"}
+        </span>
+        <Show when={props.output.running}>
+          <span class="live">running</span>
+        </Show>
+      </span>
+      <span class="latest">
+        <Show
+          when={props.output.latest !== ""}
+          fallback={
+            <span class="empty">Nothing printed yet.</span>
+          }
+        >
+          {props.output.latest}
+        </Show>
+      </span>
+    </button>
   );
 }
 

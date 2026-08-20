@@ -58,6 +58,10 @@ const SYSTEM: [&str; 6] = [
 /// launched.
 const PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
 
+/// And what a session's `SHELL` is: the one path the system bind is certain to
+/// have a shell at, on NixOS and everywhere else.
+const SHELL: &str = "/bin/sh";
+
 /// The host directory `~` means, and what is read out of it.
 ///
 /// A session's HOME is the server's own, at the same path inside the sandbox.
@@ -374,6 +378,14 @@ impl Sandbox {
             .arg("--setenv")
             .arg("PATH")
             .arg(PATH)
+            // Which shell is inside, for the same reason `PATH` is said here:
+            // the environment is cleared, so a tool that shells out reaches for
+            // whatever this holds — and with nothing in it, `script` would fall
+            // back to whatever login shell the passwd file gives the user the
+            // server happens to run as.
+            .arg("--setenv")
+            .arg("SHELL")
+            .arg(SHELL)
             .args(argv);
 
         bwrap

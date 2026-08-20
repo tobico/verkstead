@@ -53,6 +53,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(conversations).post(start_conversation),
         )
         .route("/api/ui/conversations/{id}", get(conversation))
+        // One Event's full self, fetched by the pane that shows it rather than
+        // carried by the Conversation — see [`transcript`].
+        .route(
+            "/api/ui/conversations/{id}/transcript/{event}",
+            get(transcript),
+        )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_commit))
@@ -426,6 +432,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
+    // Which of this Conversation's output Events is still being written into,
+    // which is a question about a process rather than about the record: a
+    // restarted server has no sessions, and every transcript it holds is of one
+    // that is over.
+    let writing = state.sessions.writing(id);
+
     let view = ConversationView {
         id: conversation.id,
         repo: RepoEntry {
@@ -454,11 +466,52 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 store::Event::Moved(state) => {
                     verkstead_render::moved_event(event.id, event.at, lifecycle(state))
                 }
+                // The summary and not the transcript: a Timeline is read every
+                // time an open page hears the world moved, and a session's
+                // output is megabytes the middle pane never shows.
+                store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
+                    event.id,
+                    event.at,
+                    summary.lines,
+                    summary.latest,
+                    writing == Some(event.id),
+                ),
             })
             .collect(),
     };
 
     Json(view).into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/transcript/{event}` — what one session
+/// printed, whole.
+///
+/// Its own request rather than a field on the Conversation, because of the two
+/// sizes involved. A session prints megabytes over an hour and the Timeline is
+/// re-read every time an open page hears the world moved; the transcript is read
+/// when somebody opens the one Event it belongs to.
+///
+/// Byte for byte, control sequences and all — what a terminal was sent is what
+/// the session said.
+async fn transcript(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Two ids out of a URL a human may have typed, and neither of them naming a
+    // number cannot name a transcript — the same permissiveness every other id
+    // here is read with.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_transcript();
+    };
+
+    match store::transcript(&state.pool, id, event).await {
+        Ok(Some(text)) => Json(verkstead_render::Transcript { text }).into_response(),
+        Ok(None) => no_such_transcript(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a transcript failed");
+            unavailable("the transcript could not be read")
+        }
+    }
 }
 
 /// `POST /api/ui/conversations/{id}/brief` — save what the human has written.
@@ -533,9 +586,7 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
         return Json(GrillingStarted::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::start_grilling(&state.pool, &state.watched, &state.state_dir, id)
-        .await
-    {
+    match crate::conversations::start_grilling(&state, id).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
@@ -550,7 +601,7 @@ async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         return Json(ConversationAborted::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::abort(&state.pool, id).await {
+    match crate::conversations::abort(&state, id).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
@@ -766,6 +817,16 @@ fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Conversation {id}")),
+    )
+}
+
+/// There is no such transcript on that Conversation's Timeline. Worded without
+/// either id, unlike the two above: what was asked for is a pair, and a pair
+/// that names nothing names nothing for more than one reason.
+fn no_such_transcript() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such transcript on that Conversation"),
     )
 }
 

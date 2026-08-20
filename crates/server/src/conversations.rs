@@ -9,10 +9,9 @@
 //! watching.
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
-//! somewhere to work — see [`start_grilling`] — and aborting is where it gives
-//! that back. Neither runs a session: the branch and the worktree are the ground
-//! a session will later stand on, and the stage that stands on it is the next
-//! one.
+//! somewhere to work — see [`start_grilling`] — and where the session that does
+//! the work is launched in it. Aborting is where both are given back: the
+//! session ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
 
@@ -23,9 +22,9 @@ use verkstead_render::{
     Started, Worktree,
 };
 
+use crate::AppState;
 use crate::repos::git;
 use crate::store;
-use crate::watched::WatchedPaths;
 use crate::worktrees;
 
 /// Start a Conversation against a registered Repo, on a branch name nobody has
@@ -140,12 +139,23 @@ pub(crate) async fn set_base_commit(
 /// be a Conversation nothing could start and nothing would clean up. The reverse
 /// — a worktree on disk that the store does not know about — is a directory to
 /// tidy, which is the lesser of the two.
-pub(crate) async fn start_grilling(
-    pool: &SqlitePool,
-    watched: &WatchedPaths,
-    state: &Path,
-    id: i64,
-) -> Result<GrillingStarted> {
+///
+/// The session comes last, for the same reason and read the same way: a
+/// Conversation that is grilling with nothing grilling it is a thing to look at
+/// and start again, and one that had launched an agent nothing had recorded
+/// would be an agent nobody could see or stop. It is also the one part of this
+/// that failing does not refuse — the branch is made, the Brief is frozen, and
+/// what a session that would not start leaves behind is an Interruption, which
+/// is a later stage's Event.
+///
+/// The whole state rather than the four pieces of it this needs: what starting a
+/// grilling reaches is most of what the server holds — the store, the boundary,
+/// the state directory, the sessions and whoever is watching them — and a
+/// parameter list of that length says less than the one name does.
+pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<GrillingStarted> {
+    let pool = &state.pool;
+    let watched = &state.watched;
+
     let Some(conversation) = store::load_conversation(pool, id).await? else {
         return Ok(GrillingStarted::NoSuchConversation);
     };
@@ -165,7 +175,11 @@ pub(crate) async fn start_grilling(
         return Ok(refusal);
     }
 
-    if brief(pool, id).await?.trim().is_empty() {
+    // Kept rather than only judged: it is what the session about to start is
+    // primed with, and it is frozen from the moment the Conversation moves.
+    let brief = brief(pool, id).await?;
+
+    if brief.trim().is_empty() {
         return Ok(GrillingStarted::EmptyBrief);
     }
 
@@ -180,7 +194,7 @@ pub(crate) async fn start_grilling(
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
-    let path = worktrees::worktree_path(state, id, &conversation.repo.name, &branch);
+    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
 
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
@@ -208,26 +222,59 @@ pub(crate) async fn start_grilling(
         Err(refusal) => return Ok(refusal),
     };
 
-    Ok(
-        match store::start_grilling(pool, id, &commit, &path).await? {
-            store::Grilling::Started => GrillingStarted::Started,
-            store::Grilling::NoSuchConversation => GrillingStarted::NoSuchConversation,
-            store::Grilling::NotDrafting => GrillingStarted::NotDrafting,
-        },
-    )
+    match store::start_grilling(pool, id, &commit, &path).await? {
+        store::Grilling::NoSuchConversation => return Ok(GrillingStarted::NoSuchConversation),
+        store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
+        store::Grilling::Started => {}
+    }
+
+    // Read back rather than assembled from what was just recorded: what the
+    // session runs against is the Conversation as it now stands, worktree and
+    // all, and the one thing that must not be guessed at is where an agent is
+    // about to be let loose.
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        return Ok(GrillingStarted::NoSuchConversation);
+    };
+
+    // Only the grilling Profile. The implementation one is fixed before starting
+    // because the grilling ends by handing over to it — that hand-over is a
+    // later stage's, and this session is not run under it.
+    //
+    // Logged rather than raised: by here the branch is made and the Brief is
+    // frozen, and answering the button with a failure would say that none of it
+    // happened.
+    if let Some(profile) = conversation.grilling_profile.clone()
+        && let Err(error) = state
+            .sessions
+            .start(pool, &state.nudges, &conversation, &profile, &brief)
+            .await
+    {
+        tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
+    }
+
+    Ok(GrillingStarted::Started)
 }
 
-/// Stop a Conversation wherever it has got to: its worktree removed, its branch
-/// left where it is.
+/// Stop a Conversation wherever it has got to: its session ended, its worktree
+/// removed, its branch left where it is.
 ///
-/// The worktree goes before the record does, for the reason the branch is made
-/// before one: what is recorded is what happened. A Conversation that said it
-/// had stopped while its directory was still on disk would be one nothing would
-/// ever come back and remove.
-pub(crate) async fn abort(pool: &SqlitePool, id: i64) -> Result<ConversationAborted> {
+/// The session goes first and is waited on, because what follows it is the
+/// removal of the directory it is working in: an agent still writing files into
+/// a worktree git is taking away is the one way this could leave a mess neither
+/// end knows about.
+///
+/// The worktree then goes before the record does, for the reason the branch is
+/// made before one: what is recorded is what happened. A Conversation that said
+/// it had stopped while its directory was still on disk would be one nothing
+/// would ever come back and remove.
+pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAborted> {
+    let pool = &state.pool;
+
     let Some(conversation) = store::load_conversation(pool, id).await? else {
         return Ok(ConversationAborted::NoSuchConversation);
     };
+
+    state.sessions.end(id).await;
 
     if let Some(path) = conversation.worktree.clone() {
         let repo = conversation.repo.path.clone();

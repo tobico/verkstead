@@ -18,21 +18,25 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AgentOutputEvent,
   ConversationAborted,
   ConversationEntry,
   ConversationView,
   GrillingStarted,
   ProfileEntry,
   RepoEntry,
+  TimelineEvent,
+  Transcript,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { Workbench } from "../src/workbench/Workbench";
-import { json, serving, whenever } from "./serving";
+import { askedFor, json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import transcript from "./fixtures/transcript.json" with { type: "json" };
 
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
@@ -701,6 +705,19 @@ describe("the panes on a narrow window", () => {
 /// The other shape the middle pane draws: a conversation that has been started,
 /// with a move on its timeline and a worktree to say where the work is going on.
 const GRILLING = grilling as ConversationView;
+const TRANSCRIPT = transcript as Transcript;
+
+/// The session's output on the grilling conversation's timeline.
+const OUTPUT = (() => {
+  const found = GRILLING.timeline.find((event) => "AgentOutput" in event);
+  if (!found || !("AgentOutput" in found)) {
+    throw new Error("the fixture should hold a session's output");
+  }
+  return found.AgentOutput;
+})();
+
+/// Where the details pane fetches the whole of it from.
+const TRANSCRIPT_OF_IT = `/api/ui/conversations/${GRILLING.id}/transcript/${OUTPUT.id}`;
 
 /// The workbench with the grilling conversation open instead of the drafting
 /// one.
@@ -710,7 +727,31 @@ function theGrilling(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+    whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
     ...answers,
+  );
+}
+
+/// The same, with the session's output Event altered — for the states no
+/// fixture holds, a running session being one: a fixture is a payload rather
+/// than a moment, and one that said it was running would have a page drawing a
+/// spinner over something that has not moved since 2026.
+function theGrillingOutput(over: Partial<AgentOutputEvent>) {
+  const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
+    "AgentOutput" in event
+      ? { AgentOutput: { ...event.AgentOutput, ...over } }
+      : event,
+  );
+
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, timeline: altered }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
   );
 }
 
@@ -826,8 +867,8 @@ describe("a move on the timeline", () => {
     expect(moved.classList).toContain("grilling");
   });
 
-  /// The brief stays the first event and the move follows it, which is reading
-  /// order and the order they happened in.
+  /// The brief stays the first event and everything after it follows in the
+  /// order it happened, which is also reading order.
   it("comes after the brief it followed", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -838,7 +879,105 @@ describe("a move on the timeline", () => {
       [...container.querySelectorAll(".timeline-event > *")].map(
         (event) => event.className.split(" ")[0],
       ),
-    ).toEqual(["brief", "moved"]);
+    ).toEqual(["brief", "moved", "agent-output"]);
+  });
+});
+
+describe("a session's output on the timeline", () => {
+  /// The design's summary: a line count and the last thing the agent said. An
+  /// hour of terminal output does not go in the middle pane.
+  it("summarises as a line count and the latest statement", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".lines")!.textContent).toBe(
+      `${OUTPUT.lines} lines`,
+    );
+    expect(output.querySelector(".latest")!.textContent).toBe(OUTPUT.latest);
+
+    // Nothing of the transcript itself: it is fetched by the pane that shows
+    // it, and only once one is opened.
+    expect(output.textContent).not.toContain("Reading the brief");
+  });
+
+  it("says so while the session is still running", async () => {
+    theGrillingOutput({ running: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.classList).toContain("running");
+    expect(output.querySelector(".live")!.textContent).toBe("running");
+  });
+
+  /// A session that has ended is a conversation with a transcript, not one with
+  /// an agent in it — and the fixture is exactly that.
+  it("says nothing about running when the session has ended", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(OUTPUT.running).toBe(false);
+    expect(output.classList).not.toContain("running");
+    expect(output.querySelector(".live")).toBeNull();
+  });
+
+  it("shows the whole transcript in the details pane, byte for byte", async () => {
+    const fetching = theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const shown = await drawn(container, ".details-pane .transcript");
+
+    expect(shown.textContent).toBe(TRANSCRIPT.text);
+    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// The transcript belongs to the pane, and what the conversation is comes
+  /// back when it is closed.
+  it("goes back to the conversation's details when it is closed", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .transcript");
+
+    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+
+    await drawn(container, ".details-pane .conversation-facts");
+    expect(container.querySelector(".details-pane .transcript")).toBeNull();
+  });
+
+  /// A phone shows one level at a time, and opening an event is walking into
+  /// the next one.
+  it("walks a narrow window into the details pane", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("details"),
+    );
+  });
+
+  /// The event that is open is the one the timeline says is open, so that a
+  /// narrow window walking back out can see which it came from.
+  it("marks the event the details pane is showing", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".agent-output");
+    expect(output.classList).not.toContain("selected");
+
+    fireEvent.click(output);
+
+    await waitFor(() => expect(output.classList).toContain("selected"));
+    expect(output.getAttribute("aria-pressed")).toBe("true");
   });
 });
 

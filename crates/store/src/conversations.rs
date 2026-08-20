@@ -159,7 +159,7 @@ pub struct TimelineEvent {
     pub event: Event,
 }
 
-/// What an Event is. Two kinds so far — the rest of the table in the design
+/// What an Event is. Three kinds so far — the rest of the table in the design
 /// arrives with the stages that produce them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -174,16 +174,27 @@ pub enum Event {
     /// changed to is the only thing that differs between one move and the next.
     /// Starting to grill and aborting both land here.
     Moved(Lifecycle),
+
+    /// A session's output, summarised. The whole of it is the transcript beside
+    /// it — see [`super::transcripts`] — which is what the details pane shows
+    /// and what this is a line of.
+    ///
+    /// The only Event whose body is not in the `body` column: a transcript is
+    /// written a chunk at a time for as long as a session runs, and a column
+    /// that was rewritten whole on every chunk would cost more the longer the
+    /// session went on.
+    AgentOutput(super::Summary),
 }
 
 impl Event {
     /// The word the `kind` column holds. `'static`, so the one statement that
     /// wants the word without an Event to hand can ask for it and let the Event
     /// go.
-    fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Brief(_) => "brief",
             Self::Moved(_) => "moved",
+            Self::AgentOutput(_) => "agent-output",
         }
     }
 
@@ -192,13 +203,26 @@ impl Event {
         match self {
             Self::Brief(markdown) => markdown,
             Self::Moved(state) => state.stored(),
+            // Nothing: what a session printed is in the transcript tables, and
+            // what the Timeline shows of it is read back from there too.
+            Self::AgentOutput(_) => "",
         }
     }
 
-    fn read(kind: &str, body: String) -> Result<Self> {
+    /// The Event a row holds, with the summary read alongside it where the row
+    /// is an agent-output one.
+    ///
+    /// A transcript's summary row is written in the same transaction as its
+    /// Event, so one without the other is a database somebody has been in by
+    /// hand — worth saying rather than reading as a session that printed
+    /// nothing.
+    fn read(kind: &str, body: String, summary: Option<super::Summary>) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
             "moved" => Self::Moved(Lifecycle::read(&body)?),
+            "agent-output" => Self::AgentOutput(
+                summary.ok_or_else(|| anyhow!("a session's output has no transcript beside it"))?,
+            ),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -576,12 +600,21 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Ordered by id rather than by `at`: the id is handed out in the order things
 /// happened, and two Events stamped in the same millisecond must not come back
 /// in an arbitrary one.
+///
+/// A transcript's summary is joined in rather than fetched per Event, and no
+/// transcript itself is: a Timeline is read every time an open page looks again,
+/// and what a session printed is megabytes the middle pane never shows.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
-    let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT id, at, kind, body
-         FROM timeline_events
-         WHERE conversation_id = ?
-         ORDER BY id",
+    /// The columns in the order the query below selects them: the Event, and
+    /// the transcript summary that is there for one kind of Event and no other.
+    type Row = (i64, String, String, String, Option<i64>, Option<String>);
+
+    let rows: Vec<Row> = sqlx::query_as(
+        "SELECT e.id, e.at, e.kind, e.body, t.lines, t.latest
+         FROM timeline_events e
+         LEFT JOIN transcripts t ON t.event_id = e.id
+         WHERE e.conversation_id = ?
+         ORDER BY e.id",
     )
     .bind(conversation_id)
     .fetch_all(pool)
@@ -589,11 +622,15 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
     rows.into_iter()
-        .map(|(id, at, kind, body)| {
+        .map(|(id, at, kind, body, lines, latest)| {
+            let summary = lines
+                .zip(latest)
+                .map(|(lines, latest)| super::Summary { lines, latest });
+
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body)?,
+                event: Event::read(&kind, body, summary)?,
             })
         })
         .collect()

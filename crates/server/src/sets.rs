@@ -43,7 +43,7 @@ pub(crate) async fn create_set(State(state): State<AppState>, body: String) -> R
 
             // And the pages that are already open, which hear it here rather
             // than the long way round through a push service.
-            state.creations.announce();
+            state.nudges.announce();
 
             yaml(StatusCode::CREATED, &created)
         }

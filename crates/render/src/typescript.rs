@@ -21,7 +21,7 @@ use crate::{
     BriefEdit, BriefSaved, ConversationAborted, ConversationEntry, ConversationView,
     GrillingStarted, NewConversation, PendingEntry, ProfileChoice, ProfileChosen, ProfileDeleted,
     ProfileEdit, ProfileEntry, ProfileSaved, PushKey, Registered, Registration, RepoEntry, SetView,
-    Started, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    Started, Submitted, Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -71,6 +71,10 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationAborted::export_all(&config).unwrap();
+
+    // What a session printed. The summary rides on the Timeline; the transcript
+    // is its own payload, because it is fetched by the one pane that shows it.
+    Transcript::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

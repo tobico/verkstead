@@ -1263,6 +1263,30 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And what the session running against it has printed so far, which is the
+    // other shape the Timeline draws. Written through the store rather than by
+    // running an agent, for the reason the worktree is recorded rather than
+    // made: what a session's output does to a Timeline is this file's subject,
+    // and whether a session runs at all is `tests/sessions.rs`'s.
+    //
+    // It reads as a session that has stopped: the fixture is a payload rather
+    // than a moment, and a running one would be a page drawing a spinner over
+    // something that has not moved since 2026.
+    let transcript = store::start_transcript(&pool, grilling).await.unwrap();
+    store::append_transcript(
+        &pool,
+        transcript,
+        "\u{1b}[2mReading the brief.\u{1b}[0m\r\n\
+         Looking at how the queue is drained.\r\n\
+         What should happen to a delivery that has failed forty times?\r\n",
+        &store::Summary {
+            lines: 3,
+            latest: "What should happen to a delivery that has failed forty times?".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,
@@ -1278,6 +1302,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{grilling}")).await,
         )),
+    );
+
+    // What the details pane fetches when that Conversation's output Event is
+    // opened. Nothing to pin: a transcript is bytes a session printed.
+    write(
+        "transcript.json",
+        &get(
+            &app,
+            &format!("/api/ui/conversations/{grilling}/transcript/{transcript}"),
+        )
+        .await,
     );
 }
 

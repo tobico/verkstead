@@ -31,6 +31,7 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
+  Transcript,
   UpdateNotice,
 } from "./types";
 
@@ -120,6 +121,18 @@ export function loadConversation(id: string): Promise<ConversationView> {
   return get<ConversationView>(
     `/api/ui/conversations/${encodeURIComponent(id)}`,
   );
+}
+
+/// What one session printed, whole.
+///
+/// Fetched by the pane that shows it rather than carried by the Conversation: a
+/// session prints megabytes over an hour, and the Timeline is read again every
+/// time this page hears the world moved.
+export function loadTranscript(
+  id: number,
+  event: number,
+): Promise<Transcript> {
+  return get<Transcript>(`/api/ui/conversations/${id}/transcript/${event}`);
 }
 
 /// Start a Conversation against a registered Repo.
