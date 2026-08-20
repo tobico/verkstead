@@ -170,6 +170,11 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * What became of aborting one.
+ */
+export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversation" | "WorktreeStuck";
+
+/**
  * One row of the conversations sidebar.
  *
  * The branch is the row's name: a Conversation has no title of its own, and of
@@ -209,15 +214,23 @@ grilling_profile: ProfileEntry | null,
  */
 implementation_profile: ProfileEntry | null, 
 /**
- * Whether everything the next stage needs before it will start grilling is
- * settled: both Profiles chosen, and neither of them broken.
+ * Whether everything needed before grilling will start is settled: both
+ * Profiles chosen and neither broken, a Brief with something in it, and a
+ * Conversation still drafting.
  *
- * The server's rule rather than something the page works out from the two
- * fields above, because it is not only about whether they are filled in — a
- * Profile whose pair has gone is not one to launch a session under — and
- * because the stage that grills adds its own conditions to the same answer.
+ * The server's rule rather than something the page works out from the
+ * fields around it. Every one of the refusals is checked again when the
+ * button is pressed — this is what decides whether to offer the button, and
+ * what it says is true only as of the moment it was read.
  */
 ready_to_grill: boolean, 
+/**
+ * The worktree the grilling was given to work in, once there is one.
+ *
+ * `null` both before grilling starts and after aborting — the two ways a
+ * Conversation has none, which are the same fact about it.
+ */
+worktree: Worktree | null, 
 /**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
@@ -238,13 +251,23 @@ timeline: Array<TimelineEvent>, };
 export type DiffView = { html: string, paths: Array<string>, };
 
 /**
+ * What became of starting a Conversation grilling.
+ *
+ * Every refusal is named rather than collapsed into one, because each of them
+ * is something different for the human to go and do: choose a Profile, write a
+ * Brief, pick another commit, deal with a branch that is already there. A
+ * single "cannot start" would leave them guessing which.
+ */
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
  * Where a Conversation has got to.
  *
- * The whole ladder, though only [`Lifecycle::Draft`] is reachable yet: the
- * states are the domain's, and the page says which one a Conversation is in
- * rather than assuming the only one it can currently be.
+ * The whole ladder, though only the first two are reachable yet: the states are
+ * the domain's, and the page says which one a Conversation is in rather than
+ * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done";
+export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done" | "Aborted";
 
 /**
  * What the pending list says about a Set: whether an agent is currently
@@ -258,6 +281,20 @@ export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "W
  * the registry of held waits; the browser only draws what it is told.
  */
 export type Liveness = "waiting" | "disconnected";
+
+/**
+ * A move as the page receives it: when, and to what.
+ *
+ * No rendered body, unlike the Brief — there is no markdown in a move. What the
+ * Timeline draws is a sentence of the viewer's own making from the one state,
+ * because the wording belongs to whoever is reading it rather than to the
+ * record.
+ */
+export type MovedEvent = { id: number, 
+/**
+ * When it moved, RFC 3339.
+ */
+at: string, state: Lifecycle, };
 
 /**
  * Starting a Conversation: the Repo it is against, and nothing else.
@@ -520,7 +557,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the
@@ -546,3 +583,17 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * A Conversation's worktree: where it is, and whether it is still there.
+ */
+export type Worktree = { path: string, 
+/**
+ * Whether the directory has gone from under Verkstead.
+ *
+ * A thing to say rather than a thing to fail on later. A worktree is an
+ * ordinary directory on a machine the human also uses, and one that has
+ * been deleted by hand should read as a Conversation with a problem — not
+ * as an obscure failure from whatever next tries to work in it.
+ */
+missing: boolean, };

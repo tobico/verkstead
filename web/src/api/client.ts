@@ -12,8 +12,10 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
+  ConversationAborted,
   ConversationEntry,
   ConversationView,
+  GrillingStarted,
   PendingEntry,
   ProfileChosen,
   ProfileDeleted,
@@ -149,6 +151,22 @@ export function setBaseCommit(
   commit: string | null,
 ): Promise<BaseRecorded> {
   return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { commit });
+}
+
+/// Give a Conversation somewhere to work and set it grilling: a branch off its
+/// base commit, and a worktree of its repo.
+///
+/// Nothing is sent. Which conversation is in the path, and there is nothing else
+/// to say — everything the server needs it already has, and everything it
+/// refuses for it decides itself when the button is pressed.
+export function startGrilling(id: number): Promise<GrillingStarted> {
+  return post<GrillingStarted>(`/api/ui/conversations/${id}/grill`, {});
+}
+
+/// Stop a Conversation wherever it has got to: its worktree removed, its branch
+/// left where it is.
+export function abortConversation(id: number): Promise<ConversationAborted> {
+  return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
 }
 
 /// The Agent Profiles a session can be run under, by name.

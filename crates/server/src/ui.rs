@@ -27,10 +27,10 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    ArchiveEntry, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationEntry,
-    ConversationView, Lifecycle, NewConversation, PendingEntry, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
+    ConversationEntry, ConversationView, GrillingStarted, Lifecycle, NewConversation, PendingEntry,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing,
+    Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -56,6 +56,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_commit))
+        // The two that make and unmake what a Conversation works in. Named in
+        // the path rather than in the verb, as closing a Set unanswered is: the
+        // viewer speaks one method.
+        .route("/api/ui/conversations/{id}/grill", post(start_grilling))
+        .route("/api/ui/conversations/{id}/abort", post(abort))
         .route(
             "/api/ui/conversations/{id}/grilling-profile",
             post(choose_grilling_profile),
@@ -394,6 +399,33 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // Whether the worktree is still on disk, which is a look at the filesystem
+    // rather than anything the store knows.
+    let worktree = match crate::conversations::worktree(conversation.worktree).await {
+        Ok(worktree) => worktree,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a worktree failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    // The Brief decides whether the Conversation is ready to grill, so it is
+    // read off the Timeline before the Timeline is spent building the view.
+    let brief = timeline
+        .iter()
+        .find_map(|event| match &event.event {
+            store::Event::Brief(markdown) => Some(markdown.as_str()),
+            _ => None,
+        })
+        .unwrap_or_default();
+
+    let ready_to_grill = crate::conversations::ready_to_grill(
+        conversation.state,
+        grilling_profile.as_ref(),
+        implementation_profile.as_ref(),
+        brief,
+    );
+
     let view = ConversationView {
         id: conversation.id,
         repo: RepoEntry {
@@ -407,19 +439,20 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         branch: conversation.branch,
         base_commit: conversation.base_commit,
         state: lifecycle(conversation.state),
-        ready_to_grill: crate::profiles::ready_to_grill(
-            grilling_profile.as_ref(),
-            implementation_profile.as_ref(),
-        ),
+        ready_to_grill,
         grilling_profile,
         implementation_profile,
+        worktree,
         timeline: timeline
             .into_iter()
             .map(|event| match event.event {
-                // The one kind there is. Rendered on the way out like everything
-                // else made of markdown — see [`verkstead_render`].
+                // Rendered on the way out where there is markdown to render —
+                // see [`verkstead_render`]. A move has none: it is one state.
                 store::Event::Brief(markdown) => {
                     verkstead_render::brief_event(event.id, event.at, markdown)
+                }
+                store::Event::Moved(state) => {
+                    verkstead_render::moved_event(event.id, event.at, lifecycle(state))
                 }
             })
             .collect(),
@@ -484,6 +517,44 @@ async fn set_base_commit(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "recording a base commit failed");
             unavailable("the base commit could not be recorded")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/grill` — give a Conversation somewhere to
+/// work and set it grilling.
+///
+/// Every precondition is checked here whatever the page believed a moment ago:
+/// `ready_to_grill` is what decides whether the button is offered, and a Profile
+/// can be deleted or a base commit lost between the page reading that and the
+/// human pressing it.
+async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(GrillingStarted::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::start_grilling(&state.pool, &state.watched, &state.state_dir, id)
+        .await
+    {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
+            unavailable("the grilling could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/abort` — stop it wherever it has got to.
+async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationAborted::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::abort(&state.pool, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
+            unavailable("the conversation could not be aborted")
         }
     }
 }
@@ -603,6 +674,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::Done => Lifecycle::Done,
+        store::Lifecycle::Aborted => Lifecycle::Aborted,
     }
 }
 

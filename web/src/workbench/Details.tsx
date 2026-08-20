@@ -93,8 +93,38 @@ export function Details(props: {
       <BranchName conversation={props.conversation} />
       <BaseCommit conversation={props.conversation} />
 
+      <Worktree conversation={props.conversation} />
+
       <Profiles conversation={props.conversation} />
     </>
+  );
+}
+
+/// Where the work is actually being done, once grilling has made somewhere.
+///
+/// Nothing to change here — the path is Verkstead's to choose — so this is a
+/// fact rather than a field. What it is for is the case where the directory has
+/// gone: a worktree deleted by hand should read as a conversation with a problem
+/// while the human is looking at it, rather than as an obscure failure from
+/// whatever next tries to work in it.
+function Worktree(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <Show when={props.conversation.worktree}>
+      {(worktree) => (
+        <section class="conversation-worktree" aria-label="Worktree">
+          <h2>Worktree</h2>
+          <p class="path" classList={{ missing: worktree().missing }}>
+            {worktree().path}
+          </p>
+          <Show when={worktree().missing}>
+            <p class="error">
+              This directory is gone. Abort the conversation to clear it up —
+              the branch will stay where it is.
+            </p>
+          </Show>
+        </section>
+      )}
+    </Show>
   );
 }
 
@@ -151,13 +181,20 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         </Match>
       </Switch>
 
-      {/* Whether the next stage will grill this conversation, which is the
-          server's rule and not a count of the two fields above: a profile whose
-          pair has gone is not one to launch a session under. */}
+      {/* Whether this conversation will grill, which is the server's rule and
+          not a count of the two fields above: a profile whose pair has gone is
+          not one to launch a session under, and there is more to being ready
+          than the profiles. Said here because this is where the profiles are
+          fixed; the button it gates is in the timeline. */}
       <p class="note readiness" classList={{ ready: props.conversation.ready_to_grill }}>
         <Show
           when={props.conversation.ready_to_grill}
-          fallback={<>Not ready to grill: both profiles have to be chosen and working.</>}
+          fallback={
+            <>
+              Not ready to grill: this needs a brief, and both profiles chosen
+              and working.
+            </>
+          }
         >
           Ready to grill.
         </Show>

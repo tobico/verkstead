@@ -1,11 +1,11 @@
-//! The Conversations a grilling session will later be run against: a Repo, a
-//! branch, a base commit, and the Timeline everything about the work lands on.
+//! The Conversations a grilling session is run against: a Repo, a branch, a base
+//! commit, and the Timeline everything about the work lands on.
 //!
-//! Nothing here executes anything. A Conversation is a record — no branch is
-//! created, no worktree, no session — and it stays in [`Lifecycle::Draft`] until
-//! the stage that starts grilling moves it on. What the record is for is that
-//! the human can write the brief and settle the branch name before any of that
-//! happens.
+//! Nothing here executes anything. The branch and the worktree are made by the
+//! server, against git and the filesystem; what this records is that they were —
+//! which commit was branched from, where the worktree was put, and that the
+//! Conversation has moved. A store that shelled out to git would be a store with
+//! a second way to fail.
 //!
 //! The Timeline is its own table from the start rather than a Brief column on
 //! the Conversation. The Brief is the first Event and, for now, the only kind of
@@ -14,16 +14,22 @@
 //! have to be moved into it later, and a reopened round adds a second Brief
 //! Event rather than editing the first — which a column could not hold at all.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
 
 /// Where a Conversation has got to.
 ///
-/// The whole ladder is here though only [`Lifecycle::Draft`] is ever written
-/// yet: it is the domain's, not this stage's invention, and the rules written
-/// against it — a Brief and a branch name are the human's to change only while
-/// the Conversation is still drafting — need the states they are refusing on
-/// behalf of to exist before the stage that reaches them does.
+/// The ladder is the domain's rather than any one stage's invention, so the
+/// states beyond the two this one reaches are here too: the rules written
+/// against them — a Brief and a branch name are the human's to change only while
+/// the Conversation is still drafting — need the states they refuse on behalf of
+/// to exist before the stage that reaches them does.
+///
+/// [`Lifecycle::Aborted`] is off the ladder rather than on it. Every other state
+/// is somewhere the work has got to, and aborting is the work stopping wherever
+/// it was — which is why it is reachable from all of them and leads nowhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
     /// The brief is being written. Everything about the Conversation is still
@@ -44,6 +50,10 @@ pub enum Lifecycle {
 
     /// Finished. It can be reopened with a new round.
     Done,
+
+    /// Stopped, from wherever it had got to. The worktree is gone; the branch is
+    /// not, because a branch is cheap and may hold work worth reading.
+    Aborted,
 }
 
 impl Lifecycle {
@@ -57,6 +67,7 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::Done => "done",
+            Self::Aborted => "aborted",
         }
     }
 
@@ -71,6 +82,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "done" => Self::Done,
+            "aborted" => Self::Aborted,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
@@ -109,6 +121,14 @@ pub struct Conversation {
     /// is genuinely a separate account and model — and because the
     /// implementation session cannot simply carry the grilling one on.
     pub implementation_profile: Option<super::Profile>,
+
+    /// Where the Conversation's worktree was put, once grilling has made one.
+    ///
+    /// `None` before grilling starts and again after aborting — the two ways a
+    /// Conversation has no worktree, which are the same fact about it whatever
+    /// put it there. Whether the directory is still on disk is not something the
+    /// store can say; see [`abort_conversation`] for who does.
+    pub worktree: Option<PathBuf>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -139,13 +159,21 @@ pub struct TimelineEvent {
     pub event: Event,
 }
 
-/// What an Event is. One kind so far — the rest of the table in the design
+/// What an Event is. Two kinds so far — the rest of the table in the design
 /// arrives with the stages that produce them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The Brief: the markdown the Conversation starts from, as the human last
     /// wrote it.
     Brief(String),
+
+    /// The Conversation moved, and this is the state it moved to.
+    ///
+    /// One kind for every move rather than one per destination: what the
+    /// Timeline is recording is that the work changed hands, and the state it
+    /// changed to is the only thing that differs between one move and the next.
+    /// Starting to grill and aborting both land here.
+    Moved(Lifecycle),
 }
 
 impl Event {
@@ -155,6 +183,7 @@ impl Event {
     fn kind(&self) -> &'static str {
         match self {
             Self::Brief(_) => "brief",
+            Self::Moved(_) => "moved",
         }
     }
 
@@ -162,12 +191,14 @@ impl Event {
     fn body(&self) -> &str {
         match self {
             Self::Brief(markdown) => markdown,
+            Self::Moved(state) => state.stored(),
         }
     }
 
     fn read(kind: &str, body: String) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
+            "moved" => Self::Moved(Lifecycle::read(&body)?),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -208,6 +239,42 @@ pub enum Chosen {
 
     /// There is no Profile with that id to choose.
     NoSuchProfile,
+}
+
+/// What became of starting a Conversation grilling.
+///
+/// Only the two refusals the store is in a position to make. Everything else
+/// starting is refused for — an unchosen Profile, an empty Brief, a base commit
+/// nothing answers to — is decided above it, against the Profiles and against
+/// git, and is settled by the time this is called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grilling {
+    /// Recorded: the base commit, the worktree, the state and the Event.
+    Started,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been started once already — or aborted.
+    NotDrafting,
+}
+
+/// What became of aborting one.
+///
+/// Aborting twice is not an error, which is what [`Aborting::AlreadyAborted`] is
+/// for: it is a distinct outcome rather than a failure, because the thing the
+/// human asked for holds either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Aborting {
+    /// Stopped: the worktree is forgotten, the state is [`Lifecycle::Aborted`],
+    /// and the move is on the Timeline.
+    Aborted,
+
+    /// It was aborted already. Nothing to record and nothing wrong.
+    AlreadyAborted,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
 }
 
 /// The tables a Conversation and its Timeline live in.
@@ -252,6 +319,21 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("indexing the Timeline by its Conversation")?;
+
+    // The worktree hangs off a Conversation rather than being a column on it,
+    // as an archiving hangs off a Set: there is no migration machinery here and
+    // `conversations` is STRICT and left alone. One worktree per Conversation,
+    // by the primary key — and a Conversation that has none has no row, which is
+    // both the state before grilling and the state after aborting.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS worktrees (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             path            TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the worktrees table")?;
 
     Ok(())
 }
@@ -407,6 +489,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         state: Lifecycle::read(&state)?,
         grilling_profile: chosen_profile(pool, grilling_profile_id).await?,
         implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
+        worktree: worktree(pool, id).await?,
     }))
 }
 
@@ -416,6 +499,18 @@ async fn chosen_profile(pool: &SqlitePool, id: Option<i64>) -> Result<Option<sup
         None => Ok(None),
         Some(id) => super::load_profile(pool, id).await,
     }
+}
+
+/// Where a Conversation's worktree was put, if it has one.
+async fn worktree(pool: &SqlitePool, id: i64) -> Result<Option<std::path::PathBuf>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT path FROM worktrees WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the worktree of Conversation {id}"))?;
+
+    Ok(row.map(|(path,)| std::path::PathBuf::from(path)))
 }
 
 /// Choose the Agent Profile the grilling session will run under.
@@ -594,11 +689,145 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
     })
 }
 
+/// Record that a Conversation has started grilling: what it branched from, where
+/// its worktree is, and that it has moved.
+///
+/// The branch and the worktree are already made by the time this is called —
+/// the server does that, against git — so what is written here is the record of
+/// work that has happened, not an instruction to do any. Which is also why it is
+/// one transaction: a Conversation left saying `draft` with a worktree on disk
+/// would be one nothing could start again and nothing would clean up.
+///
+/// `base_commit` is written whether or not the human overrode one. Where they
+/// did not, the rule was the default branch's tip *at grill start* — so this is
+/// the moment that rule resolves to a commit, and after it there is a fact about
+/// what the work branched from rather than a rule about what it would have.
+pub async fn start_grilling(
+    pool: &SqlitePool,
+    id: i64,
+    base_commit: &str,
+    worktree: &Path,
+) -> Result<Grilling> {
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = pool.begin().await.context("starting a grilling")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Grilling::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Draft {
+        return Ok(Grilling::NotDrafting);
+    }
+
+    sqlx::query(
+        "UPDATE conversations
+         SET base_commit = ?, state = ?
+         WHERE id = ?",
+    )
+    .bind(base_commit)
+    .bind(Lifecycle::Grilling.stored())
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("moving Conversation {id} to grilling"))?;
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
+        .bind(id)
+        .bind(worktree)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    moved(&mut tx, id, Lifecycle::Grilling).await?;
+
+    tx.commit().await.context("starting a grilling")?;
+
+    Ok(Grilling::Started)
+}
+
+/// Record that a Conversation has been aborted: its worktree is gone, and it has
+/// stopped wherever it had got to.
+///
+/// The worktree is forgotten rather than remembered as removed, because there is
+/// nothing left to point at — the branch it was checked out on is still there,
+/// and that is the thing worth keeping. The directory itself is removed by the
+/// server before this is called, for the reason the branch is created before
+/// [`start_grilling`] is: the record follows the work rather than promising it.
+///
+/// Aborting one that is already aborted records nothing and is not an error. The
+/// human asked for it to be stopped, and it is.
+pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> {
+    let mut tx = pool.begin().await.context("aborting a Conversation")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Aborting::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? == Lifecycle::Aborted {
+        return Ok(Aborting::AlreadyAborted);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Aborted.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("aborting Conversation {id}"))?;
+
+    sqlx::query("DELETE FROM worktrees WHERE conversation_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting the worktree of Conversation {id}"))?;
+
+    moved(&mut tx, id, Lifecycle::Aborted).await?;
+
+    tx.commit().await.context("aborting a Conversation")?;
+
+    Ok(Aborting::Aborted)
+}
+
+/// Put a move on a Conversation's Timeline.
+async fn moved(tx: &mut sqlx::SqliteConnection, id: i64, state: Lifecycle) -> Result<()> {
+    let event = Event::Moved(state);
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(id)
+    .bind(event.kind())
+    .bind(event.body())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!(
+            "recording that Conversation {id} moved to {}",
+            state.stored()
+        )
+    })?;
+
+    Ok(())
+}
+
 /// Move a Conversation on to another state.
 ///
-/// Nothing in this stage calls it — no Conversation leaves [`Lifecycle::Draft`]
-/// until grilling can start — but the states are what the drafting guard refuses
-/// on behalf of, and a guard nothing can reach is a guard nothing can test.
+/// The blunt instrument, for the states no stage has arrived at yet. Starting to
+/// grill and aborting have their own calls, because each of them is a move plus
+/// everything else that has to be true at the same moment.
 pub async fn set_state(pool: &SqlitePool, id: i64, state: Lifecycle) -> Result<()> {
     let changed = sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(state.stored())

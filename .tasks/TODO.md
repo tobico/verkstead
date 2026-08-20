@@ -15,7 +15,7 @@ Roadmap stage: [02: Grilling](docs/roadmaps/mvp/02-grilling.md)
 
 ## Tasks
 
-- [ ] 01: Worktree per Conversation — [details](01-worktree-per-conversation.md)
+- [x] 01: Worktree per Conversation — [details](01-worktree-per-conversation.md)
 - [ ] 02: The sandbox surface — [details](02-sandbox-surface.md)
 - [ ] 03: A sandbox under the unit — [details](03-sandbox-under-the-unit.md)
 - [ ] 04: Grilling session with a captured transcript — [details](04-grilling-session.md)

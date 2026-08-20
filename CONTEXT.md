@@ -26,12 +26,31 @@ them, and never owns them.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
-The core entity: a Repo, a base commit, a Brief, one branch and one worktree.
+The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Direction → Implementing → Wrapping → Done, and can be aborted from
 any of them or reopened once Done. *Blocked on you* is a badge on an active
-state, never a state of its own.
+state, never a state of its own — where **Aborted** is a state of its own, off
+the ladder rather than on it: every other state is somewhere the work has got
+to, and aborting is the work stopping wherever it was.
 _Avoid_: task, session, job, thread, ticket
+
+**Worktree**:
+The checkout a Conversation's work is done in, made when grilling starts along
+with the branch it holds, and removed when the Conversation is aborted — the
+branch outlives it, because a branch is cheap and may hold work worth reading.
+Named for the Repo and the branch, and it lives in the State Directory rather
+than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
+things.
+_Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
+
+**State Directory**:
+The one directory Verkstead keeps what it makes in — the Worktrees, and
+whatever later stages need to put somewhere. Beside the database by default,
+because that is the directory a packaged unit is already given to write. Not a
+Watched Path and not the same kind of thing: a Watched Path bounds what the
+human may point Verkstead at, and this is Verkstead's own.
+_Avoid_: data dir, work dir, scratch space, cache
 
 **Brief**:
 The editable markdown document a Conversation starts from, and its first

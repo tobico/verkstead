@@ -19,8 +19,8 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentType, Broken, ConversationView, ProfileChosen, ProfileDeleted, ProfileEntry, ProfileSaved,
-    Registered, Started,
+    AgentType, BriefSaved, Broken, ConversationView, ProfileChosen, ProfileDeleted, ProfileEntry,
+    ProfileSaved, Registered, Started,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -34,7 +34,11 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router) {
         .unwrap();
     let paths = WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap();
 
-    (watched, dir, router_watching(pool, paths))
+    // Beside the database, as it falls out for the real server. Nothing in this
+    // file grills, so nothing is ever put in it.
+    let state_dir = dir.path().to_owned();
+
+    (watched, dir, router_watching(pool, paths, state_dir))
 }
 
 /// A claude dir and config file pair at `root`, as `work-sandbox` would find
@@ -137,10 +141,22 @@ async fn conversation(app: &Router, watched: &Path) -> i64 {
     )
     .await;
 
-    match started {
-        Started::Started { id } => id,
-        other => panic!("expected the Conversation to start, got {other:?}"),
-    }
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    // A Brief, because readiness to grill turns on one as well as on the two
+    // Profiles — and what these tests are about is the Profiles. Written here so
+    // that every readiness assertion below is answering about them alone.
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": "# Rate limiting\n" }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    id
 }
 
 async fn opened(app: &Router, id: i64) -> ConversationView {

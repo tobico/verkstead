@@ -24,6 +24,7 @@ mod ui;
 mod updates;
 mod viewer;
 mod watched;
+mod worktrees;
 
 /// The security boundary every filesystem path is decided against. Public
 /// because starting the server is choosing what it may touch, and a caller
@@ -67,6 +68,12 @@ pub(crate) struct AppState {
     waits: Waits,
     updates: updates::Updates,
     watched: WatchedPaths,
+
+    /// Where Verkstead keeps what it makes — the worktrees, for now — which is
+    /// not a Watched Path and is not meant to be: the Watched Paths bound what
+    /// the human may point Verkstead at, and this is the directory Verkstead was
+    /// given for its own things.
+    state_dir: PathBuf,
 }
 
 /// How the server is pointed at its database and its socket. There is no
@@ -102,6 +109,17 @@ pub struct Config {
     )]
     pub watched_paths: Vec<PathBuf>,
 
+    /// Where Verkstead keeps what it makes: the Conversations' worktrees, and
+    /// whatever later stages need to put somewhere. Created if it does not
+    /// exist.
+    ///
+    /// Not a Watched Path and not one to point at a directory the human works
+    /// in: the Watched Paths bound what Verkstead may be pointed at, and this is
+    /// its own scratch space. It defaults beside the database, because that is
+    /// the one directory a packaged unit is already given to write.
+    #[arg(long, env = "VERKSTEAD_STATE_DIR", value_name = "DIR")]
+    pub state_dir: Option<PathBuf>,
+
     /// Don't ask GitHub whether a newer Verkstead has been released, and so
     /// never show the Update Notice. The check is one unauthenticated request
     /// a day and installs nothing, but anything that reaches the internet at
@@ -126,6 +144,24 @@ impl Config {
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
+
+    /// Where Verkstead keeps what it makes, as configured or as it falls out of
+    /// where the database is.
+    ///
+    /// The database's own directory by default, which is what "beside the
+    /// database" means. A database named with no directory at all — the bare
+    /// default, `verkstead.db` — leaves the working directory, which is what
+    /// running the server out of a directory already means everywhere else here.
+    pub fn state_dir(&self) -> PathBuf {
+        if let Some(state_dir) = &self.state_dir {
+            return state_dir.clone();
+        }
+
+        match self.database.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_owned(),
+            _ => PathBuf::from("."),
+        }
+    }
 }
 
 /// Everything the server answers in a serialised format: the agents' contract
@@ -142,13 +178,28 @@ pub fn router(pool: SqlitePool) -> Router {
         pool,
         updates::Updates::nothing_learned(),
         WatchedPaths::none(),
+        nowhere(),
     )
 }
 
 /// The same, permitted inside `watched` — the directories a Repo may be
-/// registered from.
-pub fn router_watching(pool: SqlitePool, watched: WatchedPaths) -> Router {
-    routed(pool, updates::Updates::nothing_learned(), watched)
+/// registered from — and keeping what it makes in `state_dir`.
+pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathBuf) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        watched,
+        state_dir,
+    )
+}
+
+/// The state directory of a router that has no use for one.
+///
+/// The empty path, which nothing is created in — and nothing tries: a router
+/// watching nothing can register no Repo, so it has no Conversation to start and
+/// no worktree to put anywhere.
+fn nowhere() -> PathBuf {
+    PathBuf::new()
 }
 
 /// The same, with the update check running against `releases` — where to ask
@@ -160,10 +211,20 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths) -> Router {
 /// address is a fact about this project, not a choice anyone running the server
 /// has to make.
 pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Router {
-    routed(pool, updates::watching(releases), WatchedPaths::none())
+    routed(
+        pool,
+        updates::watching(releases),
+        WatchedPaths::none(),
+        nowhere(),
+    )
 }
 
-fn routed(pool: SqlitePool, updates: updates::Updates, watched: WatchedPaths) -> Router {
+fn routed(
+    pool: SqlitePool,
+    updates: updates::Updates,
+    watched: WatchedPaths,
+    state_dir: PathBuf,
+) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route(
@@ -186,6 +247,7 @@ fn routed(pool: SqlitePool, updates: updates::Updates, watched: WatchedPaths) ->
             waits: Waits::new(),
             updates,
             watched,
+            state_dir,
         })
 }
 
@@ -203,8 +265,14 @@ async fn health() -> &'static str {
 /// This is also the only router that checks for updates, because it is the only
 /// one with a viewer to draw the Notice in — see [`router_checking_updates`] for
 /// what `releases` is.
-pub fn router_with_ui(pool: SqlitePool, releases: Option<&str>, watched: WatchedPaths) -> Router {
-    routed(pool, updates::watching(releases), watched).fallback(viewer::serve::<viewer::Built>)
+pub fn router_with_ui(
+    pool: SqlitePool,
+    releases: Option<&str>,
+    watched: WatchedPaths,
+    state_dir: PathBuf,
+) -> Router {
+    routed(pool, updates::watching(releases), watched, state_dir)
+        .fallback(viewer::serve::<viewer::Built>)
 }
 
 /// The same, over a site named by the caller, which is how the tests ask what the
@@ -222,6 +290,13 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 pub async fn run(config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
+    // Made at startup for the reason the Watched Paths are resolved at startup:
+    // a directory Verkstead cannot write to is a misconfiguration to report now
+    // rather than one to discover as a failed grilling weeks later.
+    let state_dir = config.state_dir();
+    std::fs::create_dir_all(&state_dir)
+        .with_context(|| format!("creating state directory {}", state_dir.display()))?;
+
     let pool = open_database(&config.database).await?;
 
     let listener = tokio::net::TcpListener::bind(config.listen)
@@ -231,12 +306,16 @@ pub async fn run(config: Config) -> Result<()> {
     tracing::info!(
         listen = %config.listen,
         database = %config.database.display(),
+        state_dir = %state_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         "verkstead is listening",
     );
 
-    axum::serve(listener, router_with_ui(pool, config.releases(), watched))
-        .await
-        .context("serving Verkstead")
+    axum::serve(
+        listener,
+        router_with_ui(pool, config.releases(), watched, state_dir),
+    )
+    .await
+    .context("serving Verkstead")
 }

@@ -32,8 +32,9 @@ mod when;
 pub use answering::{Archived, Submitted};
 pub use conversations::{
     BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
-    BriefSaved, ConversationEntry, ConversationView, Lifecycle, NewConversation, Started,
-    TimelineEvent, brief_event,
+    BriefSaved, ConversationAborted, ConversationEntry, ConversationView, GrillingStarted,
+    Lifecycle, MovedEvent, NewConversation, Started, TimelineEvent, Worktree, brief_event,
+    moved_event,
 };
 pub use lists::{ArchiveEntry, PendingEntry};
 pub use profiles::{

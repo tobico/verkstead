@@ -60,11 +60,14 @@ flowchart LR
   conversation. Each conversation owns one branch and one worktree; the branch
   name is prefilled randomly and customizable while the brief is drafted.
   Worktrees live under Verkstead's own state directory and are kept until the
-  conversation is archived.
+  conversation is aborted — *corrected 2026-08-20, building stage 02*: this said
+  "archived", and there is no archive action on a conversation. Aborting is what
+  the teardown hangs off, and it leaves the branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
   Done. *Blocked on you* is a badge on any active state, not a state. A Done
   conversation can reopen with a new brief round. Aborting is possible from
-  any state.
+  any state, and **Aborted** is a state of its own — off the ladder rather than
+  on it, since every other state is somewhere the work has got to.
 - **Agent profiles** are minimal: name, claude home dir + config file pair,
   default model — plus an agent-type discriminator so other backends can slot
   in later (claude is the only type now). Account separation works as in the

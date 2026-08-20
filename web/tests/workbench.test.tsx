@@ -18,8 +18,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  ConversationAborted,
   ConversationEntry,
   ConversationView,
+  GrillingStarted,
   ProfileEntry,
   RepoEntry,
 } from "../src/api/types";
@@ -27,6 +29,7 @@ import stylesheet from "../src/main.css?raw";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
+import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -80,7 +83,7 @@ function mount(at = "/") {
 
 /// The lists every pane of the workbench is drawn over, in whatever order a page
 /// happens to ask for them.
-function theWorkbench(...answers: Array<() => Promise<Response>>) {
+function theWorkbench(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
@@ -93,6 +96,38 @@ function theWorkbench(...answers: Array<() => Promise<Response>>) {
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
   return container.querySelector(".workbench")!;
+}
+
+/// Wait for an element to be drawn, by selector.
+///
+/// Throwing rather than returning null when it is not there yet, because that is
+/// what `waitFor` retries on — a callback that hands back null has answered, and
+/// the wait ends on the first try with nothing.
+function drawn<T extends Element>(
+  container: ParentNode,
+  selector: string,
+): Promise<T> {
+  return waitFor(() => {
+    const found = container.querySelector<T>(selector);
+    if (!found) {
+      throw new Error(`nothing matching ${selector} has been drawn`);
+    }
+    return found;
+  });
+}
+
+/// Open the conversation's action menu, the way a click on its summary does.
+///
+/// `details` opens itself natively, which jsdom does not do for a synthetic
+/// click — so the state is set and the toggle it would have fired is fired.
+async function openActions(container: ParentNode): Promise<void> {
+  const menu = await drawn<HTMLDetailsElement>(
+    container,
+    ".conversation-actions",
+  );
+
+  menu.open = true;
+  fireEvent(menu, new Event("toggle"));
 }
 
 /// The body the page put on the wire when it wrote to `path`.
@@ -660,5 +695,273 @@ describe("the panes on a narrow window", () => {
     // third pane.
     expect(stylesheet).toContain("@media (min-width: 60rem) {");
     expect(stylesheet).toContain("@media (min-width: 80rem) {");
+  });
+});
+
+/// The other shape the middle pane draws: a conversation that has been started,
+/// with a move on its timeline and a worktree to say where the work is going on.
+const GRILLING = grilling as ConversationView;
+
+/// The workbench with the grilling conversation open instead of the drafting
+/// one.
+function theGrilling(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+    ...answers,
+  );
+}
+
+/// The workbench with the opened conversation altered, for the states no fixture
+/// holds — a refusal from the server, a worktree that has gone.
+function theWorkbenchWith(
+  over: Partial<ConversationView>,
+  ...answers: Array<() => Promise<Response>>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...over })),
+    ...answers,
+  );
+}
+
+
+describe("starting the grilling", () => {
+  it("offers the button under the timeline once the conversation is ready", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, ".start-grilling .start");
+
+    expect(OPEN.ready_to_grill).toBe(true);
+    expect(start.textContent).toContain("Start grilling");
+
+    // Under the timeline, which is where the reason to press it is: at the end
+    // of everything that has happened, under the brief it will freeze.
+    expect(
+      container.querySelector(".timeline")!.compareDocumentPosition(start) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("says what is missing instead of offering a dead button", async () => {
+    theWorkbenchWith({ ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByText(/the grilling can start/));
+    expect(container.querySelector(".start-grilling .start")).toBeNull();
+  });
+
+  it("posts to the conversation's own grill route, with nothing in the body", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json("Started" satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".start-grilling .start"));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toEqual(
+        {},
+      ),
+    );
+  });
+
+  /// Every refusal is its own sentence, because each of them is something
+  /// different for the human to go and do.
+  it.each([
+    ["NoGrillingProfile", /Choose a grilling profile/],
+    ["NoImplementationProfile", /Choose an implementation profile/],
+    ["EmptyBrief", /Write the brief first/],
+    ["NoBaseCommit", /nothing to branch from/],
+    ["BranchExists", /branch already exists/],
+    ["ProfileBroken", /not where it was left/],
+    ["WorktreeRefused", /Git would not make the worktree/],
+    ["NotDrafting", /already been started/],
+  ] satisfies Array<[GrillingStarted, RegExp]>)(
+    "says in words what %s means",
+    async (outcome, said) => {
+      theWorkbench(
+        whenever(
+          `/api/ui/conversations/${OPEN.id}/grill`,
+          json(outcome as GrillingStarted),
+          "POST",
+        ),
+      );
+      const { container } = mount(`/conversations/${OPEN.id}`);
+
+      fireEvent.click(await drawn(container, ".start-grilling .start"));
+
+      await waitFor(() => screen.getByText(said));
+    },
+  );
+
+  /// A conversation that has started has nothing to start, so there is nothing
+  /// to draw — not a button that would be refused.
+  it("offers nothing on a conversation that has already started", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => screen.getByText("Started grilling"));
+    expect(container.querySelector(".start-grilling")).toBeNull();
+  });
+});
+
+describe("a move on the timeline", () => {
+  it("draws the state the conversation moved to, as something that happened", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const moved = await drawn(container, ".timeline-event .moved");
+
+    expect(moved.textContent).toBe("Started grilling");
+    expect(moved.classList).toContain("grilling");
+  });
+
+  /// The brief stays the first event and the move follows it, which is reading
+  /// order and the order they happened in.
+  it("comes after the brief it followed", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await waitFor(() => screen.getByText("Started grilling"));
+
+    expect(
+      [...container.querySelectorAll(".timeline-event > *")].map(
+        (event) => event.className.split(" ")[0],
+      ),
+    ).toEqual(["brief", "moved"]);
+  });
+});
+
+describe("aborting a conversation", () => {
+  /// Behind a menu on the header, because it throws a worktree away and the
+  /// header is somewhere the cursor passes on the way to everything else.
+  it("is not one click away", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await drawn<HTMLDetailsElement>(
+      container,
+      ".conversation-actions",
+    );
+
+    // Closed, so nothing in it can be reached without opening it first — which
+    // is the whole of what standing a destructive action behind a menu means.
+    expect(menu.open).toBe(false);
+    expect(menu.querySelector(".abort")).toBeTruthy();
+    expect(container.querySelector(".pane-head .abort")).toBe(
+      menu.querySelector(".abort"),
+    );
+  });
+
+  it("posts to the conversation's own abort route", async () => {
+    const fetching = theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/abort`,
+        json("Aborted" satisfies ConversationAborted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, ".conversation-actions .abort"));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/abort`),
+      ).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before throwing a worktree away: what goes, and
+  /// what stays.
+  it("says the branch survives it", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await waitFor(() => screen.getByText(/Removes the worktree/));
+    expect(screen.getByText(/The branch stays where it is/)).toBeTruthy();
+  });
+
+  it("offers nothing to abort on one that is aborted already", async () => {
+    theWorkbenchWith({ state: "Aborted", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+
+    await waitFor(() => screen.getByText("This conversation has been aborted."));
+    expect(container.querySelector(".conversation-actions .abort")).toBeNull();
+  });
+
+  it("says when the worktree could not be removed", async () => {
+    theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/abort`,
+        json("WorktreeStuck" satisfies ConversationAborted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, ".conversation-actions .abort"));
+
+    await waitFor(() => screen.getByText(/could not be removed/));
+  });
+});
+
+describe("a conversation's worktree", () => {
+  it("says where the work is being done", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const path = await drawn(container, ".conversation-worktree .path");
+
+    expect(path.textContent).toBe(GRILLING.worktree!.path);
+    expect(path.classList).not.toContain("missing");
+  });
+
+  /// A worktree deleted by hand should read as a conversation with a problem
+  /// while the human is looking at it, rather than as an obscure failure from
+  /// whatever next tries to work in it.
+  it("says so when the directory has gone from under it", async () => {
+    theWorkbenchWith({
+      state: "Grilling",
+      ready_to_grill: false,
+      worktree: {
+        path: "/var/lib/verkstead/worktrees/verkstead-gone",
+        missing: true,
+      },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const path = await drawn(container, ".conversation-worktree .path");
+
+    expect(path.classList).toContain("missing");
+    expect(screen.getByText(/This directory is gone/)).toBeTruthy();
+  });
+
+  it("says nothing at all before there is one", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    // Waited on the details pane itself rather than on the branch, which by now
+    // names both the sidebar row and the timeline's heading.
+    await drawn(container, ".conversation-profiles");
+
+    expect(OPEN.worktree).toBeNull();
+    expect(container.querySelector(".conversation-worktree")).toBeNull();
   });
 });

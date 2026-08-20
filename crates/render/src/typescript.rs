@@ -18,10 +18,10 @@ use ts_rs::TS;
 
 use crate::{
     ArchiveEntry, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, ConversationEntry, ConversationView, NewConversation, PendingEntry,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey,
-    Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
-    Unsubscribe, UpdateNotice,
+    BriefEdit, BriefSaved, ConversationAborted, ConversationEntry, ConversationView,
+    GrillingStarted, NewConversation, PendingEntry, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PushKey, Registered, Registration, RepoEntry, SetView,
+    Started, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -65,6 +65,12 @@ fn the_viewers_types_are_written_from_these() {
     BranchRenamed::export_all(&config).unwrap();
     BaseCommitOverride::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
+
+    // And the two actions that make and unmake what a Conversation works in.
+    // Neither takes a request shape — which Conversation is in the path, and
+    // there is nothing else to say about either — so it is the outcomes alone.
+    GrillingStarted::export_all(&config).unwrap();
+    ConversationAborted::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

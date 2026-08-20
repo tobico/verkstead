@@ -22,9 +22,9 @@ use crate::{ProfileEntry, RepoEntry};
 
 /// Where a Conversation has got to.
 ///
-/// The whole ladder, though only [`Lifecycle::Draft`] is reachable yet: the
-/// states are the domain's, and the page says which one a Conversation is in
-/// rather than assuming the only one it can currently be.
+/// The whole ladder, though only the first two are reachable yet: the states are
+/// the domain's, and the page says which one a Conversation is in rather than
+/// assuming the only one it can currently be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Lifecycle {
@@ -34,6 +34,10 @@ pub enum Lifecycle {
     Implementing,
     Wrapping,
     Done,
+
+    /// Off the ladder rather than on it: the work stopped wherever it had got
+    /// to. Reachable from every other state, and leading nowhere.
+    Aborted,
 }
 
 /// One row of the conversations sidebar.
@@ -81,17 +85,39 @@ pub struct ConversationView {
     /// it is genuinely a separate account and model.
     pub implementation_profile: Option<ProfileEntry>,
 
-    /// Whether everything the next stage needs before it will start grilling is
-    /// settled: both Profiles chosen, and neither of them broken.
+    /// Whether everything needed before grilling will start is settled: both
+    /// Profiles chosen and neither broken, a Brief with something in it, and a
+    /// Conversation still drafting.
     ///
-    /// The server's rule rather than something the page works out from the two
-    /// fields above, because it is not only about whether they are filled in — a
-    /// Profile whose pair has gone is not one to launch a session under — and
-    /// because the stage that grills adds its own conditions to the same answer.
+    /// The server's rule rather than something the page works out from the
+    /// fields around it. Every one of the refusals is checked again when the
+    /// button is pressed — this is what decides whether to offer the button, and
+    /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
+
+    /// The worktree the grilling was given to work in, once there is one.
+    ///
+    /// `null` both before grilling starts and after aborting — the two ways a
+    /// Conversation has none, which are the same fact about it.
+    pub worktree: Option<Worktree>,
 
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
+}
+
+/// A Conversation's worktree: where it is, and whether it is still there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Worktree {
+    pub path: String,
+
+    /// Whether the directory has gone from under Verkstead.
+    ///
+    /// A thing to say rather than a thing to fail on later. A worktree is an
+    /// ordinary directory on a machine the human also uses, and one that has
+    /// been deleted by hand should read as a Conversation with a problem — not
+    /// as an obscure failure from whatever next tries to work in it.
+    pub missing: bool,
 }
 
 /// One entry in a Timeline.
@@ -106,6 +132,28 @@ pub enum TimelineEvent {
     /// no details pane, because there is nothing of it the Timeline does not
     /// already show.
     Brief(BriefEvent),
+
+    /// The Conversation moved, and this is the state it moved to. Starting to
+    /// grill and aborting are both this Event, because both are the work
+    /// changing hands and the state is the only thing that differs.
+    Moved(MovedEvent),
+}
+
+/// A move as the page receives it: when, and to what.
+///
+/// No rendered body, unlike the Brief — there is no markdown in a move. What the
+/// Timeline draws is a sentence of the viewer's own making from the one state,
+/// because the wording belongs to whoever is reading it rather than to the
+/// record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct MovedEvent {
+    pub id: i64,
+
+    /// When it moved, RFC 3339.
+    pub at: String,
+
+    pub state: Lifecycle,
 }
 
 /// The Brief as the page receives it: rendered for reading, and as it was
@@ -123,6 +171,12 @@ pub struct BriefEvent {
 
     /// The same, as HTML — rendered and sanitized by the server on the way out.
     pub html: String,
+}
+
+/// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
+/// beside the Brief so that one place knows how a Timeline is made.
+pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
+    TimelineEvent::Moved(MovedEvent { id, at, state })
 }
 
 /// The Brief as an Event, rendered on the way.
@@ -226,4 +280,68 @@ pub enum BaseRecorded {
     /// Nothing in that repository answers to what was typed. Refused now rather
     /// than at grill start, where it would be a failure with nobody watching.
     NoSuchCommit,
+}
+
+/// What became of starting a Conversation grilling.
+///
+/// Every refusal is named rather than collapsed into one, because each of them
+/// is something different for the human to go and do: choose a Profile, write a
+/// Brief, pick another commit, deal with a branch that is already there. A
+/// single "cannot start" would leave them guessing which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum GrillingStarted {
+    /// The branch and the worktree are made, and the Conversation is grilling.
+    Started,
+
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been started once already — or aborted.
+    NotDrafting,
+
+    /// No Agent Profile is chosen for the grilling session.
+    NoGrillingProfile,
+
+    /// None is chosen for the implementation either. Fixed before starting
+    /// rather than after, because the grilling ends by handing over to it.
+    NoImplementationProfile,
+
+    /// A chosen Profile's pair is not where it was left, so there is no account
+    /// to run the session under.
+    ProfileBroken,
+
+    /// The Brief is empty, and the Brief is what the grilling starts from.
+    /// Freezing an empty one would freeze nothing worth having.
+    EmptyBrief,
+
+    /// Nothing in the repository answers to what the work would branch from —
+    /// an overridden commit that has gone, or a default branch that has.
+    NoBaseCommit,
+
+    /// The branch is already there. Verkstead did not make it, so it will not
+    /// take it over: what is on it is somebody's work.
+    BranchExists,
+
+    /// Git would not make the worktree. The reason is in the server's log — this
+    /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+}
+
+/// What became of aborting one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationAborted {
+    /// Stopped: the worktree is gone and the branch is not.
+    Aborted,
+
+    /// It was aborted already, which is not an error — what was asked for holds
+    /// either way.
+    AlreadyAborted,
+
+    NoSuchConversation,
+
+    /// The worktree could not be removed, so nothing was recorded: a Conversation
+    /// that said it had stopped while its directory was still there would be one
+    /// nothing would ever clean up.
+    WorktreeStuck,
 }

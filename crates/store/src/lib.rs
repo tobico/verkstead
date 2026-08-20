@@ -26,9 +26,10 @@ mod repos;
 mod waits;
 
 pub use conversations::{
-    Chosen, Conversation, ConversationRow, Edited, Event, Lifecycle, TimelineEvent, conversations,
-    load_conversation, rename_branch, save_brief, set_base_commit, set_grilling_profile,
-    set_implementation_profile, set_state, start_conversation, timeline,
+    Aborting, Chosen, Conversation, ConversationRow, Edited, Event, Grilling, Lifecycle,
+    TimelineEvent, abort_conversation, conversations, load_conversation, rename_branch, save_brief,
+    set_base_commit, set_grilling_profile, set_implementation_profile, set_state,
+    start_conversation, start_grilling, timeline,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,

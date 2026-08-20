@@ -958,10 +958,146 @@ main:has(.workbench) {
   font-size: 0.85rem;
 }
 
-/* Whether the next stage will grill this conversation. The server's rule rather
-   than a count of the two fields above, so it is stated rather than inferred. */
+/* Whether this conversation will grill. The server's rule rather than a count of
+   the two fields above, so it is stated rather than inferred. */
 .readiness.ready {
   color: var(--added);
+}
+
+/* Where the work is actually being done, once there is somewhere. A fact rather
+   than a field: the path is Verkstead's to choose. */
+.conversation-worktree {
+  margin-bottom: 1.5rem;
+}
+
+.conversation-worktree h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.conversation-worktree .path {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+/* A worktree that has gone from under Verkstead. Struck through rather than
+   merely annotated, so the path reads as the thing that is wrong with it. */
+.conversation-worktree .path.missing {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.conversation-worktree .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A move: the conversation changing hands. A line rather than a card, because
+   there is nothing to it but the fact — so it is drawn out of the run of cards
+   the other events make, as something that happened between them. */
+.timeline-event > .moved {
+  margin: 0;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.timeline-event > .moved.aborted {
+  color: #b3382c;
+}
+
+/* What happens next, under everything that has happened so far. Outside the
+   list, because it is not an event — and an event is exactly what it would look
+   like sitting at the end of one. */
+.start-grilling {
+  margin-top: 1rem;
+}
+
+.start-grilling .start {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.start-grilling .start:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.start-grilling .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* What can be done to the conversation as a whole. A menu rather than a button,
+   because aborting throws a worktree away and the header is somewhere the
+   cursor passes on the way to everything else. */
+.conversation-actions {
+  position: relative;
+}
+
+.conversation-actions summary {
+  list-style: none;
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.conversation-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-actions[open] summary {
+  color: var(--ink);
+}
+
+/* Over the timeline rather than in the flow of the header, so opening the menu
+   does not move the title it hangs off. */
+.conversation-actions .menu {
+  position: absolute;
+  top: 1.75rem;
+  right: 0;
+  z-index: 1;
+  width: 17rem;
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
+}
+
+.conversation-actions .abort {
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  font-weight: 600;
+  color: #b3382c;
+  background: none;
+  border: 1px solid #b3382c;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.conversation-actions .abort:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.conversation-actions .note,
+.conversation-actions .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
 }
 
 /* From 60rem the window holds the sidebar beside the level being read: the

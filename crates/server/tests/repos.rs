@@ -26,7 +26,9 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
         .unwrap();
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
 
-    (dir, router_watching(pool, watched))
+    let state_dir = dir.path().to_owned();
+
+    (dir, router_watching(pool, watched, state_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -267,7 +269,7 @@ async fn a_server_watching_nothing_registers_nothing() {
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
-    let app = router_watching(pool, WatchedPaths::none());
+    let app = router_watching(pool, WatchedPaths::none(), dir.path().to_owned());
 
     let repo = repository(dir.path().join("verkstead"));
 

@@ -1229,6 +1229,40 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap()
         .unwrap();
 
+    // And a third that has been started, which is the other shape the middle
+    // pane draws: a Brief that is frozen, a move on the Timeline, and a worktree
+    // to say where the work is being done. Recorded through the store rather than
+    // by pressing the button, for the reason the Repos are registered this way —
+    // going in the front way means a real repository to make a real worktree in,
+    // which is `conversations.rs`'s subject and not this one's.
+    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, grilling, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, grilling, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        grilling,
+        "# Retry policy for the outbound queue\n\n\
+         Failed deliveries are retried forever, so one dead endpoint holds up\n\
+         everything behind it.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        grilling,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
+    )
+    .await
+    .unwrap();
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,
@@ -1239,16 +1273,28 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             &get(&app, &format!("/api/ui/conversations/{drafting}")).await,
         )),
     );
+    write(
+        "conversation-grilling.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{grilling}")).await,
+        )),
+    );
 }
 
-/// Pin every Profile in a payload to a pair that is where it was left, and the
-/// Conversation carrying them to ready.
+/// Pin everything in a payload that the filesystem would otherwise decide: a
+/// Profile's pair, a Conversation's worktree, and the readiness that turns on
+/// the first of them.
 ///
-/// Whether a Profile is broken is a fact about the filesystem at the moment it
-/// was read, and these fixtures name accounts under `/srv/accounts` that nothing
-/// is at — read as they stand, every one of them would come back broken, which
-/// is the exceptional case and not the shape a viewer test wants to be fed.
-/// That the server does report it, and when, is `tests/profiles.rs`'s subject.
+/// These fixtures name accounts under `/srv/accounts` and worktrees under
+/// `/var/lib/verkstead` that nothing is at — read as they stand, every Profile
+/// would come back broken and every worktree missing, which is the exceptional
+/// case and not the shape a viewer test wants to be fed. That the server does
+/// report both, and when, is `tests/profiles.rs`'s and `tests/conversations.rs`'s
+/// subject.
+///
+/// Readiness is pinned to what it would be with the pairs mended rather than to
+/// `true`: it turns on the Conversation still drafting as well, and a
+/// Conversation that has started is not ready to start again.
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
@@ -1256,11 +1302,19 @@ fn pin_health(json: &str) -> String {
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
-            payload["ready_to_grill"] = true.into();
+            let mut ready = payload["state"] == "Draft";
+
             for role in ["grilling_profile", "implementation_profile"] {
-                if let Some(profile) = payload.get_mut(role).filter(|it| !it.is_null()) {
-                    mend(profile);
+                match payload.get_mut(role).filter(|it| !it.is_null()) {
+                    Some(profile) => mend(profile),
+                    None => ready = false,
                 }
+            }
+
+            payload["ready_to_grill"] = ready.into();
+
+            if let Some(worktree) = payload.get_mut("worktree").filter(|it| !it.is_null()) {
+                worktree["missing"] = false.into();
             }
         }
     }

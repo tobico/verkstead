@@ -6,9 +6,9 @@
 //! anything in the repository answers to what was typed as a base commit. A form
 //! that checked either would be a courtesy.
 //!
-//! Nothing here creates a branch or a worktree, and nothing here should: a
-//! Conversation is a record of work to be started later, and the stage that
-//! starts it is the next one.
+//! Starting the grilling is where that stops being true: the branch and the
+//! worktree are made against a real repository, in a real state directory, and
+//! what these assert is what git was actually left holding.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,20 +20,25 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    BaseRecorded, BranchRenamed, BriefSaved, ConversationEntry, ConversationView, Lifecycle,
-    Registered, Started, TimelineEvent,
+    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
+    ConversationView, GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
-/// A router watching `watched`, plus the directory holding its database alive.
+/// A router watching `watched`, plus the directory holding its database and its
+/// state directory alive.
+///
+/// The state directory is the database's own, which is where it falls for the
+/// real server: `--state-dir` defaults beside `--database`.
 async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
+    let state_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched))
+    (dir, router_watching(pool, watched, state_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -115,12 +120,29 @@ async fn opened(app: &Router, id: i64) -> ConversationView {
     get(app, &format!("/api/ui/conversations/{id}")).await
 }
 
-/// The Brief on a Conversation's Timeline, which is its only Event yet.
+/// The Brief on a Conversation's Timeline.
+///
+/// Found rather than taken from the front: the Brief is the first Event, but the
+/// moves that follow it are Events too.
 fn brief(view: &ConversationView) -> &verkstead_render::BriefEvent {
-    assert_eq!(view.timeline.len(), 1, "the Brief should be the only Event");
+    view.timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief),
+            _ => None,
+        })
+        .expect("every Conversation has a Brief from the moment it exists")
+}
 
-    let TimelineEvent::Brief(brief) = &view.timeline[0];
-    brief
+/// The states a Conversation's Timeline says it has moved through, in order.
+fn moves(view: &ConversationView) -> Vec<Lifecycle> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Moved(moved) => Some(moved.state),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn write_brief(app: &Router, id: i64, markdown: &str) -> BriefSaved {
@@ -487,4 +509,539 @@ async fn nothing_started_means_an_empty_sidebar() {
     let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert!(sidebar(&app).await.is_empty());
+}
+
+/// A claude dir and config file pair inside `watched`, so a Profile saved from
+/// it is one a session could actually be run under.
+fn pair(watched: &Path, account: &str) -> (PathBuf, PathBuf) {
+    let home = watched.join(account);
+    let claude_dir = home.join(".claude");
+    let config_file = home.join(".claude.json");
+
+    std::fs::create_dir_all(&claude_dir).unwrap();
+    std::fs::write(&config_file, "{}\n").unwrap();
+
+    (claude_dir, config_file)
+}
+
+/// Save an Agent Profile and hand back its id.
+async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
+    let (claude_dir, config_file) = pair(watched, name);
+
+    let saved: ProfileSaved = post(
+        app,
+        "/api/ui/profiles",
+        &serde_json::json!({
+            "name": name,
+            "claude_dir": claude_dir,
+            "config_file": config_file,
+            "model": "claude-opus-5",
+        }),
+    )
+    .await;
+    assert_eq!(saved, ProfileSaved::Saved);
+
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(app, "/api/ui/profiles").await;
+    profiles
+        .into_iter()
+        .find(|profile| profile.name == name)
+        .expect("the Profile just saved should be on the list")
+        .id
+}
+
+async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
+    let chosen: verkstead_render::ProfileChosen = post(
+        app,
+        &format!("/api/ui/conversations/{id}/{role}-profile"),
+        &serde_json::json!({ "profile_id": profile_id }),
+    )
+    .await;
+    assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+}
+
+async fn grill(app: &Router, id: i64) -> GrillingStarted {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+async fn abort(app: &Router, id: i64) -> ConversationAborted {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/abort"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Everything a Conversation needs before it will grill: both Profiles chosen
+/// and a Brief written. Hands back the Conversation's id.
+async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
+    let id = started(app, repo_id).await;
+
+    let grilling = profile(app, watched, "fable").await;
+    let implementation = profile(app, watched, "opus").await;
+    choose(app, id, "grilling", grilling).await;
+    choose(app, id, "implementation", implementation).await;
+
+    assert_eq!(
+        write_brief(app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+
+    id
+}
+
+/// What git in `repo` says its worktrees are, by path.
+fn worktrees(repo: &Path) -> Vec<PathBuf> {
+    git(repo, &["worktree", "list", "--porcelain"])
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// The whole of what pressing the button does: a branch off the base commit, a
+/// worktree registered with it under the state directory, and a Conversation
+/// that says it is grilling.
+#[tokio::test]
+async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+
+    // The branch is in the Repo's own git directory, not in the worktree.
+    assert!(
+        git(
+            &repo,
+            &[
+                "rev-parse",
+                "--verify",
+                &format!("refs/heads/{}", view.branch)
+            ]
+        )
+        .trim()
+        .len()
+            == 40,
+        "the branch should be in the repository git already had"
+    );
+
+    // Named for the Repo and the branch, under the state directory — which is
+    // where the database is, and not inside any Watched Path.
+    let worktree = view
+        .worktree
+        .expect("a grilling Conversation has a worktree");
+    let path = PathBuf::from(&worktree.path);
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert_eq!(
+        path.file_name().unwrap().to_string_lossy(),
+        format!("verkstead-{}", view.branch)
+    );
+
+    // And git knows about it, which is what makes it a worktree rather than a
+    // copy of some files.
+    assert!(
+        worktrees(&repo).contains(&path.canonicalize().unwrap()),
+        "git should have the worktree registered: {:?}",
+        worktrees(&repo)
+    );
+
+    // The files are actually there, checked out on the branch.
+    assert!(path.join("README.md").is_file());
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch
+    );
+}
+
+/// The rule the workbench already states — the default branch's tip *at grill
+/// start* — resolving for the first time.
+#[tokio::test]
+async fn starting_records_the_commit_the_work_branched_from() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        opened(&app, id).await.base_commit,
+        None,
+        "nothing was overridden, so there is only the rule"
+    );
+
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        opened(&app, id).await.base_commit.as_deref(),
+        Some(tip.as_str())
+    );
+}
+
+/// An overridden commit is what the work branches from, and it is not the tip.
+#[tokio::test]
+async fn an_overridden_base_commit_is_what_the_branch_is_made_off() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let first = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
+    git(&repo, &["add", "second.md"]);
+    git(&repo, &["commit", "-m", "second"]);
+
+    assert_eq!(base(&app, id, Some(&first)).await, BaseRecorded::Recorded);
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.base_commit.as_deref(), Some(first.as_str()));
+
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]).trim(), first);
+    assert!(
+        !worktree.join("second.md").exists(),
+        "the worktree should hold the commit it branched from, not the tip"
+    );
+}
+
+/// Each precondition refuses by its own name, because each of them is something
+/// different for the human to go and do.
+#[tokio::test]
+async fn starting_is_refused_by_name_when_a_profile_is_unchosen() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    write_brief(&app, id, "# Rate limiting\n").await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoGrillingProfile);
+
+    choose(
+        &app,
+        id,
+        "grilling",
+        profile(&app, watched.path(), "fable").await,
+    )
+    .await;
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoImplementationProfile
+    );
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// A Profile whose pair has gone is no account to run a session under, and the
+/// pane says so — so pressing the button anyway has to say the same thing.
+#[tokio::test]
+async fn starting_is_refused_when_a_chosen_profiles_pair_has_gone() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    std::fs::remove_dir_all(watched.path().join("fable")).unwrap();
+
+    assert!(!opened(&app, id).await.ready_to_grill);
+    assert_eq!(grill(&app, id).await, GrillingStarted::ProfileBroken);
+}
+
+/// The Brief is what the grilling starts from, and freezing an empty one would
+/// freeze nothing worth having.
+#[tokio::test]
+async fn starting_is_refused_when_the_brief_is_empty() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    choose(
+        &app,
+        id,
+        "grilling",
+        profile(&app, watched.path(), "fable").await,
+    )
+    .await;
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+
+    assert!(!opened(&app, id).await.ready_to_grill);
+    assert_eq!(grill(&app, id).await, GrillingStarted::EmptyBrief);
+
+    // Whitespace is not a Brief either.
+    write_brief(&app, id, "   \n\n").await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::EmptyBrief);
+
+    write_brief(&app, id, "# Rate limiting\n").await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+}
+
+/// A commit that resolved when the human typed it can be gone by the time the
+/// button is pressed, which is exactly why it is asked again.
+#[tokio::test]
+async fn starting_is_refused_when_the_base_commit_no_longer_resolves() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // A commit that exists to be recorded and then is reachable from nothing, so
+    // that expiring the reflog and pruning takes it away for good.
+    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
+    git(&repo, &["add", "second.md"]);
+    git(&repo, &["commit", "-m", "second"]);
+    let doomed = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    assert_eq!(base(&app, id, Some(&doomed)).await, BaseRecorded::Recorded);
+
+    git(&repo, &["reset", "--hard", "HEAD~1"]);
+    git(&repo, &["reflog", "expire", "--expire=now", "--all"]);
+    git(&repo, &["gc", "--prune=now", "--quiet"]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoBaseCommit);
+
+    // And nothing was made on the way to finding out.
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(worktrees(&repo).len() == 1, "only the repository itself");
+}
+
+/// Verkstead did not make the branch, so it will not take it over: what is on it
+/// is somebody's work.
+#[tokio::test]
+async fn starting_is_refused_when_the_branch_is_already_there() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let branch = opened(&app, id).await.branch;
+    git(&repo, &["branch", &branch]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+}
+
+/// Two branches and two worktrees for one piece of work is what starting twice
+/// would mean.
+#[tokio::test]
+async fn a_conversation_that_has_started_cannot_start_again() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+    assert_eq!(grill(&app, id).await, GrillingStarted::NotDrafting);
+
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+#[tokio::test]
+async fn grilling_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(grill(&app, 404).await, GrillingStarted::NoSuchConversation);
+
+    // An id that is not a number cannot name a Conversation, and gets the same
+    // answer — the id comes out of a URL the human may have typed.
+    let refused: GrillingStarted = post(
+        &app,
+        "/api/ui/conversations/nonsense/grill",
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(refused, GrillingStarted::NoSuchConversation);
+}
+
+/// The freeze the design states, tripped for the first time: past drafting, the
+/// Brief and the branch name stop being the human's to change.
+#[tokio::test]
+async fn grilling_freezes_the_brief_and_the_branch_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    grill(&app, id).await;
+
+    assert_eq!(
+        write_brief(&app, id, "# Something else\n").await,
+        BriefSaved::NotDrafting
+    );
+    assert_eq!(
+        rename(&app, id, "something-else").await,
+        BranchRenamed::NotDrafting
+    );
+    assert_eq!(
+        base(&app, id, Some("HEAD")).await,
+        BaseRecorded::NotDrafting
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.branch, branch);
+    assert_eq!(
+        brief(&view).markdown,
+        "# Rate limiting\n\nThe API has none.\n"
+    );
+}
+
+/// Aborting takes the directory away and leaves the branch, because a branch is
+/// cheap and may hold work worth reading.
+#[tokio::test]
+async fn aborting_removes_the_worktree_and_keeps_the_branch() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let view = opened(&app, id).await;
+    let branch = view.branch.clone();
+    let path = PathBuf::from(view.worktree.unwrap().path);
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+
+    assert!(!path.exists(), "the worktree directory should be gone");
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "git should hold only the repository"
+    );
+    assert!(
+        !git(
+            &repo,
+            &["rev-parse", "--verify", &format!("refs/heads/{branch}")]
+        )
+        .trim()
+        .is_empty(),
+        "the branch should still be there"
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Aborted);
+    assert_eq!(view.worktree, None);
+    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Aborted]);
+}
+
+#[tokio::test]
+async fn aborting_twice_is_not_an_error() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(abort(&app, id).await, ConversationAborted::AlreadyAborted);
+
+    assert_eq!(
+        moves(&opened(&app, id).await),
+        [Lifecycle::Grilling, Lifecycle::Aborted]
+    );
+}
+
+/// Aborting is reachable from every state this stage can reach, including the
+/// one where nothing was ever made.
+#[tokio::test]
+async fn a_drafting_conversation_can_be_aborted() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Aborted);
+    assert_eq!(view.worktree, None);
+    assert!(!view.ready_to_grill);
+}
+
+/// A worktree the human deleted by hand is still an abort that works: what was
+/// asked for is that the directory be gone, and it is.
+#[tokio::test]
+async fn aborting_a_conversation_whose_worktree_has_already_gone_works() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    std::fs::remove_dir_all(&path).unwrap();
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Aborted);
+    assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
+}
+
+#[tokio::test]
+async fn aborting_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        abort(&app, 404).await,
+        ConversationAborted::NoSuchConversation
+    );
+}
+
+/// A worktree removed from under Verkstead is a thing to say, not a thing to
+/// fail on later.
+#[tokio::test]
+async fn a_conversation_whose_worktree_has_gone_says_so() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = opened(&app, id).await.worktree.unwrap();
+    assert!(!worktree.missing);
+
+    std::fs::remove_dir_all(&worktree.path).unwrap();
+
+    let gone = opened(&app, id).await.worktree.expect("still recorded");
+    assert_eq!(gone.path, worktree.path, "it still says where it went");
+    assert!(gone.missing);
+}
+
+/// Two Conversations on one branch name in one Repo cannot share a directory.
+#[tokio::test]
+async fn two_conversations_wanting_one_name_get_a_directory_each() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+
+    let first = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(
+        rename(&app, first, "rate-limiting").await,
+        BranchRenamed::Renamed
+    );
+    assert_eq!(grill(&app, first).await, GrillingStarted::Started);
+
+    // The same branch name on a second Conversation. The branch itself is
+    // refused — Verkstead made that one — so the name is freed by aborting the
+    // first, which keeps the directory taken.
+    let second = started(&app, repo_id).await;
+    write_brief(&app, second, "# Another\n").await;
+    let profiles: Vec<verkstead_render::ProfileEntry> = get(&app, "/api/ui/profiles").await;
+    choose(&app, second, "grilling", profiles[0].id).await;
+    choose(&app, second, "implementation", profiles[1].id).await;
+    assert_eq!(
+        rename(&app, second, "rate-limiting-2").await,
+        BranchRenamed::Renamed
+    );
+
+    // Take the first directory's name for the second by hand, which is the
+    // collision the fallback is for.
+    let first_path = PathBuf::from(opened(&app, first).await.worktree.unwrap().path);
+    let wanted = first_path.with_file_name("verkstead-rate-limiting-2");
+    std::fs::create_dir_all(&wanted).unwrap();
+
+    assert_eq!(grill(&app, second).await, GrillingStarted::Started);
+
+    let path = PathBuf::from(opened(&app, second).await.worktree.unwrap().path);
+    assert_ne!(
+        path, wanted,
+        "it should not have taken the directory already there"
+    );
+    assert_eq!(
+        path.file_name().unwrap().to_string_lossy(),
+        format!("verkstead-rate-limiting-2-{second}")
+    );
 }

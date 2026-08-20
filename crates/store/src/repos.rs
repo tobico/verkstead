@@ -123,7 +123,10 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
 /// without being changed, and a stored path that is not the one on disk is a
 /// boundary check that will pass for the wrong directory later. So it is
 /// refused outright rather than written lossily.
-fn text(path: &Path) -> Result<&str> {
+///
+/// Shared with [`crate::conversations`], which stores a worktree's path under
+/// the same rule and for the same reason.
+pub(crate) fn text(path: &Path) -> Result<&str> {
     path.to_str()
         .ok_or_else(|| anyhow!("the path {} is not valid UTF-8", path.display()))
 }
