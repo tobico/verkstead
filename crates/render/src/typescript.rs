@@ -19,8 +19,9 @@ use ts_rs::TS;
 use crate::{
     ArchiveEntry, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, ConversationEntry, ConversationView, NewConversation, PendingEntry,
-    PushKey, Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey,
+    Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -64,6 +65,16 @@ fn the_viewers_types_are_written_from_these() {
     BranchRenamed::export_all(&config).unwrap();
     BaseCommitOverride::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
+
+    // The Agent Profiles a session can be run under, the one shape saving and
+    // rewriting one both take, and the two choices a Conversation makes of them.
+    // A `ProfileEntry` writes the agent type and the broken-ness it carries.
+    ProfileEntry::export_all(&config).unwrap();
+    ProfileEdit::export_all(&config).unwrap();
+    ProfileSaved::export_all(&config).unwrap();
+    ProfileDeleted::export_all(&config).unwrap();
+    ProfileChoice::export_all(&config).unwrap();
+    ProfileChosen::export_all(&config).unwrap();
 
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();

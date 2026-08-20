@@ -470,6 +470,139 @@ textarea::placeholder {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+/* Agent profiles: the account a session runs under. One form does both saving
+   and rewriting — a profile is four fields with nothing built from them yet, so
+   editing one is filling the same form in with what it already says. */
+.edit-profile {
+  margin-bottom: 1.5rem;
+}
+
+.edit-profile h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.edit-profile label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.edit-profile label code {
+  font-size: 0.9em;
+}
+
+.edit-profile input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.edit-profile-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.edit-profile-buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.edit-profile-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the brief editor's cancel is. */
+.edit-profile-buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.edit-profile .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A saved profile is a list row with its two controls on the far end: nowhere to
+   go, but two things to do to it. */
+.profile-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.profile-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.profile-row .path,
+.profile-row .model {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Which one the form above is about, said with the accent down the near edge —
+   the same mark the open conversation carries. */
+.profile-row.editing {
+  border-color: var(--accent);
+  box-shadow: inset 0.2rem 0 0 var(--accent);
+}
+
+/* A profile whose pair has gone. Said in the row rather than only in the words
+   under it, because a list is scanned before it is read. */
+.profile-row.broken {
+  border-color: var(--removed);
+}
+
+.profile-row .broken {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.profile-actions button {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.profile-actions .remove {
+  color: var(--removed);
+}
+
 /* The workbench: conversations, the selected one's timeline, and the details of
    what the timeline cannot show.
 
@@ -779,9 +912,56 @@ main:has(.workbench) {
 .branch-name .error,
 .base-commit .error,
 .start-conversation .error,
-.edit-brief-form .error {
+.edit-brief-form .error,
+.conversation-profiles .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
+}
+
+/* The two accounts the work runs under. Separate choices because they are
+   genuinely separate accounts and models, so they are drawn as two fields rather
+   than as one with a note about the other. */
+.conversation-profiles {
+  margin-bottom: 1.5rem;
+}
+
+.conversation-profiles h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.profile-choice {
+  margin-bottom: 1rem;
+}
+
+.profile-choice label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.profile-choice select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* A chosen profile whose pair has gone: the select still shows it, because it is
+   what was chosen, and the reason it will not do is said under it. */
+.profile-choice .broken {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* Whether the next stage will grill this conversation. The server's rule rather
+   than a count of the two fields above, so it is stated rather than inferred. */
+.readiness.ready {
+  color: var(--added);
 }
 
 /* From 60rem the window holds the sidebar beside the level being read: the

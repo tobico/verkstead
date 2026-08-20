@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::RepoEntry;
+use crate::{ProfileEntry, RepoEntry};
 
 /// Where a Conversation has got to.
 ///
@@ -72,6 +72,23 @@ pub struct ConversationView {
     pub base_commit: Option<String>,
 
     pub state: Lifecycle,
+
+    /// The Agent Profile the grilling session will run under, whole rather than
+    /// by id: the pane says what it is, and whether it is still runnable.
+    pub grilling_profile: Option<ProfileEntry>,
+
+    /// And the one the implementation will run under. Chosen separately because
+    /// it is genuinely a separate account and model.
+    pub implementation_profile: Option<ProfileEntry>,
+
+    /// Whether everything the next stage needs before it will start grilling is
+    /// settled: both Profiles chosen, and neither of them broken.
+    ///
+    /// The server's rule rather than something the page works out from the two
+    /// fields above, because it is not only about whether they are filled in — a
+    /// Profile whose pair has gone is not one to launch a session under — and
+    /// because the stage that grills adds its own conditions to the same answer.
+    pub ready_to_grill: bool,
 
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,

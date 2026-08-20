@@ -14,6 +14,7 @@ use verkstead_store::{Settlements, Waits};
 
 mod conversations;
 mod nudge;
+mod profiles;
 mod push;
 mod reply;
 mod repos;

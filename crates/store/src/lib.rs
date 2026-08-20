@@ -20,14 +20,19 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 
 mod conversations;
+mod profiles;
 mod push;
 mod repos;
 mod waits;
 
 pub use conversations::{
-    Conversation, ConversationRow, Edited, Event, Lifecycle, TimelineEvent, conversations,
-    load_conversation, rename_branch, save_brief, set_base_commit, set_state, start_conversation,
-    timeline,
+    Chosen, Conversation, ConversationRow, Edited, Event, Lifecycle, TimelineEvent, conversations,
+    load_conversation, rename_branch, save_brief, set_base_commit, set_grilling_profile,
+    set_implementation_profile, set_state, start_conversation, timeline,
+};
+pub use profiles::{
+    AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
+    load_profile, profiles, update_profile,
 };
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
@@ -318,8 +323,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The Repos registered from inside the Watched Paths.
     repos::apply_schema(pool).await?;
 
-    // The Conversations attached to them, and their Timelines. After the Repos,
-    // because a Conversation's row references one.
+    // The Agent Profiles a session can be run under.
+    profiles::apply_schema(pool).await?;
+
+    // The Conversations attached to them, and their Timelines. After the Repos
+    // and the Profiles, because a Conversation's row references all three.
     conversations::apply_schema(pool).await?;
 
     Ok(())

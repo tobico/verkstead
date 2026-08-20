@@ -7,20 +7,37 @@
 //! long as it is still drafting — which is why the pane that is neither the list
 //! nor the record is where they are settled.
 //!
+//! The two agent profiles are settled here too, for the same reason: which
+//! account and model the grilling runs under, and which the implementation runs
+//! under, are facts about the conversation rather than about any one event. They
+//! are separate choices because they are genuinely separate accounts — grill on
+//! fable, implement on opus — and because the implementation session cannot
+//! simply carry the grilling one on.
+//!
 //! The Brief has no place here on purpose: it is inline in the Timeline, because
 //! there is nothing of it the Timeline does not already show. What will stand
 //! here is the full self of the Events that do have one — a transcript, a
 //! Question Set, a diff — as each of those stages lands.
 
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Show, createSignal, type JSX } from "solid-js";
+import { A } from "@solidjs/router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { renameBranch, setBaseCommit } from "../api/client";
+import {
+  chooseGrillingProfile,
+  chooseImplementationProfile,
+  listProfiles,
+  renameBranch,
+  setBaseCommit,
+} from "../api/client";
 import type {
   BaseRecorded,
   BranchRenamed,
   ConversationView,
+  ProfileChosen,
+  ProfileEntry,
 } from "../api/types";
+import { BROKEN } from "../profiles/ProfileList";
 
 /// What each way of being refused a branch name says.
 export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
@@ -37,6 +54,13 @@ export const BASE_REFUSAL: Record<BaseRecorded, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The base commit was captured when grilling started.",
   NoSuchCommit: "That repo has nothing by that name.",
+};
+
+/// And a profile choice.
+export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
+  Chosen: "",
+  NoSuchConversation: "This conversation is gone.",
+  NoSuchProfile: "That profile has been removed.",
 };
 
 export function Details(props: {
@@ -68,7 +92,156 @@ export function Details(props: {
 
       <BranchName conversation={props.conversation} />
       <BaseCommit conversation={props.conversation} />
+
+      <Profiles conversation={props.conversation} />
     </>
+  );
+}
+
+/// The two accounts the work will run under, and whether everything grilling
+/// needs is settled.
+///
+/// The profile list is read here rather than passed down, so the pickers are
+/// whole wherever they are drawn — the sidebar does the same with the repos.
+function Profiles(props: { conversation: ConversationView }): JSX.Element {
+  const profiles = useQuery(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+  }));
+
+  return (
+    <section class="conversation-profiles" aria-label="Agent profiles">
+      <h2>Agent profiles</h2>
+
+      <Switch>
+        <Match when={profiles.isError}>
+          <p class="error">
+            Could not read the agent profiles: {profiles.error?.message}
+          </p>
+        </Match>
+        <Match when={profiles.data?.length === 0}>
+          {/* Nothing to choose, so the only thing to offer is the page that
+              fixes that. */}
+          <p class="empty">
+            No agent profiles are saved yet —{" "}
+            <A href="/profiles">add one</A> to run a session under.
+          </p>
+        </Match>
+        <Match when={profiles.data}>
+          {(saved) => (
+            <>
+              <ProfilePicker
+                conversation={props.conversation}
+                saved={saved()}
+                role="grilling"
+                label="Grilling"
+                chosen={props.conversation.grilling_profile}
+                choose={chooseGrillingProfile}
+              />
+              <ProfilePicker
+                conversation={props.conversation}
+                saved={saved()}
+                role="implementation"
+                label="Implementation"
+                chosen={props.conversation.implementation_profile}
+                choose={chooseImplementationProfile}
+              />
+            </>
+          )}
+        </Match>
+      </Switch>
+
+      {/* Whether the next stage will grill this conversation, which is the
+          server's rule and not a count of the two fields above: a profile whose
+          pair has gone is not one to launch a session under. */}
+      <p class="note readiness" classList={{ ready: props.conversation.ready_to_grill }}>
+        <Show
+          when={props.conversation.ready_to_grill}
+          fallback={<>Not ready to grill: both profiles have to be chosen and working.</>}
+        >
+          Ready to grill.
+        </Show>
+      </p>
+    </section>
+  );
+}
+
+/// One of the two choices: which saved profile fills this role.
+///
+/// A select rather than a list of buttons, because the profiles are a short list
+/// that barely changes and the choice is one of them — the same control the
+/// sidebar picks a repo with.
+function ProfilePicker(props: {
+  conversation: ConversationView;
+  saved: ProfileEntry[];
+  role: string;
+  label: string;
+  chosen: ProfileEntry | null;
+  choose: (id: number, profileId: number) => Promise<ProfileChosen>;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
+
+  const choose = useMutation(() => ({
+    mutationFn: (profileId: number) =>
+      props.choose(props.conversation.id, profileId),
+    onSuccess: (outcome: ProfileChosen) => {
+      if (outcome !== "Chosen") {
+        setRefused(outcome);
+        // Chosen from a list this pane read a moment ago: reading it again is
+        // both the correction and the explanation.
+        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        return;
+      }
+
+      setRefused(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  return (
+    <div class="profile-choice">
+      <label for={`${props.role}-profile`}>{props.label}</label>
+      <select
+        id={`${props.role}-profile`}
+        // The empty value is the state of having chosen nothing, and it is not
+        // an option to go back to: a conversation with no profile is one that
+        // will not grill, so the placeholder disappears once one is picked.
+        value={props.chosen ? String(props.chosen.id) : ""}
+        disabled={choose.isPending}
+        onChange={(ev) => {
+          const picked = Number(ev.currentTarget.value);
+          if (picked) {
+            choose.mutate(picked);
+          }
+        }}
+      >
+        <Show when={!props.chosen}>
+          <option value="">Not chosen</option>
+        </Show>
+        <For each={props.saved}>
+          {(profile) => (
+            <option value={profile.id}>
+              {profile.name} — {profile.model}
+            </option>
+          )}
+        </For>
+      </select>
+
+      {/* What is wrong with the one that is chosen, said where it is chosen. */}
+      <Show when={props.chosen?.broken}>
+        {(broken) => <p class="error broken">{BROKEN[broken()]}</p>}
+      </Show>
+      <Show when={refused()}>
+        {(outcome) => <p class="error">{CHOICE_REFUSAL[outcome()]}</p>}
+      </Show>
+      <Show when={choose.isError}>
+        <p class="error">
+          The profile could not be chosen: {choose.error?.message}
+        </p>
+      </Show>
+    </div>
   );
 }
 

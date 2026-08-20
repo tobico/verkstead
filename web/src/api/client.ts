@@ -15,6 +15,11 @@ import type {
   ConversationEntry,
   ConversationView,
   PendingEntry,
+  ProfileChosen,
+  ProfileDeleted,
+  ProfileEdit,
+  ProfileEntry,
+  ProfileSaved,
   PushKey,
   Registered,
   RepoEntry,
@@ -144,6 +149,59 @@ export function setBaseCommit(
   commit: string | null,
 ): Promise<BaseRecorded> {
   return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { commit });
+}
+
+/// The Agent Profiles a session can be run under, by name.
+///
+/// Each says whether its pair is still where it was left, which the server
+/// answers on every read: a directory can be moved after it was saved, and only
+/// the side that can look at the filesystem knows.
+export function listProfiles(): Promise<ProfileEntry[]> {
+  return get<ProfileEntry[]>("/api/ui/profiles");
+}
+
+/// Take on an account, named by the pair that is mounted for it. Like
+/// registering a Repo, every refusal is a named outcome rather than a status —
+/// a pair outside the watched paths is the boundary doing its job.
+export function createProfile(profile: ProfileEdit): Promise<ProfileSaved> {
+  return post<ProfileSaved>("/api/ui/profiles", profile);
+}
+
+/// Rewrite one, whole. Everything about a profile is the human's to change:
+/// nothing has been built from it that a change would contradict.
+export function editProfile(
+  id: number,
+  profile: ProfileEdit,
+): Promise<ProfileSaved> {
+  return post<ProfileSaved>(`/api/ui/profiles/${id}`, profile);
+}
+
+/// Remove one nobody is running under. There is nothing to send but its own id,
+/// which is in the path.
+export function deleteProfile(id: number): Promise<ProfileDeleted> {
+  return post<ProfileDeleted>(`/api/ui/profiles/${id}/delete`);
+}
+
+/// Choose which account and model a conversation's grilling session runs under.
+export function chooseGrillingProfile(
+  id: number,
+  profileId: number,
+): Promise<ProfileChosen> {
+  return post<ProfileChosen>(`/api/ui/conversations/${id}/grilling-profile`, {
+    profile_id: profileId,
+  });
+}
+
+/// And the one its implementation runs under, which is a separate choice: the
+/// implementation session cannot simply carry the grilling one on.
+export function chooseImplementationProfile(
+  id: number,
+  profileId: number,
+): Promise<ProfileChosen> {
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/implementation-profile`,
+    { profile_id: profileId },
+  );
 }
 
 /// Whether a newer Verkstead has been released than the one serving this page.

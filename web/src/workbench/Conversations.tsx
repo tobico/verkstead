@@ -157,6 +157,9 @@ export function Conversations(props: {
         <A class="to-repos" href="/repos">
           Repos →
         </A>
+        <A class="to-profiles" href="/profiles">
+          Profiles →
+        </A>
       </nav>
     </>
   );

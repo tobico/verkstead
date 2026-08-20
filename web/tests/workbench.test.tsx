@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ConversationEntry,
   ConversationView,
+  ProfileEntry,
   RepoEntry,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
@@ -27,11 +28,13 @@ import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
+import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
 const REPOS = repos as RepoEntry[];
+const PROFILES = profiles as ProfileEntry[];
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
@@ -75,12 +78,13 @@ function mount(at = "/") {
   };
 }
 
-/// The two lists every pane of the workbench is drawn over, in whatever order a
-/// page happens to ask for them.
+/// The lists every pane of the workbench is drawn over, in whatever order a page
+/// happens to ask for them.
 function theWorkbench(...answers: Array<() => Promise<Response>>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,
   );
@@ -159,6 +163,19 @@ describe("the workbench", () => {
     mount();
 
     await waitFor(() => screen.getByText("Nothing is being worked on yet."));
+  });
+
+  /// The sidebar is where the rest of Verkstead is reached from, now that the
+  /// workbench has the root.
+  it("reaches the rest of Verkstead from the sidebar", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    const elsewhere = container.querySelector(".elsewhere")!;
+    expect(
+      [...elsewhere.querySelectorAll("a")].map((to) => to.getAttribute("href")),
+    ).toEqual(["/pending", "/repos", "/profiles"]);
   });
 
   it("says where to go when there is no repo to start one against", async () => {
@@ -433,6 +450,7 @@ describe("a conversation's details", () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
       whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(rule)),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -445,6 +463,143 @@ describe("a conversation's details", () => {
     expect(container.querySelector(".base-commit .note")!.textContent).toContain(
       OPEN.repo.default_branch,
     );
+  });
+});
+
+/// The last thing a conversation settles before anything will run it: which
+/// account and model grills, and which implements.
+describe("a conversation's agent profiles", () => {
+  /// A conversation showing neither choice, which is what a freshly started one
+  /// looks like.
+  const UNCHOSEN: ConversationView = {
+    ...OPEN,
+    grilling_profile: null,
+    implementation_profile: null,
+    ready_to_grill: false,
+  };
+
+  function withConversation(
+    view: ConversationView,
+    ...answers: Array<() => Promise<Response>>
+  ) {
+    return serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${OPEN.id}`, json(view)),
+      ...answers,
+    );
+  }
+
+  it("shows the two profiles the conversation has chosen", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
+    const implementing = screen.getByLabelText(
+      "Implementation",
+    ) as HTMLSelectElement;
+
+    // Separate choices, and in the fixture genuinely separate accounts: grill on
+    // fable, implement on opus.
+    expect(grilling.value).toBe(String(OPEN.grilling_profile!.id));
+    expect(implementing.value).toBe(String(OPEN.implementation_profile!.id));
+    expect(grilling.value).not.toBe(implementing.value);
+  });
+
+  it("sends each choice on its own, to its own role", async () => {
+    const fetching = withConversation(UNCHOSEN, json("Chosen"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    fireEvent.change(screen.getByLabelText("Grilling"), {
+      target: { value: String(PROFILES[0]!.id) },
+    });
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-profile`),
+      ).toEqual({ profile_id: PROFILES[0]!.id }),
+    );
+
+    fireEvent.change(screen.getByLabelText("Implementation"), {
+      target: { value: String(PROFILES[1]!.id) },
+    });
+    await waitFor(() =>
+      expect(
+        sent(
+          fetching,
+          `/api/ui/conversations/${OPEN.id}/implementation-profile`,
+        ),
+      ).toEqual({ profile_id: PROFILES[1]!.id }),
+    );
+  });
+
+  /// A conversation missing either profile is identifiably not ready, and the
+  /// answer is the server's rather than a count of the two fields.
+  it("says whether the conversation is ready to grill", async () => {
+    withConversation(UNCHOSEN);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByText(/Not ready to grill/));
+    expect(container.querySelector(".readiness")!.classList).not.toContain(
+      "ready",
+    );
+
+    // The fixture's own conversation has both, and the server says so.
+    expect(OPEN.ready_to_grill).toBe(true);
+  });
+
+  it("says it is ready when the server says so", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByText("Ready to grill."));
+    expect(container.querySelector(".readiness")!.classList).toContain("ready");
+  });
+
+  /// A profile whose pair has gone is not one to launch a session under. What is
+  /// wrong with it is said where it is chosen, rather than left to be found out
+  /// when a session will not start.
+  it("says what is wrong with a chosen profile that has broken", async () => {
+    const broken: ConversationView = {
+      ...OPEN,
+      implementation_profile: {
+        ...OPEN.implementation_profile!,
+        broken: "ConfigMissing",
+      },
+      ready_to_grill: false,
+    };
+    withConversation(broken);
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByText("Its config file is gone."));
+    await waitFor(() => screen.getByText(/Not ready to grill/));
+  });
+
+  it("says why a choice was refused, in words", async () => {
+    withConversation(UNCHOSEN, json("NoSuchProfile"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    fireEvent.change(screen.getByLabelText("Grilling"), {
+      target: { value: String(PROFILES[0]!.id) },
+    });
+
+    await waitFor(() => screen.getByText("That profile has been removed."));
+  });
+
+  it("says where to go when there is no profile to choose", async () => {
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json([])),
+      whenever(`/api/ui/conversations/${OPEN.id}`, json(UNCHOSEN)),
+    );
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByText(/No agent profiles are saved yet/));
+    expect(screen.getByText("add one").getAttribute("href")).toBe("/profiles");
   });
 });
 

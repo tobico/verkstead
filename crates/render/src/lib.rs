@@ -22,6 +22,7 @@
 mod answering;
 mod conversations;
 mod lists;
+mod profiles;
 mod push;
 mod repos;
 mod update;
@@ -35,6 +36,10 @@ pub use conversations::{
     TimelineEvent, brief_event,
 };
 pub use lists::{ArchiveEntry, PendingEntry};
+pub use profiles::{
+    AgentType, Broken, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved,
+};
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry};
 pub use update::UpdateNotice;

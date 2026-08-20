@@ -7,6 +7,7 @@ import { onCleanup, onMount, type JSX } from "solid-js";
 import { ArchiveList } from "./archive/ArchiveList";
 import { listenForNudges } from "./nudge";
 import { PendingList } from "./pending/PendingList";
+import { ProfileList } from "./profiles/ProfileList";
 import { RepoList } from "./repos/RepoList";
 import { SetPage } from "./set/SetPage";
 import { Workbench } from "./workbench/Workbench";
@@ -49,6 +50,9 @@ export function App(): JSX.Element {
         <Route path="/pending" component={PendingList} />
         <Route path="/archive" component={ArchiveList} />
         <Route path="/repos" component={RepoList} />
+        {/* What a session runs under. Reached from the sidebar beside the
+            repos, because both are things a conversation is settled against. */}
+        <Route path="/profiles" component={ProfileList} />
         <Route path="/sets/:id" component={SetPage} />
         <Route path="*" component={NoSuchPage} />
       </Router>

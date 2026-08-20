@@ -74,7 +74,8 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, 
     let (dir, app) = app_watching(watched.path()).await;
     let repo = repository(watched.path().join("verkstead"));
 
-    let registered: Registered = post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
 
     let repo_id = listed_repos(&app).await;
@@ -90,7 +91,12 @@ async fn listed_repos(app: &Router) -> i64 {
 }
 
 async fn start(app: &Router, repo_id: i64) -> Started {
-    post(app, "/api/ui/conversations", &serde_json::json!({ "repo_id": repo_id })).await
+    post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": repo_id }),
+    )
+    .await
 }
 
 /// Start one and take the id, for the tests that are about what happens next.
@@ -238,7 +244,10 @@ async fn opening_a_conversation_brings_its_repo_and_its_timeline_with_it() {
 
     assert_eq!(view.id, id);
     assert_eq!(view.repo.name, "verkstead");
-    assert_eq!(view.repo.path, repo.canonicalize().unwrap().to_str().unwrap());
+    assert_eq!(
+        view.repo.path,
+        repo.canonicalize().unwrap().to_str().unwrap()
+    );
     assert_eq!(view.repo.default_branch, "main");
     assert_eq!(view.state, Lifecycle::Draft);
 
@@ -258,7 +267,12 @@ async fn a_written_brief_comes_back_as_markdown_and_as_html() {
     let id = started(&app, repo_id).await;
 
     assert_eq!(
-        write_brief(&app, id, "# Rate limiting\n\n`POST /v1/messages` has none.\n").await,
+        write_brief(
+            &app,
+            id,
+            "# Rate limiting\n\n`POST /v1/messages` has none.\n"
+        )
+        .await,
         BriefSaved::Saved
     );
 
@@ -269,7 +283,11 @@ async fn a_written_brief_comes_back_as_markdown_and_as_html() {
         brief.markdown,
         "# Rate limiting\n\n`POST /v1/messages` has none.\n"
     );
-    assert!(brief.html.contains("<h1"), "expected a heading: {}", brief.html);
+    assert!(
+        brief.html.contains("<h1"),
+        "expected a heading: {}",
+        brief.html
+    );
     assert!(
         brief.html.contains("<code>POST /v1/messages</code>"),
         "expected the code span: {}",
@@ -314,7 +332,10 @@ async fn a_drafting_conversations_branch_is_the_humans_to_name() {
     let (_watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    assert_eq!(rename(&app, id, "rate-limiting").await, BranchRenamed::Renamed);
+    assert_eq!(
+        rename(&app, id, "rate-limiting").await,
+        BranchRenamed::Renamed
+    );
 
     assert_eq!(opened(&app, id).await.branch, "rate-limiting");
     assert_eq!(sidebar(&app).await[0].branch, "rate-limiting");
@@ -367,7 +388,10 @@ async fn a_base_commit_override_is_recorded_as_the_commit_the_repo_resolved() {
     let short = &head[..8];
 
     assert_eq!(base(&app, id, Some(short)).await, BaseRecorded::Recorded);
-    assert_eq!(opened(&app, id).await.base_commit.as_deref(), Some(&head[..]));
+    assert_eq!(
+        opened(&app, id).await.base_commit.as_deref(),
+        Some(&head[..])
+    );
 }
 
 #[tokio::test]
@@ -378,7 +402,10 @@ async fn a_branch_name_resolves_to_the_commit_it_points_at() {
     let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
 
     assert_eq!(base(&app, id, Some("main")).await, BaseRecorded::Recorded);
-    assert_eq!(opened(&app, id).await.base_commit.as_deref(), Some(&head[..]));
+    assert_eq!(
+        opened(&app, id).await.base_commit.as_deref(),
+        Some(&head[..])
+    );
 }
 
 /// Refused now rather than at grill start, where it would be a failure with

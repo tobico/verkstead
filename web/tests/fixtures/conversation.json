@@ -1,7 +1,26 @@
 {
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "branch": "rate-limiting",
+  "grilling_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/fable/.claude",
+    "config_file": "/srv/accounts/fable/.claude.json",
+    "id": 1,
+    "model": "claude-fable-5",
+    "name": "fable"
+  },
   "id": 1,
+  "implementation_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/opus/.claude",
+    "config_file": "/srv/accounts/opus/.claude.json",
+    "id": 2,
+    "model": "claude-opus-5",
+    "name": "opus"
+  },
+  "ready_to_grill": true,
   "repo": {
     "default_branch": "main",
     "id": 1,

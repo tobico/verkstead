@@ -79,6 +79,11 @@ impl Lifecycle {
 /// A Conversation as the store holds it, with the Repo it is attached to read
 /// back beside it — there is no Conversation without one, and everything done
 /// about a Conversation is done inside that repository.
+///
+/// The two Profiles are read back the same way, because whether a Conversation
+/// is ready to grill turns on what they are rather than on which ids they hold:
+/// a Profile whose pair has gone is not something to launch a session under, and
+/// the id alone cannot say so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conversation {
     pub id: i64,
@@ -96,6 +101,14 @@ pub struct Conversation {
     pub base_commit: Option<String>,
 
     pub state: Lifecycle,
+
+    /// The Agent Profile the grilling session runs under, once one is chosen.
+    pub grilling_profile: Option<super::Profile>,
+
+    /// And the one the implementation runs under. A separate choice because it
+    /// is genuinely a separate account and model — and because the
+    /// implementation session cannot simply carry the grilling one on.
+    pub implementation_profile: Option<super::Profile>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -178,6 +191,25 @@ pub enum Edited {
     NotDrafting,
 }
 
+/// What became of choosing one of a Conversation's two Agent Profiles.
+///
+/// No drafting refusal among them, unlike the Brief and the branch name: a
+/// Profile is a setting rather than a document something has been built from,
+/// and the implementation one is used after the grilling is over — freezing it
+/// when grilling starts would take it away exactly when the human has just
+/// learned what they want it to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chosen {
+    /// Recorded.
+    Chosen,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// There is no Profile with that id to choose.
+    NoSuchProfile,
+}
+
 /// The tables a Conversation and its Timeline live in.
 ///
 /// The Timeline is indexed by the Conversation it belongs to, because that is
@@ -186,12 +218,14 @@ pub enum Edited {
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS conversations (
-             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-             repo_id     INTEGER NOT NULL REFERENCES repos(id),
-             created_at  TEXT NOT NULL,
-             branch      TEXT NOT NULL,
-             base_commit TEXT,
-             state       TEXT NOT NULL
+             id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+             repo_id                   INTEGER NOT NULL REFERENCES repos(id),
+             created_at                TEXT NOT NULL,
+             branch                    TEXT NOT NULL,
+             base_commit               TEXT,
+             state                     TEXT NOT NULL,
+             grilling_profile_id       INTEGER REFERENCES profiles(id),
+             implementation_profile_id INTEGER REFERENCES profiles(id)
          ) STRICT",
     )
     .execute(pool)
@@ -307,7 +341,12 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
         .collect()
 }
 
-/// One Conversation with its Repo, or `None` if there is no such Conversation.
+/// One Conversation with its Repo and whichever Profiles it has chosen, or
+/// `None` if there is no such Conversation.
+///
+/// The Profiles are fetched beside the row rather than joined into it: they are
+/// each optional, they are read back whole, and two more `LEFT JOIN`s' worth of
+/// columns to unpack would say nothing the two small reads do not.
 pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conversation>> {
     /// The columns in the order the query below selects them.
     type Row = (
@@ -316,6 +355,8 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         String,
         Option<String>,
         String,
+        Option<i64>,
+        Option<i64>,
         i64,
         String,
         String,
@@ -324,6 +365,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
 
     let row: Option<Row> = sqlx::query_as(
         "SELECT c.id, c.created_at, c.branch, c.base_commit, c.state,
+                c.grilling_profile_id, c.implementation_profile_id,
                 r.id, r.path, r.name, r.default_branch
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
@@ -340,6 +382,8 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch,
         base_commit,
         state,
+        grilling_profile_id,
+        implementation_profile_id,
         repo_id,
         repo_path,
         repo_name,
@@ -361,7 +405,74 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
+        grilling_profile: chosen_profile(pool, grilling_profile_id).await?,
+        implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
     }))
+}
+
+/// The Profile an id names, where there is an id at all.
+async fn chosen_profile(pool: &SqlitePool, id: Option<i64>) -> Result<Option<super::Profile>> {
+    match id {
+        None => Ok(None),
+        Some(id) => super::load_profile(pool, id).await,
+    }
+}
+
+/// Choose the Agent Profile the grilling session will run under.
+pub async fn set_grilling_profile(pool: &SqlitePool, id: i64, profile_id: i64) -> Result<Chosen> {
+    choose(pool, id, profile_id, "grilling_profile_id").await
+}
+
+/// Choose the Agent Profile the implementation will run under.
+pub async fn set_implementation_profile(
+    pool: &SqlitePool,
+    id: i64,
+    profile_id: i64,
+) -> Result<Chosen> {
+    choose(pool, id, profile_id, "implementation_profile_id").await
+}
+
+/// Record one of the two choices.
+///
+/// The Profile is selected from `profiles` inside the statement rather than
+/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
+/// only when asked to, and a column naming a Profile that is not there is a
+/// session that fails to start with nobody watching.
+///
+/// `column` is one of two literals this module passes, never anything a request
+/// reached.
+async fn choose(pool: &SqlitePool, id: i64, profile_id: i64, column: &str) -> Result<Chosen> {
+    if !conversation_exists(pool, id).await? {
+        return Ok(Chosen::NoSuchConversation);
+    }
+
+    let changed = sqlx::query(&format!(
+        "UPDATE conversations
+         SET {column} = (SELECT id FROM profiles WHERE id = ?)
+         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)"
+    ))
+    .bind(profile_id)
+    .bind(id)
+    .bind(profile_id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
+    .rows_affected();
+
+    Ok(match changed {
+        0 => Chosen::NoSuchProfile,
+        _ => Chosen::Chosen,
+    })
+}
+
+async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .with_context(|| format!("looking for Conversation {id}"))?;
+
+    Ok(found.is_some())
 }
 
 /// A Conversation's Timeline, oldest first — which is reading order, and which

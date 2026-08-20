@@ -27,9 +27,10 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    ArchiveEntry, Archived, BaseCommitOverride, BriefEdit, BranchRename, ConversationEntry,
-    ConversationView, Lifecycle, NewConversation, PendingEntry, PushKey, Registration, RepoEntry,
-    SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    ArchiveEntry, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationEntry,
+    ConversationView, Lifecycle, NewConversation, PendingEntry, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -55,6 +56,20 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_commit))
+        .route(
+            "/api/ui/conversations/{id}/grilling-profile",
+            post(choose_grilling_profile),
+        )
+        .route(
+            "/api/ui/conversations/{id}/implementation-profile",
+            post(choose_implementation_profile),
+        )
+        .route("/api/ui/profiles", get(profiles).post(create_profile))
+        .route("/api/ui/profiles/{id}", post(edit_profile))
+        // Removing is a POST to a route of its own, as closing a Set unanswered
+        // is: the viewer speaks one method, and the thing being done is named in
+        // the path rather than in the verb.
+        .route("/api/ui/profiles/{id}/delete", post(delete_profile))
         // Not a thing to fetch but a thing to listen on — see [`crate::nudge`].
         .route("/api/ui/nudges", get(crate::nudge::nudges))
         .route("/api/ui/push/key", get(push_key))
@@ -350,6 +365,35 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // The two Profiles are read as rows rather than as ids: what the pane says
+    // about one, and whether it can still be run under, is the same reading the
+    // Profile list gets.
+    let grilling_profile = match crate::profiles::entry(
+        &state.watched,
+        conversation.grilling_profile,
+    )
+    .await
+    {
+        Ok(profile) => profile,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Profile failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
+    let implementation_profile = match crate::profiles::entry(
+        &state.watched,
+        conversation.implementation_profile,
+    )
+    .await
+    {
+        Ok(profile) => profile,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Profile failed");
+            return unavailable("the Conversation could not be read");
+        }
+    };
+
     let view = ConversationView {
         id: conversation.id,
         repo: RepoEntry {
@@ -363,6 +407,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         branch: conversation.branch,
         base_commit: conversation.base_commit,
         state: lifecycle(conversation.state),
+        ready_to_grill: crate::profiles::ready_to_grill(
+            grilling_profile.as_ref(),
+            implementation_profile.as_ref(),
+        ),
+        grilling_profile,
+        implementation_profile,
         timeline: timeline
             .into_iter()
             .map(|event| match event.event {
@@ -434,6 +484,111 @@ async fn set_base_commit(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "recording a base commit failed");
             unavailable("the base commit could not be recorded")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/grilling-profile` — which account and model
+/// the grilling session runs under.
+async fn choose_grilling_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<ProfileChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::profiles::choose_grilling(&state.pool, id, choice.profile_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Profile failed");
+            unavailable("the grilling profile could not be chosen")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/implementation-profile` — and the one the
+/// implementation runs under, which is a separate choice.
+async fn choose_implementation_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<ProfileChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::profiles::choose_implementation(&state.pool, id, choice.profile_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Profile failed");
+            unavailable("the implementation profile could not be chosen")
+        }
+    }
+}
+
+/// `GET /api/ui/profiles` — the Agent Profiles, by name, each saying whether its
+/// pair is still where it was left.
+async fn profiles(State(state): State<AppState>) -> HttpResponse {
+    match crate::profiles::listed(&state.pool, &state.watched).await {
+        Ok(rows) => Json::<Vec<ProfileEntry>>(rows).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the Agent Profiles failed");
+            unavailable("the agent profiles could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/profiles` — take on an account, named by the pair that is
+/// mounted for it.
+///
+/// Every refusal is the server's, as a registration's is: the Watched Paths are
+/// a security boundary, and one a request could reach around by not going
+/// through the form would not be one.
+async fn create_profile(
+    State(state): State<AppState>,
+    Json(edit): Json<ProfileEdit>,
+) -> HttpResponse {
+    match crate::profiles::create(&state.pool, &state.watched, &edit).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "saving an Agent Profile failed");
+            unavailable("the agent profile could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/profiles/{id}` — rewrite one, whole.
+async fn edit_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(edit): Json<ProfileEdit>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::ProfileSaved::NoSuchProfile).into_response();
+    };
+
+    match crate::profiles::edit(&state.pool, &state.watched, id, &edit).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = id, "rewriting an Agent Profile failed");
+            unavailable("the agent profile could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/profiles/{id}/delete` — remove one nobody is running under.
+async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();
+    };
+
+    match crate::profiles::remove(&state.pool, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
+            unavailable("the agent profile could not be removed")
         }
     }
 }

@@ -1160,9 +1160,47 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         );
     }
 
+    // Two Agent Profiles, so the pickers are a choice rather than a row — and so
+    // the two roles can hold different ones, which is the ordinary arrangement:
+    // grill on fable, implement on opus. Their pairs are paths nothing is at,
+    // which is exactly what the broken reading is for: this app watches nothing,
+    // so every Profile it reads back is broken, and these fixtures are what the
+    // viewer's tests draw that state from.
+    let mut profiles = Vec::new();
+    for (name, home, model) in [
+        ("fable", "/srv/accounts/fable", "claude-fable-5"),
+        ("opus", "/srv/accounts/opus", "claude-opus-5"),
+    ] {
+        profiles.push(
+            store::create_profile(
+                &pool,
+                &store::ProfileFacts {
+                    name: name.to_owned(),
+                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    model: model.to_owned(),
+                    agent_type: store::AgentType::Claude,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        );
+    }
+    write(
+        "profiles.json",
+        &pin_health(&get(&app, "/api/ui/profiles").await),
+    );
+
     let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting")
         .await
         .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, drafting, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, drafting, profiles[1].id)
+        .await
         .unwrap();
     store::save_brief(
         &pool,
@@ -1197,8 +1235,45 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     );
     write(
         "conversation.json",
-        &pin_timeline(&get(&app, &format!("/api/ui/conversations/{drafting}")).await),
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{drafting}")).await,
+        )),
     );
+}
+
+/// Pin every Profile in a payload to a pair that is where it was left, and the
+/// Conversation carrying them to ready.
+///
+/// Whether a Profile is broken is a fact about the filesystem at the moment it
+/// was read, and these fixtures name accounts under `/srv/accounts` that nothing
+/// is at — read as they stand, every one of them would come back broken, which
+/// is the exceptional case and not the shape a viewer test wants to be fed.
+/// That the server does report it, and when, is `tests/profiles.rs`'s subject.
+fn pin_health(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    // A list of Profiles, or one Conversation carrying the two it has chosen.
+    match payload.as_array_mut() {
+        Some(rows) => rows.iter_mut().for_each(mend),
+        None => {
+            payload["ready_to_grill"] = true.into();
+            for role in ["grilling_profile", "implementation_profile"] {
+                if let Some(profile) = payload.get_mut(role).filter(|it| !it.is_null()) {
+                    mend(profile);
+                }
+            }
+        }
+    }
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+fn mend(profile: &mut serde_json::Value) {
+    assert!(
+        profile.get("broken").is_some(),
+        "no Profile here to pin:\n{profile}"
+    );
+    profile["broken"] = serde_json::Value::Null;
 }
 
 /// Pin the times a Conversation's Timeline carries, so the fixture does not

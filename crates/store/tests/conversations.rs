@@ -187,7 +187,11 @@ async fn clearing_the_base_commit_restores_the_default_branch_rule() {
     );
 
     assert_eq!(
-        load_conversation(&pool, id).await.unwrap().unwrap().base_commit,
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .base_commit,
         None
     );
 }
@@ -271,7 +275,10 @@ async fn a_conversation_and_its_brief_survive_the_database_being_reopened() {
 
     assert_eq!(conversation.branch, "rate-limiting");
     assert_eq!(conversation.repo.name, "verkstead");
-    assert_eq!(brief(&pool, id).await, "# Rate limiting\n\nThe API has none.\n");
+    assert_eq!(
+        brief(&pool, id).await,
+        "# Rate limiting\n\nThe API has none.\n"
+    );
 }
 
 #[tokio::test]
