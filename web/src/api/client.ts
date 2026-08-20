@@ -76,7 +76,7 @@ export function archiveSet(id: number): Promise<Archived> {
   return post<Archived>(`/api/ui/sets/${id}/archive`);
 }
 
-/// Whether a newer Askance has been released than the one serving this page.
+/// Whether a newer Verkstead has been released than the one serving this page.
 ///
 /// The server is the side that asks GitHub, once a day, and this hands over
 /// whatever it last concluded — so the answer costs it nothing and the browser

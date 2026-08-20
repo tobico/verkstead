@@ -1,4 +1,4 @@
-# One binary, viewer and all: `askance` carries the CLI verbs and the server both
+# One binary, viewer and all: `verkstead` carries the CLI verbs and the server both
 # (ADR-0004), so there is one package to build here and nothing beside it to keep
 # in sync.
 {
@@ -12,7 +12,7 @@
 }:
 
 rustPlatform.buildRustPackage {
-  pname = "askance";
+  pname = "verkstead";
   version = (lib.importTOML ../Cargo.toml).workspace.package.version;
 
   # Only what the build reads. `target/`, `web/node_modules` and the development
@@ -41,12 +41,12 @@ rustPlatform.buildRustPackage {
   '';
 
   # The binary's package by name rather than the whole workspace:
-  # `askance-render`'s own default features turn on the TypeScript emitter, which
+  # `verkstead-render`'s own default features turn on the TypeScript emitter, which
   # is a test's business, and a workspace-wide build would unify it into the
   # release binary.
   cargoBuildFlags = [
     "--package"
-    "askance-cli"
+    "verkstead-cli"
   ];
 
   # The tests run the server and the CLI against each other over a socket, and
@@ -56,16 +56,16 @@ rustPlatform.buildRustPackage {
 
   # The CLI shells out to git for the project, the branch and the Diff. The server
   # needs nothing set at all: the viewer is inside it, and where its database and
-  # socket are — `ASKANCE_DATABASE`, `ASKANCE_LISTEN` — stays the caller's to say.
+  # socket are — `VERKSTEAD_DATABASE`, `VERKSTEAD_LISTEN` — stays the caller's to say.
   postInstall = ''
-    wrapProgram $out/bin/askance \
+    wrapProgram $out/bin/verkstead \
       --prefix PATH : ${lib.makeBinPath [ git ]}
   '';
 
   meta = {
     description = "A service and CLI through which coding agents put questions to a human";
     license = lib.licenses.mit;
-    mainProgram = "askance";
+    mainProgram = "verkstead";
     platforms = lib.platforms.unix;
   };
 }

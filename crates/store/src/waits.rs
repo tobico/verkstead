@@ -17,9 +17,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use askance_schema::Liveness;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
+use verkstead_schema::Liveness;
 
 /// How long after the last wait was released a Set still reads as waiting.
 ///
@@ -157,9 +157,9 @@ fn verdict(
 #[cfg(test)]
 mod tests {
     use super::{GRACE, verdict};
-    use askance_schema::Liveness;
     use time::OffsetDateTime;
     use time::format_description::well_known::Rfc3339;
+    use verkstead_schema::Liveness;
 
     fn at(stamp: &str) -> OffsetDateTime {
         OffsetDateTime::parse(stamp, &Rfc3339).unwrap()

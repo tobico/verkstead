@@ -8,6 +8,12 @@ import { registerWorker } from "../src/push/worker";
 // The document vite builds the bundle into, read as text: the tags asserted
 // here are the ones no component renders.
 import shell from "../index.html?raw";
+// The web manifest itself, so the document can be checked against it rather
+// than against a second copy of what it says. Read as text and parsed here:
+// `.webmanifest` is JSON, but not by an extension any bundler recognizes.
+import manifestSource from "../../assets/manifest.webmanifest?raw";
+
+const manifest = JSON.parse(manifestSource) as { theme_color: string };
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -55,7 +61,10 @@ describe("the document", () => {
   });
 
   it("is coloured like the manifest says the app is", () => {
-    expect(shell).toContain('name="theme-color" content="#7a5c3e"');
+    // Read out of the manifest rather than written twice: the browser takes the
+    // chrome's colour from this tag and the installed app's from the manifest,
+    // so the two disagreeing is a thing only the phone would ever show you.
+    expect(shell).toContain(`name="theme-color" content="${manifest.theme_color}"`);
   });
 
   it("names everything it needs at the site root", () => {

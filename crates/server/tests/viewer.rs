@@ -18,12 +18,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use askance_server::{Embed, open_database, router_with_viewer};
 use axum::body::Body;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE};
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
+use verkstead_server::{Embed, open_database, router_with_viewer};
 
 /// A site shaped like the one vite builds: a document naming its bundles under
 /// `assets/` by content, beside the files copied verbatim to the root.
@@ -45,7 +45,9 @@ fn assets() -> PathBuf {
 /// Ask the server for a path, as a browser would.
 async fn get(path: &str) -> axum::http::Response<Body> {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
 
     router_with_viewer::<Site>(pool)
         .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
@@ -116,7 +118,7 @@ async fn a_file_that_is_not_there_is_a_miss_and_not_the_document() {
 #[tokio::test]
 async fn the_agents_namespace_is_never_answered_with_the_document() {
     // An agent that mistypes an endpoint has to be told so. A 200 of HTML would
-    // reach `askance ask` as a Response it could not parse.
+    // reach `verkstead ask` as a Response it could not parse.
     for path in ["/api/v1/no-such-endpoint", "/api/ui/no-such-endpoint"] {
         let response = get(path).await;
 

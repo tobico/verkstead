@@ -10,7 +10,7 @@
 //! What crosses it is JSON, where the agents' half speaks YAML: the agents' side
 //! is read and written by humans in a terminal, and this side is read by a
 //! browser. Everything the agent wrote arrives already rendered to sanitized HTML
-//! — see [`askance_render`] — so the viewer needs no markdown parser, no diff
+//! — see [`verkstead_render`] — so the viewer needs no markdown parser, no diff
 //! highlighter and no sanitizer of its own.
 //!
 //! The two mutations answer 200 with a named outcome rather than a status code,
@@ -20,17 +20,17 @@
 //! that cannot be read at all — a 404, because that is a page the viewer draws
 //! differently.
 
-use askance_render::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
-};
-use askance_schema::{ApiError, Response};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
+use verkstead_render::{
+    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
+};
+use verkstead_schema::{ApiError, Response};
 
 use crate::{AppState, store};
 
@@ -75,8 +75,8 @@ async fn pending(State(state): State<AppState>) -> HttpResponse {
             // All three already decided here rather than sent as timestamps:
             // this is the side with the clock and with the registry of held
             // waits.
-            age: askance_render::relative_age(&set.created_at, now),
-            created_stamp: askance_render::utc_stamp(&set.created_at),
+            age: verkstead_render::relative_age(&set.created_at, now),
+            created_stamp: verkstead_render::utc_stamp(&set.created_at),
             liveness: state.waits.liveness(set.id, &set.created_at, now),
         })
         .collect();
@@ -103,8 +103,8 @@ async fn archive(State(state): State<AppState>) -> HttpResponse {
             title: set.title,
             project: set.project,
             branch: set.branch,
-            settled_at: askance_render::settled_age(&set.settled_at, now),
-            settled_stamp: askance_render::utc_stamp(&set.settled_at),
+            settled_at: verkstead_render::settled_age(&set.settled_at, now),
+            settled_stamp: verkstead_render::utc_stamp(&set.settled_at),
             unanswered: set.settled == store::Settled::ArchivedUnanswered,
         })
         .collect();
@@ -144,7 +144,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     let standing = match settlement {
         Some(store::Settlement::Answered(answered)) => {
-            Standing::Answered(askance_render::Answered {
+            Standing::Answered(verkstead_render::Answered {
                 submitted_at: answered.submitted_at,
                 response: answered.response,
             })
@@ -163,7 +163,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
-    let view: SetView = askance_render::set_view(stored.id, stored.set, standing);
+    let view: SetView = verkstead_render::set_view(stored.id, stored.set, standing);
 
     Json(view).into_response()
 }
@@ -289,8 +289,8 @@ async fn unsubscribe(
     }
 }
 
-/// `GET /api/ui/update` — whether a newer Askance has been released than the one
-/// serving this page.
+/// `GET /api/ui/update` — whether a newer Verkstead has been released than
+/// the one serving this page.
 ///
 /// Answered out of memory and never a request made while the browser waits: the
 /// server asks GitHub on its own schedule (see [`crate::updates`]) and this

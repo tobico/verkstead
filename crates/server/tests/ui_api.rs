@@ -11,12 +11,6 @@
 
 use std::time::{Duration, Instant};
 
-use askance_render::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
-    Subscription,
-};
-use askance_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
-use askance_server::{open_database, router, store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -24,12 +18,18 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_render::{
+    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
+    Subscription,
+};
+use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
+use verkstead_server::{open_database, router, store};
 
 /// Two Questions, one with Sub-questions, so a Response has to account for
 /// `Q1`, `Q2`, `Q2a` and `Q2b`.
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: solid-viewer
 questions:
   - label: Q1
@@ -62,7 +62,9 @@ const QUESTIONS: [&str; 3] = ["Q1", "Q2a", "Q2b"];
 /// the whole point of the two namespaces sharing their state.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool.clone(), router(pool))
 }
 
@@ -220,7 +222,7 @@ fn bare(title: &str) -> QuestionSet {
         preface: None,
         questions: Vec::new(),
         postscript: None,
-        project: Some("askance".to_owned()),
+        project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
     }
@@ -239,7 +241,7 @@ async fn every_waiting_set_is_listed_newest_first_with_its_age_and_its_liveness(
     assert_eq!(titles, ["the newer ask", "the older ask"]);
 
     let row = &pending[0];
-    assert_eq!(row.project.as_deref(), Some("askance"));
+    assert_eq!(row.project.as_deref(), Some("verkstead"));
     assert_eq!(row.branch.as_deref(), Some("solid-viewer"));
     // All three arrive decided rather than as a timestamp: the age in the
     // words the list is scanned in, the exact minute behind it for the

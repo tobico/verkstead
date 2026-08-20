@@ -5,7 +5,7 @@
 //! beside it — one file is the whole deployment, which is what the tailnet box
 //! and the NixOS module both wanted. In a release build the files are compiled
 //! in; in a debug build rust-embed reads them off disk on every request, so
-//! `pnpm build` is visible to a running `cargo run -p askance-cli -- serve`
+//! `pnpm build` is visible to a running `cargo run -p verkstead-cli -- serve`
 //! without a recompile.
 //!
 //! Two decisions live here. The first is the fallback: the viewer routes on the
@@ -56,7 +56,7 @@ pub(crate) async fn serve<V: Embed>(uri: Uri) -> Response {
 
     // Anything under the API's own namespaces reaching this far is a path neither
     // half answers to. An agent that mistyped an endpoint has to be told so: a
-    // 200 of HTML would reach `askance ask` as a Response it could not parse.
+    // 200 of HTML would reach `verkstead ask` as a Response it could not parse.
     if path == "api" || path.starts_with("api/") {
         return StatusCode::NOT_FOUND.into_response();
     }

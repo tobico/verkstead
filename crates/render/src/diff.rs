@@ -478,7 +478,7 @@ mod tests {
         to_html(diff).unwrap().paths
     }
 
-    /// A tracked file edited and an untracked one added — what `askance ask`
+    /// A tracked file edited and an untracked one added — what `verkstead ask`
     /// captures from a working tree mid-change.
     const MODIFIED_AND_NEW: &str = concat!(
         "diff --git a/src/lib.rs b/src/lib.rs\n",

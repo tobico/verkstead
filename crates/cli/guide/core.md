@@ -1,24 +1,24 @@
 # Asking the human
 
-Askance carries a Question Set from a coding agent to the human and blocks
+Verkstead carries a Question Set from a coding agent to the human and blocks
 until it comes back answered. The human answers on a phone, away from the
 terminal, so a wait of hours is the tool working rather than the tool failing.
 
 This Guide is everything the binary knows about asking well, and it ships
-inside the binary: `askance guide` — or `askance` with no arguments — is where
-an agent starts, and the Topics named below are the rest of it. Nothing else
-has to be found.
+inside the binary: `verkstead guide` — or `verkstead` with no arguments — is
+where an agent starts, and the Topics named below are the rest of it. Nothing
+else has to be found.
 
 ## Required topic guides
 
-The Guide is this core plus its Topics, each printed by `askance guide <topic>`.
-A Topic is part of the Guide rather than an extra. It is split out only so its
-reading cost falls when the task that needs it arrives, instead of before every
-ask.
+The Guide is this core plus its Topics, each printed by
+`verkstead guide <topic>`. A Topic is part of the Guide rather than an extra.
+It is split out only so its reading cost falls when the task that needs it
+arrives, instead of before every ask.
 
 - **`gates`** — before authoring a confirmation gate, meaning any Set that asks
   the human for approval to proceed, to commit or to ship, the agent **MUST**
-  run `askance guide gates` first and write the Set the way it says. A gate is
+  run `verkstead guide gates` first and write the Set the way it says. A gate is
   written differently from an ordinary Set and its Response is read far more
   strictly; that strictness is the Topic's whole subject, and getting it wrong
   lands work nobody approved.
@@ -112,7 +112,7 @@ Submit a Question Set and block until the human answers it.
 
 Prints the Response as YAML on stdout and exits 0. Nothing else is ever written to stdout, so the agent can parse it as it stands.
 
-Usage: askance ask [OPTIONS] [FILE]
+Usage: verkstead ask [OPTIONS] [FILE]
 
 Arguments:
   [FILE]
@@ -120,9 +120,9 @@ Arguments:
 
 Options:
       --server <SERVER>
-          Base URL of the Askance server
+          Base URL of the Verkstead server
 
-          [env: ASKANCE_SERVER=]
+          [env: VERKSTEAD_SERVER=]
           [default: http://127.0.0.1:8422]
 
   -h, --help
@@ -139,7 +139,7 @@ set-level `comment`.
 ## Authoring the Set
 
 **If the Set asks for approval to proceed — to commit, to land, to ship — stop
-and run `askance guide gates` first.** A gate is written differently from
+and run `verkstead guide gates` first.** A gate is written differently from
 everything below and its Response is read far more strictly, and the Topic is
 where both of those live.
 
@@ -297,7 +297,7 @@ That is a property of the writing rather than of the Questions:
 
 ## Running the ask
 
-**Run `askance ask` as a background shell command** — in Claude Code, a Bash
+**Run `verkstead ask` as a background shell command** — in Claude Code, a Bash
 call with `run_in_background: true`. The call blocks until the human answers,
 with no timeout, and that may be hours: the whole point is that they are not at
 the terminal. A foreground tool call here hangs the session. The harness wakes
@@ -306,7 +306,7 @@ the agent when the Response arrives.
 Pipe the Set in on stdin — no file to name, and nothing left behind:
 
 ```
-askance ask <<'YAML'
+verkstead ask <<'YAML'
 title: …
 questions:
   - label: Q1

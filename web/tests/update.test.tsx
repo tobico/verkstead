@@ -1,5 +1,5 @@
 //! The Update Notice: the banner the pending page draws when the server says a
-//! newer Askance has been released than the one serving it.
+//! newer Verkstead has been released than the one serving it.
 //!
 //! Mounted through the pending list rather than on its own, because where it
 //! sits is half of what it is: a banner above the list, in the reading column
@@ -22,7 +22,7 @@ const A_SET = SETS[0]!;
 
 /// Where the README says how to update. Stage 06 of the public-release roadmap
 /// writes that section; the anchor is the one agreed with it.
-const UPDATING = "https://github.com/tobico/askance#updating";
+const UPDATING = "https://github.com/tobico/verkstead#updating";
 
 /// What the server says about updating, whenever the page asks.
 const saying = (notice: UpdateNotice) =>
@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("the Update Notice", () => {
-  it("asks the server whether there is a newer Askance", async () => {
+  it("asks the server whether there is a newer Verkstead", async () => {
     const fetching = serving(list(), saying("Current"));
     mount(PendingList);
 

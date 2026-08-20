@@ -8,16 +8,16 @@
 //! deserializing every Set.
 //!
 //! The store sits below both the agent API and the web UI: the UI's server
-//! functions live in the shared `askance-app` crate, which cannot reach back
+//! functions live in the shared `verkstead-app` crate, which cannot reach back
 //! into the server binary that links it.
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use askance_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
+use verkstead_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 
 mod push;
 mod waits;

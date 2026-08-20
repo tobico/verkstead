@@ -1,10 +1,82 @@
-# Askance
+# Verkstead
 
-A single-user web service and companion CLI through which coding agents put
-their questions to a human and block until answered. Agents submit Question
-Sets; the human answers from any device on the tailnet.
+A single-user management platform for agentic coding. A web GUI drives
+everything; a background orchestrator runs sandboxed coding sessions, puts
+Question Sets and commits to the human, and works through task lists and staged
+roadmaps unattended. The human answers from any device on the tailnet.
 
-## Language
+Terms are grouped by what they belong to. The workbench vocabulary is
+Verkstead's own; the question-set vocabulary is inherited from askance and
+still holds word for word, because the asking half is unchanged.
+
+## The workbench
+
+**Watched Path**:
+A directory Verkstead is permitted to operate inside, configured in the
+environment at installation. A security boundary rather than a convenience: any
+filesystem operation on a path outside every Watched Path is refused, and Repos
+are registered only from within one.
+_Avoid_: project root, workspace, scan path, allowed directory
+
+**Repo**:
+A git repository registered with Verkstead from inside a Watched Path.
+Conversations attach to one. Its files stay the source of truth for task lists
+(`.tasks/`) and roadmaps (`docs/roadmaps/`) — Verkstead parses and renders
+them, and never owns them.
+_Avoid_: project, codebase, checkout
+
+**Conversation**:
+The core entity: a Repo, a base commit, a Brief, one branch and one worktree.
+Everything done about one piece of work hangs off it. Runs through Draft →
+Grilling → Direction → Implementing → Wrapping → Done, and can be aborted from
+any of them or reopened once Done. *Blocked on you* is a badge on an active
+state, never a state of its own.
+_Avoid_: task, session, job, thread, ticket
+
+**Brief**:
+The editable markdown document a Conversation starts from, and its first
+Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
+rather than editing the frozen one.
+_Avoid_: description, prompt, spec, issue body
+
+**Timeline**:
+A Conversation's ordered record of what has happened to it, and the middle pane
+of the workbench. Everything Verkstead and its agents do lands here as an
+Event; nothing happens off it.
+_Avoid_: feed, log, history, activity stream
+
+**Event**:
+One entry in a Timeline — a Brief, agent output, a Question Set, a commit, a
+task list, a stage list, a PR, an interruption. Each shows a summary in the
+Timeline and its full self in the details pane. Task lists, stage lists and PRs
+are **pinned**: a fixed set, with no manual pin or unpin.
+_Avoid_: item, record, message, step
+
+**Agent Profile**:
+A named coding-agent account Verkstead can run a session under: a claude home
+directory and config file pair, a default model, and an agent-type
+discriminator so other backends can slot in later. The pair is bind-mounted at
+`~/.claude` / `~/.claude.json` inside the sandbox, which is what keeps accounts
+separate.
+_Avoid_: account, identity, persona, agent config
+
+**Grilling Profile** / **Implementation Profile**:
+The two Agent Profiles a Conversation fixes before grilling starts — one for
+the grilling session, one for the implementation work. They are roles a Profile
+is used in, not kinds of Profile: the same Profile may fill both. Distinct
+Profiles are why an inline implementation is a fresh session rather than the
+grilling session carrying on.
+_Avoid_: primary/secondary profile, planner/worker, grilling agent
+
+**Blocking Ask** / **Deferred Ask**:
+The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
+the session until the Response arrives, as every ask does in askance. A
+**Deferred Ask** does not idle it: the Set waits in the Timeline and its
+Answers are folded into a later session's prompt. Work blocks only on Questions
+whose Answers affect work about to be done.
+_Avoid_: sync/async ask, hard/soft question, urgent question
+
+## Question Sets
 
 **Question Set**:
 A batch of Questions submitted together by one agent, with a Preface and a

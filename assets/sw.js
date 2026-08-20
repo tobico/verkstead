@@ -1,5 +1,6 @@
-// Askance's service worker, served from the site root so its scope is the whole
-// site: a worker can only control the paths under the one it was served from,
+// Verkstead's service worker, served from the site root so its scope is the
+// whole site: a worker can only control the paths under the one it was served
+// from,
 // and a worker under /pkg/ could never show a notification for /sets/12.
 //
 // It does no caching. Every page is rendered against live SQLite, and a cached
@@ -16,8 +17,8 @@ self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 // A Question Set has arrived. Every push the server sends is one, and it does
-// two things with it: it shows a notification, and it tells every Askance that
-// is already open to look again.
+// two things with it: it shows a notification, and it tells every Verkstead
+// that is already open to look again.
 //
 // The notification is not the negotiable half. The subscription was made with
 // `userVisibleOnly`, and a push that showed nothing would cost the subscription
@@ -32,12 +33,12 @@ self.addEventListener("push", (event) => {
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(notice.title || "A Question Set is waiting", {
-        body: notice.project ? `Askance · ${notice.project}` : "Askance",
+        body: notice.project ? `Verkstead · ${notice.project}` : "Verkstead",
         icon: "/icons/icon-192.png",
         // One notification per Set, tagged by its id: a push service that
         // delivers the same push twice then replaces the notification instead of
         // stacking a second one over it.
-        tag: notice.id ? `askance-set-${notice.id}` : "askance",
+        tag: notice.id ? `verkstead-set-${notice.id}` : "verkstead",
         data: { url: notice.id ? `/sets/${notice.id}` : "/" },
       }),
       nudge(),
@@ -45,15 +46,15 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// Tapped. The Set it was about is what opens, in the Askance that is already
+// Tapped. The Set it was about is what opens, in the Verkstead that is already
 // there if there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(open((event.notification.data || {}).url || "/"));
 });
 
-// Tell every open Askance that the pending world moved. The page reacts to this
-// exactly as it does to a Nudge down the server's stream — look again at
+// Tell every open Verkstead that the pending world moved. The page reacts to
+// this exactly as it does to a Nudge down the server's stream — look again at
 // everything it is showing — and nothing here says what changed, because a Nudge
 // never does.
 //
@@ -68,12 +69,12 @@ self.addEventListener("notificationclick", (event) => {
 // root rather than a module of the bundle.
 async function nudge() {
   // includeUncontrolled, for the same reason opening a notification's Set does:
-  // a page loaded before this worker took control is still an open Askance, and
-  // it is the one that would otherwise sit on the poll alone.
+  // a page loaded before this worker took control is still an open Verkstead,
+  // and it is the one that would otherwise sit on the poll alone.
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
 
   for (const client of windows) {
-    client.postMessage({ askance: "nudge" });
+    client.postMessage({ verkstead: "nudge" });
   }
 }
 
@@ -92,7 +93,7 @@ function read(data) {
 async function open(url) {
   const target = new URL(url, self.location.origin).href;
 
-  // includeUncontrolled: an Askance opened before this worker took control is
+  // includeUncontrolled: a Verkstead opened before this worker took control is
   // still the window the human means, and opening a second one over it is the
   // thing to avoid.
   const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

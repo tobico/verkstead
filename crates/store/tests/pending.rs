@@ -1,14 +1,16 @@
 //! The pending list's query: which Sets are still waiting on the human, in
 //! the order they should be shown, drawn from the lifted columns alone.
 
-use askance_schema::{QuestionSet, Response};
-use askance_store::{insert_response, insert_set, open_database, pending_sets};
 use sqlx::SqlitePool;
+use verkstead_schema::{QuestionSet, Response};
+use verkstead_store::{insert_response, insert_set, open_database, pending_sets};
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
@@ -18,7 +20,7 @@ fn set(title: &str) -> QuestionSet {
         preface: None,
         questions: Vec::new(),
         postscript: None,
-        project: Some("askance".to_owned()),
+        project: Some("verkstead".to_owned()),
         branch: Some("answering-web-ui".to_owned()),
         diff: None,
     }
@@ -39,7 +41,7 @@ async fn a_stored_set_is_pending_with_its_lifted_columns() {
     assert_eq!(entry.id, created.id);
     assert_eq!(entry.created_at, created.created_at);
     assert_eq!(entry.title, "Storage layout for the pending list");
-    assert_eq!(entry.project.as_deref(), Some("askance"));
+    assert_eq!(entry.project.as_deref(), Some("verkstead"));
     assert_eq!(entry.branch.as_deref(), Some("answering-web-ui"));
 }
 

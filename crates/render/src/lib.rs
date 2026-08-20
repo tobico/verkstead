@@ -14,10 +14,10 @@
 //! of the wire, which is what makes this the one crate the TypeScript is
 //! generated from — see the `typescript` feature in the manifest.
 //!
-//! Nothing here knows about the store, the router or the viewer. Given an
-//! [`askance_schema::QuestionSet`] and where the Set stands, [`set_view`] hands
-//! back the [`SetView`] the viewer draws — so whatever is serving that viewer,
-//! this is the one place the rendering happens.
+//! Nothing here knows about the store, the router or the viewer. Given a
+//! [`verkstead_schema::QuestionSet`] and where the Set stands, [`set_view`]
+//! hands back the [`SetView`] the viewer draws — so whatever is serving that
+//! viewer, this is the one place the rendering happens.
 
 mod answering;
 mod lists;

@@ -1,12 +1,12 @@
 [package]
-name = "askance-store"
+name = "verkstead-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-askance-schema.workspace = true
+verkstead-schema.workspace = true
 # The push identity: generated here, because the store is where "on first run"
 # happens, and handed out already encoded.
 base64.workspace = true

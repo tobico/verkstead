@@ -9,17 +9,17 @@
 
 use std::time::Duration;
 
-use askance_schema::SetCreated;
-use askance_server::{open_database, router};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
+use verkstead_schema::SetCreated;
+use verkstead_server::{open_database, router};
 
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: nudge
 questions:
   - label: Q1
@@ -50,7 +50,9 @@ const SETTLING: Duration = Duration::from_millis(300);
 /// listening through one clone has to hear a Set posted through another.
 async fn fresh_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, router(pool))
 }
 

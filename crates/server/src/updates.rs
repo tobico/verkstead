@@ -1,4 +1,4 @@
-//! Learning that a newer Askance has been released.
+//! Learning that a newer Verkstead has been released.
 //!
 //! One unauthenticated request to GitHub's latest-release API, at startup and
 //! once a day after — server-side rather than from the browser, because a
@@ -19,8 +19,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use askance_render::UpdateNotice;
 use serde::Deserialize;
+use verkstead_render::UpdateNotice;
 
 /// Where the latest release is asked about.
 ///
@@ -29,7 +29,7 @@ use serde::Deserialize;
 /// the human to update to. Before the first real release the endpoint answers
 /// `404`, which is no news rather than a failure.
 pub(crate) const LATEST_RELEASE: &str =
-    "https://api.github.com/repos/tobico/askance/releases/latest";
+    "https://api.github.com/repos/tobico/verkstead/releases/latest";
 
 /// How often to ask. A release is not an urgent thing to hear about, and the
 /// startup poll covers the server that was restarted just after one.
@@ -40,8 +40,8 @@ const DAILY: Duration = Duration::from_secs(24 * 60 * 60);
 const REACHABLE_WITHIN: Duration = Duration::from_secs(10);
 
 /// Who is asking. GitHub refuses a caller that will not name itself, and this
-/// is the only place Askance has to introduce itself to anyone.
-const ASKING: &str = concat!("askance/", env!("CARGO_PKG_VERSION"));
+/// is the only place Verkstead has to introduce itself to anyone.
+const ASKING: &str = concat!("verkstead/", env!("CARGO_PKG_VERSION"));
 
 /// The release this binary was built as, which is what a tag is compared
 /// against.

@@ -1,14 +1,14 @@
 //! Submitting a Question Set: what the store keeps, and what the API refuses.
 
-use askance_schema::{ApiError, QuestionSet, SetCreated};
-use askance_server::store;
-use askance_server::{open_database, router};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_schema::{ApiError, QuestionSet, SetCreated};
+use verkstead_server::store;
+use verkstead_server::{open_database, router};
 
 const VALID_SET: &str = r#"
 title: Storage layout for the pending list
@@ -16,7 +16,7 @@ preface: |
   We need to settle how Sets are stored before the UI lands.
 
   The candidates differ mainly in how much SQL the Archive view needs.
-project: askance
+project: verkstead
 branch: api-core-and-cli
 questions:
   - label: Q1
@@ -44,7 +44,9 @@ questions:
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
@@ -106,7 +108,7 @@ async fn a_valid_set_is_stored_and_answered_with_its_id() {
     assert_eq!(stored.set.title, "Storage layout for the pending list");
     assert_eq!(stored.set.questions.len(), 2);
     assert_eq!(stored.set.questions[1].subquestions.len(), 2);
-    assert_eq!(stored.set.project.as_deref(), Some("askance"));
+    assert_eq!(stored.set.project.as_deref(), Some("verkstead"));
     assert_eq!(stored.set.branch.as_deref(), Some("api-core-and-cli"));
 }
 
@@ -329,14 +331,14 @@ async fn the_store_keeps_the_pending_list_columns_alongside_the_body() {
             .unwrap();
 
     assert_eq!(title, "Storage layout for the pending list");
-    assert_eq!(project.as_deref(), Some("askance"));
+    assert_eq!(project.as_deref(), Some("verkstead"));
     assert_eq!(branch.as_deref(), Some("api-core-and-cli"));
 }
 
 #[tokio::test]
 async fn the_schema_is_applied_to_an_existing_database() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("askance.db");
+    let path = dir.path().join("verkstead.db");
 
     let pool = open_database(&path).await.unwrap();
     let set = QuestionSet::from_yaml(VALID_SET).unwrap();

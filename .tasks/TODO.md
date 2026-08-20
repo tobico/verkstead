@@ -15,7 +15,7 @@ Roadmap stage: [01: Workbench](docs/roadmaps/mvp/01-workbench.md)
 
 ## Tasks
 
-- [ ] 01: Rename to Verkstead — [details](01-rename.md)
+- [x] 01: Rename to Verkstead — [details](01-rename.md)
 - [ ] 02: Watched paths and repo registration — [details](02-watched-paths.md)
 - [ ] 03: Conversations, briefs and the workbench shell — [details](03-conversations.md)
 - [ ] 04: Agent profiles — [details](04-agent-profiles.md)

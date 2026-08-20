@@ -1,4 +1,4 @@
-//! `askance` — the command coding agents run to put a Question Set to the
+//! `verkstead` — the command coding agents run to put a Question Set to the
 //! human and block until it is answered.
 //!
 //! The CLI is the agent-facing compatibility surface (ADR-0001): agents run it
@@ -24,11 +24,11 @@ const DEFAULT_SERVER: &str = "http://127.0.0.1:8422";
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "askance",
+    name = "verkstead",
     version,
     about = "Put a Question Set to the human and wait for the answer.\n\n\
-             Run `askance guide` — or `askance` with no arguments — for the \
-             Guide: everything an agent needs in order to ask well."
+             Run `verkstead guide` — or `verkstead` with no arguments — for \
+             the Guide: everything an agent needs in order to ask well."
 )]
 pub struct Cli {
     /// No subcommand is the Guide: an agent that runs the binary to see what it
@@ -47,21 +47,22 @@ enum Command {
         /// The Question Set, as YAML. Read from stdin when absent.
         file: Option<PathBuf>,
 
-        /// Base URL of the Askance server.
-        #[arg(long, env = "ASKANCE_SERVER", default_value = DEFAULT_SERVER)]
+        /// Base URL of the Verkstead server.
+        #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
         server: String,
     },
 
-    /// Run the Askance server: the agents' API and the human's viewer.
+    /// Run the Verkstead server: the agents' API and the human's viewer.
     ///
     /// The flags are the server's own, and the one verb here that is not an
     /// agent's — everything else in this binary talks *to* a server.
-    Serve(askance_server::Config),
+    Serve(verkstead_server::Config),
 
     /// Print the Guide: everything an agent needs in order to ask well.
     ///
-    /// Markdown on stdout, exit 0. With no topic, the core Guide — the same one
-    /// bare `askance` prints, which names the Topics and when each is required.
+    /// Markdown on stdout, exit 0. With no topic, the core Guide — the same
+    /// one bare `verkstead` prints, which names the Topics and when each is
+    /// required.
     Guide {
         /// A Topic of the Guide, required reading when its task is at hand.
         /// Omit for the core Guide, which names them.

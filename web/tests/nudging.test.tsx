@@ -41,7 +41,7 @@ const ANSWERED = answered as SetView;
 const ARRIVAL: PendingEntry = {
   id: 7,
   title: "Whether to keep the outbound queue at all",
-  project: "askance",
+  project: "verkstead",
   branch: "outbound-retries",
   age: "just now",
   created_stamp: "2026-08-03 09:17 UTC",
@@ -297,7 +297,7 @@ describe("a Nudge relayed by the worker", () => {
     await waitFor(() => screen.getByText(SETS[0]!.title));
     const read = askedFor(fetching, PENDING);
 
-    container.delivers({ askance: "something else" });
+    container.delivers({ verkstead: "something else" });
     container.delivers("a message from somewhere else entirely");
     container.delivers(null);
     await vi.advanceTimersByTimeAsync(0);

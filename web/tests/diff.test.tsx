@@ -20,7 +20,7 @@ const UNDIFFED = answered as SetView;
 
 /// Where the wrap setting is kept — the key `src/device.ts` writes, asked for
 /// here by the name a browser would find it under.
-const WRAP = "askance.diff-wrap";
+const WRAP = "verkstead.diff-wrap";
 
 beforeEach(() => {
   localStorage.clear();

@@ -1,15 +1,16 @@
 # Development
 
-Working *on* Askance, rather than with it: running the loop out of a checkout,
-and the commands the two halves are built and tested with. Adopting Askance
-needs none of this — [the README](../README.md) installs a binary.
+Working *on* Verkstead, rather than with it: running the loop out of a checkout,
+and the commands the two halves are built and tested with. There is no other
+way in yet — nothing has been released under this name, so a checkout is the
+only Verkstead there is.
 
 The vocabulary in bold is the project's, and is defined in
 [CONTEXT.md](../CONTEXT.md).
 
 ## Quickstart
 
-The whole loop, from a fresh checkout. It takes two terminals: `askance ask`
+The whole loop, from a fresh checkout. It takes two terminals: `verkstead ask`
 blocks until it is answered, which is the entire point of it.
 
 ### 1. Enter the dev shell
@@ -25,12 +26,12 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 
 ```console
 $ (cd web && pnpm install && pnpm build)
-$ cargo run -p askance-cli -- serve
-  INFO askance_server: askance is listening listen=127.0.0.1:8422 database=askance.db
+$ cargo run -p verkstead-cli -- serve
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 database=verkstead.db
 ```
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
-on <http://127.0.0.1:8422/>. It creates `askance.db` in the working directory
+on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
 on first run. Leave it running; check it in a third terminal if you like:
 
 ```console
@@ -46,7 +47,7 @@ itself, `pnpm dev` is the better half of this: see [The dev loop](#the-dev-loop)
 ### 3. Ask (terminal 2)
 
 ```console
-$ cargo run -p askance-cli -- ask examples/questions.yaml
+$ cargo run -p verkstead-cli -- ask examples/questions.yaml
 ```
 
 A wait that goes to plan is silent, and the little the CLI does have to say —
@@ -64,7 +65,7 @@ Question Set 1. There is no timeout: only an answer or a kill ends the wait
 A Set can also arrive on stdin, which is how an agent usually sends one:
 
 ```console
-$ cat examples/questions.yaml | cargo run -p askance-cli -- ask
+$ cat examples/questions.yaml | cargo run -p verkstead-cli -- ask
 ```
 
 ### 4. Answer (in the browser)
@@ -87,7 +88,7 @@ Question of it, which the example Set closes with. Nothing there has to be
 answered, and an empty box says there was nothing to add.
 
 The same Response can go in over the API instead, which is what an integration
-test or a script does — see [the API](../README.md#api) and
+test or a script does — see
 [`examples/response.yaml`](../examples/response.yaml), which answers every
 Question in the example Set, leaves one explicitly open, and adds a set-level
 comment.
@@ -122,8 +123,9 @@ $ echo $?
 ```
 
 That is the loop. Run step 3 again and Question Set 2 appears on the pending
-list to be answered the same way. To answer it from your phone instead, see
-[On your phone](phone.md).
+list to be answered the same way. To answer it from your phone instead, put
+`tailscale serve --bg 8422` in front of the server and open the `ts.net` url —
+push notifications need the HTTPS that gives you.
 
 ## The dev loop
 
@@ -155,7 +157,7 @@ only: the built assets are served by the server itself, out of the same binary.
 
 Which is `pnpm build`'s output, embedded by rust-embed. A release build compiles
 it in; a debug build reads it off disk per request, so a `cargo run -p
-askance-cli -- serve` serves whatever `pnpm build` last wrote without a
+verkstead-cli -- serve` serves whatever `pnpm build` last wrote without a
 recompile — and a checkout that has never built the viewer still builds the
 server, which then says so on every page instead of serving one.
 
@@ -187,9 +189,9 @@ The worker itself does no caching; every list and every Set is read from live
 SQLite, and a cached copy of one that has since been answered is worse to the
 human than a failure to load.
 
-The icons are all one SVG, `assets/icons/askance.svg`, rasterized by the script
-above (using `resvg` from the dev shell) to the PNG sizes the manifest and iOS
-ask for. The PNGs are committed so a build needs nothing but cargo — edit the
+The icons are all one SVG, `assets/icons/verkstead.svg`, rasterized by the
+script above (using `resvg` from the dev shell) to the PNG sizes the manifest
+and iOS ask for. The PNGs are committed so a build needs nothing but cargo — edit the
 SVG and re-run the script rather than touching them.
 
 The tests run the real server in-process, so the round trip they check is the
@@ -197,9 +199,9 @@ one an agent gets — including the quickstart above, whose example files
 [`crates/cli/tests/ask.rs`](../crates/cli/tests/ask.rs) drives end to end, taking
 the human's part over the API the viewer's **Submit** posts through.
 
-`askance-render` is everything the server does to what an agent wrote before it
-leaves: markdown to sanitized HTML, the Diff parsed and highlighted, and the view
-types the viewer draws a Set from. It knows nothing of the store, the router or
+`verkstead-render` is everything the server does to what an agent wrote before
+it leaves: markdown to sanitized HTML, the Diff parsed and highlighted, and the
+view types the viewer draws a Set from. It knows nothing of the store, the router or
 the viewer, so it is the seam the browser never reaches across — everything past
 it is HTML the viewer only has to put in the page.
 

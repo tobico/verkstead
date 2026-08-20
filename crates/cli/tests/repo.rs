@@ -3,8 +3,8 @@
 
 mod support;
 
-use askance_cli::repo;
 use support::{REPO_NAME, git, linked_worktree, repo_with_a_commit};
+use verkstead_cli::repo;
 
 #[test]
 fn a_linked_worktree_reports_the_root_repos_name() {

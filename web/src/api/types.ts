@@ -292,7 +292,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
 export type Unsubscribe = { endpoint: string, };
 
 /**
- * Whether there is a newer Askance to update to.
+ * Whether there is a newer Verkstead to update to.
  */
 export type UpdateNotice = "Current" | { "Available": { version: string, } };
 

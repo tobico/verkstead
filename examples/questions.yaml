@@ -1,6 +1,6 @@
 # A Question Set as an agent sends it.
 #
-#   askance ask examples/questions.yaml
+#   verkstead ask examples/questions.yaml
 #
 # `project`, `branch` and `diff` are deliberately absent: the CLI derives them
 # from the working directory and overwrites whatever a Set claims.

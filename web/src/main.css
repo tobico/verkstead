@@ -7,7 +7,12 @@
   --paper: #faf8f5;
   --card: #ffffff;
   --edge: #e3ddd4;
-  --accent: #7a5c3e;
+  /* The icon's ember, taken down until it carries text. `--accent` is both a
+     foreground on `--paper` and a button background with `--paper` on it, so it
+     has to clear 4.5:1 against the paper either way round — which the icon's
+     own #f08a3c does not, at 2.4:1 on this light paper. This is the same hue at
+     5.5:1. Dark mode has the opposite problem and so gets the bright one. */
+  --accent: #a34b12;
 
   /* Inline code gets a wash of its own rather than the fenced block's: a span of
      it is a few characters inside a line of prose, with no box and no margin to
@@ -42,7 +47,9 @@
     --paper: #171614;
     --card: #201e1b;
     --edge: #35312c;
-    --accent: #c9a87c;
+    /* The icon's ember unaltered: against this paper it is 7.2:1, and the
+       deeper light-mode one would be far too dark to read here. */
+    --accent: #f08a3c;
 
     --code-wash: #2e2b26;
     --marked: #4a3f1c;

@@ -14,23 +14,25 @@
 //! that nobody carried across shows up as a failing fixture rather than as a
 //! viewer that draws the wrong thing.
 
-use askance_render::{Answered, SetView, Standing};
-use askance_schema::{
-    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, Subquestion,
-};
-use askance_server::{open_database, router, store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_render::{Answered, SetView, Standing};
+use verkstead_schema::{
+    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, Subquestion,
+};
+use verkstead_server::{open_database, router, store};
 
 /// A router over a fresh database, plus the pool and the directory keeping it
 /// alive.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool.clone(), router(pool))
 }
 
@@ -105,7 +107,7 @@ fn full_grammar_set() -> QuestionSet {
             },
         ],
         postscript: None,
-        project: Some("askance".to_owned()),
+        project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
     }
@@ -334,7 +336,7 @@ fn asked(set: &SetView) -> Vec<&str> {
 
 /// The Option of this Set carrying `needle` in its rendered text, wherever it
 /// was offered.
-fn option_with<'a>(set: &'a SetView, needle: &str) -> &'a askance_render::OptionView {
+fn option_with<'a>(set: &'a SetView, needle: &str) -> &'a verkstead_render::OptionView {
     set.questions
         .iter()
         .flat_map(|question| std::iter::once(&question.ask).chain(question.subquestions.iter()))
@@ -780,7 +782,7 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
 
     let (from_a_repo, _) = set_json(&app, &pool, &full_grammar_set()).await;
     assert_eq!(from_a_repo.title, "Rate limiting for the public API");
-    assert_eq!(from_a_repo.project.as_deref(), Some("askance"));
+    assert_eq!(from_a_repo.project.as_deref(), Some("verkstead"));
     assert_eq!(from_a_repo.branch.as_deref(), Some("solid-viewer"));
 
     let mut outside = full_grammar_set();

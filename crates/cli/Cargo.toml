@@ -1,23 +1,23 @@
 [package]
-name = "askance-cli"
+name = "verkstead-cli"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "askance_cli"
+name = "verkstead_cli"
 path = "src/lib.rs"
 
 [[bin]]
-name = "askance"
+name = "verkstead"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-askance-schema.workspace = true
-# `askance serve` is the server: the CLI links the library and runs it, rather
+verkstead-schema.workspace = true
+# `verkstead serve` is the server: the CLI links the library and runs it, rather
 # than shipping a second binary beside this one (ADR-0004).
-askance-server = { path = "../server" }
+verkstead-server = { path = "../server" }
 clap.workspace = true
 serde-saphyr.workspace = true
 # The runtime `serve` starts. The other verbs are blocking calls and want none

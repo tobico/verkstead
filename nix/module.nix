@@ -1,5 +1,5 @@
-# Askance as a systemd service: the server under its own user, with the CLI on
-# every user's `PATH` so an agent working on the box can just call `askance`.
+# Verkstead as a systemd service: the server under its own user, with the CLI on
+# every user's `PATH` so an agent working on the box can just call `verkstead`.
 #
 # The package is the flake's, so the module is a function of it rather than of
 # `pkgs` — nothing here is in nixpkgs to be found by name.
@@ -13,41 +13,44 @@ self:
 }:
 
 let
-  cfg = config.services.askance;
+  cfg = config.services.verkstead;
 
   # systemd creates and owns this, and the database defaults inside it. Named
   # once because the sandbox, the working directory and that default all say it.
-  stateDir = "/var/lib/askance";
+  stateDir = "/var/lib/verkstead";
 in
 
 {
-  options.services.askance = {
-    enable = lib.mkEnableOption "Askance, through which coding agents put questions to a human" // {
+  options.services.verkstead = {
+    enable = lib.mkEnableOption "Verkstead, through which coding agents put questions to a human" // {
       description = ''
-        Whether to run the Askance server as a system service, with the CLI on
+        Whether to run the Verkstead server as a system service, with the CLI on
         every user's `PATH`.
 
         The server binds the loopback interface and speaks plain HTTP.
         Reaching the web UI from a phone means HTTPS, which is
-        `tailscale serve`'s job in front of it and stays host-level
-        configuration — Askance's `docs/phone.md` has the invocation, and this
-        module deliberately keeps no second copy of it.
+        `tailscale serve --bg 8422`'s job in front of it and stays host-level
+        configuration rather than anything this module arranges.
       '';
     };
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = self.packages.${pkgs.stdenv.hostPlatform.system}.askance;
-      defaultText = lib.literalExpression "askance.packages.\${system}.askance";
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.verkstead;
+      defaultText = lib.literalExpression "verkstead.packages.\${system}.verkstead";
       description = ''
-        The Askance package to run. One derivation carries both halves: the
+        The Verkstead package to run. One derivation carries both halves: the
         server this service starts and the CLI it puts on `PATH`.
 
         The default is the released binary, downloaded — so a host that imports
         this module needs no Rust toolchain and `nixos-rebuild` does not turn
         into a workspace compile. Building from the flake's own tree instead is
-        `askance.packages.''${system}.askance-source`, which is what
+        `verkstead.packages.''${system}.verkstead-source`, which is what
         `nix flake check` proves.
+
+        Until Verkstead's first release the two are the same thing: with the
+        release manifest still empty there is nothing to download, so the
+        flake hands out the source build under both names.
       '';
     };
 
@@ -56,25 +59,25 @@ in
       default = "127.0.0.1:8422";
       example = "0.0.0.0:8422";
       description = ''
-        Address and port the server binds, as `ASKANCE_LISTEN`.
+        Address and port the server binds, as `VERKSTEAD_LISTEN`.
 
         The default is the server's own: loopback, which is what
         `tailscale serve` proxies to. Binding a tailnet address instead reaches
         other devices directly, but over plain HTTP — which rules out the push
-        notifications, since a service worker needs a secure context. The
-        Askance's `docs/phone.md` is where that story lives.
+        notifications, since a service worker needs a secure context. That is
+        what the `tailscale serve` proxy is for.
 
         The CLI's own default is `http://127.0.0.1:8422`, so a host that changes
-        the port here has to set `ASKANCE_SERVER` for the agents alongside it.
+        the port here has to set `VERKSTEAD_SERVER` for the agents alongside it.
       '';
     };
 
     database = lib.mkOption {
       type = lib.types.path;
-      default = "${stateDir}/askance.db";
-      defaultText = lib.literalExpression ''"${stateDir}/askance.db"'';
+      default = "${stateDir}/verkstead.db";
+      defaultText = lib.literalExpression ''"${stateDir}/verkstead.db"'';
       description = ''
-        SQLite file, as `ASKANCE_DATABASE`. Created, with its parent directory,
+        SQLite file, as `VERKSTEAD_DATABASE`. Created, with its parent directory,
         on first run; it holds the Question Sets, the Archive, the push
         subscriptions and the VAPID keypair, so it is the whole of the service's
         state.
@@ -91,7 +94,7 @@ in
       default = true;
       example = false;
       description = ''
-        Whether the server asks GitHub, once a day, whether a newer Askance has
+        Whether the server asks GitHub, once a day, whether a newer Verkstead has
         been released — and shows the Update Notice in the web UI when one has.
 
         Nothing is ever installed on anyone's behalf either way: the Notice is a
@@ -103,29 +106,29 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # The binary lands on `PATH`; an agent asks with it, and `askance serve
+    # The binary lands on `PATH`; an agent asks with it, and `verkstead serve
     # --help` is how a human finds out what this unit is passing it.
     environment.systemPackages = [ cfg.package ];
 
-    users.users.askance = {
+    users.users.verkstead = {
       isSystemUser = true;
-      group = "askance";
-      description = "Askance server";
+      group = "verkstead";
+      description = "Verkstead server";
     };
-    users.groups.askance = { };
+    users.groups.verkstead = { };
 
-    systemd.services.askance = {
-      description = "Askance — questions from coding agents to a human";
+    systemd.services.verkstead = {
+      description = "Verkstead — questions from coding agents to a human";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
       serviceConfig = {
         # The flags rather than the environment variables behind them: what the
-        # unit passes is then readable in `systemctl cat askance`, which is
+        # unit passes is then readable in `systemctl cat verkstead`, which is
         # where a human goes to find out what this service is actually running.
         ExecStart = lib.escapeShellArgs (
           [
-            "${cfg.package}/bin/askance"
+            "${cfg.package}/bin/verkstead"
             "serve"
             "--listen"
             cfg.listen
@@ -135,13 +138,13 @@ in
           ++ lib.optional (!cfg.updateCheck) "--no-update-check"
         );
 
-        User = "askance";
-        Group = "askance";
+        User = "verkstead";
+        Group = "verkstead";
 
         # systemd makes the directory and hands it over already owned; the
         # service never creates it, and it survives a restart with the database
         # in it. Relative paths the server is given resolve here too.
-        StateDirectory = "askance";
+        StateDirectory = "verkstead";
         StateDirectoryMode = "0750";
         WorkingDirectory = stateDir;
 

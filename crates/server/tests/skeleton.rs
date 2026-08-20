@@ -4,17 +4,17 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use askance_server::{Config, open_database, router};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
+use verkstead_server::{Config, open_database, router};
 
 #[tokio::test]
 async fn opening_the_database_creates_a_missing_file() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("state/askance.db");
+    let path = dir.path().join("state/verkstead.db");
     assert!(!path.exists());
 
     let _pool = open_database(&path).await.unwrap();
@@ -25,7 +25,7 @@ async fn opening_the_database_creates_a_missing_file() {
 #[tokio::test]
 async fn opening_the_database_reuses_an_existing_file() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("askance.db");
+    let path = dir.path().join("verkstead.db");
 
     let pool = open_database(&path).await.unwrap();
     sqlx::query("CREATE TABLE marker (id INTEGER PRIMARY KEY)")
@@ -44,7 +44,9 @@ async fn opening_the_database_reuses_an_existing_file() {
 #[tokio::test]
 async fn health_route_answers_ok() {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
 
     let response = router(pool)
         .oneshot(
@@ -63,7 +65,7 @@ async fn health_route_answers_ok() {
 
 #[test]
 fn config_defaults_to_localhost() {
-    let config = Config::parse_from(["askance serve"]);
+    let config = Config::parse_from(["verkstead serve"]);
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
     assert!(!config.database.as_os_str().is_empty());
@@ -72,13 +74,13 @@ fn config_defaults_to_localhost() {
 #[test]
 fn config_is_overridable_by_flag() {
     let config = Config::parse_from([
-        "askance serve",
+        "verkstead serve",
         "--listen",
         "0.0.0.0:9999",
         "--database",
-        "/srv/askance/state.db",
+        "/srv/verkstead/state.db",
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
-    assert_eq!(config.database.to_str().unwrap(), "/srv/askance/state.db");
+    assert_eq!(config.database.to_str().unwrap(), "/srv/verkstead/state.db");
 }

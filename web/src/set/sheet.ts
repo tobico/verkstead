@@ -101,7 +101,7 @@ export function clicked(selected: number | null, n: number): number | null {
 /// Where one Set's draft lives. Keyed by the Set's id, so two Sets being
 /// answered in turn keep independent drafts.
 export function draftKey(id: number): string {
-  return `askance.draft.${id}`;
+  return `verkstead.draft.${id}`;
 }
 
 /// Whether there is nothing in a draft to come back to. An untouched sheet is

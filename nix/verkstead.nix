@@ -1,11 +1,11 @@
 # The released binary, fetched rather than built: an adopter running
-# `nix run github:tobico/askance` should get the tool, not a cold compile of the
+# `nix run github:tobico/verkstead` should get the tool, not a cold compile of the
 # Rust workspace and the pnpm viewer beside it. Which version to fetch, from
 # where, and what it must hash to all come out of `nix/release.json`, which
 # `release.yml` commits to `main` after every tag — so nothing in here is edited
 # per release.
 #
-# The build from this tree is `askance-source`, one attribute away.
+# The build from this tree is `verkstead-source`, one attribute away.
 {
   lib,
   stdenvNoCC,
@@ -22,13 +22,18 @@ let
   # hand here. A Release carries four assets and no others, and there is nothing
   # to fall back to — so an unlisted system fails at evaluation, naming the
   # package that does build anywhere, rather than fetching a url that 404s.
+  #
+  # Until Verkstead's first release that is *every* system, and the flake does
+  # not reach this file at all — it reads the same manifest, finds `systems`
+  # empty, and hands out the source build under this package's name instead.
+  # The throw is what catches a manifest that has some systems but not this one.
   asset =
     release.systems.${system}
-      or (throw "askance: the release manifest has no binary for ${system} — build askance-source instead");
+      or (throw "verkstead: the release manifest has no binary for ${system} — build verkstead-source instead");
 in
 
 stdenvNoCC.mkDerivation {
-  pname = "askance";
+  pname = "verkstead";
 
   # The manifest's version rather than `Cargo.toml`'s. The two answer different
   # questions: this package is whatever the last release published, and the tree
@@ -52,7 +57,7 @@ stdenvNoCC.mkDerivation {
   # Release serves a plain file, and the mode did not survive the upload.
   installPhase = ''
     runHook preInstall
-    install -D -m755 $src $out/bin/askance
+    install -D -m755 $src $out/bin/verkstead
     runHook postInstall
   '';
 
@@ -60,14 +65,14 @@ stdenvNoCC.mkDerivation {
   # as it does when built from source — so it gets the same wrapper here, since
   # a downloaded binary gets none of what buildRustPackage arranges for free.
   postInstall = ''
-    wrapProgram $out/bin/askance \
+    wrapProgram $out/bin/verkstead \
       --prefix PATH : ${lib.makeBinPath [ git ]}
   '';
 
   meta = {
     description = "A service and CLI through which coding agents put questions to a human";
     license = lib.licenses.mit;
-    mainProgram = "askance";
+    mainProgram = "verkstead";
     # Only where a Release actually has an asset, read off the manifest so this
     # follows the workflow's build matrix rather than restating it.
     platforms = lib.attrNames release.systems;

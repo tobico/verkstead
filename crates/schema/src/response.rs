@@ -12,8 +12,8 @@ use crate::set::is_false;
 
 // A Response is what the viewer submits, so its TypeScript is generated from
 // this definition along with the rest of the viewer's wire — see the note on
-// `askance-render`'s `typescript` feature. The attributes are gated because the
-// emitter has no business in the browser build.
+// `verkstead-render`'s `typescript` feature. The attributes are gated because
+// the emitter has no business in the browser build.
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 

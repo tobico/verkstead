@@ -39,7 +39,7 @@ const ANSWERED = answered as SetView;
 const ARRIVAL: PendingEntry = {
   id: 7,
   title: "Whether to keep the outbound queue at all",
-  project: "askance",
+  project: "verkstead",
   branch: "outbound-retries",
   age: "just now",
   created_stamp: "2026-08-03 09:17 UTC",

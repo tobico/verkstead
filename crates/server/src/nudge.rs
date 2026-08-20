@@ -8,8 +8,9 @@
 //!
 //! The three durable changes reach this stream over two channels rather than
 //! one. A settlement — a Response taken, or a Set closed unanswered — is
-//! already announced on [`Settlements`](askance_store::Settlements) from inside
-//! the store, on the single path the browser's submit and the agent's both
+//! already announced on [`Settlements`](verkstead_store::Settlements) from
+//! inside the store, on the single path the browser's submit and the agent's
+//! both
 //! take, so listening to it here is what makes it impossible to Nudge about a
 //! settlement from one namespace and silently not from the other. Only a Set
 //! arriving needs a channel of its own.

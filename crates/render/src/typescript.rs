@@ -12,7 +12,7 @@
 //! test in the crate the type is defined in, and two crates' test binaries are
 //! two processes, which would race to create the one file and each write half of
 //! it. Exporting from here writes it once, in one process — dependencies and all,
-//! including the Set types over in `askance-schema`.
+//! including the Set types over in `verkstead-schema`.
 
 use ts_rs::TS;
 
@@ -49,10 +49,10 @@ fn the_viewers_types_are_written_from_these() {
     Subscribed::export_all(&config).unwrap();
     Unsubscribe::export_all(&config).unwrap();
 
-    // Whether there is a newer Askance than the one serving the page.
+    // Whether there is a newer Verkstead than the one serving the page.
     UpdateNotice::export_all(&config).unwrap();
 
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.
-    askance_schema::ApiError::export_all(&config).unwrap();
+    verkstead_schema::ApiError::export_all(&config).unwrap();
 }

@@ -9,8 +9,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use askance_schema::SetCreated;
-use askance_server::{open_database, router, store};
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
@@ -24,11 +22,13 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_schema::SetCreated;
+use verkstead_server::{open_database, router, store};
 use web_push_native::Auth;
 
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: pwa-and-push
 questions:
   - label: Q1
@@ -161,7 +161,9 @@ async fn nowhere() -> String {
 /// through the viewer's.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     let app = router(pool.clone());
     (dir, pool, app)
 }
@@ -352,7 +354,7 @@ async fn a_set_arriving_is_pushed_once_to_every_device() {
         let notice = device.read(push);
         assert_eq!(notice["id"], created.id);
         assert_eq!(notice["title"], "Rate limiting for the public API");
-        assert_eq!(notice["project"], "askance");
+        assert_eq!(notice["project"], "verkstead");
     }
 }
 

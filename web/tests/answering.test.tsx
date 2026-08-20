@@ -8,7 +8,7 @@
 //! checked against `set-answered.json`, whose Response the same `cargo test` put
 //! through the store and read out again: what the browser puts on the wire is
 //! then the same Response the server records and hands back, which is the one
-//! the waiting `askance ask` is given as YAML.
+//! the waiting `verkstead ask` is given as YAML.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

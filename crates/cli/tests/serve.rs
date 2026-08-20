@@ -1,4 +1,4 @@
-//! `askance serve`: the verb that runs the server out of the same binary the
+//! `verkstead serve`: the verb that runs the server out of the same binary the
 //! agent asks with. What it is judged on is that the process an operator starts
 //! answers the agent API, hands over the viewer, and is pointed at its socket
 //! and its database exactly as the server binary this verb replaced was.
@@ -9,10 +9,10 @@ use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use askance_schema::Response;
+use verkstead_schema::Response;
 
 /// A Set small enough to be answered by the Response below, and legal without a
-/// repository: `askance ask` derives `project` and `branch` from the working
+/// repository: `verkstead ask` derives `project` and `branch` from the working
 /// directory and finds neither in a tempdir.
 const SET: &str = "
 title: Does the serve verb serve?
@@ -45,7 +45,7 @@ fn free_port() -> u16 {
         .port()
 }
 
-/// `askance serve` as an operator runs it: a child process with its own
+/// `verkstead serve` as an operator runs it: a child process with its own
 /// database, killed when the test is done with it.
 struct Serve {
     child: Option<Child>,
@@ -58,7 +58,7 @@ impl Serve {
     /// `RUST_LOG` is dropped from the environment so the default filter is what
     /// the log assertions below are reading.
     fn start(dir: &Path, port: u16, args: &[&str], env: &[(&str, &str)]) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_askance"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_verkstead"));
         command
             .arg("serve")
             .args(args)
@@ -73,7 +73,7 @@ impl Serve {
 
         let child = command
             .spawn()
-            .expect("the askance binary should be built for its own tests");
+            .expect("the verkstead binary should be built for its own tests");
         let serving = Serve {
             child: Some(child),
             url: format!("http://127.0.0.1:{port}"),
@@ -105,7 +105,7 @@ impl Serve {
         {
             assert!(
                 Instant::now() < deadline,
-                "`askance serve` never answered on {}",
+                "`verkstead serve` never answered on {}",
                 self.url
             );
             std::thread::sleep(Duration::from_millis(50));
@@ -154,17 +154,17 @@ impl Drop for Serve {
     }
 }
 
-/// `askance ask`, pointed at the serving process, fed `SET` on stdin.
+/// `verkstead ask`, pointed at the serving process, fed `SET` on stdin.
 fn ask(serving: &Serve, dir: &Path) -> Child {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_askance"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .arg("ask")
-        .env("ASKANCE_SERVER", &serving.url)
+        .env("VERKSTEAD_SERVER", &serving.url)
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("the askance binary should be built for its own tests");
+        .expect("the verkstead binary should be built for its own tests");
 
     let mut stdin = child.stdin.take().unwrap();
     stdin.write_all(SET.as_bytes()).unwrap();
@@ -175,10 +175,10 @@ fn ask(serving: &Serve, dir: &Path) -> Child {
 
 /// Run the binary to completion with `args` and hand back what it wrote.
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_askance"))
+    Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .args(args)
         .output()
-        .expect("the askance binary should be built for its own tests")
+        .expect("the verkstead binary should be built for its own tests")
 }
 
 fn stdout(output: &Output) -> String {
@@ -188,7 +188,7 @@ fn stdout(output: &Output) -> String {
 #[test]
 fn the_served_api_round_trips_an_ask() {
     let tmp = tempfile::tempdir().unwrap();
-    let database = tmp.path().join("state/askance.db");
+    let database = tmp.path().join("state/verkstead.db");
     let port = free_port();
     let mut serving = Serve::with_flags(tmp.path(), port, &database);
 
@@ -197,7 +197,7 @@ fn the_served_api_round_trips_an_ask() {
 
     let output = waiting.wait_with_output().unwrap();
     eprintln!(
-        "askance ask stderr:\n{}",
+        "verkstead ask stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(
@@ -228,7 +228,7 @@ fn the_served_api_round_trips_an_ask() {
 fn the_viewer_is_served_beside_the_api() {
     let tmp = tempfile::tempdir().unwrap();
     let port = free_port();
-    let mut serving = Serve::with_flags(tmp.path(), port, &tmp.path().join("askance.db"));
+    let mut serving = Serve::with_flags(tmp.path(), port, &tmp.path().join("verkstead.db"));
 
     match ureq::get(format!("{}/", serving.url)).call() {
         Ok(mut document) => {
@@ -261,16 +261,16 @@ fn the_listen_address_and_database_come_from_the_environment_too() {
         port,
         &[],
         &[
-            ("ASKANCE_LISTEN", &format!("127.0.0.1:{port}")),
-            ("ASKANCE_DATABASE", database.to_str().unwrap()),
+            ("VERKSTEAD_LISTEN", &format!("127.0.0.1:{port}")),
+            ("VERKSTEAD_DATABASE", database.to_str().unwrap()),
         ],
     );
 
-    // Reaching the health endpoint at all is `ASKANCE_LISTEN` having been
+    // Reaching the health endpoint at all is `VERKSTEAD_LISTEN` having been
     // honoured: `Serve::start` blocked until this port answered.
     assert!(
         database.exists(),
-        "ASKANCE_DATABASE should have been created at {}",
+        "VERKSTEAD_DATABASE should have been created at {}",
         database.display()
     );
 
@@ -284,33 +284,33 @@ fn the_help_describes_the_flags_and_their_defaults() {
     for phrase in [
         "--listen",
         "--database",
-        "ASKANCE_LISTEN",
-        "ASKANCE_DATABASE",
+        "VERKSTEAD_LISTEN",
+        "VERKSTEAD_DATABASE",
         "127.0.0.1:8422",
-        "askance.db",
+        "verkstead.db",
     ] {
         assert!(
             help.contains(phrase),
-            "`askance serve --help` should mention {phrase:?} — it is the whole \
+            "`verkstead serve --help` should mention {phrase:?} — it is the whole \
              of what an operator reads before starting the server, got:\n{help}"
         );
     }
 }
 
 /// The verb is one subcommand among the agent-facing ones, and adding it must
-/// not have cost the agent the thing bare `askance` does.
+/// not have cost the agent the thing bare `verkstead` does.
 #[test]
 fn serve_is_listed_without_displacing_the_guide() {
     let help = stdout(&run(&["--help"]));
     assert!(
         help.contains("serve"),
-        "`askance --help` should list the verb, got:\n{help}"
+        "`verkstead --help` should list the verb, got:\n{help}"
     );
 
     let bare = run(&[]);
     assert!(
         bare.status.success() && stdout(&bare).contains("## The CLI contract"),
-        "bare `askance` should still print the Guide, got:\n{}",
+        "bare `verkstead` should still print the Guide, got:\n{}",
         stdout(&bare)
     );
 }

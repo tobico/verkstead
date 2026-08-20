@@ -2,18 +2,20 @@
 //! keypair survives a restart, that it is in the encoding the browser wants, and
 //! that a device re-subscribing stays one device.
 
-use askance_store::{
-    PushSubscription, Subscribing, forget_subscription, open_database, push_subscriptions,
-    store_subscription, vapid_keys,
-};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sqlx::SqlitePool;
+use verkstead_store::{
+    PushSubscription, Subscribing, forget_subscription, open_database, push_subscriptions,
+    store_subscription, vapid_keys,
+};
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
@@ -40,7 +42,7 @@ async fn a_fresh_database_gets_a_keypair_on_first_run() {
 #[tokio::test]
 async fn restarting_against_the_same_database_reuses_the_same_keypair() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("askance.db");
+    let path = dir.path().join("verkstead.db");
 
     let pool = open_database(&path).await.unwrap();
     let first = vapid_keys(&pool).await.unwrap();

@@ -7,8 +7,8 @@
 //! sides of the wire. Each worded time travels with the exact minute behind
 //! it, for the tooltip on the words.
 
-use askance_schema::Liveness;
 use serde::{Deserialize, Serialize};
+use verkstead_schema::Liveness;
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;

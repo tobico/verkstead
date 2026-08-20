@@ -5,17 +5,19 @@
 //! Archiving is here too, on both sides of it: what leaves the pending list, what
 //! arrives in the Archive, and what an archived Set will no longer accept.
 
-use askance_schema::{QuestionSet, Response};
-use askance_store::{
+use sqlx::SqlitePool;
+use verkstead_schema::{QuestionSet, Response};
+use verkstead_store::{
     Archiving, Settled, Settlements, Submission, archive_set, archived_sets, insert_response,
     insert_set, open_database, pending_sets, submit_response,
 };
-use sqlx::SqlitePool;
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
@@ -32,7 +34,7 @@ fn set(title: &str) -> QuestionSet {
         preface: None,
         questions: Vec::new(),
         postscript: None,
-        project: Some("askance".to_owned()),
+        project: Some("verkstead".to_owned()),
         branch: Some("answering-conveniences".to_owned()),
         diff: None,
     }
@@ -97,7 +99,7 @@ async fn an_answered_set_is_archived_with_its_lifted_columns_and_the_time_it_was
     let entry = &archived[0];
     assert_eq!(entry.id, created.id);
     assert_eq!(entry.title, "Where the request counter lives");
-    assert_eq!(entry.project.as_deref(), Some("askance"));
+    assert_eq!(entry.project.as_deref(), Some("verkstead"));
     assert_eq!(entry.branch.as_deref(), Some("answering-conveniences"));
     assert_eq!(
         entry.settled_at, accepted.submitted_at,

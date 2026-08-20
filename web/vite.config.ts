@@ -2,7 +2,7 @@
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
-/// Where the axum server listens by default — see `ASKANCE_LISTEN`.
+/// Where the axum server listens by default — see `VERKSTEAD_LISTEN`.
 const SERVER = "http://127.0.0.1:8422";
 
 export default defineConfig(({ mode }) => ({

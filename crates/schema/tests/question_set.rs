@@ -1,7 +1,7 @@
 //! The Question Set as it arrives from an agent: what YAML parses into, and
 //! which shapes the question grammar refuses.
 
-use askance_schema::QuestionSet;
+use verkstead_schema::QuestionSet;
 
 /// A Set exercising every part of the wire format at once.
 const FULL_SET: &str = r#"
@@ -10,7 +10,7 @@ preface: |
   We need to settle how Sets are stored before the UI lands.
 
   The candidates differ mainly in how much SQL the Archive view needs.
-project: askance
+project: verkstead
 branch: api-core-and-cli
 diff: |
   diff --git a/notes.md b/notes.md
@@ -49,7 +49,7 @@ fn a_full_set_parses_into_its_parts() {
     let set = QuestionSet::from_yaml(FULL_SET).expect("the example Set should parse");
 
     assert_eq!(set.title, "Storage layout for the pending list");
-    assert_eq!(set.project.as_deref(), Some("askance"));
+    assert_eq!(set.project.as_deref(), Some("verkstead"));
     assert_eq!(set.branch.as_deref(), Some("api-core-and-cli"));
     assert!(set.diff.as_deref().unwrap().contains("+a line"));
     assert_eq!(

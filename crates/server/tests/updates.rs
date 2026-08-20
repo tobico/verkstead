@@ -1,4 +1,4 @@
-//! Learning that a newer Askance has been released, and saying so on the
+//! Learning that a newer Verkstead has been released, and saying so on the
 //! viewer's namespace.
 //!
 //! Against a GitHub stood up in-process rather than against a mock: what is
@@ -11,8 +11,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use askance_render::UpdateNotice;
-use askance_server::{Config, open_database, router_checking_updates};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -22,13 +20,15 @@ use axum::{Json, response::IntoResponse};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
+use verkstead_render::UpdateNotice;
+use verkstead_server::{Config, open_database, router_checking_updates};
 
 /// The release this test binary was built as, which is the version the server
 /// under test is comparing tags against.
 const RUNNING: &str = env!("CARGO_PKG_VERSION");
 
-/// A tag no Askance will ever carry, so a test that expects an update is never
-/// one release away from expecting nothing.
+/// A tag no Verkstead will ever carry, so a test that expects an update is
+/// never one release away from expecting nothing.
 const FAR_AHEAD: &str = "v99.0.0";
 
 /// How long a test will wait for the startup poll to come back: generous,
@@ -133,7 +133,9 @@ async fn nowhere() -> String {
 /// or not checking at all, where it is pointed nowhere.
 async fn fresh_app(releases: Option<&str>) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
 
     (dir, router_checking_updates(pool, releases))
 }
@@ -278,7 +280,7 @@ async fn a_server_told_not_to_check_asks_nobody() {
     assert_eq!(github.times_asked(), 1);
 
     // Turned off, there is nowhere to ask — with a GitHub standing right there.
-    let off = Config::parse_from(["askance serve", "--no-update-check"]);
+    let off = Config::parse_from(["verkstead serve", "--no-update-check"]);
     assert_eq!(off.releases(), None, "turned off leaves nowhere to ask");
 
     let (_quiet_dir, quiet) = fresh_app(off.releases()).await;

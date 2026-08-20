@@ -31,7 +31,7 @@ function everySection(): SetView {
   return {
     id: 1,
     title: "Rate limiting for the public API",
-    project: "askance",
+    project: "verkstead",
     branch: "solid-viewer",
     preface_html: "<p>no rate limit</p>",
     postscript_html: null,

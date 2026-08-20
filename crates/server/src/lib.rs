@@ -1,4 +1,4 @@
-//! The Askance server: the agents' HTTP API and the human's web UI, over one
+//! The Verkstead server: the agents' HTTP API and the human's web UI, over one
 //! SQLite store and out of one binary.
 
 use std::net::SocketAddr;
@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use askance_store::{Settlements, Waits};
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use sqlx::SqlitePool;
+use verkstead_store::{Settlements, Waits};
 
 mod nudge;
 mod push;
@@ -24,8 +24,8 @@ mod viewer;
 /// Persistence lives in its own crate so the viewer's endpoints can reach it
 /// without depending on the binary that links them. It is re-exported here
 /// because, from the API's side of things, it is still the server's store.
-pub use askance_store as store;
-pub use askance_store::open_database;
+pub use verkstead_store as store;
+pub use verkstead_store::open_database;
 
 /// What a site the server can serve is, for the tests that stand one up in place
 /// of the built viewer — see [`router_with_viewer`].
@@ -48,7 +48,7 @@ const SETTLEMENT_BACKLOG: usize = 64;
 /// What the handlers share: the store, word of Sets that have just arrived or
 /// have just been settled — so held waits need not poll for the one and open
 /// pages hear about both — which Sets a wait is being held on, and whether a
-/// newer Askance has been released than this one.
+/// newer Verkstead has been released than this one.
 #[derive(Clone)]
 pub(crate) struct AppState {
     pool: SqlitePool,
@@ -62,25 +62,25 @@ pub(crate) struct AppState {
 /// app-level auth: the tailnet is the perimeter, so the defaults keep the
 /// server on the loopback interface until told otherwise.
 #[derive(Debug, Clone, clap::Parser)]
-#[command(name = "askance serve", version, about = "Askance server")]
+#[command(name = "verkstead serve", version, about = "Verkstead server")]
 pub struct Config {
     /// Path to the SQLite database. Created, with its parent directory, if
     /// it does not exist.
-    #[arg(long, env = "ASKANCE_DATABASE", default_value = "askance.db")]
+    #[arg(long, env = "VERKSTEAD_DATABASE", default_value = "verkstead.db")]
     pub database: PathBuf,
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
-    #[arg(long, env = "ASKANCE_LISTEN", default_value = "127.0.0.1:8422")]
+    #[arg(long, env = "VERKSTEAD_LISTEN", default_value = "127.0.0.1:8422")]
     pub listen: SocketAddr,
 
-    /// Don't ask GitHub whether a newer Askance has been released, and so
+    /// Don't ask GitHub whether a newer Verkstead has been released, and so
     /// never show the Update Notice. The check is one unauthenticated request
     /// a day and installs nothing, but anything that reaches the internet at
     /// all has to be able to be told not to.
     #[arg(
         long,
-        env = "ASKANCE_NO_UPDATE_CHECK",
+        env = "VERKSTEAD_NO_UPDATE_CHECK",
         action = clap::ArgAction::SetTrue,
         // Anything that is not a falsey word counts as set. This one is thrown
         // from a service unit or a shell as often as from the command line, and
@@ -182,10 +182,10 @@ pub async fn run(config: Config) -> Result<()> {
         listen = %config.listen,
         database = %config.database.display(),
         update_check = config.releases().is_some(),
-        "askance is listening",
+        "verkstead is listening",
     );
 
     axum::serve(listener, router_with_ui(pool, config.releases()))
         .await
-        .context("serving Askance")
+        .context("serving Verkstead")
 }

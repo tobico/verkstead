@@ -5,8 +5,8 @@
 //! them, and the TypeScript generated from them is what the viewer reads them
 //! back as. The building is the server's alone.
 
-use askance_schema::{Liveness, Response};
 use serde::{Deserialize, Serialize};
+use verkstead_schema::{Liveness, Response};
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -183,7 +183,7 @@ pub struct Answered {
 /// `standing` is the caller's to decide — it comes from the store's settlement
 /// and the registry of held waits, neither of which is any of this crate's
 /// business. Everything else on the way out is rendering, which is all of it.
-pub fn set_view(id: i64, set: askance_schema::QuestionSet, standing: Standing) -> SetView {
+pub fn set_view(id: i64, set: verkstead_schema::QuestionSet, standing: Standing) -> SetView {
     use crate::diff;
 
     // An empty Preface is the same as none at all: no point drawing the section
@@ -229,7 +229,7 @@ fn rendered(written: Option<&str>) -> Option<String> {
 
 /// The Set's Questions as the page needs them: named as a Response answers them,
 /// with the agent's markdown rendered.
-fn viewed(questions: Vec<askance_schema::Question>) -> Vec<QuestionView> {
+fn viewed(questions: Vec<verkstead_schema::Question>) -> Vec<QuestionView> {
     use crate::markdown;
 
     questions
@@ -285,7 +285,7 @@ fn diagrammed(
 /// One question's Options as the page draws them, in the order the agent offered
 /// them. Rendered inline: a row beside a radio has room for markup and none for
 /// a block.
-fn offered_as(options: &[askance_schema::QuestionOption]) -> Vec<OptionView> {
+fn offered_as(options: &[verkstead_schema::QuestionOption]) -> Vec<OptionView> {
     options
         .iter()
         .map(|option| OptionView {

@@ -1,10 +1,11 @@
-//! `askance ask`: read a Question Set, check it, enrich it, send it, and wait.
+//! `verkstead ask`: read a Question Set, check it, enrich it, send it, and
+//! wait.
 
 use std::io::{Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
-use askance_schema::QuestionSet;
+use verkstead_schema::QuestionSet;
 
 use crate::client::Client;
 use crate::repo;

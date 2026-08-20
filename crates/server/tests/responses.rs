@@ -3,15 +3,15 @@
 
 use std::time::{Duration, Instant};
 
-use askance_schema::{ApiError, Response, ResponseAccepted, SetCreated};
-use askance_server::store;
-use askance_server::{open_database, router};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_schema::{ApiError, Response, ResponseAccepted, SetCreated};
+use verkstead_server::store;
+use verkstead_server::{open_database, router};
 
 /// Two Questions, one of them with Sub-questions, so a Response has to cover
 /// `Q1`, `Q2`, `Q2a` and `Q2b`.
@@ -43,7 +43,9 @@ questions:
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
@@ -457,7 +459,7 @@ async fn close_unanswered(pool: &SqlitePool, id: i64) {
 #[tokio::test]
 async fn a_response_outlives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("askance.db");
+    let path = dir.path().join("verkstead.db");
 
     let pool = open_database(&path).await.unwrap();
     let app = router(pool.clone());

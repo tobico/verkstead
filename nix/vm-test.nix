@@ -14,20 +14,20 @@
   testers,
   git,
   # The flake's NixOS module, which closes over the flake's package — there is
-  # no `pkgs.askance` for it to find by name.
+  # no `pkgs.verkstead` for it to find by name.
   module,
-  # What the VM runs: `askance-source`, deliberately, rather than the module's
+  # What the VM runs: `verkstead-source`, deliberately, rather than the module's
   # own default. See where it is pinned below.
   package,
 }:
 
 testers.runNixOSTest {
-  name = "askance-module";
+  name = "verkstead-module";
 
   nodes.machine = {
     imports = [ module ];
 
-    services.askance.enable = true;
+    services.verkstead.enable = true;
 
     # Not an oversight, and not to be helpfully removed: the module defaults to
     # the released binary, and a test fed that would be exercising whatever the
@@ -35,7 +35,7 @@ testers.runNixOSTest {
     # it worthless as a check on a branch. The pin is about *what* is tested,
     # not about network access: a `fetchurl` is a fixed-output derivation and
     # the binary would download here perfectly well.
-    services.askance.package = package;
+    services.verkstead.package = package;
 
     # The CLI finds its own git through the package's wrapper; this one is here
     # so the test can build the repository the CLI then reads.
@@ -44,7 +44,7 @@ testers.runNixOSTest {
     # The fixtures, in the system closure rather than written from the test
     # script, so the YAML stays YAML and is not two layers of escaping deep.
     environment.etc = {
-      "askance-vm-test/set.yaml".text = ''
+      "verkstead-vm-test/set.yaml".text = ''
         # A Question Set as an agent sends it. `project`, `branch` and `diff`
         # are absent on purpose: the CLI derives them from the working
         # directory and overwrites whatever a Set claims.
@@ -71,7 +71,7 @@ testers.runNixOSTest {
 
       # Two Responses of the same shape, distinguishable in the CLI's output, so
       # a test that answers two Sets can tell which answer reached which agent.
-      "askance-vm-test/first-response.yaml".text = ''
+      "verkstead-vm-test/first-response.yaml".text = ''
         answers:
           - label: Q1
             selected: 1
@@ -82,7 +82,7 @@ testers.runNixOSTest {
           Posted through the same API the web UI posts through.
       '';
 
-      "askance-vm-test/second-response.yaml".text = ''
+      "verkstead-vm-test/second-response.yaml".text = ''
         answers:
           - label: Q1
             selected: 1
@@ -109,7 +109,7 @@ testers.runNixOSTest {
 
 
     def ask(name):
-        """Start `askance ask` the way an agent does — in the background, so the
+        """Start `verkstead ask` the way an agent does — in the background, so the
         wait outlives the caller — and leave its stdout, stderr and exit status
         in a directory of its own.
 
@@ -123,7 +123,7 @@ testers.runNixOSTest {
         """
         machine.succeed(f"mkdir -p /root/{name}")
         machine.succeed(
-            f"( cd {REPO} && askance ask /etc/askance-vm-test/set.yaml"
+            f"( cd {REPO} && verkstead ask /etc/verkstead-vm-test/set.yaml"
             f" > /root/{name}/response.yaml 2> /root/{name}/log;"
             f" echo $? > /root/{name}/status )"
             " < /dev/null > /dev/null 2>&1 &"
@@ -160,7 +160,7 @@ testers.runNixOSTest {
         """Post a Response over the API the web UI posts through."""
         machine.succeed(
             "curl -sf -X POST -H 'Content-Type: application/yaml'"
-            f" --data-binary @/etc/askance-vm-test/{fixture}"
+            f" --data-binary @/etc/verkstead-vm-test/{fixture}"
             f" http://127.0.0.1:8422/api/v1/sets/{set_id}/response"
         )
 
@@ -189,7 +189,7 @@ testers.runNixOSTest {
         # so by the time the target is reached it is either running or the
         # module is wrong.
         machine.wait_for_unit("multi-user.target")
-        machine.succeed("systemctl is-active --quiet askance.service")
+        machine.succeed("systemctl is-active --quiet verkstead.service")
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
 
@@ -197,11 +197,11 @@ testers.runNixOSTest {
         # The server opens the database before it binds, so the open port above
         # already says the file exists; what is asserted here is where it is and
         # whose it is.
-        owner = machine.succeed("stat -c %U:%G /var/lib/askance/askance.db").strip()
-        assert owner == "askance:askance", f"the database is owned by {owner}"
+        owner = machine.succeed("stat -c %U:%G /var/lib/verkstead/verkstead.db").strip()
+        assert owner == "verkstead:verkstead", f"the database is owned by {owner}"
 
-        directory = machine.succeed("stat -c %U:%G:%a /var/lib/askance").strip()
-        assert directory == "askance:askance:750", f"the state directory is {directory}"
+        directory = machine.succeed("stat -c %U:%G:%a /var/lib/verkstead").strip()
+        assert directory == "verkstead:verkstead:750", f"the state directory is {directory}"
 
     with subtest("the server run from the store serves the viewer built into it"):
         # The viewer is inside the binary rather than beside it, so there is
@@ -224,7 +224,7 @@ testers.runNixOSTest {
         # What the unit is running is readable in the unit, which is the point of
         # passing flags rather than setting the environment: with `updateCheck`
         # left alone, the opt-out is not among them.
-        unit = machine.succeed("systemctl cat askance.service")
+        unit = machine.succeed("systemctl cat verkstead.service")
         assert "--no-update-check" not in unit, f"the check is off by default:\n{unit}"
 
         # And there is no route out of this VM, so the poll behind that check is
@@ -235,7 +235,7 @@ testers.runNixOSTest {
         # from inside this sandbox does not fall over.
         notice = machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/update").strip()
         assert notice == '"Current"', f"the Update Notice said {notice}"
-        machine.succeed("systemctl is-active --quiet askance.service")
+        machine.succeed("systemctl is-active --quiet verkstead.service")
 
     # The repository an agent always asks from, and which the CLI reads
     # `project`, `branch` and the Diff out of by shelling out to git.
@@ -243,7 +243,7 @@ testers.runNixOSTest {
     machine.succeed(f"echo committed > {REPO}/tracked.txt")
     machine.succeed(f"git -C {REPO} add -A")
     machine.succeed(
-        f"git -C {REPO} -c user.name=Askance -c user.email=vm@askance.invalid"
+        f"git -C {REPO} -c user.name=Verkstead -c user.email=vm@verkstead.invalid"
         " -c commit.gpgsign=false commit -q -m init"
     )
     # Left uncommitted, so the Set carries a Diff as well.
@@ -275,7 +275,7 @@ testers.runNixOSTest {
         # stands, so anything the CLI had to say has to have gone to stderr. It
         # says it as a YAML comment, which is what a merged capture stays
         # parseable through; on stdout alone there is nothing to comment.
-        assert "# askance:" not in printed, f"the CLI printed:\n{printed}"
+        assert "# verkstead:" not in printed, f"the CLI printed:\n{printed}"
 
     with subtest("a pending Set and its waiting agent survive the service restarting"):
         ask("second")
@@ -285,10 +285,10 @@ testers.runNixOSTest {
         # moment the agent is certain to find it missing, and can be *seen*
         # deciding to come back. A `restart` may slip between two of its polls
         # and prove nothing. `Restart=always` does not fight an explicit stop.
-        machine.succeed("systemctl stop askance.service")
+        machine.succeed("systemctl stop verkstead.service")
         machine.wait_until_succeeds("grep -q retrying /root/second/log")
 
-        machine.succeed("systemctl start askance.service")
+        machine.succeed("systemctl start verkstead.service")
         machine.wait_for_open_port(8422)
 
         # The Set outlived the process that took it: 204 is "still pending, come
