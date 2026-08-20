@@ -23,6 +23,11 @@ let
   # it, and `name=path` is the part after the `=` — the same rule the server
   # reads them by, so what the unit binds in is what the server hands out.
   bindPath = bind: if lib.hasPrefix "/" bind then bind else lib.last (lib.splitString "=" bind);
+
+  # Whether the home is Verkstead's own to make. Under the state directory it
+  # is: systemd creates it and hands it over. Anywhere else it is the human's,
+  # and something that already exists.
+  homeIsOurs = lib.hasPrefix "${stateDir}/" "${cfg.home}";
 in
 
 {
@@ -91,6 +96,33 @@ in
         directory. Pointing it elsewhere means the sandbox has to be opened up
         for that path, which this module does by directory — so the directory
         has to exist, even though the file need not.
+      '';
+    };
+
+    home = lib.mkOption {
+      type = lib.types.path;
+      default = "${stateDir}/home";
+      defaultText = lib.literalExpression ''"${stateDir}/home"'';
+      description = ''
+        The home directory the service runs with, as `HOME`, and what `~` means
+        inside a session's sandbox.
+
+        Two files are read out of it and mounted into every sandbox read-only:
+        `.gitconfig` and `.config/gh`. They are the two things a coding agent
+        cannot work without — who a commit is by, and what `gh` is logged in as
+        — and they are the machine's, configured once here rather than per
+        Conversation. Nothing else of this directory is ever exposed to a
+        session, and the service itself only ever reads it.
+
+        Said outright because systemd would otherwise derive it from the
+        `verkstead` user's passwd entry, which is `/var/empty`: a session there
+        commits as nobody and has no GitHub login.
+
+        The default is a directory under the state directory, which systemd
+        creates and hands over — put the two there and every session gets them.
+        Pointing this at a human's own home works too, as long as the
+        `verkstead` user can read them; it is bound in read-only, so it has to
+        exist.
       '';
     };
 
@@ -194,6 +226,13 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
 
+      # What the server itself has to be able to run. bwrap is every session's
+      # sandbox, and it is here rather than in the package's own wrapper because
+      # it is the server that spawns one — the CLI half of the same binary has
+      # no use for it, and there are systems the package builds for that have no
+      # bwrap to offer.
+      path = [ pkgs.bubblewrap ];
+
       serviceConfig = {
         # The flags rather than the environment variables behind them: what the
         # unit passes is then readable in `systemctl cat verkstead`, which is
@@ -224,10 +263,22 @@ in
         User = "verkstead";
         Group = "verkstead";
 
+        # Said rather than left to systemd, which would take it from the
+        # `verkstead` user's passwd entry and arrive at `/var/empty` — see the
+        # `home` option for what a session reads out of it.
+        Environment = [ "HOME=${cfg.home}" ];
+
         # systemd makes the directory and hands it over already owned; the
         # service never creates it, and it survives a restart with the database
         # in it. Relative paths the server is given resolve here too.
-        StateDirectory = "verkstead";
+        #
+        # The home joins it when it is under here, which is the default: a
+        # directory systemd creates is one that is there on a fresh install
+        # without anybody being told to make it.
+        StateDirectory = [
+          "verkstead"
+        ]
+        ++ lib.optional homeIsOurs (lib.removePrefix "/var/lib/" "${cfg.home}");
         StateDirectoryMode = "0750";
         WorkingDirectory = stateDir;
 
@@ -236,13 +287,23 @@ in
         Restart = "always";
         RestartSec = "5s";
 
-        # Hardening. Two things it must not break: SQLite in WAL mode, which
+        # Hardening. Three things it must not break: SQLite in WAL mode, which
         # creates `-wal` and `-shm` beside the database and so needs a
-        # read-write directory rather than just a writable file; and outbound
+        # read-write directory rather than just a writable file; outbound
         # HTTPS — to the browser vendors' push services, whose addresses cannot
-        # be enumerated ahead of time, and to GitHub for the update check. That
-        # is why there is no `IPAddressAllow` here, and why stopping the update
-        # check is `updateCheck = false` rather than a firewall rule.
+        # be enumerated ahead of time, and to GitHub for the update check, which
+        # is why there is no `IPAddressAllow` here and why stopping the update
+        # check is `updateCheck = false` rather than a firewall rule; and bwrap,
+        # which every session runs inside and which needs namespaces, mounts and
+        # a `/proc` of its own.
+        #
+        # Every relaxation below is one a sandbox started under this unit was
+        # seen to need — the subtest in nix/vm-test.nix is that sandbox, and it
+        # is what would catch one of them being quietly put back. Everything not
+        # commented was tried alongside a working sandbox and left alone:
+        # `PrivateUsers` and an empty `CapabilityBoundingSet` in particular look
+        # like they would stop bwrap and do not, because a new user namespace
+        # comes with a bounding set of its own.
         CapabilityBoundingSet = [ "" ];
         NoNewPrivileges = true;
         PrivateDevices = true;
@@ -255,12 +316,28 @@ in
         # it outright — a bind mount cannot be nested under `/home` with
         # `ProtectHome=yes`, and `ProtectHome=tmpfs` is what to use instead.
         ProtectHome = "tmpfs";
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
+        # `ProtectHostname` is gone: a sandbox gets a hostname of its own —
+        # `bwrap --hostname verkstead` — and that setting makes `sethostname`
+        # fail even inside a UTS namespace the process just created. What is
+        # given up is a service that could rename the host, which it cannot do
+        # anyway: it runs unprivileged with an empty capability bounding set,
+        # and renaming the host needs CAP_SYS_ADMIN in the host's own namespace.
+        #
+        # `ProtectKernelLogs` and `ProtectKernelTunables` are gone for one
+        # reason between them: each covers part of `/proc` — `/proc/kmsg` made
+        # inaccessible, `/proc/sys` remounted read-only — and the kernel refuses
+        # to mount a fresh procfs inside a user namespace when the procfs it
+        # would be mounted over is only partly visible. bwrap mounts its own
+        # `/proc`, which is what makes the sandbox's pid namespace mean
+        # anything. What is given up is that the service can read the kernel
+        # ring buffer; writing `/proc/sys` stays out of reach for the reason
+        # above.
         ProtectKernelModules = true;
-        ProtectKernelTunables = true;
         ProtectProc = "invisible";
-        ProcSubset = "pid";
+        # `ProcSubset = "pid"` is gone, and `ProtectProc` above is not: the
+        # first hides everything in `/proc` that is not a process, and bwrap
+        # reads `/proc/sys/kernel/overflowuid` before it can map a uid. The
+        # second was tried alongside a working sandbox and stays.
         ProtectSystem = "strict";
         # AF_UNIX is the journal's socket and AF_NETLINK is what glibc's
         # resolver asks which interfaces exist over — neither is the server
@@ -271,16 +348,45 @@ in
           "AF_UNIX"
           "AF_NETLINK"
         ];
-        RestrictNamespaces = true;
+        # Not `true`, which stops bwrap dead: an allow-list of exactly the
+        # namespaces `bwrap --unshare-all --share-net` creates. `net` is not
+        # among them and stays denied — the sandbox shares the host's network
+        # rather than making one of its own, which is the design's own decision
+        # and the one namespace whose absence a session would notice.
+        RestrictNamespaces = [
+          "cgroup"
+          "ipc"
+          "mnt"
+          "pid"
+          "user"
+          "uts"
+        ];
         RestrictRealtime = true;
         RestrictSUIDSGID = true;
         LockPersonality = true;
-        MemoryDenyWriteExecute = true;
+        # `MemoryDenyWriteExecute` is gone, and this one is not about bwrap: a
+        # sandbox starts perfectly well under it, and then everything inside
+        # inherits the seccomp filter. What a session runs is `claude`, which is
+        # node, and V8 aborts the moment it cannot make a page it wrote
+        # executable. A JIT is what a coding agent is made of, so this is a
+        # setting the product cannot have rather than one it has not got round
+        # to.
         SystemCallArchitectures = "native";
         SystemCallFilter = [
           "@system-service"
+          # bwrap builds the sandbox's filesystem, and none of `mount`,
+          # `umount2` or `pivot_root` is in `@system-service`.
+          "@mount"
           "~@privileged"
           "~@resources"
+          # The three calls out of `@privileged` a sandbox needs, named one at a
+          # time rather than by letting the group back in: `capset` is bwrap
+          # dropping capabilities, `pivot_root` is it swapping the root, and
+          # `sethostname` is `--hostname`. Order matters — a name after a `~`
+          # group puts that one call back.
+          "capset"
+          "pivot_root"
+          "sethostname"
         ];
         UMask = "0077";
 
@@ -307,6 +413,13 @@ in
         # The Sandbox Configuration's binds come in the same way and for the
         # same reason: what the service cannot see it cannot hand to a session.
         BindPaths = map (path: "${path}") cfg.watchedPaths ++ map bindPath cfg.sandboxBinds;
+
+        # A home the human named somewhere of their own, bound in for the reason
+        # a Watched Path is: it is usually under `/home`, which `ProtectHome`
+        # replaces with an empty tmpfs. Read-only, because the two files read
+        # out of it are the two the service only ever reads. Under the state
+        # directory there is nothing to bind — systemd made it.
+        BindReadOnlyPaths = lib.optional (!homeIsOurs) "${cfg.home}";
       };
     };
   };

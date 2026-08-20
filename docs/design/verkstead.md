@@ -139,14 +139,28 @@ flowchart LR
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — which
     is where that gitconfig and gh config are read from (*settled 2026-08-20,
-    building stage 02*), so the packaged unit has to be given a home worth
-    reading
+    building stage 02*), so the packaged unit says outright what that home is:
+    `services.verkstead.home`, defaulting to `/var/lib/verkstead/home`, because
+    systemd would otherwise derive `/var/empty` from the service user's passwd
+    entry and every commit inside a sandbox would be unattributed (*settled
+    2026-08-20, building stage 02*)
   - per-repo extra binds from sandbox configuration
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)
   - This drops today's blanket rw bind of all of `~/src`.
 - **Full network** inside the sandbox; filesystem is the boundary. Leave a
   seam for a proxy allowlist later.
+- **The packaged unit's hardening opens exactly as far as a sandbox needs**,
+  established by starting one under the unit rather than reasoned about:
+  `RestrictNamespaces` narrowed to an allow-list of the namespaces bwrap
+  creates — `net` stays denied — and `ProtectHostname`, `ProtectKernelLogs`,
+  `ProtectKernelTunables` and `ProcSubset` dropped, the last three because each
+  covers part of `/proc` and the kernel then refuses the sandbox its own.
+  `MemoryDenyWriteExecute` goes too, for a reason that is not bwrap's: the
+  filter is inherited by everything inside, and `claude` is node, which aborts
+  where it cannot make what it wrote executable. `PrivateUsers`, an empty
+  `CapabilityBoundingSet` and `ProtectProc` look like blockers and are not, so
+  they stay. (*settled 2026-08-20, building stage 02*)
 - **Question delivery:** the sandbox gets a conversation-scoped server base
   URL injected, so the bundled askance-lineage CLI attributes every set
   explicitly — no inference from project/branch. The variable is

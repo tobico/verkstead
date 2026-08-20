@@ -21,98 +21,293 @@
   package,
 }:
 
+let
+  # Where the grilling half of this test works. Named once, up here, because the
+  # probe, the machine's fixtures and the test script all say them — and a
+  # sandbox built around a path one of them wrote down differently is one that
+  # proves nothing.
+  grillingRepo = "/srv/repos/grilling";
+  account = "/srv/repos/account";
+
+  # The service's home, which is the module's default and where a session reads
+  # the machine's git identity and gh login from.
+  home = "/var/lib/verkstead/home";
+in
+
 testers.runNixOSTest {
   name = "verkstead-module";
 
-  nodes.machine = {
-    imports = [ module ];
+  nodes.machine =
+    {
+      config,
+      pkgs,
+      ...
+    }:
+    let
+      # What a session's sandbox looks like from inside, reported one
+      # `key=value` line at a time.
+      #
+      # The same shape as the sandbox tests in `crates/server/tests/sandbox.rs`,
+      # and for the same reason: a read-only bind and a directory nobody may
+      # write look identical to `test -w`, so each path is attempted rather than
+      # asked of its metadata.
+      report = pkgs.writeShellScript "verkstead-sandbox-report" ''
+        set -u
 
-    services.verkstead.enable = true;
+        say() { printf 'verkstead-probe %s=%s\n' "$1" "$2"; }
 
-    # Not an oversight, and not to be helpfully removed: the module defaults to
-    # the released binary, and a test fed that would be exercising whatever the
-    # last release contains rather than the tree it is run against — which makes
-    # it worthless as a check on a branch. The pin is about *what* is tested,
-    # not about network access: a `fetchurl` is a fixed-output derivation and
-    # the binary would download here perfectly well.
-    services.verkstead.package = package;
+        dir() {
+            if [ ! -d "$1" ]; then say "$2" absent; return; fi
+            if (exec 3> "$1/.verkstead-probe") 2>/dev/null; then
+                rm -f "$1/.verkstead-probe"
+                say "$2" write
+            elif ls "$1" >/dev/null 2>&1; then
+                say "$2" read
+            else
+                say "$2" hidden
+            fi
+        }
 
-    # The module refuses to build without a Watched Path, and the service
-    # refuses to start with one that is not there. Two of them, so that the
-    # sandbox is exercised where it has real work to do: one under `/home`,
-    # which the hardening replaces with an empty tmpfs and the module then binds
-    # back through, and one outside it. The unit coming up at all is what says
-    # both arrived.
-    services.verkstead.watchedPaths = [
-      "/srv/repos"
-      "/home/watched"
-    ];
+        file() {
+            if [ ! -f "$1" ]; then say "$2" absent; return; fi
+            # Appending is the write, and it changes not a byte of what is
+            # there. In a subshell, because a redirection that fails takes the
+            # shell attempting it down with it.
+            if (exec 3>> "$1") 2>/dev/null; then
+                say "$2" write
+            elif cat "$1" >/dev/null 2>&1; then
+                say "$2" read
+            else
+                say "$2" hidden
+            fi
+        }
 
-    systemd.tmpfiles.rules = [
-      "d /srv/repos 0755 root root -"
-      "d /home/watched 0755 root root -"
-    ];
+        worktree=$1
 
-    # The CLI finds its own git through the package's wrapper; this one is here
-    # so the test can build the repository the CLI then reads.
-    environment.systemPackages = [ git ];
+        dir "$worktree" worktree
+        dir ${grillingRepo}/.git git-dir
+        dir /srv/repos/inside sibling
+        dir /nix nix
 
-    # The fixtures, in the system closure rather than written from the test
-    # script, so the YAML stays YAML and is not two layers of escaping deep.
-    environment.etc = {
-      "verkstead-vm-test/set.yaml".text = ''
-        # A Question Set as an agent sends it. `project`, `branch` and `diff`
-        # are absent on purpose: the CLI derives them from the working
-        # directory and overwrites whatever a Set claims.
+        # A bind's parents have to exist for it to land on, so the Repo is
+        # inside as the scaffolding under its git directory — listed rather than
+        # written to, because what is worth saying is what did *not* come in
+        # with it.
+        say repo-holds "$(ls -A ${grillingRepo} | sort | tr '\n' ' ')"
 
-        title: Does the module hold up in a VM?
+        dir "$HOME/.claude" claude-dir
+        file "$HOME/.claude.json" claude-config
+        file "$HOME/.gitconfig" gitconfig
+        file "$HOME/.config/gh/hosts.yml" gh
+        say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
 
-        preface: |
-          Asked from inside the test VM, so that something has to travel the
-          whole way: agent to server to human's device and back again.
+        # Out of the sandbox's own `/proc`, which is a fresh procfs in a pid
+        # namespace of its own — so this says the mount happened as well as
+        # saying what the hostname is.
+        say hostname "$(cat /proc/sys/kernel/hostname)"
+        say tmp-holds "$(ls -A /tmp | wc -l)"
 
-        questions:
-          - label: Q1
-            text: Did the service come up on its own?
-            options:
-              - n: 1
-                text: It did, and its database is in the state directory.
-                recommended: true
-              - n: 2
-                text: It did not.
+        # The server the sandbox was started by, reached over the host's own
+        # loopback. A network namespace of its own would find nothing there.
+        if curl --silent --max-time 10 --output /dev/null \
+            http://127.0.0.1:8422/api/v1/health; then
+            say network reached
+        else
+            say network unreachable
+        fi
 
-          - label: Q2
-            text: Anything else worth recording?
+        # What a session actually is. `claude` is node, and node is a JIT: it
+        # aborts where it cannot make a page it wrote executable, which is a
+        # hardening setting away either way.
+        if node -e 'console.log("jit")' >/dev/null 2>&1; then
+            say jit ran
+        else
+            say jit refused
+        fi
       '';
 
-      # Two Responses of the same shape, distinguishable in the CLI's output, so
-      # a test that answers two Sets can tell which answer reached which agent.
-      "verkstead-vm-test/first-response.yaml".text = ''
-        answers:
-          - label: Q1
-            selected: 1
-          - label: Q2
-            free_text: The first Set came back to the agent that asked it.
+      # And the sandbox itself, built around the Conversation the running
+      # service made.
+      #
+      # The surface is `crates/server/src/sandbox.rs`'s to decide and its own
+      # tests' to check. What no in-process test can ask is whether the packaged
+      # unit permits one at all — the namespaces, the mounts, the `/proc` — so
+      # that is what this runs under the service's hardening.
+      probe = pkgs.writeShellScript "verkstead-sandbox-probe" ''
+        set -eu
 
-        comment: |
-          Posted through the same API the web UI posts through.
+        # The worktree the running service made, found rather than named: which
+        # directory it chose is the server's to decide, and a path written here
+        # would be the test agreeing with itself about it.
+        worktree=$(echo /var/lib/verkstead/worktrees/*)
+        if [ ! -d "$worktree" ]; then
+            echo "no worktree under the state directory" >&2
+            exit 1
+        fi
+
+        exec bwrap \
+            --die-with-parent \
+            --unshare-all --share-net --hostname verkstead \
+            --ro-bind /nix /nix \
+            --ro-bind /bin /bin \
+            --ro-bind /etc /etc \
+            --ro-bind /run/current-system /run/current-system \
+            --proc /proc --dev /dev --tmpfs /tmp \
+            --dir "$HOME" \
+            --bind "$worktree" "$worktree" \
+            --bind ${grillingRepo}/.git ${grillingRepo}/.git \
+            --bind ${account}/.claude "$HOME/.claude" \
+            --bind ${account}/.claude.json "$HOME/.claude.json" \
+            --ro-bind "$HOME/.gitconfig" "$HOME/.gitconfig" \
+            --ro-bind "$HOME/.config/gh" "$HOME/.config/gh" \
+            --chdir "$worktree" \
+            --setenv HOME "$HOME" \
+            --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+            ${report} "$worktree"
       '';
+    in
+    {
+      imports = [ module ];
 
-      "verkstead-vm-test/second-response.yaml".text = ''
-        answers:
-          - label: Q1
-            selected: 1
-          - label: Q2
-            free_text: The second agent recovered its wait across the restart.
+      services.verkstead.enable = true;
 
-        comment: |
-          Answered after the service had been stopped and started under it.
-      '';
+      # Not an oversight, and not to be helpfully removed: the module defaults to
+      # the released binary, and a test fed that would be exercising whatever the
+      # last release contains rather than the tree it is run against — which makes
+      # it worthless as a check on a branch. The pin is about *what* is tested,
+      # not about network access: a `fetchurl` is a fixed-output derivation and
+      # the binary would download here perfectly well.
+      services.verkstead.package = package;
+
+      # The module refuses to build without a Watched Path, and the service
+      # refuses to start with one that is not there. Two of them, so that the
+      # sandbox is exercised where it has real work to do: one under `/home`,
+      # which the hardening replaces with an empty tmpfs and the module then binds
+      # back through, and one outside it. The unit coming up at all is what says
+      # both arrived.
+      services.verkstead.watchedPaths = [
+        "/srv/repos"
+        "/home/watched"
+      ];
+
+      systemd.tmpfiles.rules = [
+        "d /srv/repos 0755 root root -"
+        "d /home/watched 0755 root root -"
+        # The Agent Profile's pair, owned by the service because a session
+        # writes its own transcripts and settings into it. The repository a
+        # Conversation is grilled about is deliberately not here: `committed`
+        # makes that one as root and hands it over afterwards, since git refuses
+        # to work in a repository belonging to somebody else whichever way round
+        # the two are.
+        "d ${account} 0755 verkstead verkstead -"
+        "d ${account}/.claude 0755 verkstead verkstead -"
+        "f ${account}/.claude.json 0644 verkstead verkstead - {}"
+      ];
+
+      # The CLI finds its own git through the package's wrapper; this one is here
+      # so the test can build the repository the CLI then reads.
+      #
+      # curl and node are the two tools the sandbox probe runs *inside* a sandbox,
+      # and they are on the system profile rather than named by store path because
+      # that profile is what a session's `PATH` points at — so finding them there
+      # is part of what is being asked.
+      environment.systemPackages = [
+        git
+        pkgs.curl
+        pkgs.nodejs
+      ];
+
+      # A sandbox under the packaged unit, run on demand rather than at boot.
+      #
+      # The hardening is not copied — it *is* `verkstead.service`'s, read straight
+      # off the module's own output, so a setting that drifts here cannot drift
+      # away from what the service runs under. Only what makes it a probe rather
+      # than a server is replaced: what it runs, and that it runs once.
+      systemd.services.verkstead-sandbox-probe = {
+        description = "A sandbox started under Verkstead's own unit";
+
+        # Including the service's `PATH`, so the bwrap the probe calls is the one
+        # the module put within the server's reach and not one this test found.
+        path = config.systemd.services.verkstead.path;
+
+        serviceConfig = config.systemd.services.verkstead.serviceConfig // {
+          ExecStart = "${probe}";
+          Type = "oneshot";
+          Restart = "no";
+        };
+      };
+
+      # The fixtures, in the system closure rather than written from the test
+      # script, so the YAML stays YAML and is not two layers of escaping deep.
+      environment.etc = {
+        "verkstead-vm-test/set.yaml".text = ''
+          # A Question Set as an agent sends it. `project`, `branch` and `diff`
+          # are absent on purpose: the CLI derives them from the working
+          # directory and overwrites whatever a Set claims.
+
+          title: Does the module hold up in a VM?
+
+          preface: |
+            Asked from inside the test VM, so that something has to travel the
+            whole way: agent to server to human's device and back again.
+
+          questions:
+            - label: Q1
+              text: Did the service come up on its own?
+              options:
+                - n: 1
+                  text: It did, and its database is in the state directory.
+                  recommended: true
+                - n: 2
+                  text: It did not.
+
+            - label: Q2
+              text: Anything else worth recording?
+        '';
+
+        # Two Responses of the same shape, distinguishable in the CLI's output, so
+        # a test that answers two Sets can tell which answer reached which agent.
+        "verkstead-vm-test/first-response.yaml".text = ''
+          answers:
+            - label: Q1
+              selected: 1
+            - label: Q2
+              free_text: The first Set came back to the agent that asked it.
+
+          comment: |
+            Posted through the same API the web UI posts through.
+        '';
+
+        # What the human puts in the service's home, and the two things a session
+        # reads out of it: who a commit is by, and what `gh` is logged in as.
+        "verkstead-vm-test/gitconfig".text = ''
+          [user]
+          	name = Verkstead VM
+          	email = vm@verkstead.invalid
+        '';
+
+        "verkstead-vm-test/gh-hosts.yml".text = ''
+          github.com:
+              user: nobody
+        '';
+
+        "verkstead-vm-test/second-response.yaml".text = ''
+          answers:
+            - label: Q1
+              selected: 1
+            - label: Q2
+              free_text: The second agent recovered its wait across the restart.
+
+          comment: |
+            Answered after the service had been stopped and started under it.
+        '';
+      };
     };
-  };
 
   testScript = ''
+    import json
     import re
+    import shlex
 
     # Where the agents' Sets are asked from. The name is distinctive so that
     # finding it in the human's page proves the CLI derived it from *this*
@@ -253,8 +448,17 @@ testers.runNixOSTest {
         assert notice == '"Current"', f"the Update Notice said {notice}"
         machine.succeed("systemctl is-active --quiet verkstead.service")
 
-    def committed(path, branch=BRANCH):
-        """A git repository at `path`, with one commit on `branch`."""
+    def committed(path, branch=BRANCH, owner="verkstead:verkstead"):
+        """A git repository at `path`, with one commit on `branch`, belonging to
+        whoever will be working in it.
+
+        The owner is not decoration. The service reads these repositories and
+        writes them — `git worktree add` writes the repository's git directory,
+        not just a checkout — and git refuses to read one it finds under another
+        user at all, before Verkstead gets a say. So a Repo the service is given
+        is one it has to own, and a fixture left as root's would be testing an
+        arrangement nothing can work in.
+        """
         machine.succeed(f"git -c init.defaultBranch={branch} init -q {path}")
         machine.succeed(f"echo committed > {path}/tracked.txt")
         machine.succeed(f"git -C {path} add -A")
@@ -262,6 +466,7 @@ testers.runNixOSTest {
             f"git -C {path} -c user.name=Verkstead -c user.email=vm@verkstead.invalid"
             " -c commit.gpgsign=false commit -q -m init"
         )
+        machine.succeed(f"chown -R {owner} {path}")
 
 
     def register(path):
@@ -377,5 +582,172 @@ testers.runNixOSTest {
         printed = collect("second")
 
         assert "recovered its wait" in printed, f"the CLI printed:\n{printed}"
+
+    def post(path, body):
+        """POST a JSON body to the viewer's own namespace, and hand back what
+        came back — which is what the workbench would have received."""
+        return machine.succeed(
+            "curl -sf -X POST -H 'Content-Type: application/json'"
+            f" -d {shlex.quote(json.dumps(body))}"
+            f" http://127.0.0.1:8422{path}"
+        ).strip()
+
+
+    with subtest("the running service makes a worktree in its state directory"):
+        # Everything a grilling needs, done through the same endpoints the
+        # workbench presses — so what makes the worktree is the service, from
+        # inside its own hardening, and not the test reaching around it.
+        #
+        committed("${grillingRepo}")
+
+        outcome = post("/api/ui/repos", {"path": "${grillingRepo}"})
+        assert outcome == '"Added"', f"${grillingRepo} was answered {outcome}"
+
+        repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
+        repo_id = next(row["id"] for row in repos if row["path"] == "${grillingRepo}")
+
+        saved = post(
+            "/api/ui/profiles",
+            {
+                "name": "vm",
+                "claude_dir": "${account}/.claude",
+                "config_file": "${account}/.claude.json",
+                "model": "claude-opus-5",
+            },
+        )
+        assert saved == '"Saved"', f"the Profile was answered {saved}"
+
+        profiles = json.loads(
+            machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/profiles")
+        )
+        assert len(profiles) == 1, f"expected the one Profile, got:\n{profiles}"
+        profile_id = profiles[0]["id"]
+        assert profiles[0]["broken"] is None, (
+            "the Profile's pair is inside a Watched Path and on disk, so the "
+            f"service should be able to reach it: {profiles[0]}"
+        )
+
+        started = json.loads(post("/api/ui/conversations", {"repo_id": repo_id}))
+        conversation = started["Started"]["id"]
+
+        # Every precondition `start_grilling` checks, in the order it checks
+        # them — a Brief, and both Profiles chosen.
+        post(
+            f"/api/ui/conversations/{conversation}/brief",
+            {"markdown": "Whether the packaged unit can host a sandbox."},
+        )
+        for which in ["grilling-profile", "implementation-profile"]:
+            chosen = post(
+                f"/api/ui/conversations/{conversation}/{which}",
+                {"profile_id": profile_id},
+            )
+            assert chosen == '"Chosen"', f"the {which} was answered {chosen}"
+
+        grilling = post(f"/api/ui/conversations/{conversation}/grill", {})
+        assert grilling == '"Started"', f"grilling was answered {grilling}"
+
+        # The worktree is where the design says it is — under the State
+        # Directory, which is Verkstead's own, rather than inside a Watched
+        # Path. `ProtectSystem = "strict"` leaves exactly that one directory
+        # writable, which is the half no crate test can ask.
+        view = json.loads(
+            machine.succeed(
+                f"curl -sf http://127.0.0.1:8422/api/ui/conversations/{conversation}"
+            )
+        )
+        worktree = view["worktree"]["path"]
+        assert worktree.startswith("/var/lib/verkstead/worktrees/"), (
+            f"the worktree is at {worktree}"
+        )
+
+        owner = machine.succeed(f"stat -c %U:%G {worktree}").strip()
+        assert owner == "verkstead:verkstead", f"the worktree is owned by {owner}"
+
+        # A checkout git made, rather than a directory that merely exists: the
+        # branch is checked out in it and the repository has a record of it.
+        #
+        # Read off the repository rather than asked of `git worktree list`,
+        # because asking would mean running git in a repository this test does
+        # not own — which is the same refusal the service would meet the other
+        # way round.
+        machine.succeed(f"test -e {worktree}/tracked.txt")
+        machine.succeed(
+            f"test -d ${grillingRepo}/.git/worktrees/{worktree.rsplit('/', 1)[-1]}"
+        )
+
+    with subtest("a sandbox starts under the service's own hardening"):
+        # The service's home as the human would leave it: the two files a
+        # session reads out of it, and something of the machine's that is none
+        # of a session's business.
+        machine.succeed("mkdir -p ${home}/.config/gh")
+        machine.succeed(
+            "install -m 0644 /etc/verkstead-vm-test/gitconfig ${home}/.gitconfig"
+        )
+        machine.succeed(
+            "install -m 0600 /etc/verkstead-vm-test/gh-hosts.yml"
+            " ${home}/.config/gh/hosts.yml"
+        )
+        machine.succeed("echo 'a private key' > ${home}/.ssh-key")
+        machine.succeed("chown -R verkstead:verkstead ${home}")
+
+        # The probe unit runs `verkstead.service`'s own `serviceConfig`, so what
+        # this starts is a sandbox under the hardening the server runs under. A
+        # setting that stops bwrap fails here and nowhere else — the crate tests
+        # run in a dev shell, which forbids none of it.
+        machine.succeed("systemctl start verkstead-sandbox-probe.service")
+
+        printed = machine.succeed(
+            "journalctl -u verkstead-sandbox-probe.service --no-pager -o cat"
+        )
+        reported = dict(
+            line.removeprefix("verkstead-probe ").split("=", 1)
+            for line in printed.splitlines()
+            if line.startswith("verkstead-probe ")
+        )
+        assert reported, f"the probe reported nothing:\n{printed}"
+
+        # The surface, as the sandbox tests describe it — asked of the packaged
+        # unit this time rather than of a dev shell.
+        assert reported["worktree"] == "write", "a session commits its work"
+        assert reported["git-dir"] == "write", (
+            "the objects and refs a commit is written into are the Repo's"
+        )
+        assert reported["claude-dir"] == "write"
+        assert reported["claude-config"] == "write"
+        assert reported["nix"] == "read"
+        assert reported["gitconfig"] == "read", (
+            "who a session commits as is the human's to set, not the session's to change"
+        )
+        assert reported["gh"] == "read"
+        # The two listings come back without the separator the probe put after
+        # the last entry, because the journal trims a line's trailing
+        # whitespace. Nothing to work around — just what to compare against.
+        assert reported["repo-holds"] == ".git", (
+            "the Repo is inside as its git directory and nothing else — not the "
+            f"checkout the worktree was made from: {reported['repo-holds']!r}"
+        )
+        assert reported["sibling"] == "absent", (
+            "another repository under the same Watched Path is another Conversation's"
+        )
+        assert reported["home"] == ".claude .claude.json .config .gitconfig", (
+            f"everything else in the service's home is absent inside: {reported['home']!r}"
+        )
+
+        # And the operations the hardening is what would forbid: a UTS namespace
+        # with a hostname of its own, a fresh `/proc` in a pid namespace of its
+        # own, a `/tmp` that is the sandbox's, the host's network, and a JIT.
+        assert reported["hostname"] == "verkstead", (
+            f"the sandbox took the host's hostname: {reported['hostname']}"
+        )
+        assert reported["tmp-holds"] == "0", (
+            f"`/tmp` inside is the host's, holding {reported['tmp-holds']} entries"
+        )
+        assert reported["network"] == "reached", (
+            "the filesystem is the boundary; the network is not"
+        )
+        assert reported["jit"] == "ran", (
+            "`claude` is node, and node aborts where it cannot make what it wrote "
+            "executable"
+        )
   '';
 }

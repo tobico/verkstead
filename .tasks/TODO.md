@@ -17,7 +17,7 @@ Roadmap stage: [02: Grilling](docs/roadmaps/mvp/02-grilling.md)
 
 - [x] 01: Worktree per Conversation — [details](01-worktree-per-conversation.md)
 - [x] 02: The sandbox surface — [details](02-sandbox-surface.md)
-- [ ] 03: A sandbox under the unit — [details](03-sandbox-under-the-unit.md)
+- [x] 03: A sandbox under the unit — [details](03-sandbox-under-the-unit.md)
 - [ ] 04: Grilling session with a captured transcript — [details](04-grilling-session.md)
 - [ ] 05: Bundled skills — [details](05-bundled-skills.md)
 - [ ] 06: Question Sets in the Timeline — [details](06-question-sets-in-the-timeline.md)
