@@ -133,9 +133,13 @@ flowchart LR
   - This drops today's blanket rw bind of all of `~/src`.
 - **Full network** inside the sandbox; filesystem is the boundary. Leave a
   seam for a proxy allowlist later.
-- **Question delivery:** the sandbox gets a conversation-scoped
-  `ASKANCE_SERVER` base URL injected, so the bundled askance-lineage CLI
-  attributes every set explicitly — no inference from project/branch.
+- **Question delivery:** the sandbox gets a conversation-scoped server base
+  URL injected, so the bundled askance-lineage CLI attributes every set
+  explicitly — no inference from project/branch. The variable is
+  `VERKSTEAD_SERVER`: the session wrote `ASKANCE_SERVER` because the rename
+  was not yet firm, and it was settled on 2026-08-20 in favour of renaming
+  the whole agent-facing surface, since the real askance stays installed on
+  the host.
 - **Skills are bundled.** Verkstead ships its own adapted fork of the
   tobico-skills set (gates removed, wrap-up added) and installs it into each
   sandbox; `~/src/tobico-skills` is no longer bound in.
@@ -174,19 +178,22 @@ Timeline events:
 
 ## Build and migration
 
-Four stages, captured in `docs/roadmaps/mvp/`:
+Five stages, captured in `docs/roadmaps/mvp/`. The session planned four; the
+Skeleton was split in two on 2026-08-20, when re-grounding at its start found
+it combining a whole-repo rename with a process supervisor.
 
-1. **Skeleton** — rename; conversations, briefs, repo registration, agent
-   profiles; sandboxed grilling sessions; question sets and transcripts in
-   the timeline (blocking asks only).
-2. **Implementation** — direction step, inline and task-list execution,
+1. **Workbench** — rename; watched paths and repo registration;
+   conversations, briefs and the 3-pane shell; agent profiles.
+2. **Grilling** — worktrees and the bwrap sandbox; grilling sessions with
+   captured transcripts; question sets in the timeline (blocking asks only).
+3. **Implementation** — direction step, inline and task-list execution,
    commit events with diffs, auto-advance.
-3. **Wrap-up** — PR events, gh integration, CI monitoring, the wrap-up loop,
+4. **Wrap-up** — PR events, gh integration, CI monitoring, the wrap-up loop,
    stacking, staged roadmaps.
-4. **Refinement** — deferred asks, usage-limit pausing, manual sidebar
+5. **Refinement** — deferred asks, usage-limit pausing, manual sidebar
    ordering, milestone notifications, reopening rounds.
 
-Adoption happens **after stage 3**, when Verkstead covers everything
+Adoption happens **after stage 4**, when Verkstead covers everything
 roadrunner does. Until then roadrunner and the tobico-scripts wrappers stay
 untouched and in daily use — and they are the toolchain that builds Verkstead
 (this roadmap is executed with `/next-stage`). They retire once stage 3 lands.

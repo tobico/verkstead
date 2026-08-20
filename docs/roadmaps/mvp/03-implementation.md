@@ -1,4 +1,4 @@
-# 02. Implementation
+# 03. Implementation
 
 ## Goal
 
@@ -16,7 +16,7 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
   conversation to Direction. No GUI wrap-up button.
 - **Direction: agent recommends, human decides.** The recommendation (inline /
   task list / roadmap) comes with rationale. Roadmap execution itself is
-  stage 03; here the choice UI plus inline and task-list paths land.
+  stage 04; here the choice UI plus inline and task-list paths land.
 - **Inline = fresh session under the implementation profile, primed with a
   handoff document the grilling session writes.** *Why:* grilling and
   implementation run under different fixed profiles (fable vs opus today), so
@@ -33,7 +33,7 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
   shows the server-rendered diff (askance's `render/diff.rs` — folds, syntect
   highlighting — fed per-commit rather than working-tree).
 - **No per-commit review states.** Commits are viewable; feedback consolidates
-  in wrap-up (stage 03).
+  in wrap-up (stage 04).
 - **Interruptions GUI-native**: crash/hang → timeline event with retry /
   take-over-manually / abort, porting roadrunner's remedies and evidence
   gathering (git status + session tail).
@@ -60,9 +60,9 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
 
 ## Re-verify at start
 
-- Assumes stage 01 landed: conversations, profiles, sandbox launcher,
+- Assumes stages 01–02 landed: conversations, profiles, sandbox launcher,
   question-set plumbing, transcript events.
-- Assumes the bundled skill fork exists from stage 01 (grilling) and needs
+- Assumes the bundled skill fork exists from stage 02 (grilling) and needs
   to-tasks/next-task added — check what shape the fork took.
 - Assumes roadrunner's next-step/done-signal semantics are still the ones to
   port (task file regex, stage entry regex, quiet-period grace).

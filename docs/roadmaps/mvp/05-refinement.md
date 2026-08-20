@@ -1,4 +1,4 @@
-# 04. Refinement
+# 05. Refinement
 
 ## Goal
 
@@ -26,7 +26,7 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
   conversation done) — extending the needs-you set that already fires.
 - **Reopening**: Done conversations accept a new brief round; the new brief
   is a new frozen event; the worktree is recreated if already cleaned up.
-- **No cap on concurrent sessions** — confirm nothing in stages 01–03
+- **No cap on concurrent sessions** — confirm nothing in stages 01–04
   accidentally serialized execution.
 
 ## Proposed tasks (provisional)
@@ -45,10 +45,10 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
 
 ## Re-verify at start
 
-- Assumes stages 01–03 landed and Verkstead is the daily driver.
+- Assumes stages 01–04 landed and Verkstead is the daily driver.
 - Assumes usage-limit exhaustion is detectable from claude session output —
   verify against the claude version in use then.
 - Assumes the push pipeline (VAPID, subscriptions) still matches askance's
-  shape after three stages of divergence.
+  shape after four stages of divergence.
 - Revisit whether anything else surfaced during adoption belongs in this
   stage ahead of the items above.

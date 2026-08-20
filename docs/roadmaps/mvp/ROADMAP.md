@@ -10,15 +10,21 @@ Each stage is one `/to-tasks` feature (one branch, one review unit). Start the
 next one with `/next-stage` in a fresh session. Task chunkings inside briefs
 are provisional — re-grounded against the codebase when the stage starts.
 
-Stages are strictly sequential: 02 executes what 01 models, 03 wraps what 02
-lands, 04 refines all three. None are reorderable. Stage 01 is the largest;
-if re-grounding at its start says it exceeds one review unit, split it then
-rather than now. Adoption (replacing roadrunner and the scripts for daily
-work) happens after stage 03.
+Stages are strictly sequential: 02 executes in the sandbox what 01 records, 03
+implements what 02 grills, 04 wraps what 03 lands, 05 refines all four. None
+are reorderable. Adoption (replacing roadrunner and the scripts for daily
+work) happens after stage 04.
+
+The original stage 01, Skeleton, was split in two on 2026-08-20 when
+re-grounding at its start found it combining a whole-repo rename with a
+process supervisor — the roadmap had flagged that risk and left the call to
+this point. Its halves are 01 and 02 below, and the stages after them shifted
+up by one.
 
 ## Stages
 
-- [ ] 01: Skeleton — [brief](01-skeleton.md)
-- [ ] 02: Implementation — [brief](02-implementation.md)
-- [ ] 03: Wrap-up — [brief](03-wrap-up.md)
-- [ ] 04: Refinement — [brief](04-refinement.md)
+- [ ] 01: Workbench — [brief](01-workbench.md)
+- [ ] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+- [ ] 05: Refinement — [brief](05-refinement.md)

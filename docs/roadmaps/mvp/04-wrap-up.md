@@ -1,4 +1,4 @@
-# 03. Wrap-up
+# 04. Wrap-up
 
 ## Goal
 
@@ -33,7 +33,7 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
 - **Stage list event**: `docs/roadmaps/` in the worktree parsed into the
   pinned stage-list event; stages auto-continue (the next stage's
   task-breakdown quiz blocks on questions naturally).
-- **Roadmap direction** from stage 02's chooser becomes executable: the
+- **Roadmap direction** from stage 03's chooser becomes executable: the
   bundled fork of to-roadmap/next-stage writes and consumes the same repo
   file formats.
 
@@ -57,7 +57,7 @@ From [docs/design/verkstead.md](../../design/verkstead.md):
 
 ## Re-verify at start
 
-- Assumes stages 01–02 landed (sessions, task runner, commit events,
+- Assumes stages 01–03 landed (sessions, task runner, commit events,
   direction chooser).
 - Assumes `gh` and the `gh-stack` extension still behave as
   git-workflow.md describes (`submit --auto`, `sync`); verify against
