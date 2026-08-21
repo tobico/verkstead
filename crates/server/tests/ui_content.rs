@@ -1747,6 +1747,21 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap();
     store::start_implementing(&pool, staged).await.unwrap();
 
+    // And what Verkstead did on its own account: the roadmap's first stage
+    // started as a Conversation of its own, said on the Timeline of the
+    // Conversation that started it. Written here rather than driven, because
+    // what starts a stage is a wrap-up settling and there is none of that in a
+    // file about wire shapes — the wording is `continuing.rs`'s, which
+    // `tests/sessions.rs` is what checks.
+    store::note(
+        &pool,
+        staged,
+        "Stage 01 of the `mvp` roadmap — *Workbench* — has started as a Conversation of its \
+         own, on `workbench`.",
+    )
+    .await
+    .unwrap();
+
     write(
         "conversation-roadmap.json",
         &pin_base(
