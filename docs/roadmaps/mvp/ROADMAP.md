@@ -25,6 +25,6 @@ up by one.
 
 - [x] 01: Workbench — [brief](01-workbench.md)
 - [x] 02: Grilling — [brief](02-grilling.md)
-- [ ] 03: Implementation — [brief](03-implementation.md) *(in progress — `implementation`)*
+- [x] 03: Implementation — [brief](03-implementation.md)
 - [ ] 04: Wrap-up — [brief](04-wrap-up.md)
 - [ ] 05: Refinement — [brief](05-refinement.md)
