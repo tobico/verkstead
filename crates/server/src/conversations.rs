@@ -160,10 +160,12 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 /// move that follows from it, and a Conversation whose direction is settled but
 /// whose session would not start still says which way it was headed.
 ///
-/// Only inline starts anything yet. A task list is a `.tasks/` directory to
-/// write before there is a session per task to run, and a staged roadmap is
-/// refused outright — the page's disabled button is a courtesy, exactly as a
-/// form's branch-name check is, and the stage that runs one has not landed.
+/// Two of the three start something. Inline starts a session that builds the
+/// work; a task list starts one that breaks it into `.tasks/` first, and the
+/// sessions that work through that backlog follow from what it commits. A staged
+/// roadmap is refused outright — the page's disabled button is a courtesy,
+/// exactly as a form's branch-name check is, and the stage that runs one has not
+/// landed.
 ///
 /// Choosing on a Conversation that is not in Direction is refused by the store,
 /// which is what makes *implement inline* impossible from anywhere else: the
@@ -184,20 +186,31 @@ pub(crate) async fn choose_direction(
         store::Directed::Chosen => {}
     }
 
-    if direction == Direction::Inline {
-        implement_inline(state, id).await?;
-    }
+    // Which skill the session runs under is the whole of the difference between
+    // the two: same Profile, same worktree, same two documents.
+    let skill: fn(&str, Option<&str>) -> String = match direction {
+        Direction::Inline => skills::implementing,
+        Direction::TaskList => skills::breaking_down,
+        Direction::Roadmap => unreachable!("a staged roadmap was refused above"),
+    };
+
+    build(state, id, skill).await?;
 
     Ok(DirectionChosen::Chosen)
 }
 
-/// Set the work being built inline: the Conversation moves to Implementing, and
-/// a fresh session under its implementation Profile starts in its worktree.
+/// Set the work being built: the Conversation moves to Implementing, and a fresh
+/// session under its implementation Profile starts in its worktree, inside
+/// whichever skill `skill` primes it for.
 ///
 /// A fresh session rather than the grilling one carrying on, because the two run
 /// under Profiles the Conversation fixed separately and a session cannot change
 /// the account it is running as. What the grilling knew reaches it as the
 /// handoff — see [`crate::skills::implementing`].
+///
+/// Implementing either way. Writing the backlog is the work starting rather than
+/// a step before it: an agent is loose in the worktree and about to commit to the
+/// branch, which is the thing the state is there to say.
 ///
 /// The move is recorded before the session is started, exactly as starting a
 /// grilling records the worktree before launching one, and it is read the same
@@ -206,7 +219,7 @@ pub(crate) async fn choose_direction(
 /// recorded would be an agent nobody could see or stop. So a session that will
 /// not start is logged rather than raised — the choice stands, and what it leaves
 /// behind is an Interruption once the stage that draws them lands.
-async fn implement_inline(state: &AppState, id: i64) -> Result<()> {
+async fn build(state: &AppState, id: i64, skill: fn(&str, Option<&str>) -> String) -> Result<()> {
     let pool = &state.pool;
 
     match store::start_implementing(pool, id).await? {
@@ -267,7 +280,7 @@ async fn implement_inline(state: &AppState, id: i64) -> Result<()> {
             &state.nudges,
             &conversation,
             &profile,
-            &skills::implementing(&brief, handoff.as_deref()),
+            &skill(&brief, handoff.as_deref()),
         )
         .await
     {

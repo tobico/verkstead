@@ -1340,8 +1340,11 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
+/// A task list runs off the press too: what starts is the session that writes
+/// the backlog, and writing it is the work beginning rather than a step in front
+/// of it.
 #[tokio::test]
-async fn choosing_a_task_list_records_it_and_leaves_the_conversation_choosing() {
+async fn choosing_a_task_list_sets_the_conversation_implementing() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
     answer(&app, ask(&app, id, PROPOSING).await).await;
@@ -1352,17 +1355,21 @@ async fn choosing_a_task_list_records_it_and_leaves_the_conversation_choosing() 
 
     assert_eq!(view.direction, Some(verkstead_schema::Direction::TaskList));
     assert_eq!(directions(&view), [verkstead_schema::Direction::TaskList]);
+    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
-        view.state,
-        Lifecycle::Direction,
-        "a task list is a `.tasks/` directory to write before anything runs a task",
+        moves(&view),
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the choice is an Event of its own and the work starting is a move",
     );
 }
 
-/// Inline is the one direction that runs off the press, so the Conversation
-/// leaves Direction the moment it is chosen. The session itself is another
-/// matter — this router has no way to run one, which is exactly why the move and
-/// the launch are separate things.
+/// Inline is the other, so the Conversation leaves Direction the moment it is
+/// chosen. The session itself is another matter — this router has no way to run
+/// one, which is exactly why the move and the launch are separate things.
 #[tokio::test]
 async fn choosing_inline_sets_the_conversation_implementing() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;

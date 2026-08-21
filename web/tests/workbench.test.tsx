@@ -1419,28 +1419,29 @@ describe("choosing a direction", () => {
     );
   });
 
-  // A task list, because it is the only direction that can still be sitting in
-  // this chooser: choosing inline starts the work, which takes the conversation
-  // past the state the chooser is drawn in at all.
-  it("says what was chosen, and that nothing runs off it yet", async () => {
+  // A conversation still in this chooser with a direction on it is one whose
+  // session never started: both runnable directions take it past the chooser
+  // altogether.
+  it("says what was chosen, where nothing started off it", async () => {
     theDirecting({ direction: "task-list" });
     const { container } = mount(`/conversations/${DIRECTING.id}`);
 
     const note = await drawn(container, ".direction-chooser .chosen-note");
 
     expect(note.textContent).toContain("break into a task list");
-    expect(note.textContent).toContain("Nothing runs off this yet");
+    expect(note.textContent).toContain("Nothing started off it");
     expect(container.querySelector(".directions .chosen")).toBeTruthy();
   });
 
-  it("says that inline starts as soon as it is chosen", async () => {
+  it("says that both runnable directions start as soon as they are chosen", async () => {
     theDirecting();
     const { container } = mount(`/conversations/${DIRECTING.id}`);
 
     const directions = await drawn(container, ".directions");
-    const inline = directions.querySelectorAll("li")[0]!;
+    const [inline, taskList] = directions.querySelectorAll("li");
 
-    expect(inline.textContent).toContain("Starts as soon as you choose it");
+    expect(inline!.textContent).toContain("Starts as soon as you choose it");
+    expect(taskList!.textContent).toContain("Starts as soon as you choose it");
   });
 
   it("draws the handoff the grilling wrote as the document it is", async () => {

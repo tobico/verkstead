@@ -193,6 +193,22 @@ proposal:
     One change, in one file.
 "#;
 
+/// And a breakdown's quiz: an ordinary Set, carrying no `proposal` block at all,
+/// because the direction it is being asked under was settled before this session
+/// started.
+const BREAKDOWN_QUIZ: &str = r#"
+title: Does this breakdown look right?
+questions:
+  - label: Q9
+    text: Six tasks, or should the migration be its own?
+    options:
+      - n: 1
+        text: Six is right
+        recommended: true
+      - n: 2
+        text: Split the migration out
+"#;
+
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
@@ -317,6 +333,17 @@ fn commits(view: &ConversationView) -> Vec<&CommitEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::Commit(commit) => Some(commit),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Question Sets on a Timeline, in the order they were asked.
+fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) => Some(asked),
             _ => None,
         })
         .collect()
@@ -720,6 +747,168 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         git(&worktree, &["status", "--porcelain"]),
         "",
         "and the handoff is not in there to be swept into it",
+    );
+}
+
+/// The task-list direction end to end: the same Profile and the same worktree as
+/// inline, inside Verkstead's fork of to-tasks instead — which writes a real
+/// `.tasks/` backlog and commits it to the branch.
+///
+/// Repo files stay the source of truth, so what this asks of the far end is what
+/// git says: the backlog is in the worktree and it is committed. Verkstead runs
+/// the workflow that writes it and owns none of it.
+#[tokio::test]
+async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            grep '^name:' "$HOME/.claude/skills/breaking-down/SKILL.md"
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-counter.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilling_output = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
+
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    let breaking_down = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilling_output && !output.running)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture
+        .transcript(breaking_down)
+        .await
+        .replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5"),
+        "the breakdown runs under the implementation Profile, as the work it plans does: {said:?}"
+    );
+    assert!(
+        said.contains("~/.claude/skills/breaking-down/SKILL.md"),
+        "and inside the bundled fork of to-tasks: {said:?}"
+    );
+    assert!(
+        said.contains("name: breaking-down"),
+        "which is really there to be read: installed under the State Directory and \
+         bound into the sandbox exactly as grilling's is: {said:?}"
+    );
+    assert!(
+        !said.contains("~/.claude/skills/implementing/SKILL.md"),
+        "which is the other direction, and not this one: {said:?}"
+    );
+    assert!(
+        said.contains("A counter per key.") && said.contains(BRIEF),
+        "primed with both documents, exactly as an inline session is: {said:?}"
+    );
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Implementing,
+        "writing the backlog is the work starting rather than a step in front of it",
+    );
+
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("chore: plan rate-limiting tasks"),
+        "the plan commit is not something the fork asks permission for",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and the backlog is committed rather than left in the worktree",
+    );
+    assert!(
+        worktree.join(".tasks/TODO.md").is_file()
+            && worktree.join(".tasks/01-counter.md").is_file(),
+        "a real `.tasks/` backlog: TODO.md and the numbered files beside it",
+    );
+    assert_eq!(
+        git(&worktree, &["branch", "--show-current"]).trim(),
+        fixture.view().await.branch,
+        "on the branch the Conversation already made — the fork creates none",
+    );
+}
+
+/// A breakdown asks its quiz the way every session asks anything: an ordinary
+/// Set, with the session idling until the Answers come back. Nothing about it
+/// ends or redirects the Conversation — the direction was settled before this
+/// session started.
+#[tokio::test]
+async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+        *) printf 'breaking down\n'; sleep 300 ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    let quiz = fixture.ask(BREAKDOWN_QUIZ).await;
+
+    let view = fixture.view().await;
+    let asked = sets(&view);
+    assert_eq!(
+        asked.len(),
+        2,
+        "the proposal and the quiz, both on the Timeline they were asked from",
+    );
+    assert_eq!(
+        view.proposal.map(|proposal| proposal.direction),
+        Some(verkstead_schema::Direction::Inline),
+        "an ordinary Set carries no proposal, so the accepted one still stands",
+    );
+
+    assert_eq!(fixture.answer(quiz).await, Submitted::Accepted);
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Implementing,
+        "answering a breakdown question moves nothing: the direction is settled",
     );
 }
 

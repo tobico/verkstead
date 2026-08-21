@@ -49,6 +49,10 @@ const GRILLING: &str = "~/.claude/skills/grilling/SKILL.md";
 /// The implementation skill's, the same way.
 const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
 
+/// And the breakdown skill's — Verkstead's fork of to-tasks, which is what the
+/// task-list direction runs instead of building anything itself.
+const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -149,9 +153,34 @@ pub(crate) fn grilling(brief: &str) -> String {
 /// an implementation that never started because a document was missing would be
 /// a Conversation stuck with nothing to press.
 pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!("Read {IMPLEMENTING} and build the work described below, the way it says."),
+        brief,
+        handoff,
+    )
+}
+
+/// What a task-list session is started on: the same two documents, under the
+/// line that sends the agent into the breakdown skill instead.
+///
+/// The same documents because it is the same work, read for a different purpose:
+/// this session is not building it but deciding how it splits, and a breakdown
+/// drawn from anything less than what the grilling settled would be a backlog for
+/// some other piece of work.
+pub(crate) fn breaking_down(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!(
+            "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
+        ),
+        brief,
+        handoff,
+    )
+}
+
+/// The body both are primed with, under whichever opening line names the skill.
+fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
     let mut prompt = format!(
-        "Read {IMPLEMENTING} and build the work described below, the way it says. \
-         Nothing else in this session tells you how to reach me.\n\n\
+        "{opening} Nothing else in this session tells you how to reach me.\n\n\
          # The Brief this started from\n\n{brief}\n"
     );
 
@@ -277,6 +306,66 @@ mod tests {
         );
     }
 
+    /// What the breakdown produces is a `.tasks/` backlog in the repository, so
+    /// the fork has to say what to write and where — Verkstead reads it back off
+    /// the branch and owns none of it.
+    #[test]
+    fn the_breakdown_skill_says_what_a_task_list_is_made_of() {
+        let breaking_down = skill("breaking-down/SKILL.md");
+
+        for named in [".tasks/", "TODO.md", "NN-<slug>.md"] {
+            assert!(
+                breaking_down.contains(named),
+                "the backlog is files in the repository, and {named} is one of them"
+            );
+        }
+
+        assert!(
+            breaking_down.contains("sequential"),
+            "the order is the dependency, which is the one rule the breakdown has"
+        );
+    }
+
+    /// The fork drops what a workstation-driven flow assumes and Verkstead
+    /// supplies instead: the branch is already made, the feature is already
+    /// chosen, and the plan commit is not something to ask permission for.
+    #[test]
+    fn the_breakdown_skill_drops_what_verkstead_already_supplies() {
+        let breaking_down = skill("breaking-down/SKILL.md");
+
+        assert!(
+            breaking_down.contains("The branch is\nalready made"),
+            "a session that made its own branch would leave the work off the \
+             Conversation's: {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("Nothing waits on approval"),
+            "and the plan commit has no gate in front of it, as no commit here does"
+        );
+        assert!(
+            !breaking_down.contains("/next-task") && !breaking_down.contains("/clear"),
+            "nobody is at a terminal to run a slash command, and Verkstead runs the \
+             backlog itself: {breaking_down}"
+        );
+    }
+
+    /// The breakdown quiz is the human's decision to make, and it reaches them
+    /// the only way anything does.
+    #[test]
+    fn the_breakdown_skill_puts_its_quiz_through_the_cli() {
+        let breaking_down = skill("breaking-down/SKILL.md");
+
+        assert!(
+            breaking_down.contains("verkstead guide") && breaking_down.contains("verkstead ask"),
+            "the quiz is an ordinary Set, asked the way every Set is: {breaking_down}"
+        );
+        assert!(
+            !breaking_down.contains("proposal:"),
+            "and ordinary ones: the `proposal` block is the grilling's closing move, \
+             and this runs after one was accepted"
+        );
+    }
+
     /// A session is put inside the skill by its prompt, and primed with the two
     /// documents the work is described by.
     #[test]
@@ -309,6 +398,30 @@ mod tests {
         assert!(
             !prompt.contains("What the grilling settled"),
             "nothing is said about a document that was never written: {prompt:?}"
+        );
+    }
+
+    /// The same two documents, into the other skill. What differs is the line
+    /// above them, which is the whole of what sends a session one way or the
+    /// other.
+    #[test]
+    fn a_breakdown_session_is_started_on_the_same_documents_inside_the_fork() {
+        let prompt = breaking_down(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+        );
+
+        assert!(
+            prompt.contains(BREAKING_DOWN),
+            "the fork is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(IMPLEMENTING),
+            "and nothing sends this session to build the work instead: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
         );
     }
 

@@ -73,8 +73,8 @@ widening a boundary is the installer's to do.
 _Avoid_: sandbox settings, mounts, extra paths
 
 **Skill**:
-One of the workflows Verkstead runs its sessions by — grilling and implementing
-now, the rest as the stages that need them arrive. Verkstead's
+One of the workflows Verkstead runs its sessions by — grilling, implementing and
+breaking down now, the rest as the stages that need them arrive. Verkstead's
 own: shipped inside the binary, installed under the State Directory at startup
 and mounted read-only over `~/.claude/skills`, so a session's behaviour is the
 product's rather than whatever the machine or the account happens to keep. A
@@ -131,9 +131,10 @@ starting. The choice and the start stay separate things on the record — the
 Direction is an Event and the work beginning is a move — but there is no second
 button between them: the human has decided, and a Conversation sitting on a
 settled Direction with nothing running would be waiting for nobody. **Inline**
-starts as it is chosen. **Task list** has nothing to start yet, so a
-Conversation that picked one stays in Direction until the stage that runs one
-lands.
+and **task list** both start as they are chosen — inline on a session that builds
+the work, a task list on one that breaks it into `.tasks/` first — and the
+Conversation is Implementing either way. **Roadmap** has nothing to start yet, so
+it is refused until the stage that runs one lands.
 _Avoid_: mode, strategy, plan, execution path
 
 **Proposal**:

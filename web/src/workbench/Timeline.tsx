@@ -519,7 +519,7 @@ const DIRECTIONS: { direction: Direction; note: string; ready: boolean }[] = [
   },
   {
     direction: "task-list",
-    note: "Broken into .tasks/ in the worktree, one fresh session per task.",
+    note: "Broken into .tasks/ in the worktree by a session of its own, then one fresh session per task. Starts as soon as you choose it.",
     ready: true,
   },
   {
@@ -617,16 +617,16 @@ function DirectionChooser(props: { conversation: ConversationView }): JSX.Elemen
           </For>
         </ul>
 
-        {/* What was chosen, said where it was chosen — which is only ever a
-            task list by the time this is read: choosing inline starts the work,
-            and a conversation that has started is past this chooser and no
-            longer drawing it. Saying that nothing has run yet is better than a
-            button that looks broken. */}
+        {/* What was chosen, said where it was chosen — which is only read when
+            the session that should have followed never started. Both runnable
+            directions take the conversation past this chooser, so a chooser
+            still drawing one is a launch that did not happen. Saying so is
+            better than a button that looks broken. */}
         <Show when={props.conversation.direction}>
           {(direction) => (
             <p class="note chosen-note">
-              Chosen: {DIRECTION[direction()].toLowerCase()}. Nothing runs off
-              this yet.
+              Chosen: {DIRECTION[direction()].toLowerCase()}. Nothing started
+              off it — press again.
             </p>
           )}
         </Show>
