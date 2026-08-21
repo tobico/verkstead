@@ -105,6 +105,55 @@ pub struct AbandonedRoadmap {
     pub stage_title: String,
 }
 
+/// What a Conversation is adopting, as its own page draws it: the roadmap it
+/// was started for, and the stage adopting would start.
+///
+/// Read off the repository at the Conversation's base commit every time the
+/// page is, rather than kept: the roadmap is the repository's document, and
+/// only the name of it is Verkstead's. So a base commit the human overrides is
+/// answered by the stage that is next *there*, which is the whole reason the
+/// stage is not carried over from the notice that was clicked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdoptionView {
+    /// Its directory name under `docs/roadmaps/` — `mvp`. The one thing about
+    /// the roadmap that is stored, and the one thing that is true whatever the
+    /// base commit says.
+    pub roadmap: String,
+
+    /// What the roadmap calls itself in its heading at that commit, or empty
+    /// where it has none — and where the roadmap is not there to read.
+    pub title: String,
+
+    /// The stage adopting would start: the lowest-numbered unchecked one, read
+    /// at the base commit.
+    ///
+    /// `null` where there is none to start there — the roadmap is finished, or
+    /// gone, or its next stage is somebody else's already. The press says which
+    /// of those it is; this is only what the page can name.
+    pub stage: Option<AdoptedStage>,
+}
+
+/// The stage an adoption would start, named.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdoptedStage {
+    /// Its number as the roadmap writes it — `04`.
+    pub label: String,
+
+    /// And what the roadmap calls it.
+    pub title: String,
+
+    /// Where its brief is in the repository, which is the document the work
+    /// starts from.
+    pub brief_path: String,
+
+    /// The branch the stage would be worked on: its own slug, as the unattended
+    /// path names one. The Conversation's server-invented name is discarded at
+    /// the press, so this is the name to say rather than that one.
+    pub branch: String,
+}
+
 /// One Conversation, whole: what it is attached to, what the human has settled
 /// about it, and everything that has happened to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,6 +192,15 @@ pub struct ConversationView {
     /// button is pressed — this is what decides whether to offer the button, and
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
+
+    /// What this Conversation is adopting, where it is adopting anything.
+    ///
+    /// `null` is the ordinary Conversation, which begins with a Brief and a
+    /// grilling. Anything else is one started from the abandoned-roadmaps
+    /// notice, and it is what puts the page on the adoption shape: the roadmap
+    /// and its stage named, both Profiles and the base commit to fix, and one
+    /// Adopt press — no Brief to write and no grilling to start.
+    pub adopting: Option<AdoptionView>,
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
@@ -1176,6 +1234,20 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct NewConversation {
     pub repo_id: i64,
+}
+
+/// Starting one to adopt a roadmap with: which Repo, and which of its roadmaps.
+///
+/// What the notice sends when a roadmap in it is clicked. The roadmap is named
+/// by its directory under `docs/roadmaps/`, which is its identity here as
+/// everywhere else — the stage is not sent, because which stage is next is the
+/// roadmap's own answer at whatever commit the Conversation ends up branching
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewAdoption {
+    pub repo_id: i64,
+    pub roadmap: String,
 }
 
 /// What became of starting one.

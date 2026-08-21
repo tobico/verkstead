@@ -38,11 +38,11 @@ mod wrap_up;
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
-    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, ask,
-    asked_from, choose_direction, conversations, load_conversation, move_to_direction, note,
+    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting,
+    ask, asked_from, choose_direction, conversations, load_conversation, move_to_direction, note,
     record_handoff, rename_branch, review_asked, save_brief, set_asked_from, set_base_commit,
-    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_conversation,
-    start_grilling, start_implementing, start_stage, timeline,
+    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_stage, timeline,
 };
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,

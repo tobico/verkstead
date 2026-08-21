@@ -45,6 +45,32 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
     )
 }
 
+/// Start a Conversation to adopt `roadmap` in a registered Repo with.
+///
+/// The same start as any other, with the roadmap written beside it: that mark
+/// is what draws the adoption-shaped page, and it is the only thing about the
+/// roadmap Verkstead keeps. The branch name is the server's here too, and it is
+/// discarded at the press — a stage is worked on its own slug — so what it does
+/// is name the row in the sidebar until then.
+///
+/// The roadmap is taken as the notice gave it. Whether it is still there with a
+/// stage to start is a question about a repository at a commit, and it is asked
+/// where the page is drawn and asked again when Adopt is pressed: a roadmap
+/// somebody finished between the notice and the click is a thing to say on the
+/// page rather than a start to refuse.
+pub(crate) async fn start_adopting(
+    pool: &SqlitePool,
+    repo_id: i64,
+    roadmap: &str,
+) -> Result<Started> {
+    Ok(
+        match store::start_adoption(pool, repo_id, &branch_name(), roadmap).await? {
+            Some(id) => Started::Started { id },
+            None => Started::NoSuchRepo,
+        },
+    )
+}
+
 /// Finish what answering a Question Set started, and say what it did to the
 /// Conversation it was asked from.
 ///

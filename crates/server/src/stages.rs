@@ -35,7 +35,9 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use verkstead_render::{AbandonedRepo, AbandonedRoadmap, PinnedEvent, StageEntry};
+use verkstead_render::{
+    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, PinnedEvent, StageEntry,
+};
 
 use crate::checklist;
 use crate::repos::git;
@@ -589,6 +591,68 @@ fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandoned> {
     })
 }
 
+/// What an adopting Conversation's page says about the roadmap it was started
+/// for: the roadmap named, and the stage adopting would start.
+///
+/// Read at the base commit the Conversation branches from — the override where
+/// the human typed one, and the default branch's tip where they did not — and
+/// read again every time the page is. What the notice said is not carried over:
+/// a base pointing somewhere the roadmap reads differently, an unmerged
+/// predecessor's tip say, is answered by the stage that is next *there*.
+///
+/// The same rule the notice was drawn by, so what the page names is what the
+/// press would start: a stage that has since been ticked, picked up, or had its
+/// branch taken leaves the roadmap named with no stage under it. Which of those
+/// it was is the press's to say by name.
+///
+/// Blocking git reads, so they happen off the runtime's threads.
+pub(crate) async fn adopting(
+    repo: store::Repo,
+    base: Option<String>,
+    roadmap: String,
+) -> AdoptionView {
+    // The roadmap is the one thing here that was never the repository's to say,
+    // so it is what the page is drawn with whatever the reading comes back as.
+    let named = roadmap.clone();
+
+    let read = tokio::task::spawn_blocking(move || {
+        let commit = base.unwrap_or(repo.default_branch);
+
+        let found = worktrees::resolve(&repo.path, &commit)
+            .and_then(|commit| startable(&repo.path, &commit, &roadmap));
+
+        let Some(abandoned) = found else {
+            return AdoptionView {
+                roadmap,
+                title: String::new(),
+                stage: None,
+            };
+        };
+
+        AdoptionView {
+            roadmap,
+            title: abandoned.title,
+            stage: Some(AdoptedStage {
+                label: abandoned.stage.label.clone(),
+                title: abandoned.stage.title.clone(),
+                brief_path: abandoned.stage.brief_path.clone(),
+                branch: abandoned.stage.branch(),
+            }),
+        }
+    })
+    .await;
+
+    read.unwrap_or_else(|error| {
+        tracing::error!(error = ?error, "reading the roadmap a Conversation is adopting failed");
+
+        AdoptionView {
+            roadmap: named,
+            title: String::new(),
+            stage: None,
+        }
+    })
+}
+
 /// What `path` holds at `commit`, or `None` where nothing is there to read.
 ///
 /// Asked of git rather than of a directory, because there is no directory: the
@@ -737,6 +801,16 @@ Turns this askance clone into Verkstead.
             run(self.path(), &["checkout", "-q", "main"]);
         }
 
+        /// This repository as a registered Repo, which is what the adoption
+        /// reading is handed: there is no Worktree anywhere in that one.
+        fn registered(&self) -> store::Repo {
+            store::Repo {
+                id: 1,
+                path: self.path().to_owned(),
+                name: "verkstead".to_owned(),
+                default_branch: "main".to_owned(),
+            }
+        }
         /// The stage lists this worktree comes back with, which every test here
         /// wants.
         fn lists(&self) -> Vec<verkstead_render::StageListEvent> {
@@ -1429,5 +1503,115 @@ Turns this askance clone into Verkstead.
         assert_eq!(named("docs/roadmaps/README.md"), None);
         assert_eq!(named("docs/roadmaps/"), None);
         assert_eq!(named("docs/design/verkstead.md"), None);
+    }
+
+    /// What an adopting Conversation's page is drawn from, with no base
+    /// override: the roadmap named, and the stage that is next at the default
+    /// branch's tip.
+    #[tokio::test]
+    async fn an_adoption_page_names_the_stage_that_is_next_at_the_default_tip() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
+
+        assert_eq!(view.roadmap, "mvp");
+        assert_eq!(view.title, "MVP roadmap");
+
+        let stage = view.stage.expect("that stage is startable");
+        assert_eq!(stage.label, "03");
+        assert_eq!(stage.title, "Implementation");
+        assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
+        assert_eq!(
+            stage.branch, "implementation",
+            "the stage's own slug, as the unattended start names one",
+        );
+    }
+
+    /// The base override is where it reads, so a commit the roadmap says
+    /// something else at is answered by the stage that is next *there* rather
+    /// than by the one the default branch is up to.
+    #[tokio::test]
+    async fn an_adoption_page_reads_the_stage_at_whatever_the_base_says() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.brief("mvp", "04-wrap-up.md", "# 04. Wrap-up\n");
+        repo.commit();
+
+        // Where the roadmap stood before the implementation stage ticked itself
+        // off — which is what an unmerged predecessor's tip is a case of.
+        let before = repo.tip();
+
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             Turns this askance clone into Verkstead.\n\n\
+             ## Stages\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [x] 02: Grilling — [brief](02-grilling.md)\n\
+             - [x] 03: Implementation — [brief](03-implementation.md)\n\
+             - [ ] 04: Wrap-up — [brief](04-wrap-up.md)\n",
+        );
+        repo.commit();
+
+        let at_tip = adopting(repo.registered(), None, "mvp".to_owned()).await;
+        assert_eq!(
+            at_tip.stage.expect("that stage is startable").label,
+            "04",
+            "with no override, the default branch's tip is what is read",
+        );
+
+        let earlier = adopting(repo.registered(), Some(before), "mvp".to_owned()).await;
+        assert_eq!(
+            earlier.stage.expect("that stage is startable").label,
+            "03",
+            "read at the base the human named, where 03 is still open",
+        );
+    }
+
+    /// Everything that can be wrong with a roadmap at a commit comes back the
+    /// same way: the roadmap is still what is being adopted, and there is no
+    /// stage under it. Which of them it was is the press's to say by name.
+    #[tokio::test]
+    async fn an_adoption_page_names_no_stage_where_there_is_none_to_start() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        for (base, why) in [
+            (
+                Some("no-such-thing".to_owned()),
+                "the base resolves to nothing",
+            ),
+            (None, "the roadmap is not there under that name"),
+        ] {
+            let roadmap = match base {
+                Some(_) => "mvp",
+                None => "public-release",
+            };
+
+            let view = adopting(repo.registered(), base, roadmap.to_owned()).await;
+
+            assert_eq!(view.roadmap, roadmap, "{why}");
+            assert_eq!(view.title, "", "{why}");
+            assert_eq!(view.stage, None, "{why}");
+        }
+    }
+
+    /// The same four clauses the notice was drawn by, so what the page names is
+    /// what the press would start: a stage whose branch is taken is a stage
+    /// somebody is already on.
+    #[tokio::test]
+    async fn an_adoption_page_names_no_stage_whose_branch_is_taken() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+        repo.branch("implementation");
+
+        let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
+
+        assert_eq!(view.roadmap, "mvp");
+        assert_eq!(view.stage, None);
     }
 }

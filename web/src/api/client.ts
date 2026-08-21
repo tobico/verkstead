@@ -111,6 +111,21 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
   return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
 }
 
+/// Start a Conversation to adopt one of those roadmaps with.
+///
+/// What clicking a roadmap in the notice does. The stage is not sent: which one
+/// is next is the roadmap's own answer at whatever commit the Conversation ends
+/// up branching from, and the page reads it back there.
+export function startAdoption(
+  repoId: number,
+  roadmap: string,
+): Promise<Started> {
+  return post<Started>("/api/ui/adoptions", {
+    repo_id: repoId,
+    roadmap,
+  });
+}
+
 /// The Conversations in the sidebar, newest first.
 export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");

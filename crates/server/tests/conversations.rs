@@ -1693,3 +1693,198 @@ async fn a_conversation_with_no_backlog_has_nothing_pinned() {
 
     assert!(opened(&app, id).await.pinned.is_empty());
 }
+
+/// A roadmap committed on a repository's default branch, as the old tools or a
+/// human left it: an index with a stage left to do, and the brief to start it
+/// from.
+///
+/// Committed rather than merely written, because that is the whole difference
+/// adoption is about — a roadmap Verkstead's own reading sees nothing of,
+/// because no branch it knows ever touched it.
+fn roadmap(repo: &Path, index: &str, briefs: &[&str]) {
+    let directory = repo.join("docs/roadmaps/mvp");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("ROADMAP.md"), index).unwrap();
+
+    for brief in briefs {
+        std::fs::write(directory.join(brief), format!("# {brief}\n")).unwrap();
+    }
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-m", "docs: the roadmap as it stands"]);
+}
+
+/// The `mvp` roadmap with its third stage still open.
+const OPEN_AT_THREE: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md)
+- [x] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md)
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// And with that stage ticked off, which is what the stage after it leaves.
+const OPEN_AT_FOUR: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md)
+- [x] 02: Grilling — [brief](02-grilling.md)
+- [x] 03: Implementation — [brief](03-implementation.md)
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+async fn adopt(app: &Router, repo_id: i64, name: &str) -> Started {
+    post(
+        app,
+        "/api/ui/adoptions",
+        &serde_json::json!({ "repo_id": repo_id, "roadmap": name }),
+    )
+    .await
+}
+
+async fn adopting(app: &Router, repo_id: i64, name: &str) -> i64 {
+    match adopt(app, repo_id, name).await {
+        Started::Started { id } => id,
+        other => panic!("expected the Conversation to start, got {other:?}"),
+    }
+}
+
+/// What clicking a roadmap in the abandoned-roadmaps notice makes: a Draft
+/// against that Repo, marked as adopting that roadmap, whose page names the
+/// roadmap and the stage adopting would start.
+#[tokio::test]
+async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = adopting(&app, repo_id, "mvp").await;
+
+    let sidebar = sidebar(&app).await;
+    assert_eq!(sidebar.len(), 1);
+    assert_eq!(sidebar[0].id, id);
+    assert_eq!(sidebar[0].state, Lifecycle::Draft);
+
+    let view = opened(&app, id).await;
+    let adopting = view
+        .adopting
+        .clone()
+        .expect("this Conversation is adopting one");
+
+    assert_eq!(adopting.roadmap, "mvp");
+    assert_eq!(adopting.title, "MVP roadmap");
+
+    let stage = adopting.stage.expect("that stage is startable");
+    assert_eq!(stage.label, "03");
+    assert_eq!(stage.title, "Implementation");
+    assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
+    assert_eq!(
+        stage.branch, "implementation",
+        "the stage's own slug, which the press names the branch by",
+    );
+
+    // And nothing has been adopted by starting it: the Brief is still empty,
+    // because the stage brief arrives when the stage does.
+    assert_eq!(brief(&view).markdown, "");
+    assert!(!view.ready_to_grill);
+}
+
+/// An ordinary Conversation is adopting nothing, which is what puts its page on
+/// the shape with a Brief to write and a grilling to start.
+#[tokio::test]
+async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(opened(&app, id).await.adopting, None);
+}
+
+/// The stage is re-read at whatever the base resolves to, rather than carried
+/// over from what the notice showed: a base where the roadmap reads differently
+/// — an unmerged predecessor's tip being the case this is for — changes the
+/// stage the page names.
+#[tokio::test]
+async fn the_stage_an_adoption_names_is_read_at_the_base_commit() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let before = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    // The default branch moves on: stage 03 is ticked off there.
+    roadmap(&repo, OPEN_AT_FOUR, &[]);
+
+    let id = adopting(&app, repo_id, "mvp").await;
+    assert_eq!(
+        stage_of(&opened(&app, id).await).label,
+        "04",
+        "with no override, the default branch's tip is what is read",
+    );
+
+    assert_eq!(base(&app, id, Some(&before)).await, BaseRecorded::Recorded);
+    assert_eq!(
+        stage_of(&opened(&app, id).await).label,
+        "03",
+        "read again at the base the human named, where 03 is still open",
+    );
+}
+
+/// The roadmap is named whatever the repository says about it, and a roadmap
+/// with no stage to start at that commit is the roadmap with nothing under it.
+/// Which of the ways it can be is the press's to say by name.
+#[tokio::test]
+async fn an_adoption_names_no_stage_where_the_roadmap_has_none_to_start() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = adopting(&app, repo_id, "public-release").await;
+    let adopting = opened(&app, id)
+        .await
+        .adopting
+        .expect("it is adopting one, whatever the repository holds");
+
+    assert_eq!(adopting.roadmap, "public-release");
+    assert_eq!(adopting.stage, None);
+}
+
+#[tokio::test]
+async fn adopting_against_a_repo_that_is_not_registered_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(adopt(&app, 404, "mvp").await, Started::NoSuchRepo);
+    assert!(sidebar(&app).await.is_empty());
+}
+
+/// The stage the page names, for the tests that are about which one it is.
+fn stage_of(view: &ConversationView) -> &verkstead_render::AdoptedStage {
+    view.adopting
+        .as_ref()
+        .expect("this Conversation is adopting one")
+        .stage
+        .as_ref()
+        .expect("that stage is startable")
+}

@@ -1228,7 +1228,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-m", "docs: the roadmaps as they stand"]);
 
-    store::register_repo(&pool, &repo, "verkstead", "main")
+    let registered = store::register_repo(&pool, &repo, "verkstead", "main")
         .await
         .unwrap()
         .unwrap();
@@ -1249,6 +1249,31 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     write(
         "abandoned-roadmaps.json",
         &get(&app, "/api/ui/abandoned-roadmaps").await,
+    );
+
+    // And what clicking one of those roadmaps makes: a Conversation in Draft
+    // adopting `mvp`, which is the adoption-shaped page. Put in through the
+    // store for the reason everything else here is, and because the branch name
+    // the server invents is a random one a fixture could not hold still — it is
+    // discarded at the press anyway, a stage being worked on its own slug.
+    //
+    // Nothing is chosen on it. Both Profiles are the human's to fix before
+    // adopting and nothing at the Repo level supplies them, so unchosen is the
+    // state this page opens in. The Repo's path is the one thing here the
+    // filesystem decided, and it is pinned like every other.
+    let adopting = store::start_adoption(&pool, registered.id, "spring-otter", "mvp")
+        .await
+        .unwrap()
+        .unwrap();
+
+    write(
+        "conversation-adopting.json",
+        &pin_repo(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{adopting}")).await,
+            )),
+            "/srv/repos/verkstead",
+        ),
     );
 
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
@@ -1924,6 +1949,26 @@ fn pin_worktree(json: &str, at: &str) -> String {
         "no worktree here to pin:\n{payload}"
     );
     payload["worktree"]["path"] = at.into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin where a Conversation's Repo is, for the one fixture whose Repo has to be
+/// a real repository.
+///
+/// What an adopting Conversation's page says about the roadmap is read out of
+/// the Repo itself at a commit, so that repository is made fresh on every run
+/// and lives wherever the temporary directory landed. Every other fixture names
+/// a Repo under `/srv/repos` that nothing is at, and this puts this one back
+/// among them.
+fn pin_repo(json: &str, at: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload["repo"].get("path").is_some(),
+        "no Repo here to pin:\n{payload}"
+    );
+    payload["repo"]["path"] = at.into();
 
     serde_json::to_string(&payload).unwrap()
 }

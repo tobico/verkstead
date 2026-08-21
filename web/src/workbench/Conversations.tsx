@@ -15,6 +15,10 @@
 //! somebody staged before Verkstead was driving anything, with a stage waiting
 //! to be started.
 //!
+//! Clicking one of those roadmaps starts a conversation to adopt it with: a
+//! draft on a page shaped for adopting, which is the other way work gets into
+//! the pipeline.
+//!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are a line at the
 //! bottom of it rather than a page of their own to find.
@@ -27,6 +31,7 @@ import {
   listAbandonedRoadmaps,
   listConversations,
   listRepos,
+  startAdoption,
   startConversation,
 } from "../api/client";
 import type { ConversationEntry, Started } from "../api/types";
@@ -128,7 +133,7 @@ export function Conversations(props: {
         </Match>
       </Switch>
 
-      <Abandoned />
+      <Abandoned open={props.open} />
 
       <Switch>
         <Match when={conversations.isPending}>
@@ -182,15 +187,42 @@ export function Conversations(props: {
 /// anything. What each one names is the roadmap and the stage that would be
 /// started, which is the whole of the decision.
 ///
+/// Each roadmap is a button, and pressing it starts a conversation to adopt
+/// that roadmap with — a draft, on a page shaped for adopting rather than for
+/// grilling. Nothing is adopted by pressing it: both profiles have to be fixed
+/// first, and there is a press on that page for the adopting itself.
+///
 /// There is no way to dismiss one, now or later. The repository is the source
 /// of truth for its own roadmaps everywhere else, so a notice that is true and
 /// unwanted is silenced in the repository — tick the box, or annotate the
 /// stage. A dismissal Verkstead stored would be a second opinion about a
 /// roadmap the repository says has work left.
-function Abandoned(): JSX.Element {
+function Abandoned(props: { open: (id: number) => void }): JSX.Element {
+  const queries = useQueryClient();
+
   const abandoned = useQuery(() => ({
     queryKey: ["abandoned-roadmaps"],
     queryFn: listAbandonedRoadmaps,
+  }));
+
+  const adopt = useMutation(() => ({
+    mutationFn: ({ repoId, roadmap }: { repoId: number; roadmap: string }) =>
+      startAdoption(repoId, roadmap),
+    onSuccess: (outcome: Started) => {
+      if (typeof outcome === "string") {
+        // `NoSuchRepo`, against a notice read a moment ago: the Repo was there
+        // and is not now. Reading both lists again is the correction and the
+        // explanation together.
+        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+        return;
+      }
+
+      // Straight onto its page, which is where the two profiles and the base
+      // commit are fixed and where adopting is pressed.
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      props.open(outcome.Started.id);
+    },
   }));
 
   return (
@@ -206,14 +238,33 @@ function Abandoned(): JSX.Element {
                 <For each={repo.roadmaps}>
                   {(roadmap) => (
                     <li>
-                      <code>{roadmap.name}</code>
-                      <span class="stage">
-                        next is stage {roadmap.stage}: {roadmap.stage_title}
-                      </span>
+                      <button
+                        type="button"
+                        class="adopt-roadmap"
+                        disabled={adopt.isPending}
+                        onClick={() =>
+                          adopt.mutate({
+                            repoId: repo.repo_id,
+                            roadmap: roadmap.name,
+                          })
+                        }
+                      >
+                        <code>{roadmap.name}</code>
+                        <span class="stage">
+                          next is stage {roadmap.stage}: {roadmap.stage_title}
+                        </span>
+                      </button>
                     </li>
                   )}
                 </For>
               </ul>
+              {/* A server that could not answer at all, which is the one thing
+                  here that is an error rather than an outcome. */}
+              <Show when={adopt.isError}>
+                <p class="error">
+                  The conversation could not be started: {adopt.error?.message}
+                </p>
+              </Show>
             </section>
           )}
         </For>

@@ -58,6 +58,7 @@ import type {
   StageListEvent,
   TaskListEvent,
 } from "../api/types";
+import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 
 /// How much of a commit's hash the timeline shows.
@@ -196,7 +197,11 @@ export function Timeline(props: {
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
-                    <Brief id={props.conversation.id} brief={brief()} />
+                    <Brief
+                      id={props.conversation.id}
+                      brief={brief()}
+                      adopting={props.conversation.adopting !== null}
+                    />
                   )}
                 </Match>
                 <Match when={"Moved" in event && event.Moved}>
@@ -271,7 +276,14 @@ export function Timeline(props: {
           event that moved every time one landed. Only one of them is ever drawn
           — each is for a different state — so they read as the one thing there
           is to do from here. */}
-      <StartGrilling conversation={props.conversation} />
+      <Show
+        when={props.conversation.adopting}
+        fallback={<StartGrilling conversation={props.conversation} />}
+      >
+        {(adopting) => (
+          <Adoption conversation={props.conversation} adopting={adopting()} />
+        )}
+      </Show>
       <DirectionChooser conversation={props.conversation} />
     </>
   );
@@ -941,7 +953,15 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 /// Read as the server rendered it and written as it was typed. The two are one
 /// field's worth of markdown either way, and the Brief is the one document on
 /// this wire that travels both ways for exactly that reason.
-function Brief(props: { id: number; brief: BriefEvent }): JSX.Element {
+function Brief(props: {
+  id: number;
+  brief: BriefEvent;
+
+  /// Whether this conversation is adopting a roadmap, in which case the brief
+  /// is nobody here to write: it is the stage brief, and it arrives when the
+  /// stage is adopted. So there is no editor, and nothing to open one on.
+  adopting: boolean;
+}): JSX.Element {
   const queries = useQueryClient();
 
   // Whether the Brief is being written rather than read. Its own signal and not
@@ -986,7 +1006,7 @@ function Brief(props: { id: number; brief: BriefEvent }): JSX.Element {
     <article class="brief">
       <div class="event-head">
         <h2>Brief</h2>
-        <Show when={!editing()}>
+        <Show when={!editing() && !props.adopting}>
           <button type="button" class="edit-brief" onClick={write}>
             Edit
           </button>
@@ -1000,7 +1020,18 @@ function Brief(props: { id: number; brief: BriefEvent }): JSX.Element {
             when={props.brief.markdown !== ""}
             fallback={
               <p class="empty">
-                Nothing written yet — this is what the grilling starts from.
+                <Show
+                  when={props.adopting}
+                  fallback={
+                    <>
+                      Nothing written yet — this is what the grilling starts
+                      from.
+                    </>
+                  }
+                >
+                  Nothing written yet — adopting the stage is what puts its
+                  brief here.
+                </Show>
               </p>
             }
           >
