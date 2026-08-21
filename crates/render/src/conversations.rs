@@ -784,6 +784,13 @@ pub struct SetRow {
 /// Byte for byte, control sequences and all: what a terminal was sent is what a
 /// session said, and a transcript that had been tidied up would be a record of
 /// something else.
+///
+/// One thing in it is not the session's word, and says so where it appears: what
+/// `script` and bwrap wrote on the pipe beside the terminal, appended once the
+/// session is over. It is empty on every session that ran, and on one that never
+/// started it is the only account of why — which makes the transcript the place
+/// for it, being where somebody looking at a session that said nothing is
+/// already looking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Transcript {

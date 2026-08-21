@@ -1018,6 +1018,87 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 }
 
+/// A sandbox that will not start says why where somebody is looking.
+///
+/// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing
+/// they say ever reaches it — so a session whose sandbox never came up prints
+/// nothing at all. Its Event would otherwise read `0 lines` with the only
+/// account of why in a log at a level nobody has turned on, which is a failure
+/// that looks exactly like an agent with nothing to say.
+///
+/// Provoked through a configured bind, because that is the one part of a sandbox
+/// that is checked at startup and can go on to be missing: what fails here is
+/// bwrap and nothing else, on a Conversation whose worktree and Profile are both
+/// fine.
+#[tokio::test]
+async fn a_sandbox_that_will_not_start_says_why_on_the_transcript() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'this session never gets to run\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    fixture
+        .until(|view| {
+            outputs(view)
+                .iter()
+                .all(|output| !output.running)
+                .then_some(())
+        })
+        .await;
+
+    // The bind the server admitted at startup, gone by the time the next session
+    // wants it. Taken away only once the grilling has ended, because a directory
+    // bound into a sandbox that is still up is one the host cannot remove.
+    let missing = fixture.spill.path().to_owned();
+    std::fs::remove_dir_all(&missing).unwrap();
+
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    let refused = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && !output.running)
+                .map(|output| (output.id, output.lines, output.latest.clone()))
+        })
+        .await;
+
+    let (event, lines, latest) = refused;
+    let said = fixture.transcript(event).await;
+
+    assert!(
+        said.contains("[the sandbox, not the agent]"),
+        "the plumbing's word goes on the transcript, marked as its own rather \
+         than left to read as something the agent said: {said:?}"
+    );
+    assert!(
+        said.contains(&missing.display().to_string()),
+        "and it names the bind bwrap could not make: {said:?}"
+    );
+    assert!(
+        lines > 0 && !latest.is_empty(),
+        "so the Timeline says what happened rather than `0 lines` and nothing: \
+         {lines} lines, latest {latest:?}"
+    );
+}
+
 /// The task-list direction end to end: the same Profile and the same worktree as
 /// inline, inside Verkstead's fork of to-tasks instead — which writes a real
 /// `.tasks/` backlog and commits it to the branch.

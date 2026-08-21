@@ -6,6 +6,12 @@
 //! the way in would be a record of something else — so the tidying happens here,
 //! for the one line the Timeline shows, and nowhere else.
 //!
+//! What the sandbox's own plumbing said goes through this too, though it came off
+//! a pipe rather than the terminal — see `plumbing` in [`crate::sessions`]. It
+//! is written down like anything else a session produced, which is what makes it
+//! count towards the lines the Timeline shows and become the last thing said: a
+//! session that failed to start is one whose summary should be the reason.
+//!
 //! Both jobs need the same thing, which is why they are one type: a reading that
 //! remembers where it got to. Bytes arrive in chunks that fall wherever the
 //! kernel put them — through the middle of a character, through the middle of a

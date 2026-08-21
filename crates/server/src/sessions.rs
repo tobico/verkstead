@@ -718,8 +718,10 @@ async fn relay(
 
     // What is left on the error pipe is `script` and bwrap talking about
     // themselves: the session's own errors come back over the pseudo-terminal
-    // with the rest of what it printed. Read all the same — a sandbox that
-    // refused to start says so here and nowhere else.
+    // with the rest of what it printed. Read, and put on the transcript once the
+    // session is over — a sandbox that refused to start says so here and nowhere
+    // else, and a Timeline reading `0 lines` with the reason in a log nobody
+    // turned up is the whole of what makes that failure hard to see.
     let complaints = child.stderr.take().map(|mut errors| {
         tokio::spawn(async move {
             let mut said = String::new();
@@ -797,14 +799,35 @@ async fn relay(
         && let Ok(said) = complaints.await
         && !said.trim().is_empty()
     {
-        tracing::debug!(
+        // A warning rather than a note: this pipe is silent on a session that
+        // ran, so anything on it is something that went wrong on the way in.
+        tracing::warn!(
             event_id,
             complaints = said.trim(),
             "a session's own plumbing"
         );
+
+        // Last, after everything the session printed, because that is what it
+        // is: the account of how the session came to stop saying anything.
+        let mut note = reading.take(plumbing(&said).as_bytes());
+        flush(pool, nudges, event_id, &mut note, &reading).await;
     }
 
     ended
+}
+
+/// The plumbing's complaint as it goes on the transcript.
+///
+/// Marked, and it is the one thing in a transcript that is not the session's own
+/// word. What a terminal was sent is the record — this arrived on the pipe
+/// beside it, from `script` and bwrap rather than from the agent, and a reader
+/// who could not tell the two apart would be reading the sandbox's failure as
+/// something the agent said about itself.
+///
+/// On its own line either way, because what it follows is whatever the session
+/// happened to leave the cursor in the middle of.
+fn plumbing(said: &str) -> String {
+    format!("\n[the sandbox, not the agent]\n{}\n", said.trim())
 }
 
 /// Put what has been printed since last time in the store, and tell whoever is
