@@ -1302,10 +1302,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It reads as a session that has stopped: the fixture is a payload rather
     // than a moment, and a running one would be a page drawing a spinner over
     // something that has not moved since 2026.
-    let transcript = store::start_transcript(&pool, grilling).await.unwrap();
-    store::append_transcript(
+    let capture = store::start_capture(&pool, grilling).await.unwrap();
+    store::append_capture(
         &pool,
-        transcript,
+        capture,
         "\u{1b}[2mReading the brief.\u{1b}[0m\r\n\
          Looking at how the queue is drained.\r\n\
          What should happen to a delivery that has failed forty times?\r\n",
@@ -1776,12 +1776,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     );
 
     // What the details pane fetches when that Conversation's output Event is
-    // opened. Nothing to pin: a transcript is bytes a session printed.
+    // opened. Nothing to pin: a Capture is bytes a session printed.
     write(
-        "transcript.json",
+        "capture.json",
         &get(
             &app,
-            &format!("/api/ui/conversations/{grilling}/transcript/{transcript}"),
+            &format!("/api/ui/conversations/{grilling}/capture/{capture}"),
         )
         .await,
     );

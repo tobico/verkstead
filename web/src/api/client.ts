@@ -11,6 +11,7 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
+  Capture,
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
@@ -35,7 +36,6 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
-  Transcript,
   UpdateNotice,
 } from "./types";
 
@@ -121,16 +121,13 @@ export function loadConversation(id: string): Promise<ConversationView> {
 /// Fetched by the pane that shows it rather than carried by the Conversation: a
 /// session prints megabytes over an hour, and the Timeline is read again every
 /// time this page hears the world moved.
-export function loadTranscript(
-  id: number,
-  event: number,
-): Promise<Transcript> {
-  return get<Transcript>(`/api/ui/conversations/${id}/transcript/${event}`);
+export function loadCapture(id: number, event: number): Promise<Capture> {
+  return get<Capture>(`/api/ui/conversations/${id}/capture/${event}`);
 }
 
 /// One commit's diff, rendered.
 ///
-/// Fetched by the pane that shows it for the transcript's reason, and read out
+/// Fetched by the pane that shows it for the Capture's reason, and read out
 /// of the repository by the server rather than out of its database: the commit
 /// is in git, which is what a commit is.
 export function loadCommitDiff(

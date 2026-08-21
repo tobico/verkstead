@@ -136,7 +136,7 @@ export function Workbench(): JSX.Element {
   /// which is what the pane says when nothing is open.
   ///
   /// Five kinds have one: a session's output, whose full self is its
-  /// transcript; a Question Set, whose full self is the document it was asked
+  /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; an interruption, whose full
   /// self is the evidence it was raised with; and the pull request, whose full
   /// self is what is on it at GitHub right now. The kind travels with it,

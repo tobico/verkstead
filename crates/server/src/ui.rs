@@ -53,11 +53,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         )
         .route("/api/ui/conversations/{id}", get(conversation))
         // One Event's full self, fetched by the pane that shows it rather than
-        // carried by the Conversation — see [`transcript`].
-        .route(
-            "/api/ui/conversations/{id}/transcript/{event}",
-            get(transcript),
-        )
+        // carried by the Conversation — see [`capture`].
+        .route("/api/ui/conversations/{id}/capture/{event}", get(capture))
         // And one commit's diff, fetched the same way and for the same reason —
         // see [`commit_diff`].
         .route(
@@ -397,7 +394,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     // Which of this Conversation's output Events is still being written into,
     // which is a question about a process rather than about the record: a
-    // restarted server has no sessions, and every transcript it holds is of one
+    // restarted server has no sessions, and every Capture it holds is of one
     // that is over.
     //
     // Asked *before* the Timeline it is read against, and the order is the whole
@@ -406,7 +403,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // ended is one whose output is already in the store — and a Timeline read
     // after that is a Timeline with all of it. Read the other way round, a
     // session that finished in between would leave its Event drawn as stopped
-    // with the transcript from before it flushed: `0 lines`, nothing printed,
+    // with the Capture from before it flushed: `0 lines`, nothing printed,
     // nothing running, and a page saying the session never said anything when it
     // had.
     //
@@ -588,7 +585,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Moved(state) => {
                         verkstead_render::moved_event(event.id, event.at, lifecycle(state))
                     }
-                    // The summary and not the transcript: a Timeline is read every
+                    // The summary and not the Capture: a Timeline is read every
                     // time an open page hears the world moved, and a session's
                     // output is megabytes the middle pane never shows.
                     store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
@@ -672,33 +669,33 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     Json(view).into_response()
 }
 
-/// `GET /api/ui/conversations/{id}/transcript/{event}` — what one session
+/// `GET /api/ui/conversations/{id}/capture/{event}` — what one session
 /// printed, whole.
 ///
 /// Its own request rather than a field on the Conversation, because of the two
 /// sizes involved. A session prints megabytes over an hour and the Timeline is
-/// re-read every time an open page hears the world moved; the transcript is read
+/// re-read every time an open page hears the world moved; the Capture is read
 /// when somebody opens the one Event it belongs to.
 ///
 /// Byte for byte, control sequences and all — what a terminal was sent is what
 /// the session said.
-async fn transcript(
+async fn capture(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
 ) -> HttpResponse {
     // Two ids out of a URL a human may have typed, and neither of them naming a
-    // number cannot name a transcript — the same permissiveness every other id
+    // number cannot name a Capture — the same permissiveness every other id
     // here is read with.
     let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
-        return no_such_transcript();
+        return no_such_capture();
     };
 
-    match store::transcript(&state.pool, id, event).await {
-        Ok(Some(text)) => Json(verkstead_render::Transcript { text }).into_response(),
-        Ok(None) => no_such_transcript(),
+    match store::capture(&state.pool, id, event).await {
+        Ok(Some(text)) => Json(verkstead_render::Capture { text }).into_response(),
+        Ok(None) => no_such_capture(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a transcript failed");
-            unavailable("the transcript could not be read")
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Capture failed");
+            unavailable("the Capture could not be read")
         }
     }
 }
@@ -707,7 +704,7 @@ async fn transcript(
 /// rendered.
 ///
 /// Its own request rather than a field on the Conversation, exactly as a
-/// transcript is: a Timeline is read every time an open page hears the world
+/// Capture is: a Timeline is read every time an open page hears the world
 /// moved, and a diff is worth reading when somebody opens the one Event it
 /// belongs to.
 ///
@@ -769,7 +766,7 @@ async fn commit_diff(
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
 /// request the finish step opened: its commit list and its comments.
 ///
-/// Its own request rather than a field on the Conversation, as a transcript and
+/// Its own request rather than a field on the Conversation, as a Capture and
 /// a diff are — and more so than either, because reading it is asking GitHub
 /// through the host's `gh`. A Timeline that carried this would make an API call
 /// every time an open page heard the world moved.
@@ -1242,19 +1239,19 @@ fn no_such_conversation(id: &str) -> HttpResponse {
     )
 }
 
-/// There is no such transcript on that Conversation's Timeline. Worded without
+/// There is no such Capture on that Conversation's Timeline. Worded without
 /// either id, unlike the two above: what was asked for is a pair, and a pair
 /// that names nothing names nothing for more than one reason.
-fn no_such_transcript() -> HttpResponse {
+fn no_such_capture() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
-        ApiError::new("there is no such transcript on that Conversation"),
+        ApiError::new("there is no such Capture on that Conversation"),
     )
 }
 
 /// And no such commit — either the Conversation has no such Event, or the
 /// repository no longer has the commit it names. Worded without either id for
-/// the transcript's reason, and without telling the two apart because there is
+/// the Capture's reason, and without telling the two apart because there is
 /// nothing different for the human to do about them: the Event is not one this
 /// server can show a diff for.
 fn no_such_commit() -> HttpResponse {
@@ -1265,7 +1262,7 @@ fn no_such_commit() -> HttpResponse {
 }
 
 /// And no such pull request — either the Conversation has no such Event, or the
-/// Event is not one. Worded without either id for the transcript's reason.
+/// Event is not one. Worded without either id for the Capture's reason.
 fn no_such_pull_request() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,

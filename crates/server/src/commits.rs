@@ -34,7 +34,7 @@ use crate::store;
 ///
 /// Commits arrive minutes apart at best, so this is not a race to notice one —
 /// it is how long the human waits to see work they can already read in the
-/// transcript. Two seconds costs a handful of short git reads a minute and is
+/// Capture. Two seconds costs a handful of short git reads a minute and is
 /// under what anyone reads as a delay.
 const SWEEP_EVERY: Duration = Duration::from_secs(2);
 

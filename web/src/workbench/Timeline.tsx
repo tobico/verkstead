@@ -503,7 +503,7 @@ function Moved(props: { moved: MovedEvent }): JSX.Element {
 /// said.
 ///
 /// A button, because the whole of it is in the details pane and this is how it
-/// is opened — the summary is a line, and a grilling session's transcript is an
+/// is opened — the summary is a line, and a grilling session's Capture is an
 /// hour of terminal output nobody wants in the middle pane.
 ///
 /// It moves while the session runs, which is the point: the page hears the world

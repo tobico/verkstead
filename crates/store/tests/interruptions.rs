@@ -214,7 +214,7 @@ async fn the_first_remedy_chosen_is_the_one_that_stands() {
 }
 
 /// An Interruption is reached through the Timeline it is on, exactly as a
-/// transcript and a commit are: an Event id belonging to another Conversation
+/// Capture and a commit are: an Event id belonging to another Conversation
 /// names nothing here.
 #[tokio::test]
 async fn an_interruption_belongs_to_the_conversation_it_stopped() {

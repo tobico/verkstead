@@ -213,7 +213,7 @@ pub enum TimelineEvent {
 
     /// What a session printed, summarised. The whole of it is fetched
     /// separately, by the details pane and only when one is opened — see
-    /// [`Transcript`].
+    /// [`Capture`].
     AgentOutput(AgentOutputEvent),
 
     /// A Question Set the session put to the human, summarised as the table of
@@ -234,7 +234,7 @@ pub enum TimelineEvent {
 
     /// A commit a session landed on the Conversation's branch, summarised as
     /// what it changed. Its diff is fetched separately, by the details pane —
-    /// the same arrangement a transcript and a Question Set have, and for the
+    /// the same arrangement a Capture and a Question Set have, and for the
     /// same reason.
     Commit(CommitEvent),
 
@@ -245,7 +245,7 @@ pub enum TimelineEvent {
     /// The one kind of Event that carries its whole self rather than a summary
     /// with the rest behind a fetch. Its evidence is four short strings, gathered
     /// once and bounded when it was — see [`InterruptionEvent::tail`] — where a
-    /// transcript and a diff are megabytes. A second request for what the
+    /// Capture and a diff are megabytes. A second request for what the
     /// remedies are being chosen against would be a page that could draw the
     /// buttons before it could say what they were for.
     Interruption(InterruptionEvent),
@@ -304,7 +304,7 @@ pub struct InterruptionEvent {
     pub git_status: String,
 
     /// The tail of what the session printed, with the terminal's own control
-    /// sequences taken out. The tail and not the transcript: what went wrong is
+    /// sequences taken out. The tail and not the Capture: what went wrong is
     /// at the end, and the whole of it is on the Timeline already as the session's
     /// own Event. Empty where it printed nothing at all.
     pub tail: String,
@@ -584,7 +584,7 @@ pub struct CommitEvent {
 /// One commit's diff, as the details pane receives it.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
-/// transcript is: a Timeline is read every time an open page hears the world
+/// Capture is: a Timeline is read every time an open page hears the world
 /// moved, and a diff is read when somebody opens the one Event it belongs to.
 ///
 /// Rendered with the folds and the highlighting an attached Diff already gets,
@@ -689,9 +689,9 @@ pub struct BriefEvent {
 /// A session's output as the Timeline shows it: how much there is, the last
 /// thing that was said, and whether more is coming.
 ///
-/// The summary and not the transcript. A grilling session prints megabytes over
+/// The summary and not the Capture. A grilling session prints megabytes over
 /// an hour, and the Timeline is re-read every time an open page hears the world
-/// moved — so what a Conversation carries is these two lines, and the transcript
+/// moved — so what a Conversation carries is these two lines, and the Capture
 /// is fetched by the pane that shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -779,21 +779,21 @@ pub struct SetRow {
     pub answer: String,
 }
 
-/// One session's transcript, whole, as the details pane receives it.
+/// One session's Capture, whole, as the details pane receives it.
 ///
 /// Byte for byte, control sequences and all: what a terminal was sent is what a
-/// session said, and a transcript that had been tidied up would be a record of
+/// session said, and a Capture that had been tidied up would be a record of
 /// something else.
 ///
 /// One thing in it is not the session's word, and says so where it appears: what
 /// `script` and bwrap wrote on the pipe beside the terminal, appended once the
 /// session is over. It is empty on every session that ran, and on one that never
-/// started it is the only account of why — which makes the transcript the place
+/// started it is the only account of why — which makes the Capture the place
 /// for it, being where somebody looking at a session that said nothing is
 /// already looking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct Transcript {
+pub struct Capture {
     pub text: String,
 }
 

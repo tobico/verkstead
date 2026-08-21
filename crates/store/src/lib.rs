@@ -24,6 +24,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
+mod captures;
 mod commits;
 mod conversations;
 mod interruptions;
@@ -31,10 +32,10 @@ mod profiles;
 mod pull_requests;
 mod push;
 mod repos;
-mod transcripts;
 mod waits;
 mod wrap_up;
 
+pub use captures::{Summary, append_capture, capture, start_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
@@ -58,7 +59,6 @@ pub use push::{
     store_subscription, vapid_keys,
 };
 pub use repos::{Repo, register_repo, registered_repos};
-pub use transcripts::{Summary, append_transcript, start_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
@@ -488,8 +488,8 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     conversations::apply_schema(pool).await?;
 
     // What the sessions run against them printed. After the Timelines, because a
-    // transcript hangs off the Event it is the full self of.
-    transcripts::apply_schema(pool).await?;
+    // Capture hangs off the Event it is the full self of.
+    captures::apply_schema(pool).await?;
 
     // And what they committed, which hangs off the Timelines for the same
     // reason — and off the Conversations too, which is what makes one commit

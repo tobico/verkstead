@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentOutputEvent,
+  Capture,
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
@@ -31,7 +32,6 @@ import type {
   SetView,
   Submitted,
   TimelineEvent,
-  Transcript,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { Workbench } from "../src/workbench/Workbench";
@@ -47,7 +47,7 @@ import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
-import transcript from "./fixtures/transcript.json" with { type: "json" };
+import capture from "./fixtures/capture.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
@@ -780,7 +780,7 @@ describe("the panes on a narrow window", () => {
 /// The other shape the middle pane draws: a conversation that has been started,
 /// with a move on its timeline and a worktree to say where the work is going on.
 const GRILLING = grilling as ConversationView;
-const TRANSCRIPT = transcript as Transcript;
+const CAPTURE = capture as Capture;
 
 /// The session's output on the grilling conversation's timeline.
 const OUTPUT = (() => {
@@ -792,7 +792,7 @@ const OUTPUT = (() => {
 })();
 
 /// Where the details pane fetches the whole of it from.
-const TRANSCRIPT_OF_IT = `/api/ui/conversations/${GRILLING.id}/transcript/${OUTPUT.id}`;
+const CAPTURE_OF_IT = `/api/ui/conversations/${GRILLING.id}/capture/${OUTPUT.id}`;
 
 /// The workbench with the grilling conversation open instead of the drafting
 /// one.
@@ -802,7 +802,7 @@ function theGrilling(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
-    whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
     ...answers,
   );
 }
@@ -826,7 +826,7 @@ function theGrillingOutput(over: Partial<AgentOutputEvent>) {
       `/api/ui/conversations/${GRILLING.id}`,
       json({ ...GRILLING, timeline: altered }),
     ),
-    whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
   );
 }
 
@@ -980,7 +980,7 @@ describe("a session's output on the timeline", () => {
     );
     expect(output.querySelector(".latest")!.textContent).toBe(OUTPUT.latest);
 
-    // Nothing of the transcript itself: it is fetched by the pane that shows
+    // Nothing of the Capture itself: it is fetched by the pane that shows
     // it, and only once one is opened.
     expect(output.textContent).not.toContain("Reading the brief");
   });
@@ -995,7 +995,7 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(".live")!.textContent).toBe("running");
   });
 
-  /// A session that has ended is a conversation with a transcript, not one with
+  /// A session that has ended is a conversation with a Capture, not one with
   /// an agent in it — and the fixture is exactly that.
   it("says nothing about running when the session has ended", async () => {
     theGrilling();
@@ -1008,31 +1008,31 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(".live")).toBeNull();
   });
 
-  it("shows the whole transcript in the details pane, byte for byte", async () => {
+  it("shows the whole capture in the details pane, byte for byte", async () => {
     const fetching = theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
 
-    const shown = await drawn(container, ".details-pane .transcript");
+    const shown = await drawn(container, ".details-pane .capture");
 
-    expect(shown.textContent).toBe(TRANSCRIPT.text);
-    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThan(0);
+    expect(shown.textContent).toBe(CAPTURE.text);
+    expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
   });
 
-  /// The transcript belongs to the pane, and what the conversation is comes
+  /// The Capture belongs to the pane, and what the conversation is comes
   /// back when it is closed.
   it("goes back to the conversation's details when it is closed", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    await drawn(container, ".details-pane .transcript");
+    await drawn(container, ".details-pane .capture");
 
     fireEvent.click(await drawn(container, ".details-pane .close-event"));
 
     await drawn(container, ".details-pane .conversation-facts");
-    expect(container.querySelector(".details-pane .transcript")).toBeNull();
+    expect(container.querySelector(".details-pane .capture")).toBeNull();
   });
 
   /// A phone shows one level at a time, and opening an event is walking into
@@ -2208,7 +2208,7 @@ describe("a conversation blocked on the human", () => {
 });
 
 describe("an interruption's evidence", () => {
-  /// It rides on the event rather than being fetched, unlike a transcript or a
+  /// It rides on the event rather than being fetched, unlike a Capture or a
   /// diff: it is what the remedies are chosen against, and a pane that had to
   /// fetch it could draw the buttons before it could say what they were for.
   it("shows the worktree and the session's last words without another request", async () => {
@@ -2257,7 +2257,7 @@ describe("an interruption's evidence", () => {
 
   /// Read at the moment the run stopped and kept, because both move on — a
   /// worktree is a directory the human also has.
-  it("says the whole transcript is elsewhere", async () => {
+  it("says the whole capture is elsewhere", async () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
@@ -2266,7 +2266,7 @@ describe("an interruption's evidence", () => {
 
     const pane = await drawn(container, ".details-pane .evidence");
     expect(pane.closest(".details-pane")!.textContent).toContain(
-      "The whole transcript is the session's own event",
+      "The whole capture is the session's own event",
     );
   });
 });

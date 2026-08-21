@@ -9,7 +9,7 @@ Every attached client sees the same screen; the latest resize sets the PTY
 size.
 
 This is the one deliberate exception to the rule that the browser never
-parses (ADR 0003 direction, restated in the transcript viewer): a live
+parses (ADR 0003 direction, restated in the Capture viewer): a live
 terminal is a terminal, not a document, and shipping server-rendered grids
 per frame buys latency and wire cost for no fidelity. The exception is
 bounded — the server's virtual terminal remains the source of truth (it is

@@ -18,11 +18,11 @@ use ts_rs::TS;
 
 use crate::{
     Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
-    CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
+    Capture, CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
     DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
-    Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
+    Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -79,11 +79,11 @@ fn the_viewers_types_are_written_from_these() {
     DirectionChoice::export_all(&config).unwrap();
     DirectionChosen::export_all(&config).unwrap();
 
-    // What a session printed. The summary rides on the Timeline; the transcript
+    // What a session printed. The summary rides on the Timeline; the Capture
     // is its own payload, because it is fetched by the one pane that shows it.
     // A Question Set on the Timeline is the same arrangement, and its full self
     // is the `SetView` above.
-    Transcript::export_all(&config).unwrap();
+    Capture::export_all(&config).unwrap();
 
     // And what a session committed. The summary rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff

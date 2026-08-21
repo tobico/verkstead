@@ -41,7 +41,7 @@ const STATUS_LINES: usize = 40;
 
 /// And how much of what the session last said.
 ///
-/// The tail rather than the transcript: what went wrong is at the end, and the
+/// The tail rather than the Capture: what went wrong is at the end, and the
 /// whole of it is on the Timeline already as the session's own Event, one row up
 /// from this one.
 const TAIL_LINES: usize = 40;
@@ -157,8 +157,8 @@ async fn session_tail(state: &AppState, conversation_id: i64, writing: Option<i6
         return String::new();
     };
 
-    match store::transcript(&state.pool, conversation_id, event_id).await {
-        Ok(Some(transcript)) => crate::transcript::tail(&transcript, TAIL_LINES),
+    match store::capture(&state.pool, conversation_id, event_id).await {
+        Ok(Some(capture)) => crate::capture::tail(&capture, TAIL_LINES),
         Ok(None) => String::new(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, event_id, "reading what a failed session said failed");

@@ -1,8 +1,8 @@
 //! Reading a session's output as it arrives: bytes off a pseudo-terminal turned
-//! into the transcript that is kept and the summary the Timeline shows.
+//! into the Capture that is kept and the summary the Timeline shows.
 //!
 //! Kept as it was printed, control sequences and all. What the session sent a
-//! terminal is what the session said, and a transcript that had been tidied on
+//! terminal is what the session said, and a Capture that had been tidied on
 //! the way in would be a record of something else — so the tidying happens here,
 //! for the one line the Timeline shows, and nowhere else.
 //!
@@ -47,7 +47,7 @@ pub(crate) struct Reading {
 }
 
 impl Reading {
-    /// Take a chunk of a session's output: what it adds to the transcript, with
+    /// Take a chunk of a session's output: what it adds to the Capture, with
     /// the summary moved on by it.
     ///
     /// What comes back is text rather than the bytes that went in, because that
@@ -204,7 +204,7 @@ fn plain(line: &str) -> String {
     plain.trim().to_owned()
 }
 
-/// The last `lines` of a transcript that said anything, tidied of the terminal's
+/// The last `lines` of a Capture that said anything, tidied of the terminal's
 /// own control sequences.
 ///
 /// What an Interruption keeps as evidence. The tail and not the whole, because
@@ -216,10 +216,10 @@ fn plain(line: &str) -> String {
 /// A line that redrew itself comes out as its last state, exactly as [`plain`]
 /// leaves it: what a reader would have seen on the terminal is what a session
 /// said.
-pub(crate) fn tail(transcript: &str, lines: usize) -> String {
-    let mut said: Vec<&str> = transcript.split('\n').collect();
+pub(crate) fn tail(capture: &str, lines: usize) -> String {
+    let mut said: Vec<&str> = capture.split('\n').collect();
 
-    // A transcript ends with the newline of its last line, so the split leaves an
+    // A Capture ends with the newline of its last line, so the split leaves an
     // empty piece behind that is not a line the session printed.
     if said.last().is_some_and(|last| last.is_empty()) {
         said.pop();
@@ -294,7 +294,7 @@ fn shorten(line: &str) -> String {
 mod tests {
     use super::*;
 
-    /// The transcript is what was printed, whatever the chunks it arrived in —
+    /// The Capture is what was printed, whatever the chunks it arrived in —
     /// which is the whole of what "byte for byte" means from in here.
     #[test]
     fn a_character_split_across_two_chunks_is_one_character() {
@@ -390,7 +390,7 @@ mod tests {
     }
 
     /// Everything printed is kept whatever the summary does with it — the
-    /// transcript is the record, and the summary is a line about it.
+    /// Capture is the record, and the summary is a line about it.
     #[test]
     fn nothing_is_dropped_from_what_is_kept() {
         let mut reading = Reading::default();

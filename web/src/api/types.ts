@@ -4,9 +4,9 @@
  * A session's output as the Timeline shows it: how much there is, the last
  * thing that was said, and whether more is coming.
  *
- * The summary and not the transcript. A grilling session prints megabytes over
+ * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
- * moved — so what a Conversation carries is these two lines, and the transcript
+ * moved — so what a Conversation carries is these two lines, and the Capture
  * is fetched by the pane that shows it.
  */
 export type AgentOutputEvent = { id: number, 
@@ -184,10 +184,26 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * One session's Capture, whole, as the details pane receives it.
+ *
+ * Byte for byte, control sequences and all: what a terminal was sent is what a
+ * session said, and a Capture that had been tidied up would be a record of
+ * something else.
+ *
+ * One thing in it is not the session's word, and says so where it appears: what
+ * `script` and bwrap wrote on the pipe beside the terminal, appended once the
+ * session is over. It is empty on every session that ran, and on one that never
+ * started it is the only account of why — which makes the Capture the place
+ * for it, being where somebody looking at a session that said nothing is
+ * already looking.
+ */
+export type Capture = { text: string, };
+
+/**
  * One commit's diff, as the details pane receives it.
  *
  * Its own request rather than a field on the Conversation, for the reason a
- * transcript is: a Timeline is read every time an open page hears the world
+ * Capture is: a Timeline is read every time an open page hears the world
  * moved, and a diff is read when somebody opens the one Event it belongs to.
  *
  * Rendered with the folds and the highlighting an attached Diff already gets,
@@ -443,7 +459,7 @@ how: string,
 git_status: string, 
 /**
  * The tail of what the session printed, with the terminal's own control
- * sequences taken out. The tail and not the transcript: what went wrong is
+ * sequences taken out. The tail and not the Capture: what went wrong is
  * at the end, and the whole of it is on the Timeline already as the session's
  * own Event. Empty where it printed nothing at all.
  */
@@ -1070,22 +1086,6 @@ tasks: Array<TaskEntry>, };
  * this one add their kinds here.
  */
 export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
-
-/**
- * One session's transcript, whole, as the details pane receives it.
- *
- * Byte for byte, control sequences and all: what a terminal was sent is what a
- * session said, and a transcript that had been tidied up would be a record of
- * something else.
- *
- * One thing in it is not the session's word, and says so where it appears: what
- * `script` and bwrap wrote on the pipe beside the terminal, appended once the
- * session is over. It is empty on every session that ran, and on one that never
- * started it is the only account of why — which makes the transcript the place
- * for it, being where somebody looking at a session that said nothing is
- * already looking.
- */
-export type Transcript = { text: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

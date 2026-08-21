@@ -1,10 +1,10 @@
-//! One session's output, opened: the whole transcript, in the details pane.
+//! One session's output, opened: the whole Capture, in the details pane.
 //!
 //! Fetched here rather than carried by the Conversation, because the two are
 //! different sizes. A session prints for an hour and the Timeline is read again
-//! every time the page hears the world moved; the transcript is read when
+//! every time the page hears the world moved; the Capture is read when
 //! somebody opens the one Event it belongs to — and then it is read again on
-//! every Nudge, which is what makes an open transcript follow a running session.
+//! every Nudge, which is what makes an open Capture follow a running session.
 //!
 //! Shown as it was printed, control sequences and all. What a terminal was sent
 //! is what the session said, and turning a terminal's own colours into markup is
@@ -15,7 +15,7 @@
 import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, type JSX } from "solid-js";
 
-import { loadTranscript } from "../api/client";
+import { loadCapture } from "../api/client";
 import type { AgentOutputEvent, ConversationView } from "../api/types";
 
 export function Output(props: {
@@ -24,11 +24,11 @@ export function Output(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const transcript = useQuery(() => ({
+  const capture = useQuery(() => ({
     // The Event is in the key, so opening another session's output is another
-    // query rather than the same one showing the wrong transcript for a moment.
-    queryKey: ["transcript", props.conversation.id, props.output.id],
-    queryFn: () => loadTranscript(props.conversation.id, props.output.id),
+    // query rather than the same one showing the wrong Capture for a moment.
+    queryKey: ["capture", props.conversation.id, props.output.id],
+    queryFn: () => loadCapture(props.conversation.id, props.output.id),
   }));
 
   return (
@@ -45,7 +45,7 @@ export function Output(props: {
         </button>
       </div>
 
-      <p class="transcript-summary">
+      <p class="capture-summary">
         {props.output.lines} {props.output.lines === 1 ? "line" : "lines"}
         <Show when={props.output.running}>
           <span class="live">running</span>
@@ -53,23 +53,23 @@ export function Output(props: {
       </p>
 
       <Switch>
-        <Match when={transcript.isPending}>
+        <Match when={capture.isPending}>
           <p class="empty">Loading…</p>
         </Match>
-        <Match when={transcript.isError}>
+        <Match when={capture.isError}>
           <p class="error">
-            Could not read this transcript: {transcript.error?.message}
+            Could not read this capture: {capture.error?.message}
           </p>
         </Match>
-        <Match when={transcript.data}>
-          {(transcript) => (
+        <Match when={capture.data}>
+          {(capture) => (
             <Show
-              when={transcript().text !== ""}
+              when={capture().text !== ""}
               fallback={
                 <p class="empty">This session has printed nothing yet.</p>
               }
             >
-              <pre class="transcript">{transcript().text}</pre>
+              <pre class="capture">{capture().text}</pre>
             </Show>
           )}
         </Match>

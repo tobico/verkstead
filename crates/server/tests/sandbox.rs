@@ -469,7 +469,7 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
 
     assert_eq!(
         reported["claude-dir"], "write",
-        "a session writes its own transcripts and settings"
+        "a session writes its own session logs and settings"
     );
     assert_eq!(reported["claude-config"], "write");
     assert_eq!(reported["private-key"], "absent");

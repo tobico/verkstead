@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod capture;
 mod checklist;
 mod checks;
 mod comments;
@@ -59,7 +60,6 @@ mod settling;
 pub mod skills;
 mod stages;
 mod tasks;
-mod transcript;
 mod ui;
 mod updates;
 mod viewer;

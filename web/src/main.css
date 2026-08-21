@@ -1698,8 +1698,8 @@ main:has(.workbench) {
 
 /* One session's output, opened: what the terminal was sent, as it was sent.
    Wrapped rather than scrolled sideways — a pane on a phone is narrow, and a
-   transcript nobody can read the right-hand end of is one line of it. */
-.transcript-summary {
+   Capture nobody can read the right-hand end of is one line of it. */
+.capture-summary {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -1708,7 +1708,7 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-.transcript {
+.capture {
   margin: 0;
   padding: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

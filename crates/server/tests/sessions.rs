@@ -25,10 +25,10 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
-    DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent,
-    TimelineEvent, Transcript,
+    AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
+    ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
+    ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
+    TaskListEvent, TimelineEvent,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -101,14 +101,14 @@ impl Grilling {
     }
 
     /// What the session has printed, whole, as the details pane fetches it.
-    async fn transcript(&self, event: i64) -> String {
-        let transcript: Transcript = get(
+    async fn capture(&self, event: i64) -> String {
+        let capture: Capture = get(
             &self.app,
-            &format!("/api/ui/conversations/{}/transcript/{event}", self.id),
+            &format!("/api/ui/conversations/{}/capture/{event}", self.id),
         )
         .await;
 
-        transcript.text
+        capture.text
     }
 
     /// A second server over the same database, sandboxes, home and agent, which
@@ -785,7 +785,7 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
         .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
         .await;
 
-    let said = fixture.transcript(event).await;
+    let said = fixture.capture(event).await;
     let said = said.replace("\r\n", "\n");
 
     assert!(
@@ -855,7 +855,7 @@ async fn what_a_session_prints_reaches_the_timeline_while_it_is_still_running() 
     );
 
     // The whole of it is there to read while it is still being written.
-    let said = fixture.transcript(summary.id).await;
+    let said = fixture.capture(summary.id).await;
     assert!(said.contains("Reading the brief."), "{said:?}");
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
@@ -864,7 +864,7 @@ async fn what_a_session_prints_reaches_the_timeline_while_it_is_still_running() 
 /// What a terminal was sent is what the session said. Nothing is stripped on
 /// the way in — the tidying is for the one line the Timeline shows.
 #[tokio::test]
-async fn the_details_pane_gets_the_transcript_byte_for_byte() {
+async fn the_details_pane_gets_the_capture_byte_for_byte() {
     let fixture = grilling(r#"printf '\033[1mbold\033[0m\nplain\n'"#).await;
 
     let event = fixture
@@ -872,14 +872,14 @@ async fn the_details_pane_gets_the_transcript_byte_for_byte() {
         .await;
 
     assert_eq!(
-        fixture.transcript(event).await,
+        fixture.capture(event).await,
         // The line endings are the pseudo-terminal's own doing, and they are
         // part of what was sent.
         "\u{1b}[1mbold\u{1b}[0m\r\nplain\r\n",
     );
 }
 
-/// A session that has ended is a Conversation with a transcript, not one with an
+/// A session that has ended is a Conversation with a Capture, not one with an
 /// agent in it.
 ///
 /// Read on every poll rather than only at the end, because the moment worth
@@ -916,15 +916,15 @@ async fn a_session_that_exits_leaves_a_conversation_that_says_so() {
 }
 
 /// The record is the record. A server that has been restarted has no sessions
-/// at all, and every transcript it holds is of one that is over.
+/// at all, and every Capture it holds is of one that is over.
 #[tokio::test]
-async fn a_transcript_survives_the_server_restarting() {
+async fn a_capture_survives_the_server_restarting() {
     let fixture = grilling(r#"printf 'first\nsecond\n'"#).await;
 
     let event = fixture
         .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
         .await;
-    let said = fixture.transcript(event).await;
+    let said = fixture.capture(event).await;
 
     // A second server over the database the first one wrote, which is what a
     // restart is from the store's side of things.
@@ -956,10 +956,10 @@ async fn a_transcript_survives_the_server_restarting() {
     );
     assert_eq!(summary.latest, "second");
 
-    let read_back: Transcript = get(
+    let read_back: Capture = get(
         &restarted,
         &format!(
-            "/api/ui/conversations/{}/transcript/{}",
+            "/api/ui/conversations/{}/capture/{}",
             fixture.id, summary.id
         ),
     )
@@ -1040,7 +1040,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         })
         .await;
 
-    let said = fixture.transcript(implementing).await.replace("\r\n", "\n");
+    let said = fixture.capture(implementing).await.replace("\r\n", "\n");
 
     assert!(
         said.contains("model=claude-implementation-5"),
@@ -1089,7 +1089,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
 /// bwrap and nothing else, on a Conversation whose worktree and Profile are both
 /// fine.
 #[tokio::test]
-async fn a_sandbox_that_will_not_start_says_why_on_the_transcript() {
+async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     let fixture = grilling(
         r#"
         case "$1" in
@@ -1139,11 +1139,11 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_transcript() {
         .await;
 
     let (event, lines, latest) = refused;
-    let said = fixture.transcript(event).await;
+    let said = fixture.capture(event).await;
 
     assert!(
         said.contains("[the sandbox, not the agent]"),
-        "the plumbing's word goes on the transcript, marked as its own rather \
+        "the plumbing's word goes on the Capture, marked as its own rather \
          than left to read as something the agent said: {said:?}"
     );
     assert!(
@@ -1217,10 +1217,7 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
         })
         .await;
 
-    let said = fixture
-        .transcript(breaking_down)
-        .await
-        .replace("\r\n", "\n");
+    let said = fixture.capture(breaking_down).await.replace("\r\n", "\n");
 
     assert!(
         said.contains("model=claude-implementation-5"),
@@ -1339,7 +1336,7 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
         })
         .await;
 
-    let said = fixture.transcript(staging).await.replace("\r\n", "\n");
+    let said = fixture.capture(staging).await.replace("\r\n", "\n");
 
     assert!(
         said.contains("model=claude-implementation-5"),
@@ -3153,7 +3150,7 @@ async fn aborting_ends_the_session_before_the_worktree_goes() {
     );
     assert!(
         !output(&fixture.view().await)
-            .expect("the transcript stays on the Timeline")
+            .expect("the Capture stays on the Timeline")
             .running,
         "an aborted Conversation has no session running"
     );
@@ -3328,7 +3325,7 @@ async fn retrying_runs_the_step_again_in_a_session_told_what_the_human_wrote() {
         })
         .await;
 
-    let printed = fixture.transcript(said).await.replace("\r\n", "\n");
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
         printed.contains("leave the migration alone"),

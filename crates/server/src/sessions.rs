@@ -35,13 +35,13 @@ use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::capture::Reading;
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::skills::Skills;
 use crate::store;
-use crate::transcript::Reading;
 
 /// How much of a session's output to take off the pseudo-terminal at once.
 const CHUNK: usize = 8 * 1024;
@@ -406,7 +406,7 @@ impl Sessions {
     /// nothing grilling it.
     ///
     /// The Timeline Event is made after the process is, so that a session that
-    /// never started leaves no transcript of nothing.
+    /// never started leaves no Capture of nothing.
     pub(crate) async fn start(
         &self,
         pool: &SqlitePool,
@@ -475,7 +475,7 @@ impl Sessions {
             }
         };
 
-        let event_id = store::start_transcript(pool, conversation_id).await?;
+        let event_id = store::start_capture(pool, conversation_id).await?;
 
         let (stop, stopping) = oneshot::channel();
 
@@ -718,7 +718,7 @@ async fn relay(
 
     // What is left on the error pipe is `script` and bwrap talking about
     // themselves: the session's own errors come back over the pseudo-terminal
-    // with the rest of what it printed. Read, and put on the transcript once the
+    // with the rest of what it printed. Read, and put on the Capture once the
     // session is over — a sandbox that refused to start says so here and nowhere
     // else, and a Timeline reading `0 lines` with the reason in a log nobody
     // turned up is the whole of what makes that failure hard to see.
@@ -816,9 +816,9 @@ async fn relay(
     ended
 }
 
-/// The plumbing's complaint as it goes on the transcript.
+/// The plumbing's complaint as it goes on the Capture.
 ///
-/// Marked, and it is the one thing in a transcript that is not the session's own
+/// Marked, and it is the one thing in a Capture that is not the session's own
 /// word. What a terminal was sent is the record — this arrived on the pipe
 /// beside it, from `script` and bwrap rather than from the agent, and a reader
 /// who could not tell the two apart would be reading the sandbox's failure as
@@ -843,7 +843,7 @@ async fn flush(
         return;
     }
 
-    match store::append_transcript(pool, event_id, pending, &reading.summary()).await {
+    match store::append_capture(pool, event_id, pending, &reading.summary()).await {
         // Kept rather than dropped: the next flush carries it, and a store that
         // is briefly unwritable should cost latency rather than a hole in a
         // record nothing can go back and fill.
