@@ -149,6 +149,7 @@ fn full_grammar_set() -> QuestionSet {
         ],
         postscript: None,
         proposal: None,
+        review: None,
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
@@ -1095,6 +1096,7 @@ fn wrap_up_proposal() -> QuestionSet {
                         - **A roadmap** is more ceremony than two days of work needs\n"
                 .to_owned(),
         }),
+        review: None,
         project: Some("verkstead".to_owned()),
         branch: Some("usage-limits".to_owned()),
         diff: None,

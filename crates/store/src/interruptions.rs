@@ -53,6 +53,14 @@ pub enum Step {
     /// red checks*, which is the fix sessions starting over from no attempts
     /// spent.
     Checks,
+
+    /// The self-review of a wrapping Conversation's branch.
+    ///
+    /// Not a step of a backlog either, and raised for a review session that
+    /// ended without putting anything to the human — which is not the same thing
+    /// as a review that found nothing. A retry is the review over again, in a
+    /// session as fresh as the first one was.
+    Review,
 }
 
 impl Step {
@@ -65,6 +73,7 @@ impl Step {
             Self::Finish => "finish",
             Self::Inline => "inline",
             Self::Checks => "checks",
+            Self::Review => "review",
         }
     }
 
@@ -78,6 +87,7 @@ impl Step {
             "finish" => Self::Finish,
             "inline" => Self::Inline,
             "checks" => Self::Checks,
+            "review" => Self::Review,
             other => bail!("an Interruption names the unknown step {other:?}"),
         })
     }

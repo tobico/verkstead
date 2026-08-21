@@ -92,40 +92,12 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
         "the checks are being tried again from no attempts spent"
     );
 
-    watch(state, conversation_id).await
-}
-
-/// Start watching a Conversation that is already wrapping up, where one should
-/// be watched.
-///
-/// What a restarting server does for every Conversation it left mid-wrap-up. A
-/// pull request goes on being built while Verkstead is down, and a server that
-/// came back up and watched nothing would leave a Conversation wrapping for ever
-/// with nobody having said so.
-pub(crate) fn resume(state: &AppState) {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
-            Ok(conversations) => conversations,
-            Err(error) => {
-                tracing::error!(error = ?error, "listing the Conversations to resume watching failed");
-                return;
-            }
-        };
-
-        for conversation in conversations
-            .into_iter()
-            .filter(|conversation| conversation.state == store::Lifecycle::Wrapping)
-        {
-            tracing::info!(
-                conversation_id = conversation.id,
-                "a Conversation was left wrapping up, so its checks are watched again",
-            );
-
-            tokio::spawn(watch(state.clone(), conversation.id));
-        }
-    });
+    // The whole wrap-up rather than the checks alone: the review stopped being
+    // run when this Interruption was raised, because nothing advances past an
+    // open one, and a Conversation that came back with its checks watched and
+    // nobody reading its branch would wait on a review that was never going to
+    // happen.
+    crate::wrapping::watching(&state, conversation_id);
 }
 
 /// What one look at the checks decided.
@@ -273,6 +245,20 @@ async fn fix(
     if fixable.is_empty() {
         return ask(state, conversation_id, failed, writing).await;
     }
+
+    // One agent in one Worktree. Tried rather than waited for, and taken before
+    // an attempt is counted: what else is in there is the review session or a
+    // finding the human accepted, both of which take as long as they take, and a
+    // fix session queued behind one would be dispatched about a suite nobody has
+    // looked at since. Looking again in half a minute costs nothing and asks
+    // GitHub afresh.
+    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
+        tracing::debug!(
+            conversation_id,
+            "something else is working in the Worktree, so the checks are looked at again later",
+        );
+        return Watching::Again(writing);
+    };
 
     // Counted as the session is dispatched rather than as it ends, so that an
     // attempt spent by a server that then restarted is one the next server does

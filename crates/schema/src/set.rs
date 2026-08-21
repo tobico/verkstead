@@ -52,6 +52,20 @@ pub struct QuestionSet {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposal: Option<Proposal>,
 
+    /// The self-review this Set carries, on the one Set a wrap-up's review asks.
+    ///
+    /// What makes a Set the review's findings rather than any other question a
+    /// session asked: absent on every ordinary Set, present on the one that puts
+    /// a review to the human. Answering a Set that carries it is what turns the
+    /// findings into work — and what settles the review as one of the things
+    /// wrap-up waits on.
+    ///
+    /// A block of its own for the reason [`Self::proposal`] is one: recognising
+    /// it is a field being there and nothing subtler. The human never sees it
+    /// either — what they read is the Questions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review: Option<Review>,
+
     /// Repository the agent is working in, as the CLI saw it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
@@ -137,6 +151,85 @@ impl Proposal {
         response.answers.iter().any(|answer| {
             answer.label.trim() == name && !answer.unanswered && answer.selected == Some(n)
         })
+    }
+}
+
+/// The wrap-up review's closing move: what it found, and which Answer to each
+/// finding means *fix this*.
+///
+/// One finding per Question, and the two halves of a finding are written for two
+/// different readers. The Question is what the human decides from, on a phone;
+/// [`Finding::what`] is what the fix session is told, and it is the only thing
+/// that session gets. A review that wrote one for both would be asking a phone
+/// screen to hold a brief for an agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Review {
+    /// What the review found, in the order it asked about them.
+    pub findings: Vec<Finding>,
+}
+
+/// One thing the review found, as the Set carries it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Finding {
+    /// The Option that means *fix this*, in the Guide's own notation: `Q1.1`
+    /// for a Question's, `Q1a.1` for a Sub-question's.
+    ///
+    /// What lets the human decline. Verkstead cannot read acceptance off wording
+    /// the agent chose, so the agent names the Option it will take as *fix it* —
+    /// and every other way of answering dispatches nothing at all.
+    pub fix: String,
+
+    /// The finding as the fix session is told it, as markdown.
+    ///
+    /// Written for an agent that has not read the diff and will never speak to
+    /// the reviewer: where it is, what is wrong, and what done would look like.
+    /// Whatever the human wrote alongside their Answer goes with it.
+    pub what: String,
+}
+
+impl Finding {
+    /// The Option this finding is fixed by, or `None` where [`Finding::fix`] is
+    /// not in the notation at all.
+    pub fn fixing(&self) -> Option<(&str, u32)> {
+        option_named(&self.fix)
+    }
+
+    /// Whether this Response says to fix it.
+    ///
+    /// Read exactly as a proposal's acceptance is, and for the same reason: only
+    /// the named Option being selected is a yes. Free text *beside* it is the
+    /// qualification the Guide says it is, and it travels to the fix session
+    /// with the finding; free text *instead* of it is an answer of the human's
+    /// own, which wins over the Options offered. An Unanswered question is never
+    /// acceptance.
+    pub fn accepted(&self, response: &crate::response::Response) -> bool {
+        let Some((name, n)) = self.fixing() else {
+            return false;
+        };
+
+        response.answers.iter().any(|answer| {
+            answer.label.trim() == name && !answer.unanswered && answer.selected == Some(n)
+        })
+    }
+
+    /// What the human wrote alongside their Answer to this finding, trimmed.
+    ///
+    /// Empty where they wrote nothing, which is the ordinary way of agreeing
+    /// with a recommendation.
+    pub fn said<'a>(&self, response: &'a crate::response::Response) -> &'a str {
+        let Some((name, _)) = self.fixing() else {
+            return "";
+        };
+
+        response
+            .answers
+            .iter()
+            .find(|answer| answer.label.trim() == name)
+            .and_then(|answer| answer.free_text.as_deref())
+            .unwrap_or_default()
+            .trim()
     }
 }
 

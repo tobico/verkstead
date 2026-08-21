@@ -62,6 +62,11 @@ const NEXT_TASK: &str = "~/.claude/skills/next-task/SKILL.md";
 /// inside — whichever of the three kinds of feedback dispatched it.
 const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
 
+/// And the reviewing skill's, which the one session a wrap-up starts with runs
+/// inside: the fresh context that reads the branch none of the sessions that
+/// wrote it ever saw.
+const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -202,6 +207,27 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
         &format!(
             "Read {NEXT_TASK} and work the next task of the backlog for the work described \
              below, the way it says."
+        ),
+        brief,
+        handoff,
+    )
+}
+
+/// What the review session is started on: the same two documents again, under
+/// the line that sends the agent into the reviewing skill.
+///
+/// The documents rather than the branch alone, because a review is a reading of
+/// work against what it was for: the diff says what was done and these two say
+/// what was meant. What is deliberately *not* here is anything about how the
+/// work was built — the tasks, the sessions, the order they ran in. This session
+/// is the first thing to see the branch whole, and priming it with the shape the
+/// work was cut into would be handing it the very frame the sessions that wrote
+/// it were each stuck inside.
+pub(crate) fn reviewing(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!(
+            "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
+             work described below is what it was meant to be."
         ),
         brief,
         handoff,
@@ -628,6 +654,98 @@ mod tests {
             prompt.find("In-process counter.") < prompt.find("The Rust check is failing."),
             "and the feedback comes last: it is the newest thing said and the least \
              general — {prompt:?}"
+        );
+    }
+
+    /// The one thing the reviewing skill has to be, and the one thing it has to
+    /// not be: it reads the branch and it changes none of it.
+    #[test]
+    fn the_reviewing_skill_reviews_and_does_not_fix() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("do not fix"),
+            "nothing it finds is changed by this session: {reviewing}"
+        );
+        assert!(
+            !reviewing.contains("git commit") && !reviewing.contains("git push"),
+            "and it lands nothing: this is the one session here that commits nothing at \
+             all — {reviewing}"
+        );
+        assert!(
+            reviewing.contains("gh pr diff"),
+            "what it reads is the pull request the work is on: {reviewing}"
+        );
+    }
+
+    /// How the findings reach the human, which is the whole of what this session
+    /// produces: one Set, a Question per finding, and the block that says which
+    /// Answer to each means fix it.
+    #[test]
+    fn the_reviewing_skill_says_how_a_finding_becomes_work() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("review:") && reviewing.contains("findings:"),
+            "the Set is marked by the block it carries, so the skill has to name it: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("fix: Q1.1"),
+            "and name the Option that means fix it, in the Guide's own notation: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("`what` is what the fix session is told"),
+            "the finding carries its own words for whoever fixes it: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("verkstead guide") && reviewing.contains("verkstead ask"),
+            "put through the CLI like every other Set: {reviewing}"
+        );
+        assert!(
+            !reviewing.contains("proposal:"),
+            "and carrying no proposal: this runs long after a grilling ended — {reviewing}"
+        );
+    }
+
+    /// A review that finds nothing asks nothing, and says so where the human is
+    /// already looking: the last line a session prints is what its Timeline row
+    /// shows.
+    #[test]
+    fn the_reviewing_skill_says_what_to_do_having_found_nothing() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("Ask nothing"),
+            "a Set with no findings is a row for the human to dismiss: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("last thing you print"),
+            "and what it found is said where the Timeline will show it: {reviewing}"
+        );
+    }
+
+    /// The review session is put inside the skill the same way every other is,
+    /// and primed with the two documents that say what the work was *for*.
+    #[test]
+    fn a_review_session_is_started_on_the_documents_inside_the_skill() {
+        let prompt = reviewing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+        );
+
+        assert!(
+            prompt.contains(REVIEWING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(ADDRESSING) && !prompt.contains(NEXT_TASK),
+            "and nothing sends this session to change anything: {prompt:?}"
         );
     }
 

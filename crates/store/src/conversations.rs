@@ -1130,6 +1130,44 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
     Ok(found.is_some())
 }
 
+/// Whether this Conversation's self-review has put its findings to the human,
+/// and which Set they are on.
+///
+/// Read off the Sets themselves rather than written down when one is asked: a Set
+/// carrying a `review` block *is* the review's, which is the whole reason the
+/// block is a field being there rather than a convention. A second record saying
+/// which Set was the review's would be a second thing to keep true, and the one
+/// that could disagree.
+///
+/// The first one, where a Conversation somehow has two. Nothing should ask twice
+/// — the skill says the block goes on one Set and no others — and if something
+/// does, the review is the one that arrived first.
+pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT q.id, q.body
+         FROM question_sets q
+         JOIN set_events s ON s.set_id = q.id
+         JOIN timeline_events e ON e.id = s.event_id
+         WHERE e.conversation_id = ?
+         ORDER BY q.id",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("looking for Conversation {conversation_id}'s review"))?;
+
+    for (set_id, body) in rows {
+        let set: QuestionSet = serde_json::from_str(&body)
+            .with_context(|| format!("reading stored Question Set {set_id}"))?;
+
+        if set.review.is_some() {
+            return Ok(Some(set_id));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Which Conversation a Set was asked from, or `None` if it is on no Timeline
 /// at all.
 ///

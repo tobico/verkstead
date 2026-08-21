@@ -165,7 +165,17 @@ pub(crate) struct Sessions {
     agents: Option<Arc<Agents>>,
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
+
+    /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
+    turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
 }
+
+/// The Worktree of one Conversation, held for as long as one thing is using it.
+///
+/// Dropping it is what hands it on, so it is held across the whole of a session
+/// rather than taken to start one: what it is protecting is not the launching but
+/// the working.
+pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
 
 /// A session that has been started, as whatever is driving it holds one.
 ///
@@ -305,6 +315,7 @@ impl Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),
             running: Arc::new(Mutex::new(HashMap::new())),
+            turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -314,7 +325,48 @@ impl Sessions {
         Sessions {
             agents: None,
             running: Arc::new(Mutex::new(HashMap::new())),
+            turns: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Wait for this Conversation's Worktree, and take it.
+    ///
+    /// One agent in one Worktree, kept true by whoever is about to put one there
+    /// asking first. Nothing in [`Sessions::start`] enforces it — starting a
+    /// second session for a Conversation *ends the first*, which is exactly what
+    /// a run relaunching a step wants and exactly what a wrap-up must never do:
+    /// a red check arriving mid-review would otherwise kill the review, and the
+    /// human answering the review would kill the fix session halfway through a
+    /// commit.
+    ///
+    /// So the wrap-up's three dispatchers take turns. This is the one that waits
+    /// — for the review, which nothing will start again on its behalf, and for
+    /// the findings the human has just accepted, which would otherwise be work
+    /// quietly dropped. The checks watcher uses [`Sessions::try_turn`] instead.
+    ///
+    /// The map keeps a lock per Conversation for the life of the server, which is
+    /// a pointer per Conversation ever wrapped up.
+    pub(crate) async fn turn(&self, conversation_id: i64) -> Turn {
+        self.turn_of(conversation_id).lock_owned().await
+    }
+
+    /// Take it if it is free, and hand back nothing if somebody else has it.
+    ///
+    /// What a poller wants. The checks watcher looks again in half a minute
+    /// anyway, and a fix session queued behind a review that takes ten minutes
+    /// would be dispatched about checks nobody has looked at since.
+    pub(crate) fn try_turn(&self, conversation_id: i64) -> Option<Turn> {
+        self.turn_of(conversation_id).try_lock_owned().ok()
+    }
+
+    /// The lock for one Conversation, made the first time anyone asks for it.
+    fn turn_of(&self, conversation_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+        self.turns
+            .lock()
+            .expect("the turns registry is not poisoned")
+            .entry(conversation_id)
+            .or_default()
+            .clone()
     }
 
     /// Which Timeline Event a Conversation's running session is printing into,

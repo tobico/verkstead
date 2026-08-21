@@ -272,6 +272,7 @@ fn bare(title: &str) -> QuestionSet {
         questions: Vec::new(),
         postscript: None,
         proposal: None,
+        review: None,
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,

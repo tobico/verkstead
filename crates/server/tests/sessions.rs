@@ -163,6 +163,16 @@ impl Grilling {
         .await
     }
 
+    /// The same, for a Set whose questions are not the proposal's one.
+    async fn respond(&self, set_id: i64, answers: serde_json::Value) -> Submitted {
+        post(
+            &self.app,
+            &format!("/api/ui/sets/{set_id}/response"),
+            &serde_json::json!({ "answers": answers }),
+        )
+        .await
+    }
+
     /// And choose how the work gets built.
     async fn direct(&self, direction: &str) -> DirectionChosen {
         post(
@@ -1044,6 +1054,12 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
             sleep 300
             ;;
         *)
+            case "$2" in
+            *reviewing/SKILL.md*)
+                printf 'I read the whole branch and found nothing worth raising\n'
+                exit 0
+                ;;
+            esac
             if [ ! -d .tasks ]; then
                 printf 'breaking down\n'
                 mkdir -p .tasks
@@ -1120,12 +1136,22 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
         "the backlog in order, then the finish step — each by a session of its own",
     );
 
+    // The finish step is not the last session a backlog leads to: the pull
+    // request it opened is reviewed, which is where the wrap-up starts.
+    fixture
+        .until(|view| {
+            let sessions = outputs(view);
+            (sessions.len() == 6 && sessions.iter().all(|output| !output.running)).then_some(())
+        })
+        .await;
+
     let view = fixture.view().await;
 
     assert_eq!(
         outputs(&view).len(),
-        5,
-        "one Event per session: the grilling, the breakdown, a task each, and the finish",
+        6,
+        "one Event per session: the grilling, the breakdown, a task each, the finish, \
+         and the review of the pull request it opened",
     );
     assert!(
         outputs(&view).iter().all(|output| !output.running),
@@ -1157,7 +1183,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
-        5,
+        6,
         "an empty backlog leaves the runner idle rather than launching sessions at nothing",
     );
 }
@@ -1244,6 +1270,11 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// One task and then the finish, which is the shortest whole backlog there is —
 /// and the one the wrap-up tests below drive to its end.
 ///
+/// The wrap-up's review is played too, because every backlog worked to empty
+/// gets one: it reads the branch, finds nothing worth raising, and gets out of
+/// the way. A stub that fell through to the backlog arm would find `.tasks` gone
+/// and write a whole second backlog.
+///
 /// The finish step here does what the bundled fork tells a session to do:
 /// commits the removal of `TODO.md`, and pushes and opens a pull request through
 /// its own `gh`. There is no remote to push to in these fixtures, so the stub
@@ -1253,6 +1284,12 @@ const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
 claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
 *)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
     if [ ! -d .tasks ]; then
         mkdir -p .tasks
         printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -1796,6 +1833,433 @@ async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_i
         view.blocked_on,
         Some(stopped.id),
         "what is waiting is the human, which is what an Interruption is for",
+    );
+}
+
+/// The findings of a review, as the bundled reviewing skill writes them: a
+/// Question per finding, and the `review` block that says which Answer to each
+/// means *fix it*.
+///
+/// Put through the agent API by the test rather than by the stub, exactly as the
+/// grilling's proposal is: a router driven by `oneshot` has no socket for a
+/// session to reach, and what is under test is what Verkstead does once the Set
+/// is there.
+const REVIEW: &str = r#"
+title: Review of the rate limiter branch
+preface: |
+  Two things worth a decision.
+questions:
+  - label: Q1
+    text: The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: Two clocks now, and the tests pin both.
+    options:
+      - n: 1
+        text: Fix it
+      - n: 2
+        text: Leave it
+        recommended: true
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset the counter as the window rolls.
+    - fix: Q2.1
+      what: Collapse the two clocks onto one.
+"#;
+
+/// The shortest whole backlog, plus the two sessions a wrap-up dispatches.
+///
+/// The review writes down the prompt it was given and then idles, which is what
+/// a session blocked on `verkstead ask` does; a fix session writes its prompt
+/// down and commits, which is what one reports through. Told apart by the skill
+/// their prompts name, because that is the fact under it — all three run under
+/// the same implementation Profile and differ only in what they were sent to do.
+fn a_backlog_then_wraps_up(reviews: &Path, dispatched: &Path, review: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{review}
+    ;;
+*addressing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {dispatched}
+    printf 'having a go at it\n'
+    printf 'a fix\n' >> fixes.md
+    git add -A
+    git commit --quiet -m 'fix: address what the wrap-up raised'
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+        dispatched = quoted(dispatched),
+    )
+}
+
+/// A review session that reads the branch and then waits on the human, which is
+/// what one blocked on `verkstead ask` looks like from outside.
+const REVIEW_THEN_WAIT: &str = "    printf 'reading the branch\\n'\n    sleep 300";
+
+/// One that finds nothing, says so as the last thing it prints, and stops.
+const REVIEW_AND_FIND_NOTHING: &str =
+    "    printf 'I read the whole branch and found nothing worth raising\\n'";
+
+/// Whether Verkstead has recorded this Conversation's review as done with.
+async fn review_settled(fixture: &Grilling) -> bool {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    settled.contains(&verkstead_server::store::WaitingOn::Review)
+}
+
+/// Wait until a session has written its prompt down, and hand back what is
+/// there.
+async fn until_written(path: &Path) -> String {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        if let Ok(written) = std::fs::read_to_string(path) {
+            if !written.trim().is_empty() {
+                return written;
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "no session ever wrote to {}",
+            path.display(),
+        );
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// How many sessions wrote to one of those files.
+fn prompts(written: &str) -> Vec<&str> {
+    written
+        .split("=====")
+        .filter(|prompt| !prompt.trim().is_empty())
+        .collect()
+}
+
+/// The whole of the wrap-up self-review: one fresh session reads the branch, its
+/// findings arrive as a Question Set, and the ones the human accepts become work.
+///
+/// The session that reviews is the first thing to see this branch — the ones that
+/// wrote it each saw one task — so it runs in a fresh context, under the
+/// implementation Profile, inside the bundled reviewing skill. It changes nothing:
+/// what it produces is the Set, and what becomes of each finding is the human's.
+#[tokio::test]
+async fn the_review_puts_its_findings_to_the_human_and_what_they_accept_becomes_work() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&reviews).await;
+    let started = prompts(&told);
+
+    assert_eq!(started.len(), 1, "one review and one only: {told}");
+    assert!(
+        started[0].contains("reviewing/SKILL.md"),
+        "inside the bundled reviewing skill: {told}",
+    );
+    assert!(
+        started[0].contains("model=claude-implementation-5"),
+        "under the implementation Profile, as every session about the code is: {told}",
+    );
+    assert!(
+        started[0].contains("The API has none."),
+        "and told what the work was meant to be: {told}",
+    );
+
+    assert!(
+        !review_settled(&fixture).await,
+        "a review that has not reported settles nothing",
+    );
+
+    // What the review session does through the CLI, played by the test.
+    let set = fixture.ask(REVIEW).await;
+
+    // Verkstead ends it once the findings are in: the Response is not its to wait
+    // for, and each finding the human accepts gets a session of its own.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .filter(|output| !output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(fixes(&view), 0, "the review itself changes nothing");
+    assert!(
+        !review_settled(&fixture).await,
+        "and the review is what wrap-up is waiting on until they answer it",
+    );
+
+    // The human answers from the workbench: fix the first, leave the second.
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let told = until_written(&dispatched).await;
+
+    assert!(
+        told.contains("addressing/SKILL.md"),
+        "a finding they accepted goes to the bundled addressing skill: {told}",
+    );
+    assert!(
+        told.contains("Reset the counter as the window rolls"),
+        "carrying the finding as the review wrote it for whoever fixes it: {told}",
+    );
+    assert!(
+        told.contains("Keep the signature."),
+        "and what they said when they agreed: {told}",
+    );
+
+    // Long enough for a second session, had anything been going to dispatch one.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let told = std::fs::read_to_string(&dispatched).unwrap();
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one session for the one finding they accepted: {told}",
+    );
+    assert!(
+        !told.contains("Collapse the two clocks"),
+        "the finding they declined dispatches nothing at all: {told}",
+    );
+
+    assert!(
+        review_settled(&fixture).await,
+        "and answering it is what settles the review",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        1,
+        "nothing reviews the branch a second time",
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing stopped: {:?}",
+        interruptions(&view),
+    );
+}
+
+/// A review that finds nothing asks nothing.
+///
+/// A Set with no findings in it would be a row for the human to dismiss, and the
+/// point of the phase is to spend their attention only where there is a decision.
+/// So it says what it found where they are already looking — the last line a
+/// session prints is what its Timeline row shows — and wrap-up carries on.
+#[tokio::test]
+async fn a_review_that_finds_nothing_raises_no_question_set_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(Instant::now() < deadline, "the review never settled");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "the only Set on the Timeline is the proposal that ended the grilling",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "nothing is waiting on the human, which is the whole of finding nothing",
+    );
+    assert!(
+        outputs(&view)
+            .last()
+            .is_some_and(|output| output.latest.contains("nothing worth raising")),
+        "and the Timeline says what the review found: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !dispatched.exists(),
+        "nothing was dispatched: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// A review session that dies is not a review that found nothing.
+///
+/// One is a branch nobody has read and the other is a branch somebody read and
+/// had nothing to say about, and reading the first as the second would let a
+/// crash pass for a clean bill of health. So the run stops at an Interruption
+/// like every other, and retrying it is the review over again.
+#[tokio::test]
+async fn a_review_session_that_dies_stops_the_run_and_is_run_again_on_a_retry() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let mended = spill.path().join("mended");
+
+    // Falls over the first time, and reads the branch once whatever the human
+    // went off and did about it is done.
+    let review = format!(
+        "    if [ -e {mended} ]; then\n        \
+             printf 'I read the whole branch and found nothing worth raising\\n'\n    \
+         else\n        \
+             printf 'gh: could not read the diff\\n'\n        \
+             exit 1\n    \
+         fi",
+        mended = quoted(&mended),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("review"),
+        "the step is named as what it was: {stopped:?}",
+    );
+    assert!(
+        stopped.tail.contains("could not read the diff"),
+        "with the tail of what the session said, which is where it says why: {stopped:?}",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human",
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and a review that did not happen settles nothing",
+    );
+
+    std::fs::write(&mended, "").unwrap();
+
+    assert_eq!(
+        fixture.settle(stopped.id, "Retry", "").await,
+        RemedySettled::Settled,
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the retry never reviewed anything"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        2,
+        "the review that failed, and the one the retry ran",
+    );
+}
+
+/// One agent in one Worktree, which is what the wrap-up's turns are for.
+///
+/// The checks are watched while the review reads the branch, and starting a
+/// session for a Conversation *ends* the one it already has — so a red check
+/// dispatching a fix session mid-review would kill the review, and nothing would
+/// ever say so. It waits for the Worktree instead, and takes it when the review
+/// has put its findings down.
+#[tokio::test]
+async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // Long enough for many polls of a suite that is red the whole time.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "nothing was dispatched into the Worktree the review is reading: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "and the review session is still the one running: {:?}",
+        outputs(&view).last(),
+    );
+
+    // The review reports and its session ends, which hands the Worktree on.
+    fixture.ask(REVIEW).await;
+
+    let told = until_written(&dispatched).await;
+
+    assert!(
+        told.contains("Rust") && told.contains("/actions/runs/1/job/2"),
+        "the fix session that was waiting is about the red check: {told}",
     );
 }
 

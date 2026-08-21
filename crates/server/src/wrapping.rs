@@ -89,10 +89,10 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
             // an open page should say so without being reloaded.
             state.nudges.announce();
 
-            // And the wrap-up itself starts here, which for now is the checks:
-            // the branch has just been pushed, so GitHub is already running them
-            // and nobody else is going to look.
-            tokio::spawn(crate::checks::watch(state.clone(), conversation_id));
+            // And the wrap-up itself starts here. The branch has just been
+            // pushed, so GitHub is already running the checks and nobody else is
+            // going to look — and nobody has read the branch at all.
+            watching(state, conversation_id);
         }
         // The run was stopped from outside while the finish step was landing, or
         // this is a second attempt at a finish that already moved the
@@ -119,6 +119,55 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
             .await;
         }
     }
+}
+
+/// Everything a wrapping Conversation has going on: its pull request's checks
+/// watched, and its branch reviewed where nobody has read it yet.
+///
+/// One place that says what a wrap-up *is*, because four things start one and all
+/// four have to start the whole of it: the finish step opening the pull request,
+/// a server coming back up over a Conversation it left wrapping, and either of
+/// the two Interruptions being retried — each of which stopped the other half
+/// too, since nothing advances past an open one.
+///
+/// Both halves decide for themselves whether there is anything to do, so starting
+/// them twice is not starting two of anything: a review that has already asked
+/// returns, and a Conversation that has stopped wrapping up stops both.
+pub(crate) fn watching(state: &AppState, conversation_id: i64) {
+    tokio::spawn(crate::checks::watch(state.clone(), conversation_id));
+    tokio::spawn(crate::review::run(state.clone(), conversation_id));
+}
+
+/// Start watching every Conversation that was already wrapping up.
+///
+/// What a restarting server does. A pull request goes on being built while
+/// Verkstead is down, and a review is a session that does not survive the process
+/// that started it — so a server that came back up and watched nothing would
+/// leave a Conversation wrapping for ever with nobody having said so.
+pub(crate) fn resume(state: &AppState) {
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        let conversations = match store::conversations(&state.pool).await {
+            Ok(conversations) => conversations,
+            Err(error) => {
+                tracing::error!(error = ?error, "listing the Conversations to resume wrapping up failed");
+                return;
+            }
+        };
+
+        for conversation in conversations
+            .into_iter()
+            .filter(|conversation| conversation.state == store::Lifecycle::Wrapping)
+        {
+            tracing::info!(
+                conversation_id = conversation.id,
+                "a Conversation was left wrapping up, so its wrap-up is taken up again",
+            );
+
+            watching(&state, conversation.id);
+        }
+    });
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.

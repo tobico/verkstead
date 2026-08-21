@@ -93,6 +93,7 @@ fn proposing(direction: Direction) -> QuestionSet {
             accepted_by: "Q14.1".to_owned(),
             rationale: "Six changes, each independently testable.".to_owned(),
         }),
+        review: None,
         project: None,
         branch: None,
         diff: None,
@@ -103,6 +104,7 @@ fn proposing(direction: Direction) -> QuestionSet {
 fn ordinary() -> QuestionSet {
     QuestionSet {
         proposal: None,
+        review: None,
         title: "Where the request counter lives".to_owned(),
         ..proposing(Direction::Inline)
     }

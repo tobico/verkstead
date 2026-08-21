@@ -24,14 +24,21 @@ use sqlx::SqlitePool;
 
 /// One of the things a Conversation has to have settled before wrap-up is over.
 ///
-/// The review's Question Set being answered and the pull request's comments
-/// being addressed are the other two, and they arrive with the stages that
-/// produce them — there is nothing yet that could settle either, and a variant
-/// nothing ever writes would be a wrap-up that could never finish.
+/// The pull request's comments being addressed is the other one, and it arrives
+/// with the stage that produces it — there is nothing yet that could settle it,
+/// and a variant nothing ever writes would be a wrap-up that could never finish.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitingOn {
     /// The pull request's checks are green.
     Checks,
+
+    /// The self-review has been answered — or found nothing to ask about.
+    ///
+    /// Unlike the checks, this is settled once and stays settled. A review is
+    /// something that happened rather than a state of the branch: the human has
+    /// read what it found and said which of it to fix, and a commit landing
+    /// afterwards does not un-say that.
+    Review,
 }
 
 impl WaitingOn {
@@ -40,6 +47,7 @@ impl WaitingOn {
     fn stored(self) -> &'static str {
         match self {
             Self::Checks => "checks",
+            Self::Review => "review",
         }
     }
 
@@ -49,6 +57,7 @@ impl WaitingOn {
     fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "checks" => Self::Checks,
+            "review" => Self::Review,
             other => bail!("a wrap-up is waiting on the unknown thing {other:?}"),
         })
     }

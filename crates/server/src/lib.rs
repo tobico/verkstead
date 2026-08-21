@@ -35,6 +35,7 @@ mod push;
 mod reply;
 mod repos;
 mod responses;
+mod review;
 mod runner;
 /// What a session can reach: the bwrap surface built around one Conversation's
 /// worktree.
@@ -360,7 +361,7 @@ fn routed(
     // rather than about anything a request will start: a Conversation left
     // wrapping up by a server that stopped has a pull request GitHub has gone on
     // building, and nobody but this is going to look at it.
-    checks::resume(&state);
+    wrapping::resume(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

@@ -10,10 +10,10 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    WaitingOn, choose_direction, fix_attempts, forget_fix_attempts, move_to_direction,
-    open_database, record_fix_attempt, record_pull_request, register_repo, save_brief,
-    settle_wrap_up, start_conversation, start_grilling, start_implementing, unsettle_wrap_up,
-    wrap_up_settled,
+    Fixing, Reviewed, Settlements, Submission, WaitingOn, ask, choose_direction, fix_attempts,
+    forget_fix_attempts, move_to_direction, open_database, record_fix_attempt, record_pull_request,
+    register_repo, review_asked, save_brief, settle_wrap_up, start_conversation, start_grilling,
+    start_implementing, submit_response, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -189,4 +189,201 @@ async fn a_retry_gives_every_check_its_attempts_back() {
 
     assert_eq!(fix_attempts(&pool, id, "Rust").await.unwrap(), 0);
     assert_eq!(fix_attempts(&pool, id, "Viewer").await.unwrap(), 0);
+}
+
+/// The review's Set as the reviewing skill writes one: a Question per finding,
+/// and the block that says which Answer to each means *fix it*.
+fn reviewing() -> verkstead_schema::QuestionSet {
+    verkstead_schema::QuestionSet::from_yaml(
+        r#"
+title: Review of the rate limiter branch
+questions:
+  - label: Q1
+    text: The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: Two clocks now, and the tests pin both.
+    options:
+      - n: 1
+        text: Fix it
+      - n: 2
+        text: Leave it
+        recommended: true
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset the counter as the window rolls.
+    - fix: Q2.1
+      what: Collapse the two clocks onto one.
+"#,
+    )
+    .unwrap()
+}
+
+/// Answering the review is what settles it, and what the human accepted is
+/// handed back as work to dispatch.
+///
+/// The findings come back in the order the review raised them rather than the
+/// order they were answered in: that is the order it thought about them.
+#[tokio::test]
+async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing())
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    let taken = submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  \
+             - label: Q1\n    selected: 1\n    free_text: Keep the signature.\n  \
+             - label: Q2\n    selected: 2\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(taken) = taken else {
+        panic!("the Response resolves the Set, so it should be taken: {taken:?}");
+    };
+
+    assert_eq!(
+        taken.reviewed,
+        Some(Reviewed::Answered {
+            conversation_id: id,
+            fixing: vec![Fixing {
+                what: "Reset the counter as the window rolls.".to_owned(),
+                said: "Keep the signature.".to_owned(),
+            }],
+        }),
+        "the accepted finding is work, with what they said alongside it; the declined \
+         one is nothing at all",
+    );
+
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Review),
+        "and the review has stopped being something wrap-up waits on",
+    );
+}
+
+/// A review the human declined every finding of is an answered review, not an
+/// unanswered one: they read it and decided, which is the whole of what wrap-up
+/// was waiting for.
+#[tokio::test]
+async fn a_review_answered_with_nothing_to_fix_is_still_answered() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    let taken = submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 2\n  - label: Q2\n    unanswered: true\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(taken) = taken else {
+        panic!("the Response resolves the Set: {taken:?}");
+    };
+
+    assert_eq!(
+        taken.reviewed,
+        Some(Reviewed::Answered {
+            conversation_id: id,
+            fixing: Vec::new(),
+        }),
+        "nothing to dispatch",
+    );
+    assert!(
+        wrap_up_settled(&pool, id)
+            .await
+            .unwrap()
+            .contains(&WaitingOn::Review),
+        "and the review is over either way",
+    );
+}
+
+/// An ordinary Set is not the review's, however it is answered — otherwise every
+/// question an agent asked during a wrap-up would settle it.
+#[tokio::test]
+async fn answering_an_ordinary_set_settles_no_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let ordinary = verkstead_schema::QuestionSet {
+        review: None,
+        ..reviewing()
+    };
+
+    let asked = ask(&pool, id, &ordinary).await.unwrap().unwrap();
+
+    let taken = submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 1\n  - label: Q2\n    selected: 1\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(taken) = taken else {
+        panic!("the Response resolves the Set: {taken:?}");
+    };
+
+    assert_eq!(taken.reviewed, None);
+    assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// Which Set the review is on is read off the Sets themselves, so that nothing
+/// has to be written down twice — and the review is the Set carrying findings,
+/// not whichever one came first.
+#[tokio::test]
+async fn the_review_is_found_by_the_block_it_carries() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "a wrap-up nobody has reviewed has no review to find",
+    );
+
+    let ordinary = verkstead_schema::QuestionSet {
+        review: None,
+        ..reviewing()
+    };
+    ask(&pool, id, &ordinary).await.unwrap().unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "and an ordinary Set is not one",
+    );
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
 }

@@ -132,6 +132,7 @@ impl QuestionSet {
         }
 
         check_proposal(self, &mut violations);
+        check_review(self, &mut violations);
 
         if violations.is_empty() {
             Ok(())
@@ -283,6 +284,91 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
                 ),
             },
         ));
+    }
+}
+
+/// What a review's findings have to be, beyond being findings at all.
+///
+/// The same load-bearing check the proposal has, one finding at a time: the
+/// Option that means *fix this* has to be one the human can actually pick. A
+/// finding nobody can accept is one that could never become work, and nothing
+/// would ever say so — the Set would be answered and the finding would quietly
+/// go nowhere.
+///
+/// And the other half of it, which the proposal has no equivalent of: the
+/// finding has to say something to the session that would fix it. `what` is the
+/// only thing that session gets, so an empty one is a fix session dispatched
+/// with nothing to go on.
+fn check_review(set: &QuestionSet, violations: &mut Vec<Violation>) {
+    let Some(review) = &set.review else {
+        return;
+    };
+
+    if review.findings.is_empty() {
+        violations.push(Violation::set(
+            "a `review` carries at least one finding; a review that found nothing \
+             raises no Set at all",
+        ));
+    }
+
+    // Two findings on one Option would be one Answer dispatching two fix
+    // sessions, which is one of them nobody agreed to.
+    let mut fixed_by: HashSet<&str> = HashSet::new();
+
+    for finding in &review.findings {
+        if finding.what.trim().is_empty() {
+            violations.push(Violation::set(format!(
+                "the finding fixed by {:?} says nothing; `what` is the whole of what \
+                 the fix session is told",
+                finding.fix
+            )));
+        }
+
+        let Some((name, n)) = finding.fixing() else {
+            violations.push(Violation::set(format!(
+                "a finding names the Option that means fix it, as `Q1.1`; {:?} is not \
+                 an Option's number",
+                finding.fix
+            )));
+            continue;
+        };
+
+        if !fixed_by.insert(finding.fix.trim()) {
+            violations.push(Violation::at(
+                name,
+                format!(
+                    "two findings are fixed by Option {n} of this question; one Answer \
+                     cannot mean two different pieces of work"
+                ),
+            ));
+            continue;
+        }
+
+        let Some(options) = offered(set, name) else {
+            violations.push(Violation::set(format!(
+                "a finding is fixed by {:?}, but this Set asks no question called {name:?}",
+                finding.fix
+            )));
+            continue;
+        };
+
+        if !options.iter().any(|option| option.n == n) {
+            let offered: Vec<String> = options.iter().map(|option| option.n.to_string()).collect();
+            violations.push(Violation::at(
+                name,
+                match offered.is_empty() {
+                    true => format!(
+                        "a finding is fixed by Option {n} of this question, which offers \
+                         no Options at all"
+                    ),
+                    false => format!(
+                        "a finding is fixed by Option {n} of this question, which offers \
+                         only {}",
+                        offered.join(", ")
+                    ),
+                },
+            ));
+        }
     }
 }
 

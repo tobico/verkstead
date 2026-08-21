@@ -875,3 +875,239 @@ proposal:
     set.validate()
         .expect("a Sub-question's Option answers to Q1a.1 like any other");
 }
+
+/// A Set carrying the wrap-up review's findings: a Question per finding, and the
+/// block that says which Answer to each means *fix it*.
+const REVIEWING: &str = r#"
+title: Review of the rate limiter branch
+preface: |
+  Two things worth a decision.
+questions:
+  - label: Q1
+    text: |
+      The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: |
+      Two clocks now, and the tests pin both.
+    options:
+      - n: 1
+        text: Fix it
+      - n: 2
+        text: Leave it
+        recommended: true
+review:
+  findings:
+    - fix: Q1.1
+      what: |
+        `window.rs` — `Window::count` is never reset as the window rolls, so a
+        client that exceeds the limit is refused for ever.
+    - fix: Q2.1
+      what: |
+        `limits.rs` and `window.rs` each hold their own notion of now. Collapse
+        them onto one clock.
+"#;
+
+#[test]
+fn a_review_parses_into_a_finding_per_question() {
+    let set = QuestionSet::from_yaml(REVIEWING).expect("the review Set should parse");
+
+    set.validate()
+        .expect("findings that each name an Option the Set offers are legal");
+
+    let review = set.review.expect("this Set carries a review");
+
+    assert_eq!(review.findings.len(), 2);
+    assert_eq!(review.findings[0].fixing(), Some(("Q1", 1)));
+    assert!(
+        review.findings[0].what.contains("Window::count"),
+        "the finding carries what the fix session is told, got: {:?}",
+        review.findings[0].what,
+    );
+}
+
+#[test]
+fn an_ordinary_set_carries_no_review_at_all() {
+    let set = QuestionSet::from_yaml(FULL_SET).expect("the example Set should parse");
+
+    assert_eq!(
+        set.review, None,
+        "any Set could otherwise be mistaken for the wrap-up review's",
+    );
+}
+
+#[test]
+fn a_review_round_trips_through_yaml() {
+    let set = QuestionSet::from_yaml(REVIEWING).unwrap();
+    let yaml = set.to_yaml().expect("a Set should serialise");
+    let reparsed = QuestionSet::from_yaml(&yaml).expect("our own YAML should parse");
+
+    assert_eq!(reparsed, set);
+}
+
+/// The same rule the proposal's acceptance has, one finding at a time: a finding
+/// nobody can accept could never become work, and nothing would ever say so.
+///
+/// Plus the two only a review has — a finding that says nothing to the session
+/// that would fix it, and a block that found nothing at all, which is a review
+/// that should have asked nothing rather than asked emptily.
+#[test]
+fn a_finding_nobody_can_act_on_is_refused() {
+    for (how, set) in [
+        (
+            "an Option the question does not offer",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings:
+    - fix: Q1.4
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a question the Set does not ask",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings:
+    - fix: Q9.1
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "something that is not the notation",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings:
+    - fix: please fix it
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a finding with nothing to tell the session that would fix it",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings:
+    - fix: Q1.1
+      what: \"   \"
+",
+        ),
+        (
+            "two findings on one Option, which is one Answer meaning two things",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset it as the window rolls.
+    - fix: Q1.1
+      what: And collapse the two clocks.
+",
+        ),
+        (
+            "a review that found nothing, which raises no Set at all",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it
+review:
+  findings: []
+",
+        ),
+    ] {
+        assert!(
+            QuestionSet::from_yaml(set).unwrap().validate().is_err(),
+            "{how} should be refused, and was not",
+        );
+    }
+}
+
+/// What turns a finding into work, read straight off the Response — and what the
+/// session that fixes it is told the human said.
+#[test]
+fn only_the_named_option_accepts_a_finding() {
+    let set = QuestionSet::from_yaml(REVIEWING).unwrap();
+    let review = set.review.as_ref().expect("this Set carries a review");
+    let finding = &review.findings[0];
+
+    let answered = |yaml: &str| finding.accepted(&Response::from_yaml(yaml).unwrap());
+
+    assert!(
+        answered("answers:\n  - label: Q1\n    selected: 1\n"),
+        "picking the Option the finding names is what dispatches a fix",
+    );
+    assert!(
+        answered("answers:\n  - label: Q1\n    selected: 1\n    free_text: Keep the signature.\n"),
+        "words beside a picked Option are a qualification, not a refusal",
+    );
+
+    assert!(
+        !answered("answers:\n  - label: Q1\n    selected: 2\n"),
+        "leaving it is the human declining the finding",
+    );
+    assert!(
+        !answered("answers:\n  - label: Q1\n    free_text: Not worth it yet.\n"),
+        "an answer in their own words wins over the Options, so it is not the named one",
+    );
+    assert!(
+        !answered("answers:\n  - label: Q1\n    unanswered: true\n"),
+        "a question left open never dispatches anything",
+    );
+
+    let qualified = Response::from_yaml(
+        "answers:\n  - label: Q1\n    selected: 1\n    free_text: Keep the signature.\n",
+    )
+    .unwrap();
+
+    assert_eq!(
+        finding.said(&qualified),
+        "Keep the signature.",
+        "and what they wrote goes with the finding to whoever fixes it",
+    );
+    assert_eq!(
+        finding.said(&Response::from_yaml("answers:\n  - label: Q1\n    selected: 1\n").unwrap()),
+        "",
+        "agreeing without a word said is the ordinary way of agreeing",
+    );
+}
