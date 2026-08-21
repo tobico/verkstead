@@ -90,6 +90,15 @@ enum Step {
     /// through. It is the step the runner is handed rather than one it decides.
     Planning,
 
+    /// The same first step for a roadmap stage, which starts where a task-list
+    /// Conversation does and gets there another way: nobody chose a direction,
+    /// the stage before it settling is what started it, and the fork that writes
+    /// its backlog re-grounds a brief rather than breaking down a handoff.
+    ///
+    /// Watched for exactly what a breakdown is watched for, the backlog being
+    /// the same backlog. What differs is which fork wrote it.
+    PlanningStage,
+
     /// Work this task file, the lowest-numbered one left.
     Task(PathBuf),
 
@@ -130,7 +139,7 @@ impl Step {
         match self {
             // The plan commit is what puts the backlog under version control,
             // so the backlog being there and committed is the breakdown done.
-            Step::Planning => Some(Landing::Arrived(todo())),
+            Step::Planning | Step::PlanningStage => Some(Landing::Arrived(todo())),
             // Finishing a task is what deletes its file.
             Step::Task(file) => Some(Landing::Gone(file.clone())),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
@@ -154,6 +163,7 @@ impl Step {
     fn stored(&self) -> Option<store::Step> {
         match self {
             Step::Planning => Some(store::Step::Planning),
+            Step::PlanningStage => Some(store::Step::Stage),
             Step::Task(_) => Some(store::Step::Task),
             Step::Finish => Some(store::Step::Finish),
             Step::Staging(_) => Some(store::Step::Roadmap),
@@ -169,6 +179,7 @@ impl Step {
     fn what(&self) -> String {
         match self {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
+            Step::PlanningStage => "planning the roadmap stage into a backlog".to_owned(),
             Step::Task(file) => format!("the task in {}", file.display()),
             Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
@@ -225,6 +236,15 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
     // to. Inline is not a backlog step at all and is followed on its own.
     let (step, prompt) = match step {
         store::Step::Planning => (Step::Planning, Prompt::BreakingDown),
+        // The same first step by the other route, and the same care about where
+        // the branch stands: what it was made on top of was decided once, when
+        // it was made, and is read back rather than decided again — a retry that
+        // came to a different answer would be a session told to stack on
+        // something nobody had stacked it on.
+        store::Step::Stage => (
+            Step::PlanningStage,
+            Prompt::PlanningStage(stacked_on(&state, conversation_id).await.flatten()),
+        ),
         store::Step::Task | store::Step::Finish => match decide(&working_in).await {
             Step::Nothing => {
                 // Nothing left to work, which for a retried finish is the
@@ -314,6 +334,33 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
     };
 
     work(state, conversation_id, step, session).await
+}
+
+/// Plan a roadmap stage and then work the backlog it writes, from the first task
+/// to the pull request.
+///
+/// Where [`follow`] is handed the session that is already running, this launches
+/// one: a stage is started by the stage before it settling rather than by
+/// anything a human pressed, so there is nobody to have launched it — see
+/// [`crate::continuing`]. Everything after that is the same run a task list has,
+/// because from the plan commit onwards it *is* one.
+///
+/// `stacked_on` is the branch this stage's branch was made on top of, which the
+/// fork is told because it is the one thing about a stage the repository does not
+/// say.
+pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on: Option<String>) {
+    let Some(session) = launch(
+        &state,
+        conversation_id,
+        Prompt::PlanningStage(stacked_on),
+        "",
+    )
+    .await
+    else {
+        return;
+    };
+
+    work(state, conversation_id, Step::PlanningStage, session).await
 }
 
 /// Work a backlog from `first` to empty.
@@ -997,6 +1044,11 @@ enum Prompt {
     /// Verkstead's fork of to-tasks, which writes the backlog.
     BreakingDown,
 
+    /// Its fork of next-stage, which writes a roadmap stage's backlog instead —
+    /// carrying what the branch was made on top of, which is the one thing about
+    /// a stage the session cannot read out of the repository.
+    PlanningStage(Option<String>),
+
     /// Its fork of to-roadmap, which writes the roadmap and carries the branch
     /// to a pull request.
     Staging,
@@ -1067,6 +1119,9 @@ async fn launch(
 
             let prompt = match &inside {
                 Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
+                Prompt::PlanningStage(stacked_on) => {
+                    skills::next_stage(&brief, stacked_on.as_deref())
+                }
                 Prompt::Staging => skills::staging(&brief, handoff),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
@@ -1121,6 +1176,22 @@ async fn worktree(state: &AppState, conversation_id: i64) -> Option<PathBuf> {
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Conversation to work in failed");
+            None
+        }
+    }
+}
+
+/// What a stage Conversation's branch was made on top of.
+///
+/// Both layers mean something — see [`store::stacks_on`] — and a store that will
+/// not answer reads as the outer `None`: what turns on it is a sentence in a
+/// prompt, and a session told nothing about stacking will read the repository
+/// rather than stack on a branch this guessed at.
+async fn stacked_on(state: &AppState, conversation_id: i64) -> Option<Option<String>> {
+    match store::stacks_on(&state.pool, conversation_id).await {
+        Ok(stacked_on) => stacked_on,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a stage's branch stands on failed");
             None
         }
     }

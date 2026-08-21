@@ -500,6 +500,25 @@ at: string, state: Lifecycle, };
 export type NewConversation = { repo_id: number, };
 
 /**
+ * A notice as the page receives it: what Verkstead did, and when.
+ *
+ * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
+ * on the way out all the same, because a notice says which stage it started and
+ * what the branch is called, and those are worth setting in a code span rather
+ * than running into the prose around them.
+ */
+export type NoticeEvent = { id: number, 
+/**
+ * When it was said, RFC 3339.
+ */
+at: string, 
+/**
+ * Rendered and sanitized by the server on the way out, as every piece of
+ * markdown on this wire is.
+ */
+html: string, };
+
+/**
  * One Option as the page draws it: the number a Response answers by, its text
  * already rendered, and whether the agent recommended it.
  *
@@ -1050,7 +1069,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

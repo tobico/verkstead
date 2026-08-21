@@ -52,6 +52,7 @@ import type {
   HandoffEvent,
   Lifecycle,
   MovedEvent,
+  NoticeEvent,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
@@ -206,6 +207,9 @@ export function Timeline(props: {
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => <Handoff handoff={handoff()} />}
+                </Match>
+                <Match when={"Notice" in event && event.Notice}>
+                  {(notice) => <Notice notice={notice()} />}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -469,6 +473,18 @@ function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
       <div class="markdown" innerHTML={props.handoff.html} />
     </article>
   );
+}
+
+/// Something Verkstead did on its own account: the stage it started and where
+/// the branch went, or a roadmap with nothing left to run.
+///
+/// A line and not a card, unlike the handoff above it: it is a sentence rather
+/// than a document, and there is nothing to open and nothing to answer. It is
+/// rendered markdown all the same, because what it names — a branch, a stage, a
+/// file the repository records its process in — reads better set apart from the
+/// prose around it.
+function Notice(props: { notice: NoticeEvent }): JSX.Element {
+  return <div class="notice markdown" innerHTML={props.notice.html} />;
 }
 
 /// A move: the Conversation changing hands, said in a line.

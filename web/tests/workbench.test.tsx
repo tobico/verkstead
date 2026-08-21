@@ -1922,6 +1922,23 @@ describe("the pinned stage list", () => {
     expect(list.querySelectorAll("button")).toHaveLength(0);
   });
 
+  /// What Verkstead did on its own account while nobody was watching — here,
+  /// the stage it started when this roadmap's wrap-up settled.
+  ///
+  /// A line in the record rather than a card above it, because it is a sentence
+  /// and not a document: there is nothing to open, and nothing to answer.
+  it("draws what verkstead did unasked as a line in the record", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const notice = await drawn(container, ".timeline-event > .notice");
+
+    expect(notice.textContent).toContain("Stage 01");
+    expect(notice.querySelector("code")?.textContent).toBe("mvp");
+    expect(notice.closest(".timeline")).not.toBeNull();
+    expect(notice.querySelectorAll("button")).toHaveLength(0);
+  });
+
   it("draws nothing at all where the branch has written no roadmap", async () => {
     // Every other fixture here is a conversation whose branch touched none,
     // which is the ordinary case: the server pins nothing.

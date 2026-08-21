@@ -249,6 +249,15 @@ pub enum TimelineEvent {
     /// remedies are being chosen against would be a page that could draw the
     /// buttons before it could say what they were for.
     Interruption(InterruptionEvent),
+
+    /// Something Verkstead did on its own account, rendered inline like the
+    /// Brief — and for the same reason: it is a sentence to read, and there is
+    /// nothing of it a details pane would show.
+    ///
+    /// The one Event with nothing to do about it and nobody behind it: no agent
+    /// wrote it and no human pressed anything for it. It is how an unattended run
+    /// says what it decided while nobody was watching.
+    Notice(NoticeEvent),
 }
 
 /// One of the three things the human can do about an Interruption.
@@ -606,6 +615,25 @@ pub struct HandoffEvent {
 
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// agent markdown on this wire is.
+    pub html: String,
+}
+
+/// A notice as the page receives it: what Verkstead did, and when.
+///
+/// HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
+/// on the way out all the same, because a notice says which stage it started and
+/// what the branch is called, and those are worth setting in a code span rather
+/// than running into the prose around them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NoticeEvent {
+    pub id: i64,
+
+    /// When it was said, RFC 3339.
+    pub at: String,
+
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// markdown on this wire is.
     pub html: String,
 }
 
@@ -1075,6 +1103,16 @@ pub struct Stopped {
 /// somebody else to read.
 pub fn handoff_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
     TimelineEvent::Handoff(HandoffEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(markdown),
+    })
+}
+
+/// A notice as an Event, rendered the same way and for the same reason: it is a
+/// sentence somebody has to be able to read.
+pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
+    TimelineEvent::Notice(NoticeEvent {
         id,
         at,
         html: crate::markdown::to_html(markdown),

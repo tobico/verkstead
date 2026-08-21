@@ -288,6 +288,20 @@ pub enum Event {
     /// an enum every Brief and every move was as large as would cost a
     /// Timeline's worth of memory to hold the one kind that needs it.
     Interruption(Box<super::Interruption>),
+
+    /// Something Verkstead has to say on its own account: which stage it has
+    /// started and where the branch went, or that a roadmap has no stages left
+    /// to run.
+    ///
+    /// Markdown in the `body` column like the Brief, and the one Event no agent
+    /// and no human writes. It is what unattended running is owed: a decision
+    /// Verkstead made without being asked is one the human has to be able to
+    /// read afterwards, and a decision only the log knows about is one nobody
+    /// looking at the work will ever find.
+    ///
+    /// Never something to do about — an Interruption is what an open question
+    /// looks like, and this is closed by the time it is written.
+    Notice(String),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -325,6 +339,7 @@ impl Event {
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
             Self::Interruption(_) => super::interruptions::INTERRUPTION,
+            Self::Notice(_) => "notice",
         }
     }
 
@@ -348,6 +363,7 @@ impl Event {
             Self::PullRequest(_) => "",
             // Nothing either, and for the commit's reason.
             Self::Interruption(_) => "",
+            Self::Notice(markdown) => markdown,
         }
     }
 
@@ -390,6 +406,7 @@ impl Event {
                     anyhow!("an Interruption Event has no evidence beside it")
                 })?))
             }
+            "notice" => Self::Notice(body),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -447,6 +464,24 @@ pub enum Grilling {
     NoSuchConversation,
 
     /// It is past drafting, so it has been started once already — or aborted.
+    NotDrafting,
+}
+
+/// What became of starting a roadmap stage's Conversation working.
+///
+/// The same two refusals [`Grilling`] has, one phase further along and for the
+/// same reason: everything else this could be refused for is settled against git
+/// before the record is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Staged {
+    /// Recorded: the base commit, the worktree, the direction, the state and the
+    /// move.
+    Started,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, so something has started it already.
     NotDrafting,
 }
 
@@ -611,6 +646,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the directions table")?;
+
+    // What a roadmap stage's branch was put on top of, where it was put on top
+    // of anything. A table of its own for the reason the direction is one, and
+    // one row per stage Conversation — written by [`start_stage`] and by nothing
+    // else, because it is a decision taken once, at the moment the branch is
+    // made, and never again.
+    //
+    // Verkstead's own fact rather than the repository's, which is why it is
+    // stored where almost nothing about a roadmap is: the boxes and the briefs
+    // belong to `docs/roadmaps/` and are read back off the Worktree, but *which
+    // branch this one stacks on* is something Verkstead decided and the
+    // repository never records.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_branches (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             stacks_on       TEXT
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the stage branches table")?;
 
     Ok(())
 }
@@ -1566,6 +1622,140 @@ pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Resul
     .rows_affected();
 
     Ok(written > 0)
+}
+
+/// Put something Verkstead has to say on a Conversation's Timeline.
+///
+/// `false` means there is no such Conversation, by the same insert-from-select
+/// every other Event is written with.
+///
+/// Written whenever there is something to say and never replacing what was said
+/// before: a notice is a record of a decision at the moment it was taken, and a
+/// Timeline that rewrote yesterday's would be one the human could not read back.
+pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
+    let event = Event::Notice(markdown.to_owned());
+
+    let written = sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
+         FROM conversations WHERE id = ?",
+    )
+    .bind(event.kind())
+    .bind(event.body())
+    .bind(id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("putting a notice on the Timeline of Conversation {id}"))?
+    .rows_affected();
+
+    Ok(written > 0)
+}
+
+/// Start a roadmap stage's Conversation working: its base commit, its worktree,
+/// the direction its work takes and the move that says it is under way, all at
+/// once.
+///
+/// The one Conversation nobody starts. Every other one is drafted, grilled and
+/// directed by a human at the workbench; a stage is started by the stage before
+/// it settling, and what would have been settled by a grilling was settled by the
+/// grilling that wrote the roadmap — the stage brief is what it settled, and it
+/// arrives as the Brief. So this goes straight to Implementing: there is nothing
+/// to grill and nobody to choose.
+///
+/// The direction is recorded with it, and it is a task list because that is the
+/// pipeline a stage runs: the fork it starts in writes `.tasks/`, and the runner
+/// works the backlog from there. Recorded rather than left empty, so that a
+/// Conversation implementing something always says how — but as the row alone,
+/// with no [`Event::Directed`] beside it: that Event is the human's choice
+/// landing on the Timeline, and there was no chooser here.
+///
+/// One transaction, as every move is, and the branch and the worktree exist
+/// before it for the reason they do at [`start_grilling`]: the record follows the
+/// work rather than promising it.
+///
+/// `stacks_on` is the branch this stage's branch was made on top of, and `None`
+/// where it came off the default branch. Written here because this is the
+/// transaction that makes the Conversation a stage, and read back by whatever
+/// starts a session in it — the first one, and any the human asks for again.
+pub async fn start_stage(
+    pool: &SqlitePool,
+    id: i64,
+    base_commit: &str,
+    worktree: &Path,
+    stacks_on: Option<&str>,
+) -> Result<Staged> {
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = pool.begin().await.context("starting a stage")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Staged::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Draft {
+        return Ok(Staged::NotDrafting);
+    }
+
+    sqlx::query("UPDATE conversations SET base_commit = ?, state = ? WHERE id = ?")
+        .bind(base_commit)
+        .bind(Lifecycle::Implementing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} to implementing a stage"))?;
+
+    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
+        .bind(id)
+        .bind(worktree)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    sqlx::query(
+        "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
+    )
+    .bind(id)
+    .bind(direction_stored(Direction::TaskList))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the direction of Conversation {id}"))?;
+
+    sqlx::query("INSERT INTO stage_branches (conversation_id, stacks_on) VALUES (?, ?)")
+        .bind(id)
+        .bind(stacks_on)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording what the branch of Conversation {id} stands on"))?;
+
+    moved(&mut tx, id, Lifecycle::Implementing).await?;
+
+    tx.commit().await.context("starting a stage")?;
+
+    Ok(Staged::Started)
+}
+
+/// What a stage Conversation's branch was made on top of, where it is a stage
+/// at all.
+///
+/// Two layers of `Option` and both mean something: the outer one is *this is
+/// not a stage Conversation*, and the inner is *it is, and its branch came off
+/// the default branch rather than standing on another stage*.
+pub async fn stacks_on(pool: &SqlitePool, id: i64) -> Result<Option<Option<String>>> {
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT stacks_on FROM stage_branches WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading what the branch of Conversation {id} stands on"))?;
+
+    Ok(row.map(|(stacks_on,)| stacks_on))
 }
 
 /// Put a move on a Conversation's Timeline.

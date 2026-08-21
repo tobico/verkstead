@@ -1276,6 +1276,26 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
+/* And something Verkstead did on its own account, which reads as the same kind
+   of thing again — a fact about the work, said by the one voice on a Timeline
+   that is neither the human's nor an agent's. Marked off by a rule at its left
+   rather than by a card: there is nothing to open, and nothing to do about it. */
+.timeline-event > .notice {
+  margin: 0;
+  padding: 0.15rem 0 0.15rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--edge);
+}
+
+.timeline-event > .notice > :first-child {
+  margin-top: 0;
+}
+
+.timeline-event > .notice > :last-child {
+  margin-bottom: 0;
+}
+
 /* And the direction the human chose, which reads as the same kind of thing: a
    fact about the work rather than a card to open. */
 .timeline-event > .directed {

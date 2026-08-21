@@ -3503,3 +3503,417 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
     );
     assert_eq!(view.state, Lifecycle::Aborted);
 }
+
+/// A roadmap Conversation that stages, wraps up and settles — with a stub that
+/// tells the four sessions apart by the skill their prompts name, which is the
+/// fact under them: all of them run under the one implementation Profile.
+///
+/// `workflow` is what the branch records about how this repository's own work
+/// goes for review, written beside the roadmap by the session that stages it.
+/// Empty is a repository that records nothing, which is one of the two answers
+/// about where the next stage's branch goes.
+fn a_roadmap_then_wraps_up(planning: &Path, worked: &Path, stages: &str, workflow: &str) -> String {
+    format!(
+        r#"
+case "$2" in
+*grilling/SKILL.md*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+*staging/SKILL.md*)
+    mkdir -p docs/roadmaps/rate-limiting docs/agents
+{workflow}
+    printf '# Rate limiting roadmap\n\n## Stages\n\n{stages}' > docs/roadmaps/rate-limiting/ROADMAP.md
+    printf '# 01. Count the requests\n\n## Goal\n\nA counter per key, and nothing else.\n' > docs/roadmaps/rate-limiting/01-counter.md
+    printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+    git add -A
+    git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*next-stage/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# Count the requests\n\nRoadmap stage: [01: Count the requests](docs/roadmaps/rate-limiting/01-counter.md)\n\n## Tasks\n\n- [ ] 01: count them — [details](01-count.md)\n' > .tasks/TODO.md
+    printf '# 01. count them\n' > .tasks/01-count.md
+    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
+    git add -A
+    git commit --quiet -m 'chore: plan counter tasks'
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {worked}
+    printf 'working the stage backlog\n'
+    sleep 300
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        worked = quoted(worked),
+    )
+}
+
+/// What a repository that records a way to stack a roadmap stage says, as the
+/// staging session writes it onto the branch.
+const RECORDS_STACKING: &str = r#"    printf '# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it, open a draft PR.\n\n### Stacking roadmap stages\n\nAdopt the predecessor with `gh stack init <predecessor> <new>`.\n' > docs/agents/git-workflow.md"#;
+
+/// Both stages open, which is a roadmap with something to start.
+const TWO_STAGES: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n"#;
+
+/// Take a roadmap Conversation from its Brief to a settled wrap-up: staged,
+/// pushed, reviewed, green, done — with nothing pressed but the two the human
+/// presses at the start.
+async fn staged_and_settled(fixture: &Grilling) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+}
+
+/// Every Conversation the workbench knows about, newest first.
+async fn conversations(app: &Router) -> Vec<verkstead_render::ConversationEntry> {
+    get(app, "/api/ui/conversations").await
+}
+
+/// The Conversation the stage was started as, once there is one — or a panic
+/// saying nothing ever started.
+/// Waited for as a Conversation that is *working* rather than as one that
+/// exists: it is a record before it is a branch, a worktree and a notice, and a
+/// test that read it the moment the row appeared would be reading a half-made
+/// one.
+async fn stage_of(fixture: &Grilling) -> ConversationView {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        let started = conversations(&fixture.app)
+            .await
+            .into_iter()
+            .find(|entry| entry.id != fixture.id);
+
+        if let Some(entry) = started {
+            let view: ConversationView =
+                get(&fixture.app, &format!("/api/ui/conversations/{}", entry.id)).await;
+
+            if view.state == Lifecycle::Implementing && !notices(&view).is_empty() {
+                return view;
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "no stage was ever started. The Timeline says: {:?}",
+            notices(&fixture.view().await),
+        );
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// What a Conversation has said on its own account, once it has said anything.
+///
+/// A notice is written after the thing it is about has happened, so a test that
+/// read the Timeline the moment the work finished would be reading it too early.
+async fn said_by(fixture: &Grilling) -> String {
+    fixture
+        .until(|view| {
+            let said = notices(view);
+
+            (!said.is_empty()).then(|| said.join("\n"))
+        })
+        .await
+}
+
+/// What Verkstead has said on a Timeline on its own account.
+fn notices(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The whole of stage auto-continue: a settled wrap-up on a roadmap Conversation
+/// starts the next stage, with nobody asked.
+///
+/// The stage is a Conversation of its own — one Repo, one branch, one Worktree —
+/// against the same Repo, under the same Profiles, primed with the stage brief as
+/// its Brief and going straight to Implementing. Its branch stacks on the
+/// predecessor because this repository records how, and the session it starts is
+/// the bundled fork of next-stage, told which of the two happened.
+#[tokio::test]
+async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let roadmap_branch = fixture.view().await.branch;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+
+    assert_eq!(
+        stage.branch, "counter",
+        "the branch is the stage brief's own name, without its number",
+    );
+    assert_eq!(
+        stage.state,
+        Lifecycle::Implementing,
+        "straight to Implementing: the grilling that would have settled this wrote the brief",
+    );
+    assert_eq!(
+        stage.repo.path,
+        fixture.view().await.repo.path,
+        "and against the same Repo, a stage being the same work one branch further on",
+    );
+    assert_eq!(
+        stage
+            .implementation_profile
+            .as_ref()
+            .map(|profile| profile.name.clone()),
+        Some("implementation".to_owned()),
+        "under the same Profiles, there being nobody to choose them again",
+    );
+
+    let brief = stage
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief.markdown.clone()),
+            _ => None,
+        })
+        .expect("a Conversation's first Event is its Brief");
+
+    assert!(
+        brief.contains("A counter per key, and nothing else."),
+        "primed with the stage brief itself: {brief:?}",
+    );
+
+    // What the runner is watching, and what says the stage went straight to
+    // work: no move through Grilling or Direction, because neither happened.
+    assert_eq!(
+        stage
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Moved(moved) => Some(moved.state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [Lifecycle::Implementing],
+    );
+
+    let said = notices(&stage).join("\n");
+
+    assert!(
+        said.contains("Stage 01") && said.contains("rate-limiting"),
+        "the stage says which stage of which roadmap it is: {said:?}",
+    );
+    assert!(
+        said.contains(&format!("<code>{roadmap_branch}</code>")),
+        "and that its branch stacks on the one the stage before it was worked on: {said:?}",
+    );
+
+    // The branch really is on top of the predecessor's work, which is what
+    // stacking is: the roadmap commit is in this branch's history.
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "the stage's branch stands on the predecessor's unmerged work",
+    );
+
+    // And the Conversation that settled says what became of it, where the human
+    // was watching when it happened.
+    let carried_on = said_by(&fixture).await;
+
+    assert!(
+        carried_on.contains("Stage 01") && carried_on.contains("<code>counter</code>"),
+        "the settled Conversation says which stage started and on what: {carried_on:?}",
+    );
+
+    // The session the stage is working in: the bundled fork of next-stage, under
+    // the implementation Profile, primed with the brief and told where its branch
+    // came from.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "the stage plans under the implementation Profile: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("~/.claude/skills/next-stage/SKILL.md"),
+        "inside the bundled fork of next-stage: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("A counter per key, and nothing else."),
+        "primed with the stage brief: {prompt:?}",
+    );
+    assert!(
+        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
+        "and told what its branch stands on, which it cannot read anywhere: {prompt:?}",
+    );
+
+    // And what the plan commit hands over to: the runner works the backlog the
+    // fork wrote, one fresh session per task, with nothing pressed in between.
+    let working = until_written(&worked).await;
+
+    assert!(
+        working.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the stage's backlog is worked by the same runner a feature's is: {working:?}",
+    );
+
+    // The roadmap keeps its own score on the branch that earned it, and the
+    // pinned stage list follows: it is read off the Worktree as it stands.
+    let stage =
+        get::<ConversationView>(&fixture.app, &format!("/api/ui/conversations/{}", stage.id)).await;
+
+    let stages = stage
+        .pinned
+        .iter()
+        .find_map(|pinned| match pinned {
+            PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this branch has written to is pinned");
+
+    assert_eq!(
+        stages
+            .stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "Count the requests", false),
+            ("02", "Refuse the rest", false),
+        ],
+        "stage 01 is under way rather than done: what ticks it is the stage after it",
+    );
+
+    assert!(
+        backlog(&stage).is_some(),
+        "and the backlog it wrote is pinned beside it, as a feature's is",
+    );
+
+    // The annotation itself, which is what says the stage is in flight and on
+    // what — and what stops the stage after it being read as this one again.
+    let index = std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md"))
+        .expect("the roadmap is on the stage's branch too");
+
+    assert!(
+        index.contains("*(in progress: `counter`)*"),
+        "the roadmap says which branch stage 01 is being worked on: {index:?}",
+    );
+}
+
+/// A repository that records no way to stack a roadmap stage gets a branch off
+/// its default branch — and the Timeline says so plainly rather than Verkstead
+/// inventing a convention the repository never agreed to.
+#[tokio::test]
+async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_branch() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let said = notices(&stage).join("\n");
+
+    assert!(
+        said.contains("no way to stack"),
+        "what was missing is said rather than worked around: {said:?}",
+    );
+    assert!(
+        said.contains("<code>main</code>"),
+        "and where the branch went instead: {said:?}",
+    );
+
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        !git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "the branch came off the default branch, so the roadmap is not under it",
+    );
+
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("not stacked on anything"),
+        "and the session is told that rather than left to guess: {prompt:?}",
+    );
+}
+
+/// A roadmap with every stage checked starts nothing, and the Timeline says why.
+///
+/// Which is where the whole pipeline stops of its own accord: there is no stage
+/// left, so there is nothing to carry on and nothing for the human to do.
+#[tokio::test]
+async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_complete() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(
+            &planning,
+            &worked,
+            r#"- [x] 01: Count the requests — [brief](01-counter.md)\n- [x] 02: Refuse the rest — [brief](02-refusing.md)\n"#,
+            RECORDS_STACKING,
+        ),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("complete"),
+        "the roadmap being finished is a thing to say: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and nothing was started: there is no stage left to start",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+}

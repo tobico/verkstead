@@ -97,10 +97,21 @@ _Avoid_: feed, log, history, activity stream
 
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
-commit, a task list, a stage list, a PR, an interruption. Each shows a summary in the
+commit, a task list, a stage list, a PR, an interruption, a Notice. Each shows a
+summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
+
+**Notice**:
+The one kind of Event Verkstead writes on its own account: which Stage it
+started and where that Stage's branch went, or that a roadmap has no Stage left
+to run. No agent wrote it and nobody pressed anything for it, and there is
+nothing to do about one — where an Interruption is a question left open, a
+Notice is a decision already taken. It is what running unattended owes the
+human: a decision made while nobody was watching is one they have to be able to
+read afterwards.
+_Avoid_: log line, info event, message, alert
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
@@ -198,6 +209,21 @@ output arriving puts the whole grace back on the clock. A session that keeps
 talking is never ended. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
 _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
+
+**Stage**:
+One numbered entry of a roadmap, and a Conversation of its own: one branch, one
+review unit, one pull request. Started by the Stage before it settling rather
+than by anybody pressing anything — against the same Repo, under the same
+Profiles, primed with the stage brief as its Brief, and Implementing from the
+first moment, because the grilling that would have settled the work wrote the
+brief. Its branch stacks on the unmerged predecessor where the target
+repository records how, and comes off the default branch where it does not.
+
+Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
+and is kept one Stage behind: the tick rides in the plan commit of the Stage
+after it, so a Stage whose work has settled is still the box that says *in
+progress* on this branch.
+_Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Interruption**:
 Something Verkstead detected about an unattended run and cannot resolve itself: a

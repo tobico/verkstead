@@ -639,6 +639,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             stopped(*interruption),
                         )
                     }
+                    // Rendered like the handoff and inline like it, being the
+                    // other kind of sentence somebody has to be able to read
+                    // back — and the one nobody wrote for a human to press
+                    // anything about.
+                    store::Event::Notice(markdown) => {
+                        verkstead_render::notice_event(event.id, event.at, &markdown)
+                    }
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
                     // a catch-all, so a kind added later has to be decided about

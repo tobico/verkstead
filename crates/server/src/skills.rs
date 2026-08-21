@@ -57,6 +57,11 @@ const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
 /// roadmap direction runs instead of building anything itself.
 const STAGING: &str = "~/.claude/skills/staging/SKILL.md";
 
+/// And the fork of next-stage, which the one session a roadmap stage starts
+/// with runs inside: the session that re-grounds the stage's brief and writes
+/// the backlog the runner then works.
+const NEXT_STAGE: &str = "~/.claude/skills/next-stage/SKILL.md";
+
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
@@ -211,6 +216,42 @@ pub(crate) fn staging(brief: &str, handoff: Option<&str>) -> String {
         brief,
         handoff,
     )
+}
+
+/// What a stage's first session is started on: the stage brief, under the line
+/// that sends the agent into the fork of next-stage — and the one sentence only
+/// this kind of session gets, about where its branch came from.
+///
+/// One document rather than two, alone among these. A stage has no grilling of
+/// its own and so no handoff: what a grilling would have settled was settled by
+/// the grilling that wrote the roadmap, and the stage brief is what it settled.
+/// It arrives as the Conversation's Brief, so it is primed exactly as every
+/// other session is primed with one — see [`on_the_documents`].
+///
+/// `stacked_on` is the predecessor's branch where this stage's branch was made
+/// on top of it, and `None` where it came off the default branch. Said because
+/// it is the one thing about the stage the session cannot read out of the
+/// repository: a branch says what it is descended from, not what somebody meant
+/// by it, and what the session does about it — registering the stack the way the
+/// repository records — turns on which of the two this is.
+pub(crate) fn next_stage(brief: &str, stacked_on: Option<&str>) -> String {
+    let prompt = on_the_documents(
+        &format!("Read {NEXT_STAGE} and plan the roadmap stage described below, the way it says."),
+        brief,
+        None,
+    );
+
+    let branch = match stacked_on {
+        Some(predecessor) => format!(
+            "This stage's branch stacks on `{predecessor}`, the branch the stage before it \
+             was worked on, which is not merged yet.",
+        ),
+        None => "This stage's branch came off the repository's default branch, so it is not \
+                 stacked on anything."
+            .to_owned(),
+    };
+
+    format!("{prompt}\n# Where this stage's branch came from\n\n{branch}\n")
 }
 
 /// What each session of a backlog is started on: the same two documents again,
@@ -630,6 +671,156 @@ mod tests {
         assert!(
             prompt.contains("The API has none.") && prompt.contains("In-process counter."),
             "both documents go in whole: {prompt:?}"
+        );
+    }
+
+    /// Why a stage is planned in a session of its own rather than when the
+    /// roadmap was written: the brief's chunking is provisional, and the code has
+    /// moved under it since. Re-grounding it is the whole of what this fork adds.
+    #[test]
+    fn the_next_stage_fork_re_grounds_the_brief_against_the_code() {
+        let next_stage = skill("next-stage/SKILL.md");
+
+        assert!(
+            next_stage.contains("Re-verify at start")
+                && next_stage.contains("Proposed tasks (provisional)"),
+            "the two sections of a brief that say what to check and what to correct: \
+             {next_stage}"
+        );
+        assert!(
+            next_stage.contains("sequential"),
+            "and what comes out is a backlog, whose order is its dependency: {next_stage}"
+        );
+    }
+
+    /// The breakdown quiz, which is the one thing in a whole roadmap's run that
+    /// stops it — and stops it naturally, being a blocking ask.
+    #[test]
+    fn the_next_stage_fork_puts_its_breakdown_to_the_human() {
+        let next_stage = skill("next-stage/SKILL.md");
+
+        assert!(
+            next_stage.contains("verkstead guide") && next_stage.contains("verkstead ask"),
+            "the quiz is an ordinary Set, asked the way every Set is: {next_stage}"
+        );
+        assert!(
+            !next_stage.contains("proposal:"),
+            "and an ordinary one: the `proposal` block is the grilling's closing move, \
+             and a stage has no grilling of its own"
+        );
+    }
+
+    /// What it produces is a `.tasks/` backlog the runner then works, so it has
+    /// to write the same files the fork of next-task reads — and the line that
+    /// says this backlog is a stage's.
+    #[test]
+    fn the_next_stage_fork_writes_the_backlog_the_runner_works() {
+        let next_stage = skill("next-stage/SKILL.md");
+
+        for named in [".tasks/", "TODO.md", "NN-<slug>.md", "Roadmap stage:"] {
+            assert!(
+                next_stage.contains(named),
+                "the backlog is files in the repository, and {named} is one of them"
+            );
+        }
+
+        assert!(
+            next_stage.contains("Nothing waits on approval"),
+            "and the plan commit has no gate in front of it, as no commit here does"
+        );
+        assert!(
+            !next_stage.contains("Do not start on task 01\n"),
+            "the task after the plan is Verkstead's to launch a session for"
+        );
+    }
+
+    /// The roadmap keeps its own score, and the plan commit is what moves it:
+    /// the stage before this one ticked, and this one annotated with the branch
+    /// it is being worked on — which is also what stops Verkstead starting this
+    /// stage twice.
+    #[test]
+    fn the_next_stage_fork_moves_the_roadmaps_own_score() {
+        let next_stage = skill("next-stage/SKILL.md");
+
+        assert!(
+            next_stage.contains("ROADMAP.md"),
+            "the score is kept in the roadmap's index: {next_stage}"
+        );
+        assert!(
+            next_stage.contains("*(in progress: `<branch>`)*"),
+            "and the stage in flight is annotated with the branch, which is the fact \
+             rather than the prose: {next_stage}"
+        );
+        assert!(
+            next_stage.contains("`- [x]`"),
+            "the stage before it is ticked, its work having settled: {next_stage}"
+        );
+    }
+
+    /// Stacking is the repository's mechanism rather than Verkstead's, so the
+    /// fork is told where to read it and told not to invent one.
+    #[test]
+    fn the_next_stage_fork_stacks_the_repositorys_own_way() {
+        let next_stage = skill("next-stage/SKILL.md");
+
+        assert!(
+            next_stage.contains("docs/agents/git-workflow.md")
+                && next_stage.contains("### Stacking roadmap stages"),
+            "the mechanism is the repository's, read out of the file that records it: \
+             {next_stage}"
+        );
+        assert!(
+            next_stage.contains("Do not invent one"),
+            "and where there is none there is none: {next_stage}"
+        );
+        assert!(
+            !next_stage.contains("/next-stage") && !next_stage.contains("/to-tasks"),
+            "nobody is at a terminal to run a slash command: {next_stage}"
+        );
+    }
+
+    /// A stage session is put inside the fork the same way every other session
+    /// is — and primed with one document rather than two, there being no
+    /// grilling of its own to have written a handoff.
+    #[test]
+    fn a_stage_session_is_started_on_its_brief_inside_the_fork() {
+        let prompt = next_stage("# 05. Roadmap direction\n\nThe third Direction.\n", None);
+
+        assert!(
+            prompt.contains(NEXT_STAGE),
+            "the fork is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The third Direction."),
+            "and the stage brief is what it is primed with: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "nothing is said about a document a stage never had: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(BREAKING_DOWN) && !prompt.contains(NEXT_TASK),
+            "and nothing sends this session to break down a feature or work a task: \
+             {prompt:?}"
+        );
+    }
+
+    /// Where the branch came from is the one thing about a stage the session
+    /// cannot read out of the repository, so it is the one thing it is told.
+    #[test]
+    fn a_stage_session_is_told_whether_its_branch_is_stacked() {
+        let stacked = next_stage("# 05. Roadmap direction\n", Some("wrap-up"));
+
+        assert!(
+            stacked.contains("`wrap-up`"),
+            "the predecessor is named, because registering the stack needs it: {stacked:?}"
+        );
+
+        let alone = next_stage("# 05. Roadmap direction\n", None);
+
+        assert!(
+            alone.contains("default branch") && !alone.contains("stacks on"),
+            "and a stage off the default branch is told that plainly: {alone:?}"
         );
     }
 

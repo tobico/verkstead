@@ -109,6 +109,207 @@ pub(crate) fn touched(worktree: &Path, base: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Where a repository records how work of its own goes for review — the file
+/// the finish sequence is read out of, and the stacking mechanism with it.
+pub(crate) const GIT_WORKFLOW: &str = "docs/agents/git-workflow.md";
+
+/// The section that file keeps its review process under.
+const REVIEW_PROCESS: &str = "## Review process";
+
+/// And the block inside it that says how a stage stacks on the stage before it.
+const STACKING: &str = "### Stacking roadmap stages";
+
+/// Whether `worktree`'s repository records a way to stack a roadmap stage on
+/// its unmerged predecessor.
+///
+/// The question is only whether the block is *there*. What it says is the
+/// repository's own business and the session's to follow: Verkstead carries no
+/// stacking mechanism of its own, and one invented here would be a convention
+/// this repository never agreed to. Where the block is missing there is nothing
+/// to follow, so the stage branches off the default branch and the Timeline says
+/// which of the two happened.
+///
+/// Read under `## Review process` rather than anywhere in the file, because that
+/// is where the section belongs and a file that mentioned stacking in passing —
+/// a note, a changelog entry — would not be a repository that had recorded one.
+pub(crate) fn stacks(worktree: &Path) -> bool {
+    let Ok(workflow) = std::fs::read_to_string(worktree.join(GIT_WORKFLOW)) else {
+        return false;
+    };
+
+    workflow
+        .lines()
+        .map(str::trim_end)
+        .skip_while(|line| *line != REVIEW_PROCESS)
+        .skip(1)
+        // As far as the section goes: the next `## ` heading is another section,
+        // and what it holds is not the review process.
+        .take_while(|line| !line.starts_with("## "))
+        .any(|line| line == STACKING)
+}
+
+/// What a Conversation's roadmap has left to start once its own work has
+/// settled.
+///
+/// Read off the Worktree, like everything else here, and by the same rule the
+/// pinned stage list is drawn by: the roadmap this branch has written to, and
+/// the boxes as that roadmap wrote them. So what the human is watching and what
+/// Verkstead starts next cannot come to disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Next {
+    /// This one: the lowest-numbered stage still unchecked.
+    Stage(Box<Stage>),
+
+    /// Every stage is done. The roadmap is finished, and its directory stays
+    /// where it is as the record of what it was.
+    Complete {
+        /// What it is called, for saying so.
+        roadmap: String,
+    },
+
+    /// This branch has written to no roadmap, so this Conversation is not a
+    /// stage of anything and there is nothing to carry on.
+    NoRoadmap,
+
+    /// There is a stage to start and it cannot be started: the brief it names
+    /// is not there to prime a Conversation with.
+    ///
+    /// A thing to say rather than to guess past. A roadmap entry pointing at a
+    /// file nobody wrote is the human's to fix, and starting the stage after it
+    /// instead would be Verkstead deciding to skip work.
+    Unstartable {
+        /// Why, in the words the Timeline says it in.
+        why: String,
+    },
+}
+
+/// One stage of a roadmap, as the Conversation that runs it is started from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Stage {
+    /// The roadmap's directory name under `docs/roadmaps/` — `mvp`.
+    pub(crate) roadmap: String,
+
+    /// The stage's number as the roadmap writes it — `05`. Zero-padding is the
+    /// roadmap's own.
+    pub(crate) label: String,
+
+    /// What the stage is called.
+    pub(crate) title: String,
+
+    /// Where its brief is, relative to the Worktree — for saying which document
+    /// the work came from.
+    pub(crate) brief_path: String,
+
+    /// And the brief itself, which is what the stage's Conversation starts from.
+    pub(crate) brief: String,
+}
+
+impl Stage {
+    /// What to call the branch this stage is worked on: its brief's name
+    /// without the number in front of it — `04-wrap-up.md` becomes `wrap-up`.
+    ///
+    /// The brief's name rather than the title, because it is already a slug
+    /// somebody chose and it is what the roadmap's own annotation will name.
+    /// A brief with nothing usable in its name falls back to the number, which
+    /// is the one thing every entry has.
+    pub(crate) fn branch(&self) -> String {
+        let stem = self
+            .brief_path
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .trim_end_matches(".md");
+
+        let slug = stem
+            .strip_prefix(&self.label)
+            .unwrap_or(stem)
+            .trim_start_matches(['-', '_']);
+
+        match slug.is_empty() {
+            true => format!("stage-{}", self.label),
+            false => slug.to_owned(),
+        }
+    }
+}
+
+/// What `worktree`'s roadmap has left to start, with `branch` the Conversation
+/// that has just finished.
+///
+/// The Conversation's own stage is skipped, and that is the one piece of
+/// reading that is not just *the lowest unchecked box*. A stage ticks itself off
+/// in the plan commit of the stage after it — the roadmap keeps its score one
+/// step behind — so when a stage's own work settles, its box is still open and
+/// annotated with the branch it was worked on. That annotation is the roadmap
+/// saying *this one is in flight*, and the branch in it is what says whose.
+///
+/// Blocking work: a git read and two file reads.
+pub(crate) fn next_stage(worktree: &Path, base: &str, branch: &str) -> Next {
+    let mut complete = None;
+
+    for name in touched(worktree, base) {
+        let directory = worktree.join(ROADMAPS).join(&name);
+
+        let Ok(list) = std::fs::read_to_string(directory.join(INDEX)) else {
+            continue;
+        };
+
+        let mut entries = list.lines().filter_map(checklist::entry).peekable();
+
+        if entries.peek().is_none() {
+            // A directory under `docs/roadmaps/` with an index that plans
+            // nothing is not a roadmap, exactly as it is not one to pin.
+            continue;
+        }
+
+        let Some(entry) = entries.find(|entry| !entry.checked && !ours(entry.after, branch)) else {
+            // Every stage of this one is done — or the only one left is this
+            // Conversation's, which the plan commit that ticks it has not landed
+            // yet and never will, there being no stage after it. Kept rather
+            // than answered with, in case another roadmap this branch touched
+            // has something to run.
+            complete.get_or_insert(name);
+            continue;
+        };
+
+        let brief = directory.join(entry.link);
+
+        let Ok(markdown) = std::fs::read_to_string(&brief) else {
+            return Next::Unstartable {
+                why: format!(
+                    "stage {} of the {name} roadmap names the brief {}, and there is nothing \
+                     there to read",
+                    entry.label,
+                    brief.display(),
+                ),
+            };
+        };
+
+        return Next::Stage(Box::new(Stage {
+            brief_path: format!("{ROADMAPS}/{name}/{}", entry.link),
+            roadmap: name,
+            label: entry.label.to_owned(),
+            title: entry.title.to_owned(),
+            brief: markdown,
+        }));
+    }
+
+    match complete {
+        Some(roadmap) => Next::Complete { roadmap },
+        None => Next::NoRoadmap,
+    }
+}
+
+/// Whether what a roadmap wrote after a stage's link says the stage is in
+/// flight on `branch`.
+///
+/// The branch in backticks, which is how `/next-stage` annotates one: `*(in
+/// progress: `wrap-up`)*`. Matched on the branch rather than on the words
+/// around it, because the words are prose a human may rewrite and the branch
+/// name is the fact.
+fn ours(after: &str, branch: &str) -> bool {
+    !branch.is_empty() && after.contains(&format!("`{branch}`"))
+}
+
 /// The roadmap a changed path belongs to — `mvp` of
 /// `docs/roadmaps/mvp/ROADMAP.md` — or `None` where it belongs to none.
 ///
@@ -248,6 +449,27 @@ Turns this askance clone into Verkstead.
         /// Write a roadmap into the worktree, uncommitted.
         fn write(&self, name: &str, index: &str) {
             write(self.path(), name, index);
+        }
+
+        /// And one of its stage briefs beside it, which is what starting a stage
+        /// reads.
+        fn brief(&self, name: &str, file: &str, markdown: &str) {
+            let directory = self.path().join(ROADMAPS).join(name);
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join(file), markdown).unwrap();
+        }
+
+        /// What the repository records about how its own work goes for review.
+        fn workflow(&self, markdown: &str) {
+            let file = self.path().join(GIT_WORKFLOW);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, markdown).unwrap();
+        }
+
+        /// What this Worktree has left to start, as the Conversation on
+        /// `branch` finishing asks it.
+        fn next(&self, branch: &str) -> Next {
+            next_stage(self.path(), &self.base, branch)
         }
 
         fn commit(&self) {
@@ -476,6 +698,170 @@ Turns this askance clone into Verkstead.
                 );
             }
         }
+    }
+
+    /// The ordinary continuation: the stage after the one whose work has just
+    /// settled, read off the boxes the roadmap keeps.
+    #[test]
+    fn the_next_stage_is_the_lowest_numbered_unchecked_one() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next("anything-else") else {
+            panic!("stage 03 is the one left: {:?}", repo.next("anything-else"));
+        };
+
+        assert_eq!(stage.roadmap, "mvp");
+        assert_eq!(stage.label, "03");
+        assert_eq!(stage.title, "Implementation");
+        assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
+        assert_eq!(stage.brief, "# 03. Implementation\n");
+        assert_eq!(
+            stage.branch(),
+            "implementation",
+            "the branch is the brief's own name, without the number in front of it",
+        );
+    }
+
+    /// The one piece of reading that is not just *the lowest unchecked box*. A
+    /// stage is ticked off by the plan commit of the stage after it, so when its
+    /// own work settles its box is still open — and what says so is the roadmap's
+    /// annotation naming the branch it was worked on.
+    ///
+    /// A Conversation that started stage 02 again here would be a run going round
+    /// in circles for ever, with nobody watching.
+    #[test]
+    fn the_stage_this_conversation_worked_is_not_the_one_to_start() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n\
+             - [ ] 03: Implementation — [brief](03-implementation.md)\n",
+        );
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next("grilling") else {
+            panic!("the stage after this Conversation's own is the one to start");
+        };
+
+        assert_eq!(stage.label, "03");
+
+        // And to anybody else it is the stage it says it is: the annotation is
+        // about whose it is, not about whether it is done.
+        let Next::Stage(stage) = repo.next("some-other-branch") else {
+            panic!("stage 02 is still unchecked");
+        };
+
+        assert_eq!(stage.label, "02");
+    }
+
+    /// The end of a roadmap, which is where the whole pipeline stops of its own
+    /// accord: nothing is started, and there is nothing for the human to do.
+    #[test]
+    fn a_roadmap_with_every_stage_checked_has_nothing_to_start() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n- [x] 01: Workbench — [brief](01-workbench.md)\n",
+        );
+
+        assert_eq!(
+            repo.next("anything-else"),
+            Next::Complete {
+                roadmap: "mvp".to_owned()
+            },
+        );
+    }
+
+    /// Including the last stage of one, whose own box is ticked by a plan commit
+    /// that is never going to land: there is no stage after it to write one.
+    #[test]
+    fn the_last_stage_finishing_is_the_roadmap_complete() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `grilling`)*\n",
+        );
+
+        assert_eq!(
+            repo.next("grilling"),
+            Next::Complete {
+                roadmap: "mvp".to_owned()
+            },
+        );
+    }
+
+    /// An ordinary feature: its branch has written to no roadmap, so there is no
+    /// roadmap for its wrap-up to carry on.
+    #[test]
+    fn a_branch_that_wrote_to_no_roadmap_carries_nothing_on() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+
+        assert_eq!(repo.next("rate-limiting"), Next::NoRoadmap);
+    }
+
+    /// A stage that cannot be started is said rather than skipped: starting the
+    /// one after it would be Verkstead deciding to leave work out.
+    #[test]
+    fn a_stage_whose_brief_is_missing_is_not_startable() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+
+        let Next::Unstartable { why } = repo.next("anything-else") else {
+            panic!("there is no 03-implementation.md to start stage 03 from");
+        };
+
+        assert!(
+            why.contains("03") && why.contains("03-implementation.md"),
+            "which stage and which brief: {why:?}",
+        );
+    }
+
+    /// Whether the repository records a way to stack a stage on its predecessor
+    /// — which is a fact about the repository, and the only part of stacking
+    /// Verkstead decides.
+    #[test]
+    fn a_repository_records_its_stacking_mechanism_under_its_review_process() {
+        let repo = Repo::with(&[]);
+
+        assert!(
+            !stacks(repo.path()),
+            "a repository with no git-workflow.md has recorded nothing",
+        );
+
+        repo.workflow("# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n");
+
+        assert!(
+            !stacks(repo.path()),
+            "and neither has one whose review process says nothing about stacking",
+        );
+
+        repo.workflow(
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+        );
+
+        assert!(stacks(repo.path()), "and this one has");
+    }
+
+    /// Under the review process rather than anywhere in the file: a repository
+    /// that mentions stacking in a note has not recorded a mechanism to follow.
+    #[test]
+    fn a_stacking_block_outside_the_review_process_is_not_the_mechanism() {
+        let repo = Repo::with(&[]);
+        repo.workflow(
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n\n\
+             ## Notes\n\n### Stacking roadmap stages\n\nWe gave up on these.\n",
+        );
+
+        assert!(!stacks(repo.path()));
     }
 
     #[test]

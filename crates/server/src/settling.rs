@@ -44,6 +44,19 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                 // The Timeline has a move on it, and an open page should say so
                 // without being reloaded.
                 state.nudges.announce();
+
+                // And a settled wrap-up is what lets the next roadmap stage
+                // start, which is the whole of what makes a staged roadmap
+                // execute itself — see [`crate::continuing`]. Asked of every
+                // Conversation rather than of the ones somebody thought were
+                // stages: whether this is a stage of anything is read off the
+                // branch, and one that has written to no roadmap starts nothing.
+                //
+                // Here rather than anywhere else because this is the one place
+                // that knows a wrap-up has just ended, and awaited rather than
+                // spawned: this loop has nothing left to do after it, and the
+                // work it is waiting on is a git read and a session starting.
+                crate::continuing::carry_on(state, conversation_id).await;
                 return;
             }
             // Aborted out from under the watchers, or finished by something else

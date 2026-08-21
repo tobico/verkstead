@@ -29,6 +29,22 @@ pub(crate) struct Entry<'a> {
     /// What it is called, without the link to the file it details.
     pub(crate) title: &'a str,
 
+    /// What the link points at — `04-wrap-up.md` — or empty where the entry
+    /// carries no link.
+    ///
+    /// The target rather than the whole link, because that is the only part
+    /// anything does anything with: a roadmap's entry points at the brief the
+    /// stage is started from, which is a file to go and read.
+    pub(crate) link: &'a str,
+
+    /// Whatever the list wrote after the link, as it wrote it — `*(in progress:
+    /// `wrap-up`)*`.
+    ///
+    /// The roadmap keeping its own score rather than anything about what the
+    /// stage is called, which is why it is not part of the title. Empty on the
+    /// ordinary entry, which is every entry of a backlog and most of a roadmap's.
+    pub(crate) after: &'a str,
+
     /// Whether the box is ticked. What that says is the reader's to decide —
     /// see the module docs.
     pub(crate) checked: bool,
@@ -52,10 +68,14 @@ pub(crate) fn entry(line: &str) -> Option<Entry<'_>> {
         return None;
     }
 
+    let (title, link, after) = split(title);
+
     Some(Entry {
         number: label.parse().ok()?,
         label,
-        title: titled(title),
+        title,
+        link,
+        after,
         checked,
     })
 }
@@ -73,33 +93,44 @@ pub(crate) fn heading(list: &str) -> String {
         .to_owned()
 }
 
-/// An entry's title, which is everything before the link to the file it
-/// details.
+/// The three parts of what follows an entry's number: what it is called, what
+/// it links to, and whatever the list wrote after that.
 ///
-/// The link is how the list points at that file, and a title reading `Commit
-/// Timeline Events — [details](03-commit-events.md)` would be a line nobody
-/// wrote. The dash before it goes too, because it was punctuation joining the
-/// two rather than part of either.
+/// The link is how the list points at the file the entry details, and a title
+/// reading `Commit Timeline Events — [details](03-commit-events.md)` would be a
+/// line nobody wrote. The dash before it goes too, because it was punctuation
+/// joining the two rather than part of either.
 ///
 /// The title is cut at the link rather than having the link taken out of it,
 /// because what follows one is not part of the title either: a roadmap entry
 /// annotates the stage in flight after its link — `— [brief](04-wrap-up.md)
 /// *(in progress: `wrap-up`)*` — and that is the roadmap keeping score rather
-/// than what the stage is called.
+/// than what the stage is called. It comes back separately for whoever is
+/// reading the score.
 ///
 /// The link is found by its shape rather than by the word inside it: `TODO.md`
 /// writes `[details]` and `ROADMAP.md` writes `[brief]`. A title carrying an
 /// ordinary bracketed aside keeps it, there being no link in one.
-fn titled(title: &str) -> &str {
-    let title = title.trim();
+fn split(rest: &str) -> (&str, &str, &str) {
+    let rest = rest.trim();
 
-    let before_link = title
-        .find("](")
-        .and_then(|link| title[..link].rfind('['))
-        .map(|open| &title[..open])
-        .unwrap_or(title);
+    let Some(open) = rest.find("](").and_then(|link| rest[..link].rfind('[')) else {
+        return (rest, "", "");
+    };
 
-    before_link.trim().trim_end_matches(['—', '–', '-']).trim()
+    let title = rest[..open].trim().trim_end_matches(['—', '–', '-']).trim();
+
+    // The target is between the `](` and the `)` that closes it. A link left
+    // unclosed is not one, and what would have been the title is still the
+    // title.
+    let Some((target, after)) = rest[open..]
+        .split_once("](")
+        .and_then(|(_, target)| target.split_once(')'))
+    else {
+        return (title, "", "");
+    };
+
+    (title, target.trim(), after.trim())
 }
 
 #[cfg(test)]
@@ -114,6 +145,8 @@ mod tests {
         assert_eq!(entry.number, 3);
         assert_eq!(entry.label, "03");
         assert_eq!(entry.title, "The pinned task-list Event");
+        assert_eq!(entry.link, "03-pinned.md");
+        assert_eq!(entry.after, "");
         assert!(!entry.checked);
     }
 
@@ -148,24 +181,34 @@ mod tests {
     /// what the stage is called.
     #[test]
     fn what_a_roadmap_writes_after_the_link_is_not_the_title() {
+        let entry = entry("- [ ] 04: Wrap-up — [brief](04-wrap-up.md) *(in progress: `wrap-up`)*")
+            .expect("that is an entry");
+
+        assert_eq!(entry.title, "Wrap-up");
+        assert_eq!(entry.link, "04-wrap-up.md");
         assert_eq!(
-            entry("- [ ] 04: Wrap-up — [brief](04-wrap-up.md) *(in progress: `wrap-up`)*")
-                .unwrap()
-                .title,
-            "Wrap-up"
+            entry.after, "*(in progress: `wrap-up`)*",
+            "the roadmap's own score, kept for whoever is reading it",
         );
     }
 
     #[test]
     fn a_title_carrying_no_link_is_taken_as_it_stands() {
-        assert_eq!(
-            entry("- [ ] 01: A task — with a dash in it").unwrap().title,
-            "A task — with a dash in it"
-        );
-        assert_eq!(
-            entry("- [ ] 01: A task (with an aside)").unwrap().title,
-            "A task (with an aside)"
-        );
+        for (line, title) in [
+            (
+                "- [ ] 01: A task — with a dash in it",
+                "A task — with a dash in it",
+            ),
+            ("- [ ] 01: A task (with an aside)", "A task (with an aside)"),
+            // A link that never closes is not one, and cutting the title at it
+            // would be reading half a link as a whole one.
+            ("- [ ] 01: A task — [details](01-task.md", "A task"),
+        ] {
+            let entry = entry(line).expect("that is an entry");
+
+            assert_eq!(entry.title, title);
+            assert_eq!(entry.link, "", "{line:?} points at nothing");
+        }
     }
 
     #[test]

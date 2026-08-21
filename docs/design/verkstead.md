@@ -119,7 +119,12 @@ flowchart LR
   phase is where problems get raised. The next stage starts only after
   wrap-up completes.
 - **Stages always stack.** The next stage's branch stacks on the unmerged
-  predecessor (`gh stack`), per the repo's stacked review process.
+  predecessor (`gh stack`), per the repo's stacked review process — *refined
+  2026-08-21, building stage 04*: per the mechanism that repo **records**, in
+  the `### Stacking roadmap stages` block of its `docs/agents/git-workflow.md`.
+  Verkstead reads whether the block is there and the session follows what it
+  says; a repo that records none gets a branch off the default branch, said on
+  the timeline, because there is no convention to invent on its behalf.
 - **The brief freezes at grill start.** A reopened round adds a new brief
   event rather than editing the old one.
 - **Interruptions** (crash, hang) become timeline events with retry /
@@ -202,6 +207,7 @@ Timeline events:
 | Stage list | inline, pinned | — |
 | PR | name + id, pinned | fetched commit list and comments |
 | Interruption | inline with remedy actions | session tail / evidence |
+| Notice | inline, nothing to do about it | — |
 
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin.

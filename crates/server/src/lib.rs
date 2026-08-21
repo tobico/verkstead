@@ -16,6 +16,7 @@ mod checklist;
 mod checks;
 mod comments;
 mod commits;
+mod continuing;
 mod conversations;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///

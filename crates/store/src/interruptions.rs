@@ -50,6 +50,14 @@ pub enum Step {
     /// work in one session: the stages are Conversations of their own.
     Roadmap,
 
+    /// Planning a roadmap stage: the session that re-grounds the stage's brief
+    /// and writes the backlog the runner then works.
+    ///
+    /// A backlog's first step like [`Self::Planning`], and a different one
+    /// because a different fork runs it — the brief has to be re-grounded and
+    /// the roadmap's own score moved, neither of which a breakdown knows about.
+    Stage,
+
     /// Getting a wrapping Conversation's pull request green again.
     ///
     /// Not a step of a backlog at all — the backlog is finished by the time one
@@ -77,6 +85,7 @@ impl Step {
             Self::Finish => "finish",
             Self::Inline => "inline",
             Self::Roadmap => "roadmap",
+            Self::Stage => "stage",
             Self::Checks => "checks",
             Self::Review => "review",
         }
@@ -92,6 +101,7 @@ impl Step {
             "finish" => Self::Finish,
             "inline" => Self::Inline,
             "roadmap" => Self::Roadmap,
+            "stage" => Self::Stage,
             "checks" => Self::Checks,
             "review" => Self::Review,
             other => bail!("an Interruption names the unknown step {other:?}"),
