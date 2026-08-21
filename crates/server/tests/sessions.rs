@@ -401,6 +401,46 @@ fn gh_checking_until(green: &Path) -> String {
     )
 }
 
+/// And one whose suite is still running until `started` is there, and red once
+/// it is.
+///
+/// For the test about what a red check does while something else holds the
+/// Worktree. A suite that was red from the first poll would be racing the very
+/// thing it is meant to find in there: [`crate::wrapping::watching`] spawns the
+/// checks watcher and the review together, the watcher takes its first look at
+/// once, and the review reads the Conversation before it asks for the Worktree —
+/// so a loaded machine can have the watcher take it first and dispatch a fix
+/// session, which is correct behaviour and not the one being asked about.
+///
+/// Still running is the answer that is neither red nor green: it dispatches
+/// nothing, settles nothing, and the watcher simply looks again. So the check
+/// turns red only once the file the review session writes its prompt into is
+/// there — which is that session inside its sandbox, and so the Worktree already
+/// taken.
+fn gh_checking_after(started: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ -s {started} ]; then status=COMPLETED; how=FAILURE; else status=IN_PROGRESS; how=; fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how"
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        started = quoted(started),
+    )
+}
+
 /// And one that can find the pull request but cannot say anything about its
 /// checks — an account whose login has expired, which is the ordinary way this
 /// goes wrong on a machine nobody is sitting at.
@@ -2602,10 +2642,13 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
 
+    // Red only once the review has written its prompt, which is the review inside
+    // the sandbox and so the Worktree already taken — see [`gh_checking_after`].
+    // A suite red from the first poll would be a race with the review for it.
     let fixture = grilling_spilling(
         spill,
         &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
-        &gh_checking("FAILURE"),
+        &gh_checking_after(&reviews),
     )
     .await;
 
