@@ -1373,6 +1373,43 @@ pub enum GrillingStarted {
     WorktreeRefused,
 }
 
+/// What became of pressing Adopt.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
+/// human is at the workbench pressing the button, and each of these is
+/// something different for them to go and do. What is decided while nobody is
+/// watching says itself on a Timeline instead — see the server's `continuing`
+/// module, which starts the same stage by the other route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Adopted {
+    /// The branch and the worktree are made, the stage brief is the Brief, and
+    /// the Conversation is implementing the stage.
+    Adopted,
+
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been adopted once already — or aborted.
+    NotDrafting,
+
+    /// It is adopting nothing, which is every Conversation that began with a
+    /// Brief and a grilling. There is no roadmap here to take a stage from.
+    NotAdopting,
+
+    /// The roadmap has no stage to start at the base commit: it has finished, it
+    /// is not there, its next brief cannot be read, or somebody is on it
+    /// already.
+    NoStage,
+
+    /// Nothing in the repository answers to what the stage would branch from —
+    /// an overridden commit that has gone, or a default branch that has.
+    NoBaseCommit,
+
+    /// Git would not make the worktree. The reason is in the server's log — this
+    /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+}
+
 /// What became of aborting one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]

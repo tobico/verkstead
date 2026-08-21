@@ -10,7 +10,10 @@
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
 //! somewhere to work — see [`start_grilling`] — and where the session that does
-//! the work is launched in it. Aborting is where both are given back: the
+//! the work is launched in it. Adopting is the same moment by the other door:
+//! a roadmap Verkstead did not write has its next stage started here, with the
+//! human's press standing in for the predecessor that would otherwise have
+//! started it — see [`adopt`]. Aborting is where both are given back: the
 //! session ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
@@ -18,8 +21,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen, GrillingStarted,
-    ProfileEntry, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen,
+    GrillingStarted, ProfileEntry, Started, Worktree,
 };
 use verkstead_schema::Direction;
 
@@ -584,6 +587,164 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     }
 
     Ok(GrillingStarted::Started)
+}
+
+/// Take a roadmap Verkstead did not write and start its next stage: one press,
+/// and a drafting Conversation becomes the stage's own, on the stage's own
+/// branch, with a planning session running in it.
+///
+/// The human's press stands in for the settling predecessor that starts every
+/// other stage — see [`crate::continuing`], which does the same job at the other
+/// end of a roadmap. So what this does is [`crate::continuing::start`]'s
+/// sequence with the two differences adoption has: there is no predecessor
+/// Conversation, so nothing stacks and the branch comes off the base commit; and
+/// there is a human at the workbench, so what stops it is answered to the button
+/// by name rather than said as a notice to nobody.
+///
+/// **The stage is read again, here, at whatever the base resolves to.** What the
+/// page showed is a reading of a moment ago, and a roadmap is a document in a
+/// repository that anybody may have moved since — ticked the last box, taken the
+/// branch, started the stage by hand.
+///
+/// **Then git, and then the store**, which is the order [`start_grilling`] does
+/// the same job in and for the same reason: a row saying a stage is under way
+/// with nothing checked out is a Conversation nothing can run and nothing will
+/// clean up, where a directory the store does not know about is a directory to
+/// tidy.
+///
+/// The Timeline gets both records — the stage brief as the Brief, and what was
+/// adopted from where — and the planning session comes last, exactly as it does
+/// for a stage a predecessor started. From the plan commit onwards there is
+/// nothing new: that commit touches the roadmap, so the stage after this one is
+/// carried on by the path that was already there.
+pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
+    let pool = &state.pool;
+
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        return Ok(Adopted::NoSuchConversation);
+    };
+
+    if conversation.state != store::Lifecycle::Draft {
+        return Ok(Adopted::NotDrafting);
+    }
+
+    // The one thing about the roadmap that is Verkstead's, and the whole of what
+    // makes this Conversation an adopting one. Everything else about it is read
+    // back out of the repository.
+    let Some(roadmap) = conversation.adopting.clone() else {
+        return Ok(Adopted::NotAdopting);
+    };
+
+    // Where the stage branches from. The override where the human fixed one —
+    // which is how an unmerged predecessor is stacked on, that being their move
+    // rather than Verkstead's — and the default branch's tip where they did not.
+    let named = conversation
+        .base_commit
+        .clone()
+        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+    let repo = conversation.repo.path.clone();
+
+    // The reading, off the runtime's threads: resolving a commit and reading a
+    // roadmap out of a git directory are both blocking calls.
+    let read = tokio::task::spawn_blocking({
+        let repo = repo.clone();
+        let named = named.clone();
+
+        move || {
+            let Some(commit) = worktrees::resolve(&repo, &named) else {
+                return Err(Adopted::NoBaseCommit);
+            };
+
+            match crate::stages::startable(&repo, &commit, &roadmap) {
+                Some(abandoned) => Ok((commit, abandoned.stage)),
+                None => Err(Adopted::NoStage),
+            }
+        }
+    })
+    .await?;
+
+    let (commit, stage) = match read {
+        Ok(read) => read,
+        Err(refusal) => return Ok(refusal),
+    };
+
+    // The stage's own slug, as the unattended start names one — the brief's
+    // filename without its number. The name the Conversation was started under
+    // was the server's invention for a row in the sidebar, and it is discarded
+    // here: a stage is worked on the branch its roadmap will annotate it with.
+    let branch = stage.branch();
+    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
+
+    let made = tokio::task::spawn_blocking({
+        let path = path.clone();
+        let branch = branch.clone();
+        let commit = commit.clone();
+
+        move || worktrees::add(&repo, &path, &branch, &commit)
+    })
+    .await?;
+
+    if !made {
+        return Ok(Adopted::WorktreeRefused);
+    }
+
+    // And now the store, in the order the record is read in: the branch it is on,
+    // the Brief it works from, and then the move that freezes both. Adoption
+    // never stacks — there is no predecessor Conversation to stand on, and
+    // standing on an unmerged one is the base commit the human fixed above.
+    store::rename_branch(pool, id, &branch).await?;
+    store::save_brief(pool, id, &stage.brief).await?;
+
+    match store::start_stage(pool, id, &commit, &path, None).await? {
+        store::Staged::Started => {}
+        store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
+        store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
+    }
+
+    // What was adopted, from where, and where its branch came off — on the
+    // Conversation's own Timeline, because that is the only Timeline there is:
+    // adoption has no predecessor Conversation for the human to have been
+    // watching.
+    if let Err(error) = store::note(pool, id, &adopted(&stage, &branch, &named)).await {
+        tracing::error!(error = ?error, conversation_id = id, "recording what was adopted failed");
+    }
+
+    tracing::info!(
+        conversation_id = id,
+        branch,
+        label = stage.label,
+        roadmap = stage.roadmap,
+        "a roadmap stage was adopted and has started",
+    );
+
+    // A Conversation moved and the sidebar's notice has one roadmap fewer in it,
+    // and an open page should say so without being reloaded.
+    state.nudges.announce();
+
+    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None));
+
+    Ok(Adopted::Adopted)
+}
+
+/// What an adopting Conversation's Timeline is told: which stage of which
+/// roadmap was adopted, and where its branch came off.
+///
+/// [`crate::continuing::begun`]'s wording, with the two things adoption changes
+/// taken out of it. *With nobody asked* goes, because somebody did: a human
+/// pressed this. And only the came-off half is ever said, because an adopted
+/// stage has no predecessor Conversation to stack on — where its branch stands
+/// is the base commit, which is the human's to fix and theirs alone.
+fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
+    // The brief named rather than linked, as the unattended start names it: it
+    // is a path in a Worktree the workbench has no route to, and a link that
+    // went nowhere would be worse than the path itself.
+    format!(
+        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`. Its branch `{branch}` came \
+         off `{from}`: an adopted stage has no Conversation before it to stack on, so where it \
+         stands is the base commit this one was fixed to.",
+        stage.label, stage.roadmap, stage.title, stage.brief_path,
+    )
 }
 
 /// Stop a Conversation wherever it has got to: its session ended, its worktree

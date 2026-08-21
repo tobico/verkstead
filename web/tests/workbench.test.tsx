@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AbandonedRepo,
+  Adopted,
   AgentOutputEvent,
   CommitDiff,
   ConversationAborted,
@@ -553,6 +554,52 @@ describe("the adoption page", () => {
     expect(panel.textContent).toContain(ADOPTION.roadmap);
     expect(panel.querySelector(".empty")).toBeTruthy();
     expect(panel.querySelector(".stage")).toBeNull();
+  });
+
+  /// The press posts to the conversation's own adopt route with nothing in the
+  /// body, for the reason starting a grilling sends nothing: which conversation
+  /// is in the path, and which stage is the roadmap's own answer at the base
+  /// commit — read again by the server when the button is pressed.
+  it("posts to the conversation's own adopt route, with nothing in the body", async () => {
+    const fetching = theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json("Adopted" satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${ADOPTING.id}/adopt`),
+      ).toEqual({}),
+    );
+  });
+
+  /// And what a press leaves behind is a conversation that has moved and a
+  /// notice with one roadmap fewer in it, so all three are read again.
+  it("reads the conversation and the notice again once it has been pressed", async () => {
+    const fetching = theAdoption(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json("Adopted" satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const before = askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`);
+    fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`),
+      ).toBeGreaterThan(before),
+    );
   });
 });
 

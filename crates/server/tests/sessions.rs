@@ -25,10 +25,10 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
-    DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent,
-    TimelineEvent, Transcript,
+    Adopted, AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted,
+    ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
+    ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
+    TaskListEvent, TimelineEvent, Transcript,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -457,6 +457,91 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_both_profiles(id).await;
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let grilling: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A workbench with a stub where claude goes and a registered repository in it,
+/// before any Conversation has been started against it.
+///
+/// The two ways in start from here and part company at the press: one writes a
+/// Brief and grills, and the other adopts a roadmap the repository already
+/// holds — see [`adopting`].
+struct Bench {
+    watched: tempfile::TempDir,
+    state: tempfile::TempDir,
+    home: tempfile::TempDir,
+    spill: tempfile::TempDir,
+    app: Router,
+    database: PathBuf,
+
+    /// The registered repository: where it is on disk, and the id a Conversation
+    /// is started against.
+    repo: PathBuf,
+    repo_id: i64,
+}
+
+impl Bench {
+    /// Fix both Profiles on a Conversation, which is what every one of these
+    /// has to have settled before anything will start in it.
+    async fn under_both_profiles(&self, id: i64) {
+        for role in ["grilling", "implementation"] {
+            let profile = profile(&self.app, self.watched.path(), role).await;
+            let chosen: verkstead_render::ProfileChosen = post(
+                &self.app,
+                &format!("/api/ui/conversations/{id}/{role}-profile"),
+                &serde_json::json!({ "profile_id": profile }),
+            )
+            .await;
+            assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        }
+    }
+
+    /// The fixture the tests read, once there is a Conversation running in it.
+    fn holding(self, id: i64) -> Grilling {
+        Grilling {
+            _watched: self.watched,
+            home: self.home,
+            state: self.state,
+            spill: self.spill,
+            app: self.app,
+            id,
+            database: self.database,
+        }
+    }
+}
+
+async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -501,51 +586,15 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
     let repo_id = repos[0].id;
 
-    let started: Started = post(
-        &app,
-        "/api/ui/conversations",
-        &serde_json::json!({ "repo_id": repo_id }),
-    )
-    .await;
-    let Started::Started { id } = started else {
-        panic!("expected the Conversation to start, got {started:?}");
-    };
-
-    for role in ["grilling", "implementation"] {
-        let profile = profile(&app, watched.path(), role).await;
-        let chosen: verkstead_render::ProfileChosen = post(
-            &app,
-            &format!("/api/ui/conversations/{id}/{role}-profile"),
-            &serde_json::json!({ "profile_id": profile }),
-        )
-        .await;
-        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
-    }
-
-    let saved: BriefSaved = post(
-        &app,
-        &format!("/api/ui/conversations/{id}/brief"),
-        &serde_json::json!({ "markdown": BRIEF }),
-    )
-    .await;
-    assert_eq!(saved, BriefSaved::Saved);
-
-    let grilling: GrillingStarted = post(
-        &app,
-        &format!("/api/ui/conversations/{id}/grill"),
-        &serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(grilling, GrillingStarted::Started);
-
-    Grilling {
-        _watched: watched,
-        home,
+    Bench {
+        watched,
         state,
+        home,
         spill,
         app,
-        id,
         database,
+        repo,
+        repo_id,
     }
 }
 
@@ -3915,5 +3964,166 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     assert!(
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// A roadmap committed on the repository's default branch, as the old tools or
+/// a human left it: two stages, neither of them ticked, and a brief for each.
+///
+/// Committed rather than merely written, because that is the whole difference
+/// adoption is about — a roadmap no branch Verkstead knows ever touched, so
+/// nothing it reads on its own would ever start it.
+fn a_roadmap_already_committed(repo: &Path) {
+    let directory = repo.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&directory).unwrap();
+
+    std::fs::write(
+        directory.join("ROADMAP.md"),
+        "# Rate limiting roadmap\n\n## Stages\n\n\
+         - [ ] 01: Count the requests — [brief](01-counter.md)\n\
+         - [ ] 02: Refuse the rest — [brief](02-refusing.md)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("01-counter.md"),
+        "# 01. Count the requests\n\n## Goal\n\nA counter per key, and nothing else.\n",
+    )
+    .unwrap();
+    std::fs::write(directory.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-m", "docs: the roadmap as it stands"]);
+}
+
+/// A stub that does nothing but say which session it was and where it ran, for
+/// the tests about a stage that was adopted rather than staged.
+///
+/// Nothing here writes a plan: what is being asked is whether the press starts
+/// the planning session at all, and what it is primed with.
+fn plans_whatever_it_is_given(planning: &Path) -> String {
+    format!(
+        r#"
+printf 'model=%s\nwhere=%s\n%s\n' "$1" "$(pwd)" "$2" >> {planning}
+sleep 300
+"#,
+        planning = quoted(planning),
+    )
+}
+
+/// Stand a workbench up with a roadmap the repository already holds, and press
+/// Adopt on it.
+///
+/// The other way into the pipeline, and the shorter one: there is no Brief to
+/// write and no grilling to run, so what the human settles is the two Profiles
+/// and then presses once.
+async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    let bench = bench(spill, stub, PULL_REQUEST).await;
+
+    a_roadmap_already_committed(&bench.repo);
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/adoptions",
+        &serde_json::json!({ "repo_id": bench.repo_id, "roadmap": "rate-limiting" }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_both_profiles(id).await;
+
+    let adopted: Adopted = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/adopt"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(adopted, Adopted::Adopted);
+
+    bench.holding(id)
+}
+
+/// The whole of adopting: one press on a roadmap the repository already held,
+/// and the stage is running as a Conversation on its own branch — with the
+/// planning session the unattended path would have started, in the worktree the
+/// press made.
+///
+/// Nothing about that session is adoption's own. It is the same fork of
+/// next-stage a settling predecessor launches, under the same Profile, primed
+/// with the same document — which is the point: adoption is an entry into the
+/// pipeline rather than a pipeline of its own.
+#[tokio::test]
+async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting(spill, &plans_whatever_it_is_given(&planning)).await;
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.branch, "counter",
+        "the branch is the stage brief's own name, without its number",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "straight to Implementing: the human's press stands in for the stage before it",
+    );
+
+    let brief = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief.markdown.clone()),
+            _ => None,
+        })
+        .expect("a Conversation's first Event is its Brief");
+
+    assert!(
+        brief.contains("A counter per key, and nothing else."),
+        "primed with the stage brief itself: {brief:?}",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the Timeline says which stage of which roadmap was adopted: {said:?}",
+    );
+    assert!(
+        said.contains("<code>main</code>"),
+        "and where its branch came off: {said:?}",
+    );
+
+    // The worktree git made, which is where the session is running.
+    let worktree = PathBuf::from(view.worktree.expect("an adopted stage has a Worktree").path);
+
+    assert!(
+        worktree
+            .join("docs/roadmaps/rate-limiting/01-counter.md")
+            .exists(),
+        "the branch is checked out with the roadmap it was adopted from",
+    );
+
+    // The session itself: the bundled fork of next-stage, under the
+    // implementation Profile, in that worktree.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "an adopted stage plans under the implementation Profile: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("~/.claude/skills/next-stage/SKILL.md"),
+        "inside the bundled fork of next-stage: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("A counter per key, and nothing else."),
+        "primed with the stage brief: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("not stacked on anything"),
+        "and told its branch stands on nothing: adoption never stacks: {prompt:?}",
     );
 }

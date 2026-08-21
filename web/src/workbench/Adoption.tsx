@@ -17,14 +17,30 @@
 //! invented when the row was made is discarded at the press, and what the
 //! sidebar shows until then is that invented name.
 
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { type JSX, Show } from "solid-js";
 
-import type { ConversationView } from "../api/types";
+import { adoptRoadmap } from "../api/client";
+import type { Adopted, ConversationView } from "../api/types";
 
 export function Adoption(props: {
   conversation: ConversationView;
   adopting: NonNullable<ConversationView["adopting"]>;
 }): JSX.Element {
+  const queries = useQueryClient();
+
+  const adopt = useMutation(() => ({
+    mutationFn: () => adoptRoadmap(props.conversation.id),
+    onSuccess: (_outcome: Adopted) => {
+      // Whatever it came back with, the page is read again: what adopting did
+      // is a conversation that has moved, and what refused it is a repository
+      // that has moved — and reading it again is the correction either way.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+    },
+  }));
+
   return (
     <section class="adoption" aria-label="Adoption">
       <h2>Adopt a roadmap</h2>
@@ -64,14 +80,25 @@ export function Adoption(props: {
       </Show>
 
       <Show when={props.conversation.state === "Draft"}>
-        <button type="button" class="adopt">
-          Adopt
+        <button
+          type="button"
+          class="adopt"
+          disabled={adopt.isPending}
+          onClick={() => adopt.mutate()}
+        >
+          {adopt.isPending ? "Adopting…" : "Adopt"}
         </button>
         <p class="note">
           This creates the branch and its worktree, takes the stage brief as
           this conversation's brief, and starts the work on it. Both agent
           profiles have to be chosen first.
         </p>
+
+        <Show when={adopt.isError}>
+          <p class="error">
+            The stage could not be adopted: {adopt.error?.message}
+          </p>
+        </Show>
       </Show>
     </section>
   );

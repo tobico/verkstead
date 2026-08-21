@@ -20,7 +20,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
     ConversationView, DirectionChosen, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
     Registered, Started, TimelineEvent,
 };
@@ -1887,4 +1887,156 @@ fn stage_of(view: &ConversationView) -> &verkstead_render::AdoptedStage {
         .stage
         .as_ref()
         .expect("that stage is startable")
+}
+
+async fn press_adopt(app: &Router, id: i64) -> Adopted {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/adopt"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Everything an adoption needs before the press: both Profiles chosen, which
+/// is the whole of what an adopting Conversation has to settle — the Brief is
+/// the stage brief and it arrives with the stage.
+async fn ready_to_adopt(app: &Router, watched: &Path, repo_id: i64, name: &str) -> i64 {
+    let id = adopting(app, repo_id, name).await;
+
+    let grilling = profile(app, watched, "fable").await;
+    let implementation = profile(app, watched, "opus").await;
+    choose(app, id, "grilling", grilling).await;
+    choose(app, id, "implementation", implementation).await;
+
+    id
+}
+
+/// What Verkstead has said on a Timeline on its own account.
+fn notices(view: &ConversationView) -> Vec<String> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The whole of what pressing Adopt does: the stage's own branch off the base
+/// commit, a worktree with it, the stage brief as the Brief, and a Conversation
+/// that is implementing the stage.
+#[tokio::test]
+async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+
+    // The stage's own slug, rather than the name the server invented for the
+    // row: `03-implementation.md` without its number.
+    assert_eq!(view.branch, "implementation");
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Implementing],
+        "straight to Implementing: there was no grilling and no direction to choose",
+    );
+
+    // Branched from what the base resolved to, which with no override is the
+    // default branch's tip.
+    assert_eq!(view.base_commit.as_deref(), Some(tip.as_str()));
+
+    // The branch is in the Repo's own git directory, standing on that commit
+    // and nothing else — adoption never stacks.
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/implementation"]).trim(),
+        tip,
+    );
+
+    // And the worktree is git's, under the state directory.
+    let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
+
+    assert!(worktree.starts_with(dir.path()));
+    assert!(worktrees(&repo).contains(&worktree));
+    assert!(
+        worktree
+            .join("docs/roadmaps/mvp/03-implementation.md")
+            .exists()
+    );
+}
+
+/// The Timeline gets both records: the stage brief as the Brief the work runs
+/// from, and what was adopted from where.
+#[tokio::test]
+async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        brief(&view).markdown,
+        "# 03-implementation.md\n",
+        "the stage brief itself, as the repository holds it",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("Stage 03") && said.contains("<code>mvp</code>"),
+        "the record says which stage of which roadmap: {said:?}",
+    );
+    assert!(
+        said.contains("<code>docs/roadmaps/mvp/03-implementation.md</code>"),
+        "and which brief it was adopted from: {said:?}",
+    );
+    assert!(
+        said.contains("<code>implementation</code>") && said.contains("<code>main</code>"),
+        "and where its branch came off: {said:?}",
+    );
+}
+
+/// The stage is read again at the press rather than taken from what the page
+/// showed: a base the human fixed to an earlier commit is adopted by the stage
+/// that is next *there*.
+#[tokio::test]
+async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let before = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    // The default branch moves on: stage 03 is ticked off there, so 04 is what
+    // the tip has open.
+    roadmap(&repo, OPEN_AT_FOUR, &[]);
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    assert_eq!(base(&app, id, Some(&before)).await, BaseRecorded::Recorded);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.branch, "implementation");
+    assert_eq!(view.base_commit.as_deref(), Some(before.as_str()));
 }

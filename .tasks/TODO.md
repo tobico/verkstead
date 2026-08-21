@@ -20,6 +20,6 @@ commit override and adopts on one press.
 
 - [x] 01: The abandoned-roadmaps notice — [details](01-abandoned-notice.md)
 - [x] 02: An adopting Conversation and its page — [details](02-adopting-draft.md)
-- [ ] 03: Adopting — the press that starts the stage — [details](03-adopt-press.md)
+- [x] 03: Adopting — the press that starts the stage — [details](03-adopt-press.md)
 - [ ] 04: Adopting — every refusal by name — [details](04-adopt-refusals.md)
 - [ ] 05: The words, and the chain joining up — [details](05-words-and-chain.md)

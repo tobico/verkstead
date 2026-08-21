@@ -27,11 +27,11 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted, ConversationEntry,
-    ConversationView, DirectionChoice, DirectionChosen, GrillingStarted, Lifecycle, NewAdoption,
-    NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice,
-    RemedySettled, RepoEntry, SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe,
-    UpdateNotice,
+    Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
+    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
+    Lifecycle, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -89,6 +89,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
+        // And the press that adopts a roadmap's next stage, which is the
+        // grilling start's sibling: what the human presses on an adopting
+        // Conversation, there being no Brief to write and no grilling to run.
+        .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
         // How the work gets built, once the grilling has proposed wrapping up.
         // What moved the Conversation here was a Question Set being answered —
@@ -977,6 +981,26 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
             unavailable("the grilling could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/adopt` — take a roadmap's next stage and set
+/// it working.
+///
+/// The grilling start's sibling, and checked the same way: the page names the
+/// stage it read a moment ago, and a roadmap somebody has ticked, taken or
+/// finished since is answered here rather than there.
+async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Adopted::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::adopt(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
+            unavailable("the stage could not be adopted")
         }
     }
 }

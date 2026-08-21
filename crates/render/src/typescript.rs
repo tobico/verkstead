@@ -17,12 +17,13 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, CommitDiff, ConversationAborted, ConversationEntry, ConversationView,
-    DirectionChoice, DirectionChosen, GrillingStarted, NewAdoption, NewConversation, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started,
-    Submitted, Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
+    AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
+    BranchRenamed, BriefEdit, BriefSaved, CommitDiff, ConversationAborted, ConversationEntry,
+    ConversationView, DirectionChoice, DirectionChosen, GrillingStarted, NewAdoption,
+    NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemedyChoice,
+    RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription, Transcript,
+    Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -79,6 +80,11 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationAborted::export_all(&config).unwrap();
+
+    // And the press that starts an adopted stage, which is the grilling start's
+    // sibling: one Conversation, one branch, and every way of being refused
+    // named separately. It takes no request shape either.
+    Adopted::export_all(&config).unwrap();
 
     // How the work gets built, once the grilling has proposed wrapping up. The
     // recommendation and its reasoning ride on the `ConversationView` above,

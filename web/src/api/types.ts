@@ -56,6 +56,17 @@ stage: string,
 stage_title: string, };
 
 /**
+ * What became of pressing Adopt.
+ *
+ * Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
+ * human is at the workbench pressing the button, and each of these is
+ * something different for them to go and do. What is decided while nobody is
+ * watching says itself on a Timeline instead — see the server's `continuing`
+ * module, which starts the same stage by the other route.
+ */
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoStage" | "NoBaseCommit" | "WorktreeRefused";
+
+/**
  * The stage an adoption would start, named.
  */
 export type AdoptedStage = { 

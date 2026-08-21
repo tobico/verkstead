@@ -532,12 +532,16 @@ fn indexed(path: &str) -> Option<&str> {
 /// then who the annotation names, then whether the brief is there, then what git
 /// has for branches.
 ///
+/// Asked at the default branch's tip for the notice, and at a Conversation's
+/// base commit for the page that adopts and for the press itself — the same
+/// rule each time, so what the human is offered is what pressing would start.
+///
 /// Which stage is never in question. It is the lowest-numbered unchecked one:
 /// the roadmap's order is the roadmap's own and its stages are strictly
 /// sequential. And there is no Conversation of this reading's own to skip, so
 /// the branch-skipping [`ours`] does for the settling path has no part in it —
 /// a roadmap read here belongs to nobody yet.
-fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandoned> {
+pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandoned> {
     let index = at(repo, commit, &format!("{ROADMAPS}/{name}/{INDEX}"))?;
 
     let mut entries = index.lines().filter_map(checklist::entry).peekable();

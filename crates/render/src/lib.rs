@@ -29,7 +29,7 @@ mod view;
 
 pub use answering::{Archived, Submitted};
 pub use conversations::{
-    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, AgentOutputEvent,
+    AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
     BriefSaved, Comment, CommitDiff, CommitEvent, CommitSummary, ConversationAborted,
     ConversationEntry, ConversationView, DirectedEvent, DirectionChoice, DirectionChosen,
