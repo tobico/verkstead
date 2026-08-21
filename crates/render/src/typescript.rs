@@ -18,10 +18,10 @@ use ts_rs::TS;
 
 use crate::{
     Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
-    ConversationAborted, ConversationEntry, ConversationView, GrillingStarted, NewConversation,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey,
-    Registered, Registration, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
-    Transcript, Unsubscribe, UpdateNotice,
+    ConversationAborted, ConversationEntry, ConversationView, DirectionChoice, DirectionChosen,
+    GrillingStarted, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PushKey, Registered, Registration, RepoEntry, SetView, Started,
+    Submitted, Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -70,6 +70,13 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationAborted::export_all(&config).unwrap();
+
+    // How the work gets built, once the grilling has proposed wrapping up. The
+    // recommendation and its reasoning ride on the `ConversationView` above,
+    // because the chooser draws them beside the buttons; this is the choice
+    // going back.
+    DirectionChoice::export_all(&config).unwrap();
+    DirectionChosen::export_all(&config).unwrap();
 
     // What a session printed. The summary rides on the Timeline; the transcript
     // is its own payload, because it is fetched by the one pane that shows it.

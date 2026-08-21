@@ -16,7 +16,12 @@
 //!   Option fill every one of them, and `cells` without `columns` have nothing
 //!   to fill. An empty `columns` list is not a table with no axes — the wire
 //!   format cannot tell it from an absent one — so it reads as no declaration
-//!   at all, and the question is drawn as the list it always was.
+//!   at all, and the question is drawn as the list it always was;
+//! - a Set carrying a `proposal` gives its reasoning, and the Option it names as
+//!   acceptance is one the Set actually offers. The direction is an enum, so the
+//!   wire format refuses an unknown one on its own; what is left is a rationale
+//!   nobody wrote, and an `accepted_by` naming an Option nobody can pick — which
+//!   would be a grilling that could never end.
 //!
 //! Multi-select needs no rule: the format gives no way to express it — an
 //! Answer carries one `selected` number.
@@ -126,6 +131,8 @@ impl QuestionSet {
             check_question(question, &mut seen_labels, &mut violations);
         }
 
+        check_proposal(self, &mut violations);
+
         if violations.is_empty() {
             Ok(())
         } else {
@@ -212,6 +219,93 @@ impl Response {
             Err(ValidationError { violations })
         }
     }
+}
+
+/// The two things a wrap-up proposal has to be, beyond naming a direction the
+/// wire format already knows.
+///
+/// Which direction is recommended is settled by deserialization: `direction` is
+/// an enum of three, and a Set naming a fourth never reaches this. What is left
+/// is what the grammar cannot express — that there is reasoning to read, and
+/// that there is something to answer.
+///
+/// The second of those is the load-bearing one. Answering a proposal Set is what
+/// moves the Conversation on, so a proposal on a Set with nothing answerable in
+/// it is a grilling that could never end: the Set would sit waiting on a human
+/// who has nothing to decide.
+fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
+    let Some(proposal) = &set.proposal else {
+        return;
+    };
+
+    if proposal.rationale.trim().is_empty() {
+        violations.push(Violation::set(
+            "a `proposal` needs a rationale; the chooser shows the human why this \
+             direction was recommended, and a bare word is not a reason",
+        ));
+    }
+
+    // The Option that means "go ahead" has to be one the human can actually
+    // pick. A proposal naming an Option nothing offers could never be accepted,
+    // so the grilling it was supposed to end would run until somebody aborted
+    // it — which is the one failure here nobody would be told about.
+    let Some((name, n)) = proposal.acceptance() else {
+        violations.push(Violation::set(format!(
+            "a `proposal` names the Option that means go ahead, as `Q14.1`; \
+             {:?} is not an Option's number",
+            proposal.accepted_by
+        )));
+        return;
+    };
+
+    let Some(options) = offered(set, name) else {
+        violations.push(Violation::set(format!(
+            "a `proposal` is accepted by {:?}, but this Set asks no question \
+             called {name:?}",
+            proposal.accepted_by
+        )));
+        return;
+    };
+
+    if !options.iter().any(|option| option.n == n) {
+        let offered: Vec<String> = options.iter().map(|option| option.n.to_string()).collect();
+        violations.push(Violation::at(
+            name,
+            match offered.is_empty() {
+                true => format!(
+                    "a `proposal` is accepted by Option {n} of this question, which \
+                     offers no Options at all"
+                ),
+                false => format!(
+                    "a `proposal` is accepted by Option {n} of this question, which \
+                     offers only {}",
+                    offered.join(", ")
+                ),
+            },
+        ));
+    }
+}
+
+/// The Options a Set's question offers, by the name it answers to — `Q7` for a
+/// Question, `Q7a` for a Sub-question.
+///
+/// A Heading is not among them, for the reason a Response never carries one: it
+/// heads its Sub-questions rather than asking anything, so there is nothing
+/// there to accept a proposal with.
+fn offered<'a>(set: &'a QuestionSet, name: &str) -> Option<&'a [QuestionOption]> {
+    for question in &set.questions {
+        if !question.heading() && question.name() == name {
+            return Some(&question.options);
+        }
+
+        for subquestion in &question.subquestions {
+            if subquestion.name(question) == name {
+                return Some(&subquestion.options);
+            }
+        }
+    }
+
+    None
 }
 
 fn check_answer(

@@ -165,6 +165,33 @@ mod tests {
         );
     }
 
+    /// A grilling ends by the agent's own closing move, so the skill has to say
+    /// what that move is. Nothing else will tell it: there is no button that
+    /// ends a grilling, and a session that never proposed wrapping up would grill
+    /// until the human aborted it.
+    #[test]
+    fn the_grilling_skill_says_how_a_grilling_ends() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains("proposal:"),
+            "the closing Set is marked by the block it carries, so the skill has to name it"
+        );
+
+        for direction in ["inline", "task-list", "roadmap"] {
+            assert!(
+                grilling.contains(direction),
+                "the skill should name the {direction} direction, which is one of the three"
+            );
+        }
+
+        assert!(
+            grilling.contains("rationale"),
+            "the chooser draws the agent's reasoning beside the choices, and a proposal \
+             without one is refused"
+        );
+    }
+
     /// A session is pointed at the skill by the prompt, and nothing else in the
     /// sandbox says what it is for.
     #[test]

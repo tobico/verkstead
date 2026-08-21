@@ -37,6 +37,7 @@ fn set(title: &str) -> QuestionSet {
         preface: None,
         questions: Vec::new(),
         postscript: None,
+        proposal: None,
         project: Some("verkstead".to_owned()),
         branch: Some("answering-conveniences".to_owned()),
         diff: None,

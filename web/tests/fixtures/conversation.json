@@ -1,6 +1,7 @@
 {
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "branch": "rate-limiting",
+  "direction": null,
   "grilling_profile": {
     "agent_type": "Claude",
     "broken": null,
@@ -20,6 +21,7 @@
     "model": "claude-opus-5",
     "name": "opus"
   },
+  "proposal": null,
   "ready_to_grill": true,
   "repo": {
     "default_branch": "main",

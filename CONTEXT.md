@@ -116,6 +116,37 @@ Profiles are why an inline implementation is a fresh session rather than the
 grilling session carrying on.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent
 
+**Direction**:
+How a Conversation's work gets built — **inline**, **task list** or **roadmap**
+— chosen by the human in the workbench once the grilling has proposed wrapping
+up. One of the three and never a mixture: the choice is which pipeline runs the
+work, and a Conversation that had picked two would be two pieces of work. It is
+also the state that choosing happens in, which is the same word on purpose:
+Direction is where the Conversation is and the Direction is what comes out of
+it. Choosing does not start anything — the work beginning is a move of its own —
+so a Conversation stays in Direction with its Direction settled.
+_Avoid_: mode, strategy, plan, execution path
+
+**Proposal**:
+The grilling agent's closing move: a recommended Direction, the reasoning for it,
+and the Option that means *go ahead*, carried as a block on one Question Set.
+What can end a grilling rather than continue it — no button anywhere ends one.
+Ordinary grilling Sets carry none.
+
+Only picking the named Option accepts a Proposal and moves the Conversation to
+Direction. **Every other way of answering sends it back**: another Option, an
+answer in the human's own words, or the question left open. That is how the
+human disagrees, and it is the whole way back — the session that proposed is
+still holding the thread, and takes their Response to decide for itself whether
+to keep grilling or propose again. A Proposal that was sent back is not in force
+and is not what the chooser draws; the latest accepted one is.
+
+The recommendation is marked in the chooser and never preselected: accepting the
+Proposal settles that the work is understood, not which Direction it takes, and
+the human may pick any of the three.
+_Avoid_: wrap-up request, handover, recommendation (that is the part, not the
+whole), final question
+
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A

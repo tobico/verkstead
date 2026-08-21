@@ -21,7 +21,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
-    ConversationView, GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, TimelineEvent,
+    ConversationView, DirectionChosen, GrillingStarted, Lifecycle, ProfileSaved, Registered,
+    Started, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -1043,5 +1044,347 @@ async fn two_conversations_wanting_one_name_get_a_directory_each() {
     assert_eq!(
         path.file_name().unwrap().to_string_lossy(),
         format!("verkstead-rate-limiting-2-{second}")
+    );
+}
+
+/// The grilling's closing move as it reaches the server: YAML on the agents'
+/// half, exactly as the CLI sends one.
+///
+/// Sent through the agent endpoint rather than pressed into the store, because
+/// what these are about is the whole path — an agent's Set in one end, the
+/// human's Answer in the other, and a Conversation that has moved.
+const PROPOSING: &str = r#"
+title: Ready to build the rate limiter
+questions:
+  - label: Q9
+    text: Ready to build it this way?
+    options:
+      - n: 1
+        text: Yes, go ahead
+        recommended: true
+      - n: 2
+        text: Not yet — more to work through
+proposal:
+  direction: task-list
+  accepted_by: Q9.1
+  rationale: |
+    Six changes, each independently testable.
+"#;
+
+/// And an ordinary round of grilling, which carries no proposal at all.
+const ORDINARY: &str = r#"
+title: Where the request counter lives
+questions:
+  - label: Q9
+    text: Where should it live?
+    options:
+      - n: 1
+        text: In-process
+        recommended: true
+"#;
+
+/// Put a Set to the human the way a session does, and hand back its id.
+async fn ask(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{conversation}/api/v1/sets"))
+                .header(header::CONTENT_TYPE, "application/yaml")
+                .body(Body::from(yaml.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let created: verkstead_schema::SetCreated =
+        serde_saphyr::from_str(std::str::from_utf8(&body).unwrap()).unwrap();
+
+    created.id
+}
+
+/// Answer it from the browser, which is the path the human's own reply takes.
+async fn answer(app: &Router, set_id: i64) -> verkstead_render::Submitted {
+    answered(
+        app,
+        set_id,
+        serde_json::json!({ "label": "Q9", "selected": 1 }),
+    )
+    .await
+}
+
+/// The same, with an Answer of the test's own choosing — for the ways of
+/// answering that are not the Option `accepted_by` names.
+async fn answered(
+    app: &Router,
+    set_id: i64,
+    answer: serde_json::Value,
+) -> verkstead_render::Submitted {
+    post(
+        app,
+        &format!("/api/ui/sets/{set_id}/response"),
+        &serde_json::json!({ "answers": [answer] }),
+    )
+    .await
+}
+
+async fn direct(app: &Router, id: i64, direction: &str) -> DirectionChosen {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/direction"),
+        &serde_json::json!({ "direction": direction }),
+    )
+    .await
+}
+
+/// The directions a Conversation's Timeline says were chosen, in order.
+fn directions(view: &ConversationView) -> Vec<verkstead_schema::Direction> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Directed(directed) => Some(directed.direction),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A Conversation that is grilling for real: branch, worktree and all.
+async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
+    let id = ready(app, watched, repo_id).await;
+    assert_eq!(grill(app, id).await, GrillingStarted::Started);
+    id
+}
+
+#[tokio::test]
+async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let set = ask(&app, id, PROPOSING).await;
+    assert_eq!(
+        answer(&app, set).await,
+        verkstead_render::Submitted::Accepted
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Direction);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Grilling, Lifecycle::Direction],
+        "nothing on this page was pressed to get here: the agent proposed and the human answered",
+    );
+
+    let proposal = view.proposal.expect("the closing Set proposed a direction");
+    assert_eq!(proposal.direction, verkstead_schema::Direction::TaskList);
+    assert!(
+        proposal.rationale_html.contains("independently testable"),
+        "the chooser draws the agent's reasoning, got: {}",
+        proposal.rationale_html
+    );
+    assert!(
+        proposal.rationale_html.contains("<p>"),
+        "and it arrives as HTML, like every other piece of agent markdown: {}",
+        proposal.rationale_html
+    );
+
+    assert_eq!(
+        view.direction, None,
+        "the recommendation is marked, never chosen on the human's behalf",
+    );
+}
+
+#[tokio::test]
+async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let set = ask(&app, id, ORDINARY).await;
+    assert_eq!(
+        answer(&app, set).await,
+        verkstead_render::Submitted::Accepted
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.proposal, None);
+    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+}
+
+#[tokio::test]
+async fn choosing_a_direction_records_it_and_leaves_the_conversation_choosing() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    assert_eq!(direct(&app, id, "inline").await, DirectionChosen::Chosen);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
+    assert_eq!(directions(&view), [verkstead_schema::Direction::Inline]);
+    assert_eq!(
+        view.state,
+        Lifecycle::Direction,
+        "what was settled is how the work gets built, not that it has started",
+    );
+}
+
+#[tokio::test]
+async fn a_staged_roadmap_is_refused_by_the_server_and_not_only_by_the_chooser() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    assert_eq!(
+        direct(&app, id, "roadmap").await,
+        DirectionChosen::RoadmapNotYet,
+        "the chooser's disabled button is a courtesy; the refusal is the server's",
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.direction, None);
+    assert_eq!(directions(&view), []);
+}
+
+#[tokio::test]
+async fn a_conversation_still_grilling_has_no_direction_to_choose() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        direct(&app, id, "inline").await,
+        DirectionChosen::NotChoosing
+    );
+    assert_eq!(opened(&app, id).await.direction, None);
+}
+
+#[tokio::test]
+async fn a_direction_for_a_conversation_that_is_not_there() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        direct(&app, 404, "inline").await,
+        DirectionChosen::NoSuchConversation
+    );
+
+    // And an id that is not a number at all, which is what a typed URL holds.
+    let chosen: DirectionChosen = post(
+        &app,
+        "/api/ui/conversations/nonsense/direction",
+        &serde_json::json!({ "direction": "inline" }),
+    )
+    .await;
+    assert_eq!(chosen, DirectionChosen::NoSuchConversation);
+}
+
+#[tokio::test]
+async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let set = ask(&app, id, PROPOSING).await;
+
+    // Not the Option `accepted_by` names, and words of their own beside it —
+    // which is the shape of a human saying what is still open.
+    assert_eq!(
+        answered(
+            &app,
+            set,
+            serde_json::json!({
+                "label": "Q9",
+                "selected": 2,
+                "free_text": "The migration is still hand-wavy.",
+            }),
+        )
+        .await,
+        verkstead_render::Submitted::Accepted,
+        "the Response is taken either way: it is the agent's to read",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "only the Option the proposal named ends a grilling",
+    );
+    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+    assert_eq!(
+        view.proposal, None,
+        "and there is no chooser to draw: nothing was accepted",
+    );
+}
+
+#[tokio::test]
+async fn a_proposal_put_again_after_a_refusal_reaches_the_chooser() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    // Refused, so the grilling carries on holding the thread.
+    answered(
+        &app,
+        ask(&app, id, PROPOSING).await,
+        serde_json::json!({ "label": "Q9", "selected": 2 }),
+    )
+    .await;
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Grilling);
+
+    // The agent read the Response, went back down the branch, and proposed
+    // again — this time recommending something else.
+    let again = PROPOSING.replace("direction: task-list", "direction: inline");
+    answer(&app, ask(&app, id, &again).await).await;
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Direction);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Grilling, Lifecycle::Direction],
+        "the refusal moved nothing, so it got here once",
+    );
+    assert_eq!(
+        view.proposal
+            .expect("the second proposal is the one in force")
+            .direction,
+        verkstead_schema::Direction::Inline,
+        "the chooser is about the latest proposal, not the one that was refused",
+    );
+}
+
+#[tokio::test]
+async fn a_proposal_naming_an_option_the_set_does_not_offer_is_refused_as_it_arrives() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    // Nothing could ever accept it, so the grilling it was meant to end would
+    // run until somebody aborted the conversation.
+    let unacceptable = PROPOSING.replace("accepted_by: Q9.1", "accepted_by: Q9.7");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{id}/api/v1/sets"))
+                .header(header::CONTENT_TYPE, "application/yaml")
+                .body(Body::from(unacceptable))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let refusal = String::from_utf8(body.to_vec()).unwrap();
+    assert!(
+        refusal.contains("Q9"),
+        "the refusal should name the question at fault, got: {refusal}"
     );
 }

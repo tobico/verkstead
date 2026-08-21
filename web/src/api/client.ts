@@ -14,6 +14,8 @@ import type {
   ConversationAborted,
   ConversationEntry,
   ConversationView,
+  Direction,
+  DirectionChosen,
   GrillingStarted,
   ProfileChosen,
   ProfileDeleted,
@@ -167,6 +169,20 @@ export function startGrilling(id: number): Promise<GrillingStarted> {
 /// left where it is.
 export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
+}
+
+/// Say how the work gets built, once the grilling has proposed wrapping up.
+///
+/// The conversation stays in Direction: this settles *how*, and starting is a
+/// move of its own. There is no call for the move that got it here — answering
+/// the grilling's closing question set is what did that.
+export function chooseDirection(
+  id: number,
+  direction: Direction,
+): Promise<DirectionChosen> {
+  return post<DirectionChosen>(`/api/ui/conversations/${id}/direction`, {
+    direction,
+  });
 }
 
 /// The Agent Profiles a session can be run under, by name.

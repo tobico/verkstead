@@ -18,9 +18,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, GrillingStarted, ProfileEntry,
-    Started, Worktree,
+    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen, GrillingStarted,
+    ProfileEntry, Started, Worktree,
 };
+use verkstead_schema::Direction;
 
 use crate::AppState;
 use crate::repos::git;
@@ -41,6 +42,63 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
             None => Started::NoSuchRepo,
         },
     )
+}
+
+/// Say what answering a Question Set did to the Conversation it was asked from.
+///
+/// The store hands back what happened and says nothing about it — see
+/// [`store::Taken`] — so this is where a proposal settled becomes a line in the
+/// log. Three of the four outcomes are unremarkable and one cannot happen, which
+/// is exactly why it is worth saying when it does.
+pub(crate) fn said_of_a_proposal(set_id: i64, proposed: Option<store::Proposed>) {
+    use store::{Directing, Proposed};
+
+    match proposed {
+        // The ordinary Set, carrying no proposal at all — which is nearly every
+        // Set a grilling asks.
+        None => {}
+        Some(Proposed::SentBack) => tracing::info!(
+            set_id,
+            "a wrap-up proposal was not accepted; the grilling carries on with the Response"
+        ),
+        Some(Proposed::Accepted(Directing::Moved)) => tracing::info!(
+            set_id,
+            "a wrap-up proposal was accepted; the Conversation is choosing a direction"
+        ),
+        Some(Proposed::Accepted(Directing::NotGrilling)) => tracing::debug!(
+            set_id,
+            "a wrap-up proposal was accepted for a Conversation that had already left grilling"
+        ),
+        Some(Proposed::Accepted(Directing::NoSuchConversation)) => tracing::error!(
+            set_id,
+            "a wrap-up proposal names a Conversation that is not there, so nothing moved"
+        ),
+    }
+}
+
+/// Record how the human chose to have the work built.
+///
+/// The Conversation stays in Direction: this settles *how* the work gets done,
+/// and starting to do it is the next stage's move to make.
+///
+/// Roadmap is refused here rather than only greyed out in the chooser. The page's
+/// disabled button is a courtesy, exactly as a form's branch-name check is: the
+/// stage that runs a staged roadmap has not landed, so there is nothing behind
+/// the choice whatever reached this endpoint.
+pub(crate) async fn choose_direction(
+    pool: &SqlitePool,
+    id: i64,
+    direction: Direction,
+) -> Result<DirectionChosen> {
+    if direction == Direction::Roadmap {
+        return Ok(DirectionChosen::RoadmapNotYet);
+    }
+
+    Ok(match store::choose_direction(pool, id, direction).await? {
+        store::Directed::Chosen => DirectionChosen::Chosen,
+        store::Directed::NoSuchConversation => DirectionChosen::NoSuchConversation,
+        store::Directed::NotChoosing => DirectionChosen::NotChoosing,
+    })
 }
 
 /// Save what the human has written into the Brief.

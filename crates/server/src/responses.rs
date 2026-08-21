@@ -51,7 +51,14 @@ pub(crate) async fn submit_response(
     }
 
     match store::submit_response(&state.pool, &state.settlements, id, &response).await {
-        Ok(Submission::Accepted(accepted)) => yaml(StatusCode::CREATED, &accepted),
+        Ok(Submission::Accepted(taken)) => {
+            crate::conversations::said_of_a_proposal(id, taken.proposed);
+
+            // The acceptance and nothing about the move: what a waiting agent
+            // came for is that its Set is answered, and the Conversation moving
+            // on is the Timeline's business rather than the agent contract's.
+            yaml(StatusCode::CREATED, &taken.accepted)
+        }
         Ok(Submission::NoSuchSet) => not_found(id),
         Ok(Submission::Archived) => gone(id),
         Ok(Submission::Invalid(invalid)) => yaml(

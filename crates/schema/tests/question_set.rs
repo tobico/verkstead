@@ -1,7 +1,7 @@
 //! The Question Set as it arrives from an agent: what YAML parses into, and
 //! which shapes the question grammar refuses.
 
-use verkstead_schema::QuestionSet;
+use verkstead_schema::{Direction, QuestionSet, Response};
 
 /// A Set exercising every part of the wire format at once.
 const FULL_SET: &str = r#"
@@ -630,4 +630,248 @@ questions:
     let reparsed = QuestionSet::from_yaml(&yaml).expect("our own YAML should parse");
 
     assert_eq!(reparsed, set);
+}
+
+/// A Set proposing wrap-up: the closing move a grilling ends by, and the one
+/// shape that carries a `proposal` block.
+const PROPOSING: &str = r#"
+title: Ready to build the rate limiter
+preface: |
+  I think we have this.
+questions:
+  - label: Q14
+    text: Ready to build it this way?
+    options:
+      - n: 1
+        text: Yes, go ahead
+        recommended: true
+      - n: 2
+        text: Not yet — more to work through
+proposal:
+  direction: task-list
+  accepted_by: Q14.1
+  rationale: |
+    Six changes across the limiter, the config and the migration, each
+    independently testable.
+"#;
+
+#[test]
+fn a_proposal_parses_into_the_direction_and_the_reasoning() {
+    let set = QuestionSet::from_yaml(PROPOSING).expect("the proposing Set should parse");
+
+    set.validate()
+        .expect("a proposal with reasoning and a question to answer is legal");
+
+    let proposal = set.proposal.expect("this Set proposes wrapping up");
+
+    assert_eq!(proposal.direction, Direction::TaskList);
+    assert!(
+        proposal.rationale.starts_with("Six changes across"),
+        "the rationale is markdown the human reads, got: {:?}",
+        proposal.rationale
+    );
+}
+
+#[test]
+fn an_ordinary_set_carries_no_proposal_at_all() {
+    let set = QuestionSet::from_yaml(FULL_SET).expect("the example Set should parse");
+
+    assert_eq!(
+        set.proposal, None,
+        "a grilling Set must never be mistaken for the one that ends the grilling",
+    );
+}
+
+#[test]
+fn a_proposal_round_trips_through_yaml() {
+    let set = QuestionSet::from_yaml(PROPOSING).unwrap();
+    let yaml = set.to_yaml().expect("a Set should serialise");
+    let reparsed = QuestionSet::from_yaml(&yaml).expect("our own YAML should parse");
+
+    assert_eq!(reparsed, set);
+}
+
+#[test]
+fn a_direction_the_wire_format_does_not_know_is_refused_as_it_parses() {
+    let unknown = PROPOSING.replace("direction: task-list", "direction: telepathy");
+
+    QuestionSet::from_yaml(&unknown)
+        .expect_err("there are three directions, and the format knows all of them");
+}
+
+#[test]
+fn a_proposal_needs_reasoning_the_human_can_read() {
+    let bare = PROPOSING
+        .split("  rationale:")
+        .next()
+        .expect("the fixture has a rationale to cut off")
+        .to_owned()
+        + "  rationale: \"   \"\n";
+
+    let error = QuestionSet::from_yaml(&bare)
+        .unwrap()
+        .validate()
+        .expect_err("the chooser shows the reasoning, so there has to be some");
+
+    assert!(
+        error.to_string().contains("rationale"),
+        "the refusal should say what is missing, got: {error}"
+    );
+}
+
+/// The Option that means "go ahead" has to be one the human can actually pick.
+///
+/// One test over the four ways it can fail, because they are one rule: a
+/// proposal nobody can accept is a grilling that would run until somebody
+/// aborted it, which is the one failure here that nothing would report.
+#[test]
+fn a_proposal_naming_an_option_nobody_can_pick_is_refused() {
+    for (how, set) in [
+        (
+            "a Set that asks nothing at all",
+            "
+title: Ready to build it
+questions: []
+proposal:
+  direction: inline
+  accepted_by: Q1.1
+  rationale: One session is enough.
+",
+        ),
+        (
+            "a question the Set does not ask",
+            "
+title: Ready to build it
+questions:
+  - label: Q1
+    text: Ready?
+    options:
+      - n: 1
+        text: Yes
+proposal:
+  direction: inline
+  accepted_by: Q9.1
+  rationale: One session is enough.
+",
+        ),
+        (
+            "an Option number the question does not offer",
+            "
+title: Ready to build it
+questions:
+  - label: Q1
+    text: Ready?
+    options:
+      - n: 1
+        text: Yes
+proposal:
+  direction: inline
+  accepted_by: Q1.4
+  rationale: One session is enough.
+",
+        ),
+        (
+            // A bare clarifying Question is answered with whatever the human
+            // writes, and free text is never acceptance — so there is no Option
+            // here to name.
+            "a question that offers no Options at all",
+            "
+title: Ready to build it
+questions:
+  - label: Q1
+    text: What we settled
+proposal:
+  direction: inline
+  accepted_by: Q1.1
+  rationale: One session is enough.
+",
+        ),
+        (
+            "something that is not the notation",
+            "
+title: Ready to build it
+questions:
+  - label: Q1
+    text: Ready?
+    options:
+      - n: 1
+        text: Yes
+proposal:
+  direction: inline
+  accepted_by: yes please
+  rationale: One session is enough.
+",
+        ),
+    ] {
+        assert!(
+            QuestionSet::from_yaml(set).unwrap().validate().is_err(),
+            "{how} should be refused, and was not",
+        );
+    }
+}
+
+/// What counts as acceptance, read straight off the Response.
+///
+/// The rule the whole way back turns on: only the named Option ends a grilling.
+#[test]
+fn only_the_named_option_accepts_a_proposal() {
+    let set = QuestionSet::from_yaml(PROPOSING).unwrap();
+    let proposal = set.proposal.as_ref().expect("this Set proposes");
+
+    let answered = |yaml: &str| proposal.accepted(&Response::from_yaml(yaml).unwrap());
+
+    assert!(
+        answered("answers:\n  - label: Q14\n    selected: 1\n"),
+        "picking the Option the proposal names is what accepts it",
+    );
+    assert!(
+        answered("answers:\n  - label: Q14\n    selected: 1\n    free_text: Keep the key.\n"),
+        "words beside a picked Option are a qualification, not a refusal",
+    );
+
+    assert!(
+        !answered("answers:\n  - label: Q14\n    selected: 2\n"),
+        "another Option is the human disagreeing",
+    );
+    assert!(
+        !answered("answers:\n  - label: Q14\n    free_text: Not until the migration lands.\n"),
+        "an answer in their own words wins over the Options, so it is not the named one",
+    );
+    assert!(
+        !answered("answers:\n  - label: Q14\n    unanswered: true\n"),
+        "a question left open is never acceptance",
+    );
+    assert!(
+        !answered("answers: []\n"),
+        "and neither is a Response that never reached the question",
+    );
+}
+
+#[test]
+fn a_proposal_can_be_accepted_by_a_sub_questions_option() {
+    let set = QuestionSet::from_yaml(
+        "
+title: Ready to build it
+questions:
+  - label: Q1
+    text: What we settled
+    subquestions:
+      - letter: a
+        text: Ready to build it this way?
+        options:
+          - n: 1
+            text: Yes, go ahead
+            recommended: true
+          - n: 2
+            text: Not yet
+proposal:
+  direction: inline
+  accepted_by: Q1a.1
+  rationale: One session is enough.
+",
+    )
+    .unwrap();
+
+    set.validate()
+        .expect("a Sub-question's Option answers to Q1a.1 like any other");
 }

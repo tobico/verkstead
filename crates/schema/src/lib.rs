@@ -16,5 +16,5 @@ mod validate;
 pub use api::{ApiError, ResponseAccepted, SetCreated};
 pub use liveness::Liveness;
 pub use response::{Answer, Response};
-pub use set::{Question, QuestionOption, QuestionSet, Subquestion};
+pub use set::{Direction, Proposal, Question, QuestionOption, QuestionSet, Subquestion};
 pub use validate::{ValidationError, Violation};

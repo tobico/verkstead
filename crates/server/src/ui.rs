@@ -28,9 +28,9 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
     Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted, ConversationEntry,
-    ConversationView, GrillingStarted, Lifecycle, NewConversation, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RepoEntry, SetView, Standing, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
+    ConversationView, DirectionChoice, DirectionChosen, GrillingStarted, Lifecycle,
+    NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry,
+    SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -65,6 +65,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // viewer speaks one method.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
         .route("/api/ui/conversations/{id}/abort", post(abort))
+        // How the work gets built, once the grilling has proposed wrapping up.
+        // What moved the Conversation here was a Question Set being answered —
+        // see [`store::submit_response`] — so there is no route for that.
+        .route(
+            "/api/ui/conversations/{id}/direction",
+            post(choose_direction),
+        )
         .route(
             "/api/ui/conversations/{id}/grilling-profile",
             post(choose_grilling_profile),
@@ -148,6 +155,24 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     Json(view).into_response()
 }
 
+/// The wrap-up proposal a Set carried, where it carried one *and* the human
+/// accepted it.
+///
+/// The same reading the store settles the move by — see
+/// [`store::submit_response`] — so the Conversation being in Direction and the
+/// chooser having something to draw are the one fact rather than two that could
+/// come apart. A Set still waiting on the human has not been accepted either:
+/// nobody has answered it yet.
+fn accepted_proposal(asked: &store::SetOnTimeline) -> Option<&verkstead_schema::Proposal> {
+    let proposal = asked.set.proposal.as_ref()?;
+
+    let Some(store::Settlement::Answered(answered)) = &asked.settlement else {
+        return None;
+    };
+
+    proposal.accepted(&answered.response).then_some(proposal)
+}
+
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
 ///
 /// The Liveness comes out of the registry of held waits, which is the same
@@ -197,7 +222,10 @@ async fn submit_response(
         };
 
     Json(match submission {
-        store::Submission::Accepted(_) => Submitted::Accepted,
+        store::Submission::Accepted(taken) => {
+            crate::conversations::said_of_a_proposal(id, taken.proposed);
+            Submitted::Accepted
+        }
         store::Submission::AlreadyAnswered => Submitted::AlreadyAnswered,
         store::Submission::NoSuchSet => Submitted::NoSuchSet,
         store::Submission::Archived => Submitted::Archived,
@@ -402,6 +430,25 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
+    // What the grilling proposed on its way out, read off the Timeline for the
+    // reason the Brief is: it is already here, and a second read would be a
+    // second opinion about which proposal is in force.
+    //
+    // Only an *accepted* one. A grilling proposes as often as it takes, and a
+    // proposal the human sent back is a thing that was declined rather than a
+    // thing in force — drawing its reasoning beside the chooser would credit the
+    // decision to the wrong argument. The last accepted one wins, so a grilling
+    // that was sent back and proposed again is about what it proposed the second
+    // time.
+    let proposal = timeline
+        .iter()
+        .rev()
+        .find_map(|event| match &event.event {
+            store::Event::QuestionSet(asked) => accepted_proposal(asked),
+            _ => None,
+        })
+        .map(verkstead_render::proposal_view);
+
     // Which of this Conversation's output Events is still being written into,
     // which is a question about a process rather than about the record: a
     // restarted server has no sessions, and every transcript it holds is of one
@@ -430,6 +477,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         grilling_profile,
         implementation_profile,
         worktree,
+        proposal,
+        direction: conversation.direction,
         timeline: timeline
             .into_iter()
             .map(|event| match event.event {
@@ -468,6 +517,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         &asked.set,
                         standing,
                     )
+                }
+                // One of three words, like a move — and drawn as a line for the
+                // same reason.
+                store::Event::Directed(direction) => {
+                    verkstead_render::directed_event(event.id, event.at, direction)
                 }
             })
             .collect(),
@@ -584,6 +638,29 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
             unavailable("the grilling could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/direction` — how the work gets built.
+///
+/// The Conversation stays in Direction: this settles *how*, and starting is the
+/// next stage's move. Roadmap is refused here as well as greyed out in the
+/// chooser — see [`crate::conversations::choose_direction`].
+async fn choose_direction(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<DirectionChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(DirectionChosen::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::choose_direction(&state.pool, id, choice.direction).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "choosing a direction failed");
+            unavailable("the direction could not be chosen")
         }
     }
 }

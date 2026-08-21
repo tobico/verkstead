@@ -246,6 +246,22 @@ ready_to_grill: boolean,
  */
 worktree: Worktree | null, 
 /**
+ * What the grilling proposed on its way out, once it has proposed anything.
+ *
+ * Lifted out of the Timeline rather than left for the page to go looking
+ * for: the chooser draws the recommendation marked and the reasoning beside
+ * it, and a page that had to walk its own Timeline for the last Set carrying
+ * one would be a second opinion about which proposal is in force.
+ */
+proposal: ProposalView | null, 
+/**
+ * How the human chose to have the work built, once they have chosen.
+ *
+ * `null` while the choice is still open, which is what the chooser draws
+ * its buttons for.
+ */
+direction: Direction | null, 
+/**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, };
@@ -263,6 +279,36 @@ timeline: Array<TimelineEvent>, };
  * Set.
  */
 export type DiffView = { html: string, paths: Array<string>, };
+
+/**
+ * The direction the human chose, as the page receives it.
+ *
+ * No rendered body, like a move: there is no markdown in a choice of one of
+ * three. What the Timeline draws is a sentence of the viewer's own making.
+ */
+export type DirectedEvent = { id: number, 
+/**
+ * When it was chosen, RFC 3339.
+ */
+at: string, direction: Direction, };
+
+/**
+ * One of the three ways the work can be built.
+ *
+ * Named on the wire in the words the design uses for them, so a Set is
+ * readable as written: `inline`, `task-list`, `roadmap`.
+ */
+export type Direction = "inline" | "task-list" | "roadmap";
+
+/**
+ * Which direction the human is choosing.
+ */
+export type DirectionChoice = { direction: Direction, };
+
+/**
+ * What became of choosing one.
+ */
+export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing" | "RoadmapNotYet";
 
 /**
  * What became of starting a Conversation grilling.
@@ -400,6 +446,23 @@ broken: Broken | null, };
  * whether or not a form was involved.
  */
 export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "DirOutsideWatchedPaths" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "ConfigOutsideWatchedPaths" | "NotAFile";
+
+/**
+ * The grilling's closing proposal as the chooser draws it: which direction was
+ * recommended, and why.
+ *
+ * The rationale arrives as HTML like every other piece of agent markdown on this
+ * wire — the parser and the sanitizer are the server's.
+ */
+export type ProposalView = { 
+/**
+ * The direction the agent recommends, which the chooser marks.
+ */
+direction: Direction, 
+/**
+ * Why, rendered and sanitized by the server on the way out.
+ */
+rationale_html: string, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the
@@ -631,7 +694,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

@@ -1,32 +1,46 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
-//! Three kinds of Event so far — the Brief, a move, and what a session printed —
-//! drawn as a list of Events rather than as a Brief with a list under it. The
-//! stages after this one put Question Sets and commits on the same list.
+//! Five kinds of Event so far — the Brief, a move, what a session printed, a
+//! Question Set, and the direction the human chose — drawn as a list of Events
+//! rather than as a Brief with a list under it. The stages after this one put
+//! commits on the same list.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. The Brief has
 //! no full self beyond what is already drawn, so it is the one Event nothing
 //! opens.
 //!
-//! The Timeline is also where the grilling is started from, because that is
-//! where the reason to start it is: the button sits under the Brief it will
-//! freeze, at the end of everything that has happened so far, which is exactly
-//! where the next thing to happen belongs. Aborting is not in the list — it is
-//! not a step in the work but a way of ending it — so it hangs off the header
-//! instead, behind a menu, where a destructive action is not one stray click
-//! away.
+//! The Timeline is also where the work is moved on from, because that is where
+//! the reason to move it is: a control sits at the end of everything that has
+//! happened so far, which is exactly where the next thing to happen belongs.
+//! Two of them live there, one per state — `Start grilling` under the Brief it
+//! will freeze, and the direction chooser under the proposal that ended the
+//! grilling. Aborting is in neither place and not in the list: it is not a step
+//! in the work but a way of ending it, so it hangs off the header behind a menu,
+//! where a destructive action is not one stray click away.
+//!
+//! Nothing here ends the grilling. That is the agent's own closing move — a
+//! marked Question Set, answered — which is why the chooser appears without any
+//! button on this page having been pressed.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { abortConversation, saveBrief, startGrilling } from "../api/client";
+import {
+  abortConversation,
+  chooseDirection,
+  saveBrief,
+  startGrilling,
+} from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
   BriefSaved,
   ConversationAborted,
   ConversationView,
+  DirectedEvent,
+  Direction,
+  DirectionChosen,
   GrillingStarted,
   Lifecycle,
   MovedEvent,
@@ -71,6 +85,26 @@ export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
+};
+
+/// And each way of being refused a direction.
+export const DIRECTION_REFUSAL: Record<DirectionChosen, string> = {
+  Chosen: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotChoosing:
+    "This conversation is not choosing a direction — the grilling has not proposed wrapping up, or the work is past this point.",
+  RoadmapNotYet: "Staged roadmaps are not built yet.",
+};
+
+/// What each direction is called, wherever one is named: on a button in the
+/// chooser, and in the line the timeline gives the choice afterwards.
+///
+/// One record for both, so the thing the human pressed and the thing they read
+/// back cannot come to be called different things.
+export const DIRECTION: Record<Direction, string> = {
+  inline: "Implement inline",
+  "task-list": "Break into a task list",
+  roadmap: "Stage a roadmap",
 };
 
 /// What a move reads as. The state moved *to*, said as something that happened.
@@ -122,6 +156,9 @@ export function Timeline(props: {
                 <Match when={"Moved" in event && event.Moved}>
                   {(moved) => <Moved moved={moved()} />}
                 </Match>
+                <Match when={"Directed" in event && event.Directed}>
+                  {(directed) => <Directed directed={directed()} />}
+                </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
                     <AgentOutput
@@ -153,10 +190,27 @@ export function Timeline(props: {
       </ol>
 
       {/* After everything that has happened, because it is what happens next.
-          Drawn outside the list: it is not an event, and it would be an event
-          that moved every time one landed. */}
+          Drawn outside the list: neither is an event, and either would be an
+          event that moved every time one landed. Only one of them is ever drawn
+          — each is for a different state — so they read as the one thing there
+          is to do from here. */}
       <StartGrilling conversation={props.conversation} />
+      <DirectionChooser conversation={props.conversation} />
     </>
+  );
+}
+
+/// The direction the human chose, said in a line.
+///
+/// A line and not a card, like a move, and for the same reason: there is nothing
+/// to it but the fact and the time. It sits below the move into Direction rather
+/// than replacing it — the move says the choosing began and this says how it came
+/// out, and a human who changed their mind has both on the record.
+function Directed(props: { directed: DirectedEvent }): JSX.Element {
+  return (
+    <p class="directed" classList={{ [props.directed.direction]: true }}>
+      Chose to {DIRECTION[props.directed.direction].toLowerCase()}
+    </p>
   );
 }
 
@@ -352,6 +406,143 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show when={start.isError}>
           <p class="error">
             The grilling could not be started: {start.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
+  );
+}
+
+/// The three ways the work can be built, in the order the design names them.
+///
+/// Roadmap is here and not runnable: the choice exists so the shape of the
+/// decision is visible, and the stage that executes one has not landed. Drawn
+/// disabled rather than left out, because a chooser that grew a third button
+/// later would be a decision the human had never been shown.
+const DIRECTIONS: { direction: Direction; note: string; ready: boolean }[] = [
+  {
+    direction: "inline",
+    note: "One fresh session under the implementation profile, primed with a handoff document.",
+    ready: true,
+  },
+  {
+    direction: "task-list",
+    note: "Broken into .tasks/ in the worktree, one fresh session per task.",
+    ready: true,
+  },
+  {
+    direction: "roadmap",
+    note: "Staged under docs/roadmaps/, a feature per stage. Arriving in a later stage.",
+    ready: false,
+  },
+];
+
+/// Where the grilling hands over: what the agent proposed, and the human's
+/// choice of how the work gets built.
+///
+/// Drawn only while the conversation is choosing. What moved it here was the
+/// grilling's closing question set being answered — there is no button for that,
+/// which is the whole point of the agent proposing rather than the human
+/// declaring.
+///
+/// The recommendation is marked rather than preselected. Nothing is chosen until
+/// the human presses something, and a control that arrived already set would be
+/// the agent deciding in their place.
+function DirectionChooser(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<DirectionChosen | null>(null);
+
+  const choose = useMutation(() => ({
+    mutationFn: (direction: Direction) =>
+      chooseDirection(props.conversation.id, direction),
+    onSuccess: (outcome: DirectionChosen) => {
+      if (outcome !== "Chosen") {
+        setRefused(outcome);
+        // Refused against a picture of the world this page read a moment ago:
+        // reading it again is both the correction and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+  }));
+
+  /// Whether this direction is the one the grilling recommended.
+  const recommended = (direction: Direction) =>
+    props.conversation.proposal?.direction === direction;
+
+  return (
+    <Show when={props.conversation.state === "Direction"}>
+      <div class="direction-chooser">
+        <h2>How should this be built?</h2>
+
+        {/* The agent's reasoning, which is what the human is deciding against.
+            A conversation that reached Direction some other way has none, and
+            says so rather than drawing an empty box. */}
+        <Show
+          when={props.conversation.proposal}
+          fallback={
+            <p class="empty">
+              The grilling left no recommendation, so this is an open choice.
+            </p>
+          }
+        >
+          {(proposal) => (
+            <div
+              class="proposal markdown"
+              innerHTML={proposal().rationale_html}
+            />
+          )}
+        </Show>
+
+        <ul class="directions">
+          <For each={DIRECTIONS}>
+            {(offered) => (
+              <li
+                classList={{
+                  recommended: recommended(offered.direction),
+                  chosen: props.conversation.direction === offered.direction,
+                }}
+              >
+                <button
+                  type="button"
+                  class="direction"
+                  disabled={!offered.ready || choose.isPending}
+                  aria-pressed={props.conversation.direction === offered.direction}
+                  onClick={() => choose.mutate(offered.direction)}
+                >
+                  {DIRECTION[offered.direction]}
+                </button>
+                <Show when={recommended(offered.direction)}>
+                  <span class="mark">Recommended</span>
+                </Show>
+                <p class="note">{offered.note}</p>
+              </li>
+            )}
+          </For>
+        </ul>
+
+        {/* What was chosen, said where it was chosen. Nothing runs off it yet:
+            the stages that execute each direction are what make it do
+            something, and saying so is better than a button that looks broken. */}
+        <Show when={props.conversation.direction}>
+          {(direction) => (
+            <p class="note chosen-note">
+              Chosen: {DIRECTION[direction()].toLowerCase()}. Nothing runs off
+              this yet.
+            </p>
+          )}
+        </Show>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{DIRECTION_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={choose.isError}>
+          <p class="error">
+            The direction could not be chosen: {choose.error?.message}
           </p>
         </Show>
       </div>

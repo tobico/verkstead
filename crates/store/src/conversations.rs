@@ -18,7 +18,32 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{QuestionSet, SetCreated};
+use verkstead_schema::{Direction, QuestionSet, SetCreated};
+
+/// The word the `direction` column and the Directed Event's body hold.
+///
+/// The wire spelling, so the column reads as what an agent wrote and a database
+/// opened by hand says something. Its own pair of functions rather than serde,
+/// because what goes in a `TEXT` column is this module's business either way —
+/// exactly as [`Lifecycle::stored`] is.
+fn direction_stored(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Inline => "inline",
+        Direction::TaskList => "task-list",
+        Direction::Roadmap => "roadmap",
+    }
+}
+
+/// The direction a stored word names. An unknown one is a database written by a
+/// Verkstead this one does not understand, as an unknown state is.
+fn direction_read(word: &str) -> Result<Direction> {
+    Ok(match word {
+        "inline" => Direction::Inline,
+        "task-list" => Direction::TaskList,
+        "roadmap" => Direction::Roadmap,
+        other => bail!("a Conversation is headed in the unknown direction {other:?}"),
+    })
+}
 
 /// Where a Conversation has got to.
 ///
@@ -130,6 +155,13 @@ pub struct Conversation {
     /// put it there. Whether the directory is still on disk is not something the
     /// store can say; see [`abort_conversation`] for who does.
     pub worktree: Option<PathBuf>,
+
+    /// How the human chose to have the work built, once they have chosen.
+    ///
+    /// `None` is a choice not yet made rather than a direction of none: a
+    /// Conversation that has not reached Direction has had nobody to choose, and
+    /// one sitting in Direction is waiting for exactly this.
+    pub direction: Option<Direction>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -206,6 +238,14 @@ pub enum Event {
     /// asked, and an enum every Brief and every move was as large as would cost
     /// a Timeline's worth of memory to hold the one kind that needs it.
     QuestionSet(Box<SetOnTimeline>),
+
+    /// The human chose how the work gets built, and this is what they chose.
+    ///
+    /// Not a [`Self::Moved`], though it lands beside one: the move into Direction
+    /// says the choosing has begun, and this says how it came out. A Conversation
+    /// stays in Direction after it — what leaves is the implementation starting,
+    /// which is a move of its own.
+    Directed(Direction),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -238,6 +278,7 @@ impl Event {
             Self::Moved(_) => "moved",
             Self::AgentOutput(_) => "agent-output",
             Self::QuestionSet(_) => QUESTION_SET,
+            Self::Directed(_) => "directed",
         }
     }
 
@@ -252,6 +293,7 @@ impl Event {
             // Nothing either, and for the nearer reason: a Set is a row in
             // `question_sets` already.
             Self::QuestionSet(_) => "",
+            Self::Directed(direction) => direction_stored(*direction),
         }
     }
 
@@ -277,6 +319,7 @@ impl Event {
             QUESTION_SET => Self::QuestionSet(Box::new(
                 set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
             )),
+            "directed" => Self::Directed(direction_read(&body)?),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -335,6 +378,40 @@ pub enum Grilling {
 
     /// It is past drafting, so it has been started once already — or aborted.
     NotDrafting,
+}
+
+/// What became of a wrap-up proposal being accepted.
+///
+/// Driven by a Response arriving rather than by anything the human pressed, so
+/// [`Directing::NotGrilling`] is an ordinary outcome and not a mistake: a second
+/// proposal Set answered after the first has nothing left to move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Directing {
+    /// Moved: the Conversation is choosing a direction, and the move is on the
+    /// Timeline.
+    Moved,
+
+    /// It was not grilling, so there was no grilling for this to end. Nothing
+    /// recorded and nothing wrong.
+    NotGrilling,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of the human choosing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Directed {
+    /// Recorded, and the choice is on the Timeline.
+    Chosen,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is not in Direction, so there is nothing here to choose. Either the
+    /// grilling has not proposed wrapping up yet, or the work is past the point
+    /// where the choice was the human's.
+    NotChoosing,
 }
 
 /// What became of aborting one.
@@ -431,6 +508,21 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the set_events table")?;
+
+    // How the human chose to have the work built, once they have. A table of its
+    // own for the reason the worktree is one: there is no migration machinery
+    // here and `conversations` is STRICT and left alone. One direction per
+    // Conversation, by the primary key — and one that has not been chosen for
+    // has no row, which is the state every Conversation starts in.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS directions (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             direction       TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the directions table")?;
 
     Ok(())
 }
@@ -587,6 +679,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         grilling_profile: chosen_profile(pool, grilling_profile_id).await?,
         implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
         worktree: worktree(pool, id).await?,
+        direction: direction(pool, id).await?,
     }))
 }
 
@@ -608,6 +701,18 @@ async fn worktree(pool: &SqlitePool, id: i64) -> Result<Option<std::path::PathBu
             .with_context(|| format!("reading the worktree of Conversation {id}"))?;
 
     Ok(row.map(|(path,)| std::path::PathBuf::from(path)))
+}
+
+/// How a Conversation's work is to be built, if the human has chosen yet.
+async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT direction FROM directions WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the direction of Conversation {id}"))?;
+
+    row.map(|(word,)| direction_read(&word)).transpose()
 }
 
 /// Choose the Agent Profile the grilling session will run under.
@@ -1108,6 +1213,109 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
     tx.commit().await.context("aborting a Conversation")?;
 
     Ok(Aborting::Aborted)
+}
+
+/// Record that a grilling has proposed wrapping up and the human has answered:
+/// the Conversation is out of Grilling and choosing how the work gets built.
+///
+/// Called off the back of a Response landing rather than off anything the human
+/// pressed — see [`super::submit_response`] — which is why a Conversation that is
+/// not grilling is [`Directing::NotGrilling`] rather than an error. A grilling
+/// that put two proposals to the human has the first Answer move it, and the
+/// second finds the move already made.
+///
+/// One transaction, so a Conversation that says Direction always has the move on
+/// its Timeline to say when it got there.
+pub async fn move_to_direction(pool: &SqlitePool, id: i64) -> Result<Directing> {
+    let mut tx = pool.begin().await.context("moving to a direction")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Directing::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Grilling {
+        return Ok(Directing::NotGrilling);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Direction.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} to choosing a direction"))?;
+
+    moved(&mut tx, id, Lifecycle::Direction).await?;
+
+    tx.commit().await.context("moving to a direction")?;
+
+    Ok(Directing::Moved)
+}
+
+/// Record how the human chose to have the work built.
+///
+/// The Conversation stays in Direction: what this settles is *how* the work gets
+/// done, and starting to do it is a move of its own that the stages wiring up
+/// each direction will make. So the Timeline gets the choice as an Event of its
+/// own rather than as a move, and the row is what everything afterwards reads.
+///
+/// Choosing again replaces the choice rather than being refused. Nothing has been
+/// built off it yet while the Conversation is still in Direction, and a human who
+/// pressed the wrong one of three buttons is owed the other two — the Timeline
+/// keeps both Events, so what was chosen and what it was changed to are both on
+/// the record.
+pub async fn choose_direction(
+    pool: &SqlitePool,
+    id: i64,
+    direction: Direction,
+) -> Result<Directed> {
+    let mut tx = pool.begin().await.context("choosing a direction")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Directed::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Direction {
+        return Ok(Directed::NotChoosing);
+    }
+
+    sqlx::query(
+        "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+         ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
+    )
+    .bind(id)
+    .bind(direction_stored(direction))
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the direction of Conversation {id}"))?;
+
+    let event = Event::Directed(direction);
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(id)
+    .bind(event.kind())
+    .bind(event.body())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting the direction of Conversation {id} on its Timeline"))?;
+
+    tx.commit().await.context("choosing a direction")?;
+
+    Ok(Directed::Chosen)
 }
 
 /// Put a move on a Conversation's Timeline.

@@ -14,6 +14,7 @@
 //! would have to be taken apart to hold the second.
 
 use serde::{Deserialize, Serialize};
+use verkstead_schema::Direction;
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -101,8 +102,65 @@ pub struct ConversationView {
     /// Conversation has none, which are the same fact about it.
     pub worktree: Option<Worktree>,
 
+    /// What the grilling proposed on its way out, once it has proposed anything.
+    ///
+    /// Lifted out of the Timeline rather than left for the page to go looking
+    /// for: the chooser draws the recommendation marked and the reasoning beside
+    /// it, and a page that had to walk its own Timeline for the last Set carrying
+    /// one would be a second opinion about which proposal is in force.
+    pub proposal: Option<ProposalView>,
+
+    /// How the human chose to have the work built, once they have chosen.
+    ///
+    /// `null` while the choice is still open, which is what the chooser draws
+    /// its buttons for.
+    pub direction: Option<Direction>,
+
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
+}
+
+/// The grilling's closing proposal as the chooser draws it: which direction was
+/// recommended, and why.
+///
+/// The rationale arrives as HTML like every other piece of agent markdown on this
+/// wire — the parser and the sanitizer are the server's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ProposalView {
+    /// The direction the agent recommends, which the chooser marks.
+    pub direction: Direction,
+
+    /// Why, rendered and sanitized by the server on the way out.
+    pub rationale_html: String,
+}
+
+/// Which direction the human is choosing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DirectionChoice {
+    pub direction: Direction,
+}
+
+/// What became of choosing one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum DirectionChosen {
+    /// Recorded, and the choice is on the Timeline.
+    Chosen,
+
+    NoSuchConversation,
+
+    /// The Conversation is not in Direction, so there is nothing here to choose:
+    /// either the grilling has not proposed wrapping up yet, or the work is past
+    /// the point where this was the human's call.
+    NotChoosing,
+
+    /// A staged roadmap is not built yet. The chooser offers it disabled so the
+    /// shape of the decision is visible, and the server refuses it for the same
+    /// reason every other refusal is the server's: a check only the page made
+    /// would not be one.
+    RoadmapNotYet,
 }
 
 /// A Conversation's worktree: where it is, and whether it is still there.
@@ -148,6 +206,26 @@ pub enum TimelineEvent {
     /// separately, by the details pane, from the same endpoint the standalone
     /// Set page reads.
     QuestionSet(QuestionSetEvent),
+
+    /// The human chose how the work gets built. Beside a move rather than one of
+    /// them: the move into Direction says the choosing began, and this says how
+    /// it came out.
+    Directed(DirectedEvent),
+}
+
+/// The direction the human chose, as the page receives it.
+///
+/// No rendered body, like a move: there is no markdown in a choice of one of
+/// three. What the Timeline draws is a sentence of the viewer's own making.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct DirectedEvent {
+    pub id: i64,
+
+    /// When it was chosen, RFC 3339.
+    pub at: String,
+
+    pub direction: Direction,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -292,6 +370,24 @@ pub struct Transcript {
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent { id, at, state })
+}
+
+/// The human's choice as an Event. Nothing to render — the direction is one of
+/// three words — and here beside the move for the same reason.
+pub fn directed_event(id: i64, at: String, direction: Direction) -> TimelineEvent {
+    TimelineEvent::Directed(DirectedEvent { id, at, direction })
+}
+
+/// The grilling's proposal as the chooser needs it, with the rationale rendered
+/// on the way.
+///
+/// Here rather than in the server for the reason the Brief's rendering is: this
+/// is the crate with the markdown parser in it.
+pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
+    ProposalView {
+        direction: proposal.direction,
+        rationale_html: crate::markdown::to_html(&proposal.rationale),
+    }
 }
 
 /// A session's output as an Event. Nothing to render either — the summary was

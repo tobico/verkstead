@@ -34,6 +34,7 @@ import stylesheet from "../src/main.css?raw";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
+import direction from "./fixtures/conversation-direction.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -1300,5 +1301,186 @@ describe("a question set on the timeline", () => {
     });
 
     expect(pane.querySelector(".contents")).toBeNull();
+  });
+});
+
+/// The third shape the middle pane draws: a conversation the grilling has handed
+/// over, with the agent's proposal on it and the choice still open.
+const DIRECTING = direction as ConversationView;
+
+/// The workbench with that conversation open.
+function theDirecting(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${DIRECTING.id}`,
+      json({ ...DIRECTING, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+describe("choosing a direction", () => {
+  it("draws the chooser once the grilling has proposed wrapping up", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const chooser = await drawn(container, ".direction-chooser");
+
+    expect(DIRECTING.state).toBe("Direction");
+    expect(chooser.textContent).toContain("How should this be built?");
+  });
+
+  it("does not draw it while the conversation is still grilling", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    // The timeline is up, so the pane has drawn what it was handed.
+    await drawn(container, ".timeline");
+
+    expect(GRILLING.state).toBe("Grilling");
+    expect(container.querySelector(".direction-chooser")).toBeNull();
+  });
+
+  it("shows the agent's reasoning, as the server rendered it", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const proposal = await drawn(container, ".direction-chooser .proposal");
+
+    // Straight out of the fixture: the server has the markdown parser, and this
+    // side only puts the HTML in the page.
+    expect(DIRECTING.proposal).toBeTruthy();
+    expect(proposal.innerHTML).toBe(DIRECTING.proposal!.rationale_html);
+    expect(proposal.querySelector("strong")).toBeTruthy();
+  });
+
+  it("marks the recommended direction without choosing it", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const marked = await drawn(container, ".directions .recommended");
+
+    expect(DIRECTING.proposal!.direction).toBe("task-list");
+    expect(marked.textContent).toContain("Break into a task list");
+    expect(marked.querySelector(".mark")!.textContent).toContain("Recommended");
+
+    // Marked and not chosen: nothing is settled until the human presses one.
+    expect(DIRECTING.direction).toBeNull();
+    expect(container.querySelector(".directions .chosen")).toBeNull();
+    expect(container.querySelector(".chosen-note")).toBeNull();
+  });
+
+  it("offers a staged roadmap disabled, and says it is coming later", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    await drawn(container, ".direction-chooser");
+
+    const buttons = [
+      ...container.querySelectorAll<HTMLButtonElement>(".directions .direction"),
+    ];
+    const labelled = buttons.map((button) => button.textContent);
+
+    // All three, so the shape of the decision is visible — and only two of them
+    // are pressable.
+    expect(labelled).toEqual([
+      "Implement inline",
+      "Break into a task list",
+      "Stage a roadmap",
+    ]);
+    expect(buttons.map((button) => button.disabled)).toEqual([
+      false,
+      false,
+      true,
+    ]);
+
+    const roadmap = buttons[2]!.closest("li")!;
+    expect(roadmap.textContent).toContain("Arriving in a later stage");
+  });
+
+  it("sends the direction the human pressed", async () => {
+    const fetching = theDirecting({}, json("Chosen"));
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const buttons = await drawn(container, ".directions");
+    fireEvent.click(buttons.querySelectorAll(".direction")[0]!);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${DIRECTING.id}/direction`),
+      ).toEqual({ direction: "inline" }),
+    );
+  });
+
+  it("says what was chosen, and that nothing runs off it yet", async () => {
+    theDirecting({ direction: "inline" });
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const note = await drawn(container, ".direction-chooser .chosen-note");
+
+    expect(note.textContent).toContain("implement inline");
+    expect(note.textContent).toContain("Nothing runs off this yet");
+    expect(container.querySelector(".directions .chosen")).toBeTruthy();
+  });
+
+  it("says in words why a direction was refused", async () => {
+    const fetching = theDirecting({}, json("NotChoosing"));
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const buttons = await drawn(container, ".directions");
+    fireEvent.click(buttons.querySelectorAll(".direction")[0]!);
+
+    await waitFor(() =>
+      screen.getByText(/not choosing a direction/i),
+    );
+    expect(askedFor(fetching, `/api/ui/conversations/${DIRECTING.id}`)).toBeGreaterThan(1);
+  });
+
+  it("draws the choice on the timeline as the line it is", async () => {
+    const chosen: TimelineEvent[] = [
+      ...DIRECTING.timeline,
+      { Directed: { id: 99, at: "2026-08-03T11:45:00.000Z", direction: "task-list" } },
+    ];
+    theDirecting({ timeline: chosen, direction: "task-list" });
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const line = await drawn(container, ".timeline-event > .directed");
+
+    expect(line.textContent).toContain("Chose to break into a task list");
+  });
+
+  it("says so where the grilling left no recommendation at all", async () => {
+    theDirecting({ proposal: null });
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const chooser = await drawn(container, ".direction-chooser");
+
+    expect(chooser.textContent).toContain("left no recommendation");
+    expect(container.querySelector(".directions .recommended")).toBeNull();
+
+    // The buttons are still there: the choice is the human's whether or not
+    // anything recommended one.
+    expect(container.querySelectorAll(".directions .direction")).toHaveLength(3);
+  });
+});
+
+describe("disagreeing with a proposal", () => {
+  it("draws no chooser while the grilling is still running", async () => {
+    // What a refused proposal leaves behind: the set is on the timeline and
+    // answered, the conversation is still grilling, and nothing was proposed
+    // *in force* — the server only lifts an accepted one onto the view.
+    theDirecting({ state: "Grilling", proposal: null });
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".direction-chooser")).toBeNull();
+    expect(container.querySelector(".directions")).toBeNull();
   });
 });

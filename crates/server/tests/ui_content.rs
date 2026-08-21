@@ -148,6 +148,7 @@ fn full_grammar_set() -> QuestionSet {
             },
         ],
         postscript: None,
+        proposal: None,
         project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
@@ -1065,6 +1066,54 @@ fn assert_sanitised(json: &str, wrote_it: &str) {
     );
 }
 
+/// The grilling's closing move: one answerable question, and the `proposal`
+/// block that makes answering it end the grilling.
+///
+/// The rationale is markdown, because the chooser renders it — which is the
+/// whole reason it travels as a rationale rather than as a word.
+fn wrap_up_proposal() -> QuestionSet {
+    QuestionSet {
+        title: "Ready to build the usage-limit pause".to_owned(),
+        preface: Some("We settled all four questions. Here is what I think we build.\n".to_owned()),
+        questions: vec![Question {
+            label: "Q9".to_owned(),
+            text: "Ready to build it this way?".to_owned(),
+            columns: Vec::new(),
+            options: vec![
+                option(1, "Yes, go ahead", true),
+                option(2, "Not yet — more to work through", false),
+            ],
+            subquestions: Vec::new(),
+        }],
+        postscript: None,
+        proposal: Some(verkstead_schema::Proposal {
+            direction: verkstead_schema::Direction::TaskList,
+            accepted_by: "Q9.1".to_owned(),
+            rationale: "Five changes that barely touch each other: the detector, the \
+                        pause, the notification, the resume and the window arithmetic.\n\n\
+                        - **Inline** would be one session holding all five at once\n\
+                        - **A roadmap** is more ceremony than two days of work needs\n"
+                .to_owned(),
+        }),
+        project: Some("verkstead".to_owned()),
+        branch: Some("usage-limits".to_owned()),
+        diff: None,
+    }
+}
+
+/// The human accepting it, which is what moves the Conversation on.
+fn accepting_the_proposal() -> Response {
+    Response {
+        answers: vec![Answer {
+            label: "Q9".to_owned(),
+            selected: Some(1),
+            free_text: None,
+            unanswered: false,
+        }],
+        comment: None,
+    }
+}
+
 /// Where the golden fixtures are written, relative to this crate.
 const FIXTURES: &str = "../../web/tests/fixtures";
 
@@ -1295,6 +1344,63 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap()
         .unwrap();
 
+    // And a fourth that the grilling has handed over: its closing proposal
+    // answered, so it is out of Grilling and choosing how the work gets built.
+    // The chooser draws the recommendation marked and the reasoning beside it,
+    // and both of those come off this payload.
+    //
+    // Answered through `submit_response`, which is the one path a Response takes
+    // and the one thing that moves a Conversation here — pressing the state into
+    // the store by hand would write a fixture no Answer could ever produce.
+    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, directing, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, directing, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        directing,
+        "# Pausing when an account runs out of window\n\n\
+         A session that hits its usage limit mid-run fails silently and the\n\
+         conversation looks stalled.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        directing,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
+    )
+    .await
+    .unwrap();
+
+    let proposing = wrap_up_proposal();
+    let proposed = store::ask(&pool, directing, &proposing)
+        .await
+        .unwrap()
+        .unwrap();
+    store::submit_response(
+        &pool,
+        &verkstead_store::Settlements::new(4),
+        proposed.id,
+        &accepting_the_proposal(),
+    )
+    .await
+    .unwrap();
+    stamp(
+        &pool,
+        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
+        "2026-08-03T11:42:03.000Z",
+        proposed.id,
+    )
+    .await;
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,
@@ -1309,6 +1415,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "conversation-grilling.json",
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{grilling}")).await,
+        )),
+    );
+    write(
+        "conversation-direction.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{directing}")).await,
         )),
     );
 
