@@ -9,9 +9,9 @@
 //! it to fill the field would need a parser after all.
 //!
 //! The Timeline is a list of Events with a kind, not a Brief and a list. The
-//! Brief is the only kind there is yet; agent output, Question Sets and commits
-//! are variants added beside it, and a Timeline shaped around its first Event
-//! would have to be taken apart to hold the second.
+//! Brief was the only kind there was to begin with; agent output, Question Sets
+//! and commits are variants added beside it, and a Timeline shaped around its
+//! first Event would have had to be taken apart to hold the second.
 
 use serde::{Deserialize, Serialize};
 use verkstead_schema::Direction;
@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{ProfileEntry, RepoEntry, Standing};
+use crate::{DiffView, ProfileEntry, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -216,6 +216,67 @@ pub enum TimelineEvent {
     /// Brief — and for the same reason: it is a document to read, and there is
     /// nothing of it a details pane would show that the Timeline does not.
     Handoff(HandoffEvent),
+
+    /// A commit a session landed on the Conversation's branch, summarised as
+    /// what it changed. Its diff is fetched separately, by the details pane —
+    /// the same arrangement a transcript and a Question Set have, and for the
+    /// same reason.
+    Commit(CommitEvent),
+}
+
+/// A commit as the Timeline shows it: what it was called, and how much of the
+/// repository it moved.
+///
+/// The summary and not the diff. A commit's diff is what the details pane
+/// fetches, from the repository the commit is in — see [`CommitDiff`] — and the
+/// Timeline is re-read every time an open page hears the world moved.
+///
+/// There is no state here and no action on it. Commits are viewable and nothing
+/// else: the design gives them no per-commit review, because feedback about the
+/// work consolidates in the wrap-up phase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CommitEvent {
+    pub id: i64,
+
+    /// When it reached the Timeline, RFC 3339. Which is when Verkstead noticed
+    /// it rather than when it was committed — the two are a poll apart, and the
+    /// Timeline is a record of what Verkstead saw happen.
+    pub at: String,
+
+    /// The full hash. Full, because what it takes for a short one to be
+    /// unambiguous grows with the repository — the page shortens it for
+    /// reading, which is a different thing from recording one shortened.
+    pub sha: String,
+
+    /// The first line of the commit message.
+    ///
+    /// It comes from the Event because it cannot come from the diff: the diff
+    /// arrives headerless, which is what lets it be rendered by the same
+    /// renderer an attached Diff is.
+    pub subject: String,
+
+    pub files: i64,
+    pub insertions: i64,
+    pub deletions: i64,
+}
+
+/// One commit's diff, as the details pane receives it.
+///
+/// Its own request rather than a field on the Conversation, for the reason a
+/// transcript is: a Timeline is read every time an open page hears the world
+/// moved, and a diff is read when somebody opens the one Event it belongs to.
+///
+/// Rendered with the folds and the highlighting an attached Diff already gets,
+/// because it is the same renderer on the same kind of input — see
+/// [`crate::diff`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct CommitDiff {
+    /// `null` where the commit changed nothing a diff can show, which is a merge
+    /// or an empty commit. A commit the repository no longer has is not this: it
+    /// is a 404, because there is nothing there to draw a pane about.
+    pub diff: Option<DiffView>,
 }
 
 /// The handoff document as the page receives it.
@@ -549,6 +610,48 @@ pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
         html: crate::markdown::to_html(&markdown),
         markdown,
     })
+}
+
+/// A commit as an Event. Nothing to render — the summary is five facts git
+/// counted — and here beside the move for the reason that one is: one place
+/// knows how a Timeline is made.
+pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent {
+    TimelineEvent::Commit(CommitEvent {
+        id,
+        at,
+        sha: commit.sha,
+        subject: commit.subject,
+        files: commit.files,
+        insertions: commit.insertions,
+        deletions: commit.deletions,
+    })
+}
+
+/// What the caller of [`commit_event`] hands over: the commit as the store
+/// holds it.
+///
+/// Its own type rather than the store's, because this crate does not depend on
+/// the store — and rather than six parameters, because five of them are numbers
+/// and a subject, and a call with those in the wrong order would compile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitSummary {
+    pub sha: String,
+    pub subject: String,
+    pub files: i64,
+    pub insertions: i64,
+    pub deletions: i64,
+}
+
+/// One commit's diff as the details pane receives it, rendered on the way.
+///
+/// Here rather than in the server for the reason the Brief's rendering is: this
+/// is the crate with the diff parser and the highlighter in it. A patch with
+/// nothing in it comes back as nothing to show, exactly as an empty attached
+/// Diff does.
+pub fn commit_diff(patch: &str) -> CommitDiff {
+    CommitDiff {
+        diff: crate::diff::to_html(patch),
+    }
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

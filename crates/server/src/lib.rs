@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod commits;
 mod conversations;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.

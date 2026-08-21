@@ -184,6 +184,59 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * One commit's diff, as the details pane receives it.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * transcript is: a Timeline is read every time an open page hears the world
+ * moved, and a diff is read when somebody opens the one Event it belongs to.
+ *
+ * Rendered with the folds and the highlighting an attached Diff already gets,
+ * because it is the same renderer on the same kind of input — see
+ * [`crate::diff`].
+ */
+export type CommitDiff = { 
+/**
+ * `null` where the commit changed nothing a diff can show, which is a merge
+ * or an empty commit. A commit the repository no longer has is not this: it
+ * is a 404, because there is nothing there to draw a pane about.
+ */
+diff: DiffView | null, };
+
+/**
+ * A commit as the Timeline shows it: what it was called, and how much of the
+ * repository it moved.
+ *
+ * The summary and not the diff. A commit's diff is what the details pane
+ * fetches, from the repository the commit is in — see [`CommitDiff`] — and the
+ * Timeline is re-read every time an open page hears the world moved.
+ *
+ * There is no state here and no action on it. Commits are viewable and nothing
+ * else: the design gives them no per-commit review, because feedback about the
+ * work consolidates in the wrap-up phase.
+ */
+export type CommitEvent = { id: number, 
+/**
+ * When it reached the Timeline, RFC 3339. Which is when Verkstead noticed
+ * it rather than when it was committed — the two are a poll apart, and the
+ * Timeline is a record of what Verkstead saw happen.
+ */
+at: string, 
+/**
+ * The full hash. Full, because what it takes for a short one to be
+ * unambiguous grows with the repository — the page shortens it for
+ * reading, which is a different thing from recording one shortened.
+ */
+sha: string, 
+/**
+ * The first line of the commit message.
+ *
+ * It comes from the Event because it cannot come from the diff: the diff
+ * arrives headerless, which is what lets it be rendered by the same
+ * renderer an attached Diff is.
+ */
+subject: string, files: number, insertions: number, deletions: number, };
+
+/**
  * What became of aborting one.
  */
 export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversation" | "WorktreeStuck";
@@ -713,7 +766,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

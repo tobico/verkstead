@@ -279,6 +279,14 @@ impl Sessions {
 
         let (stop, stopping) = oneshot::channel();
 
+        // What the session is about to commit, which is the other half of what
+        // it leaves behind. Watched for as long as it runs and once more as it
+        // ends — see [`crate::commits`] — and its base commit is where the
+        // branch started, which is recorded by the time any session exists.
+        let branch = conversation.branch.clone();
+        let repo = conversation.repo.path.clone();
+        let base = conversation.base_commit.clone();
+
         // Registered under the lock the relay will want in order to take itself
         // off again, and started while it is held. A session that ends the
         // instant it starts — an agent that is not installed, a prompt it
@@ -296,7 +304,50 @@ impl Sessions {
                 let nudges = nudges.clone();
 
                 async move {
+                    // A Conversation with no base commit has never started
+                    // grilling, and a session is running in it — so this is a
+                    // record that has been got at rather than a Conversation
+                    // whose branch is not worth watching.
+                    let watching = match base {
+                        Some(base) => {
+                            let (stop, stopping) = oneshot::channel();
+
+                            let watcher = tokio::spawn(crate::commits::watch(
+                                pool.clone(),
+                                nudges.clone(),
+                                conversation_id,
+                                repo,
+                                branch,
+                                base,
+                                stopping,
+                            ));
+
+                            Some((stop, watcher))
+                        }
+                        None => {
+                            tracing::error!(
+                                conversation_id,
+                                "a session is running on a Conversation with no base commit, \
+                                 so its commits cannot be told from what it branched off"
+                            );
+                            None
+                        }
+                    };
+
                     relay(&pool, &nudges, event_id, &mut child, stopping).await;
+
+                    // The session is over, so the branch is finished moving.
+                    // Waited on rather than only asked to stop, because what it
+                    // does when told is one last sweep: a session's final act is
+                    // usually a commit, and it lands a poll after the process
+                    // that made it has gone.
+                    if let Some((stop, watcher)) = watching {
+                        let _ = stop.send(());
+
+                        if let Err(error) = watcher.await {
+                            tracing::error!(error = ?error, conversation_id, "a branch watcher ended badly");
+                        }
+                    }
 
                     // Off the register before the last Nudge, so that a page
                     // reading the Conversation back reads a session that has

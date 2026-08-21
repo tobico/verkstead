@@ -25,9 +25,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentOutputEvent, BriefSaved, ConversationAborted, ConversationView, DirectionChosen,
-    GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, Submitted, TimelineEvent,
-    Transcript,
+    AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
+    DirectionChosen, GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, Submitted,
+    TimelineEvent, Transcript,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -108,6 +108,15 @@ impl Grilling {
         .await;
 
         transcript.text
+    }
+
+    /// And one commit's diff, as the same pane fetches that.
+    async fn commit_diff(&self, event: i64) -> CommitDiff {
+        get(
+            &self.app,
+            &format!("/api/ui/conversations/{}/commit/{event}", self.id),
+        )
+        .await
     }
 
     async fn abort(&self) -> ConversationAborted {
@@ -296,6 +305,18 @@ fn outputs(view: &ConversationView) -> Vec<&AgentOutputEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::AgentOutput(output) => Some(output),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The commits on a Timeline, in Timeline order — which is the order they
+/// landed on the branch.
+fn commits(view: &ConversationView) -> Vec<&CommitEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Commit(commit) => Some(commit),
             _ => None,
         })
         .collect()
@@ -700,6 +721,121 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         "",
         "and the handoff is not in there to be swept into it",
     );
+}
+
+/// What a session leaves behind besides its output: the commits it lands on the
+/// Conversation's branch, each one a Timeline Event with the diff behind it.
+///
+/// Nothing tells Verkstead a commit happened — the session is launched but not
+/// driven — so what this asks is whether watching the branch notices. The stub
+/// commits twice and then idles, exactly as a real session does between pieces
+/// of work, so both are found by a sweep rather than by the session ending.
+#[tokio::test]
+async fn what_a_session_commits_lands_on_the_timeline() {
+    let fixture = grilling(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+
+        printf 'why\nand how\n' > NOTES.md
+        git add NOTES.md
+        git commit --quiet -m 'docs: say what it does'
+
+        printf 'committed\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 2).then(|| landed.into_iter().cloned().collect::<Vec<_>>())
+        })
+        .await;
+
+    assert_eq!(
+        landed
+            .iter()
+            .map(|commit| commit.subject.as_str())
+            .collect::<Vec<_>>(),
+        vec!["feat: rate limiting", "docs: say what it does"],
+        "in the order they landed on the branch",
+    );
+
+    let notes = &landed[1];
+    assert_eq!(notes.files, 1);
+    assert_eq!(notes.insertions, 2);
+    assert_eq!(notes.deletions, 0);
+
+    // The details pane's half: the commit's own diff, rendered by the same
+    // renderer an attached Diff goes through — folds, highlighting and all.
+    let diff = fixture
+        .commit_diff(notes.id)
+        .await
+        .diff
+        .expect("a commit that added a file has a diff");
+
+    assert_eq!(diff.paths, vec!["NOTES.md".to_owned()]);
+    assert!(
+        diff.html.contains("<details class=\"diff-file\""),
+        "the folds the renderer already gives an attached Diff: {}",
+        diff.html
+    );
+    assert!(diff.html.contains("and how"), "{}", diff.html);
+    assert!(
+        !diff.html.contains("docs: say what it does"),
+        "the message is the Event's to say — the diff arrives headerless: {}",
+        diff.html
+    );
+
+    // Long enough for several more sweeps of a branch that has not moved.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    let view = fixture.view().await;
+    assert_eq!(
+        commits(&view).len(),
+        2,
+        "a branch is swept whole every few seconds, and each commit lands once",
+    );
+    assert_eq!(
+        commits(&view)
+            .iter()
+            .map(|commit| commit.id)
+            .collect::<Vec<_>>(),
+        landed.iter().map(|commit| commit.id).collect::<Vec<_>>(),
+        "and they are the same Events, rather than the same commits recorded again",
+    );
+}
+
+/// The commit a session makes as its last act, which is the ordinary shape of
+/// unattended work: it commits and exits, and there is no next poll to catch it.
+#[tokio::test]
+async fn a_commit_made_as_the_session_ends_still_lands() {
+    let fixture = grilling(
+        r#"
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+        "#,
+    )
+    .await;
+
+    // The session is over — its Event says so — and the commit is on the
+    // Timeline all the same, because ending it sweeps the branch once more.
+    let landed = fixture
+        .until(|view| {
+            let ended = output(view).is_some_and(|output| !output.running);
+            let landed = commits(view);
+
+            (ended && !landed.is_empty()).then(|| landed[0].clone())
+        })
+        .await;
+
+    assert_eq!(landed.subject, "feat: rate limiting");
+    assert_eq!(landed.files, 1);
+    assert_eq!(landed.insertions, 1);
 }
 
 /// The one ordering that matters when a Conversation is stopped: the agent is

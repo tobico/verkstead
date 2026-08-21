@@ -1,9 +1,10 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
-//! Five kinds of Event so far — the Brief, a move, what a session printed, a
-//! Question Set, and the direction the human chose — drawn as a list of Events
-//! rather than as a Brief with a list under it. The stages after this one put
-//! commits on the same list.
+//! The kinds of Event so far — the Brief, a move, what a session printed, a
+//! Question Set, the direction the human chose, the handoff, and the commits a
+//! session lands on the branch — drawn as a list of Events rather than as a
+//! Brief with a list under it. The stages after this one put task lists, PRs
+//! and interruptions on the same list.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. The Brief has
@@ -36,6 +37,7 @@ import type {
   AgentOutputEvent,
   BriefEvent,
   BriefSaved,
+  CommitEvent,
   ConversationAborted,
   ConversationView,
   DirectedEvent,
@@ -47,6 +49,14 @@ import type {
   MovedEvent,
   QuestionSetEvent,
 } from "../api/types";
+
+/// How much of a commit's hash the timeline shows.
+///
+/// Seven characters, which is what git prints and what everybody reads a commit
+/// by. The whole hash travels on the wire — what it takes to be unambiguous
+/// grows with a repository, and shortening for reading is a different thing
+/// from recording one short.
+export const ABBREVIATED = 7;
 
 /// What each way of being refused a Brief says.
 ///
@@ -182,6 +192,18 @@ export function Timeline(props: {
                       selected={props.selected === asked().id}
                       open={() => {
                         props.select(asked().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"Commit" in event && event.Commit}>
+                  {(commit) => (
+                    <Commit
+                      commit={commit()}
+                      selected={props.selected === commit().id}
+                      open={() => {
+                        props.select(commit().id);
                         props.details();
                       }}
                     />
@@ -361,6 +383,51 @@ function QuestionSet(props: {
           </For>
         </tbody>
       </table>
+    </button>
+  );
+}
+
+/// A commit a session landed on the branch: what it was called, and how much of
+/// the repository it moved.
+///
+/// A button, as a session's output and a question set are, and for the same
+/// reason: the whole of it — the diff — is in the details pane, and this is how
+/// it is opened.
+///
+/// Nothing here asks the human for anything. Commits are viewable and have no
+/// state of their own: the design gives them no per-commit review, because
+/// feedback about the work consolidates in the wrap-up phase.
+function Commit(props: {
+  commit: CommitEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  const files = () =>
+    `${props.commit.files} ${props.commit.files === 1 ? "file" : "files"}`;
+
+  return (
+    <button
+      type="button"
+      class="commit"
+      classList={{ selected: props.selected }}
+      aria-pressed={props.selected}
+      onClick={props.open}
+    >
+      <span class="event-head">
+        <span class="what">Commit</span>
+        <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
+      </span>
+
+      <span class="subject">{props.commit.subject}</span>
+
+      <span class="changed">
+        <span class="files">{files()}</span>
+        {/* The signs travel with the numbers rather than being drawn by the
+            stylesheet, so a row read aloud or copied out still says which way
+            each of them went. */}
+        <span class="added">+{props.commit.insertions}</span>
+        <span class="removed">−{props.commit.deletions}</span>
+      </span>
     </button>
   );
 }

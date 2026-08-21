@@ -1157,6 +1157,86 @@ main:has(.workbench) {
   opacity: 0.6;
 }
 
+/* A commit a session landed on the branch. A button, as the two events above
+   are, because the whole of it — the diff — is in the details pane and this is
+   how it is opened. */
+.timeline-event > .commit {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event > .commit.selected {
+  border-color: var(--accent);
+}
+
+.commit .event-head {
+  margin-bottom: 0.35rem;
+  justify-content: flex-start;
+}
+
+.commit .what {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* The hash, shortened for reading. Monospaced wherever it appears, because it
+   is a thing to type into git rather than a thing to read as words. */
+.commit .sha,
+.commit-summary .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What the commit was called: the first line of its message, on one line — the
+   rest of the message is in the diff. */
+.commit .subject {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* And what it moved, which is the design's summary for a commit: the counts,
+   in a row that reads left to right as files, added, removed. */
+.commit .changed,
+.commit-summary .changed {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.commit .added,
+.commit-summary .added {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.commit .removed,
+.commit-summary .removed {
+  color: #b3382c;
+  font-weight: 600;
+}
+
+/* One commit, opened: the same three facts the timeline row shows, above the
+   diff — so a pane walked into on a phone still says which commit this is. */
+.commit-summary {
+  margin: 0 0 1rem;
+}
+
+.commit-summary .subject {
+  margin: 0;
+  font-weight: 600;
+}
+
 /* One session's output, opened: what the terminal was sent, as it was sent.
    Wrapped rather than scrolled sideways — a pane on a phone is narrow, and a
    transcript nobody can read the right-hand end of is one line of it. */

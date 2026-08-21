@@ -25,10 +25,12 @@ import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "s
 import { loadConversation } from "../api/client";
 import type {
   AgentOutputEvent,
+  CommitEvent,
   ConversationView,
   QuestionSetEvent,
 } from "../api/types";
 import { Asked } from "./Asked";
+import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Details } from "./Details";
 import { Output } from "./Output";
@@ -46,22 +48,32 @@ export type Pane = "conversations" | "timeline" | "details";
 
 /// An Event with a full self, as the details pane holds it: which kind, and the
 /// Event itself.
-type Opened = { output: AgentOutputEvent } | { asked: QuestionSetEvent };
+type Opened =
+  | { output: AgentOutputEvent }
+  | { asked: QuestionSetEvent }
+  | { commit: CommitEvent };
 
-/// The Event inside, whichever kind it turned out to be — what the two have in
+/// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
-function which(open: Opened): AgentOutputEvent | QuestionSetEvent {
-  return "output" in open ? open.output : open.asked;
+function which(open: Opened): AgentOutputEvent | QuestionSetEvent | CommitEvent {
+  if ("output" in open) {
+    return open.output;
+  }
+  return "asked" in open ? open.asked : open.commit;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
-/// one of that kind, and nothing where it is the other.
+/// one of that kind, and nothing where it is another.
 function outputIn(open: Opened): AgentOutputEvent | undefined {
   return "output" in open ? open.output : undefined;
 }
 
 function setIn(open: Opened): QuestionSetEvent | undefined {
   return "asked" in open ? open.asked : undefined;
+}
+
+function commitIn(open: Opened): CommitEvent | undefined {
+  return "commit" in open ? open.commit : undefined;
 }
 
 export function Workbench(): JSX.Element {
@@ -96,9 +108,10 @@ export function Workbench(): JSX.Element {
   /// self to show. An id whose Event has gone shows the Conversation instead,
   /// which is what the pane says when nothing is open.
   ///
-  /// Two kinds have one: a session's output, whose full self is its transcript,
-  /// and a Question Set, whose full self is the document it was asked as. The
-  /// kind travels with it, because it is what decides which pane is drawn.
+  /// Three kinds have one: a session's output, whose full self is its
+  /// transcript; a Question Set, whose full self is the document it was asked
+  /// as; and a commit, whose full self is its diff. The kind travels with it,
+  /// because it is what decides which pane is drawn.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = event();
 
@@ -109,6 +122,9 @@ export function Workbench(): JSX.Element {
         }
         if ("QuestionSet" in entry) {
           return { asked: entry.QuestionSet };
+        }
+        if ("Commit" in entry) {
+          return { commit: entry.Commit };
         }
         return undefined;
       })
@@ -200,6 +216,16 @@ export function Workbench(): JSX.Element {
                     {(asked) => (
                       <Asked
                         asked={asked()}
+                        back={() => setPane("timeline")}
+                        close={() => setEvent(null)}
+                      />
+                    )}
+                  </Match>
+                  <Match when={commitIn(open())}>
+                    {(commit) => (
+                      <Commit
+                        conversation={conversation()}
+                        commit={commit()}
                         back={() => setPane("timeline")}
                         close={() => setEvent(null)}
                       />

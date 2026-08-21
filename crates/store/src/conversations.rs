@@ -8,9 +8,9 @@
 //! a second way to fail.
 //!
 //! The Timeline is its own table from the start rather than a Brief column on
-//! the Conversation. The Brief is the first Event and, for now, the only kind of
-//! Event there is; agent output, Question Sets and commits are the same list
-//! with more in it. A Brief kept beside the Timeline rather than in it would
+//! the Conversation. The Brief is the first Event, and agent output, Question
+//! Sets and commits are the same list with more in it. A Brief kept beside the
+//! Timeline rather than in it would
 //! have to be moved into it later, and a reopened round adds a second Brief
 //! Event rather than editing the first — which a column could not hold at all.
 
@@ -200,8 +200,8 @@ pub struct TimelineEvent {
     pub event: Event,
 }
 
-/// What an Event is. Three kinds so far — the rest of the table in the design
-/// arrives with the stages that produce them.
+/// What an Event is. The kinds the stages so far produce — the rest of the
+/// table in the design arrives with the stages that produce them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The Brief: the markdown the Conversation starts from, as the human last
@@ -254,6 +254,14 @@ pub enum Event {
     /// proposal is accepted — see `crate::handoffs` in the server — so the copy
     /// here is the only one that lasts.
     Handoff(String),
+
+    /// A commit a session landed on the Conversation's branch, summarised.
+    ///
+    /// Its body is not in the `body` column either, and for the transcript's
+    /// reason rather than the Set's: what a commit is worth saying about it is
+    /// five separate facts, and a row of them is a row of them. The diff is in
+    /// neither place — see [`super::commits`] — because the repository has it.
+    Commit(super::Commit),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -288,6 +296,7 @@ impl Event {
             Self::QuestionSet(_) => QUESTION_SET,
             Self::Directed(_) => "directed",
             Self::Handoff(_) => "handoff",
+            Self::Commit(_) => "commit",
         }
     }
 
@@ -304,6 +313,9 @@ impl Event {
             Self::QuestionSet(_) => "",
             Self::Directed(direction) => direction_stored(*direction),
             Self::Handoff(markdown) => markdown,
+            // Nothing, for the transcript's reason: what a commit is, is a row
+            // in `commits`.
+            Self::Commit(_) => "",
         }
     }
 
@@ -319,6 +331,7 @@ impl Event {
         body: String,
         summary: Option<super::Summary>,
         set: Option<SetOnTimeline>,
+        commit: Option<super::Commit>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -331,6 +344,9 @@ impl Event {
             )),
             "directed" => Self::Directed(direction_read(&body)?),
             "handoff" => Self::Handoff(body),
+            "commit" => Self::Commit(
+                commit.ok_or_else(|| anyhow!("a Commit Event has no commit beside it"))?,
+            ),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -819,8 +835,9 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Set would be a read for every Question the human has ever been put.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
-    /// transcript summary that is there for one kind of Event, and the Set with
-    /// however it was settled that is there for another.
+    /// transcript summary that is there for one kind of Event, the Set with
+    /// however it was settled that is there for another, and the commit that is
+    /// there for a third.
     type Row = (
         i64,
         String,
@@ -833,17 +850,24 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
     );
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body, t.lines, t.latest,
-                q.id, q.body, r.submitted_at, r.body, a.archived_at
+                q.id, q.body, r.submitted_at, r.body, a.archived_at,
+                c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
          LEFT JOIN transcripts t ON t.event_id = e.id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
          LEFT JOIN archivings a ON a.set_id = s.set_id
+         LEFT JOIN commits c ON c.event_id = e.id
          WHERE e.conversation_id = ?
          ORDER BY e.id",
     )
@@ -866,11 +890,32 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 answered_at,
                 answer,
                 archived_at,
+                sha,
+                subject,
+                files,
+                insertions,
+                deletions,
             ) = row;
 
             let summary = lines
                 .zip(latest)
                 .map(|(lines, latest)| super::Summary { lines, latest });
+
+            let commit = match (sha, subject, files, insertions, deletions) {
+                (Some(sha), Some(subject), Some(files), Some(insertions), Some(deletions)) => {
+                    Some(super::Commit {
+                        sha,
+                        subject,
+                        files,
+                        insertions,
+                        deletions,
+                    })
+                }
+                // Every column of that row is `NOT NULL`, so the only way to be
+                // missing any of them is to be missing the row: this Event is
+                // not a Commit.
+                _ => None,
+            };
 
             let set = set_id
                 .zip(set_body)
@@ -888,7 +933,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body, summary, set)?,
+                event: Event::read(&kind, body, summary, set, commit)?,
             })
         })
         .collect()

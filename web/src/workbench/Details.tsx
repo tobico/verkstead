@@ -15,9 +15,10 @@
 //! simply carry the grilling one on.
 //!
 //! The Brief has no place here on purpose: it is inline in the Timeline, because
-//! there is nothing of it the Timeline does not already show. What will stand
-//! here is the full self of the Events that do have one — a transcript, a
-//! Question Set, a diff — as each of those stages lands.
+//! there is nothing of it the Timeline does not already show. What stands here
+//! instead is the full self of the Events that do have one — a transcript, a
+//! Question Set, a commit's diff — each drawn by a component of its own, with
+//! this pane being what the third one says when no Event is open.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";

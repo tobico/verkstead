@@ -11,6 +11,7 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
+  CommitDiff,
   ConversationAborted,
   ConversationEntry,
   ConversationView,
@@ -122,6 +123,18 @@ export function loadTranscript(
   event: number,
 ): Promise<Transcript> {
   return get<Transcript>(`/api/ui/conversations/${id}/transcript/${event}`);
+}
+
+/// One commit's diff, rendered.
+///
+/// Fetched by the pane that shows it for the transcript's reason, and read out
+/// of the repository by the server rather than out of its database: the commit
+/// is in git, which is what a commit is.
+export function loadCommitDiff(
+  id: number,
+  event: number,
+): Promise<CommitDiff> {
+  return get<CommitDiff>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
 /// Start a Conversation against a registered Repo.

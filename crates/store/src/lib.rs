@@ -24,6 +24,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
+mod commits;
 mod conversations;
 mod profiles;
 mod push;
@@ -31,6 +32,7 @@ mod repos;
 mod transcripts;
 mod waits;
 
+pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
     Implementing, Lifecycle, SetOnTimeline, TimelineEvent, abort_conversation, ask, asked_from,
@@ -380,6 +382,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // What the sessions run against them printed. After the Timelines, because a
     // transcript hangs off the Event it is the full self of.
     transcripts::apply_schema(pool).await?;
+
+    // And what they committed, which hangs off the Timelines for the same
+    // reason — and off the Conversations too, which is what makes one commit
+    // per Conversation a rule the database keeps.
+    commits::apply_schema(pool).await?;
 
     Ok(())
 }

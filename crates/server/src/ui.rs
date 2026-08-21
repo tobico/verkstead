@@ -57,6 +57,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/transcript/{event}",
             get(transcript),
         )
+        // And one commit's diff, fetched the same way and for the same reason —
+        // see [`commit_diff`].
+        .route(
+            "/api/ui/conversations/{id}/commit/{event}",
+            get(commit_diff),
+        )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_commit))
@@ -528,6 +534,19 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 store::Event::Handoff(markdown) => {
                     verkstead_render::handoff_event(event.id, event.at, &markdown)
                 }
+                // The counts and the subject, and not the diff: the diff is in
+                // the repository, and what fetches it is the pane that shows it.
+                store::Event::Commit(commit) => verkstead_render::commit_event(
+                    event.id,
+                    event.at,
+                    verkstead_render::CommitSummary {
+                        sha: commit.sha,
+                        subject: commit.subject,
+                        files: commit.files,
+                        insertions: commit.insertions,
+                        deletions: commit.deletions,
+                    },
+                ),
             })
             .collect(),
     };
@@ -564,6 +583,69 @@ async fn transcript(
             unavailable("the transcript could not be read")
         }
     }
+}
+
+/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
+/// rendered.
+///
+/// Its own request rather than a field on the Conversation, exactly as a
+/// transcript is: a Timeline is read every time an open page hears the world
+/// moved, and a diff is worth reading when somebody opens the one Event it
+/// belongs to.
+///
+/// Read out of the repository rather than out of the store. The commit is in git
+/// — that is what a commit *is* — and keeping a second copy of every patch would
+/// be a database growing with the work rather than with the record of it. What
+/// the store holds is the line the Timeline draws.
+async fn commit_diff(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Two ids out of a URL a human may have typed, read as permissively as every
+    // other id here: neither of them naming a number cannot name a commit.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_commit();
+    };
+
+    let commit = match store::commit(&state.pool, id, event).await {
+        Ok(Some(commit)) => commit,
+        Ok(None) => return no_such_commit(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit failed");
+            return unavailable("the commit could not be read");
+        }
+    };
+
+    // Which repository to read it out of, which is the Conversation's own. A
+    // Conversation that has a commit on its Timeline and no row of its own is a
+    // record that has been got at.
+    let repo = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation.repo.path,
+        Ok(None) => return no_such_commit(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the commit could not be read");
+        }
+    };
+
+    let patch = match tokio::task::spawn_blocking(move || crate::commits::patch(&repo, &commit.sha))
+        .await
+    {
+        Ok(patch) => patch,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit's diff failed");
+            return unavailable("the commit could not be read");
+        }
+    };
+
+    // A commit the repository will not say anything about is one that has gone —
+    // collected, or on a branch somebody rewrote. There is nothing to draw a pane
+    // about, which is what a 404 means everywhere else here.
+    let Some(patch) = patch else {
+        return no_such_commit();
+    };
+
+    Json(verkstead_render::commit_diff(&patch)).into_response()
 }
 
 /// `POST /api/ui/conversations/{id}/brief` — save what the human has written.
@@ -904,6 +986,18 @@ fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such transcript on that Conversation"),
+    )
+}
+
+/// And no such commit — either the Conversation has no such Event, or the
+/// repository no longer has the commit it names. Worded without either id for
+/// the transcript's reason, and without telling the two apart because there is
+/// nothing different for the human to do about them: the Event is not one this
+/// server can show a diff for.
+fn no_such_commit() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such commit on that Conversation"),
     )
 }
 

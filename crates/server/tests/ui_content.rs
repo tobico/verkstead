@@ -1420,6 +1420,37 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And the commits on its branch, which is what a session leaves behind
+    // besides its output. Recorded here rather than made, exactly as the
+    // worktree and the handoff are: what a commit does to a Timeline is this
+    // file's subject, and whether watching a branch notices one is
+    // `tests/sessions.rs`'s.
+    //
+    // Two of them, because a Timeline row has to read as one of several rather
+    // than as a lone event — and on the Conversation that has been through a
+    // grilling, because that is where a branch first has anything on it.
+    for commit in [
+        store::Commit {
+            sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
+            subject: "chore: plan the usage-limit pause".to_owned(),
+            files: 2,
+            insertions: 74,
+            deletions: 3,
+        },
+        store::Commit {
+            sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
+            subject: "feat: read the account's own limit error".to_owned(),
+            files: 5,
+            insertions: 213,
+            deletions: 41,
+        },
+    ] {
+        store::record_commit(&pool, directing, &commit)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,

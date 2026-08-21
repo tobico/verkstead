@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentOutputEvent,
+  CommitDiff,
   ConversationAborted,
   ConversationEntry,
   ConversationView,
@@ -1511,5 +1512,172 @@ describe("disagreeing with a proposal", () => {
 
     expect(container.querySelector(".direction-chooser")).toBeNull();
     expect(container.querySelector(".directions")).toBeNull();
+  });
+});
+
+/// The commits on that conversation's timeline: what a session leaves behind
+/// besides its output.
+const COMMITS = DIRECTING.timeline.flatMap((event) =>
+  "Commit" in event ? [event.Commit] : [],
+);
+
+/// One commit's diff, as the details pane fetches it.
+///
+/// The payload is built from the answering set's own attached diff rather than
+/// written by hand: it is the same `DiffView`, rendered by the same server-side
+/// renderer that a commit's diff goes through — which is the whole reason a
+/// commit needs no diff machinery of its own.
+const COMMIT_DIFF: CommitDiff = { diff: (answeringSet as SetView).diff };
+
+/// Where the details pane fetches it from.
+const DIFF_OF_IT = `/api/ui/conversations/${DIRECTING.id}/commit/${COMMITS[0]!.id}`;
+
+/// The workbench with that conversation open and its commits' diffs to hand.
+function theCommits(...answers: Parameters<typeof serving>) {
+  return theDirecting({}, whenever(DIFF_OF_IT, json(COMMIT_DIFF)), ...answers);
+}
+
+describe("a commit on the timeline", () => {
+  it("summarises as what it was called and how much it moved", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const row = await drawn(container, ".timeline-event > .commit");
+    const commit = COMMITS[0]!;
+
+    expect(row.querySelector(".subject")!.textContent).toBe(commit.subject);
+    expect(row.querySelector(".sha")!.textContent).toBe(
+      commit.sha.slice(0, 7),
+    );
+    expect(row.querySelector(".files")!.textContent).toBe(
+      `${commit.files} files`,
+    );
+    expect(row.querySelector(".added")!.textContent).toBe(
+      `+${commit.insertions}`,
+    );
+    expect(row.querySelector(".removed")!.textContent).toBe(
+      `−${commit.deletions}`,
+    );
+  });
+
+  it("draws one row per commit, in timeline order", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    await drawn(container, ".timeline-event > .commit");
+
+    const subjects = [
+      ...container.querySelectorAll(".timeline-event > .commit .subject"),
+    ].map((it) => it.textContent);
+
+    expect(COMMITS).toHaveLength(2);
+    expect(subjects).toEqual(COMMITS.map((commit) => commit.subject));
+  });
+
+  /// There is nothing to decide about a commit. The design gives it no
+  /// per-commit review — feedback consolidates in the wrap-up phase — so the
+  /// row opens a diff and offers nothing else.
+  it("asks the human for nothing", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const row = await drawn(container, ".timeline-event > .commit");
+
+    expect(row.querySelectorAll("button")).toHaveLength(0);
+    expect(row.textContent).not.toContain("Approve");
+  });
+
+  it("shows that commit's diff in the details pane, as the server rendered it", async () => {
+    const fetching = theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const diff = await drawn(container, ".details-pane .diff-files");
+
+    // Put in the page as it arrived: the folds, the per-file anchors and the
+    // highlighting are all the renderer's, and nothing here reads the diff.
+    const folds = [...diff.querySelectorAll("details.diff-file")];
+
+    expect(folds.map((fold) => fold.id)).toEqual(["diff-1", "diff-2"]);
+    expect(folds[0]!.querySelector(".diff-path")!.textContent).toBe(
+      COMMIT_DIFF.diff!.paths[0],
+    );
+    expect(diff.querySelector(".diff-line.add")).toBeTruthy();
+    expect(diff.querySelector(".tok-storage")).toBeTruthy();
+    expect(askedFor(fetching, DIFF_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// The message is the event's to say: the diff arrives headerless, because
+  /// the renderer splits on `diff --git` and would drop anything above it.
+  it("says which commit it is above the diff", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const summary = await drawn(container, ".details-pane .commit-summary");
+
+    expect(summary.textContent).toContain(COMMITS[0]!.subject);
+    expect(summary.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
+  });
+
+  it("says so plainly when the commit changed no files", async () => {
+    theDirecting({}, whenever(DIFF_OF_IT, json({ diff: null })));
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    // Waited for rather than read once: the pane says `Loading…` in the same
+    // place while the diff is in flight.
+    await waitFor(() =>
+      expect(
+        container.querySelector(".details-pane .empty")!.textContent,
+      ).toContain("changed no files"),
+    );
+
+    expect(container.querySelector(".details-pane .diff")).toBeNull();
+  });
+
+  /// A commit whose repository no longer has it is a 404, and the pane says the
+  /// server's own words rather than drawing an empty diff.
+  it("shows the server's wording when the diff cannot be read", async () => {
+    theDirecting(
+      {},
+      whenever(DIFF_OF_IT, () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: "there is no such commit on that Conversation",
+            }),
+            { status: 404, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const error = await drawn(container, ".details-pane .error");
+
+    expect(error.textContent).toContain(
+      "there is no such commit on that Conversation",
+    );
+  });
+
+  /// The event that is open is the one the timeline says is open, so a narrow
+  /// window walking back out can see which it came from.
+  it("marks the commit the details pane is showing", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const row = await drawn(container, ".timeline-event > .commit");
+    expect(row.classList).not.toContain("selected");
+
+    fireEvent.click(row);
+
+    await waitFor(() => expect(row.classList).toContain("selected"));
+    expect(row.getAttribute("aria-pressed")).toBe("true");
   });
 });

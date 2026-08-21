@@ -18,7 +18,7 @@ Roadmap stage: [03: Implementation](docs/roadmaps/mvp/03-implementation.md)
 
 - [x] 01: Wrap-up proposal and the Direction state — [details](01-direction-state.md)
 - [x] 02: Handoff document and inline execution — [details](02-inline-execution.md)
-- [ ] 03: Commit Timeline Events — [details](03-commit-events.md)
+- [x] 03: Commit Timeline Events — [details](03-commit-events.md)
 - [ ] 04: The to-tasks fork in-conversation — [details](04-task-list-path.md)
 - [ ] 05: The pinned task-list Event — [details](05-pinned-task-list.md)
 - [ ] 06: The auto-advancing task runner — [details](06-task-runner.md)
