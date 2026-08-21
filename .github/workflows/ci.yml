@@ -35,6 +35,30 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.2
 
+      # The sandbox suite runs a real `bwrap` rather than a stand-in — what it
+      # checks is which paths come in writable, read-only and absent, and there
+      # is no way to ask that of anything but the tool itself. The runner image
+      # does not carry it.
+      #
+      # Installed from apt rather than fetched, because the package is what
+      # makes it *usable* as well as present: Ubuntu 24.04 denies unprivileged
+      # user namespaces by default, which is exactly what the sandbox's
+      # `--unshare-all` asks for, and the package ships the AppArmor profile
+      # granting bwrap the exception.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          bwrap --version
+
+      # For the dev-shell autodetection alone: it decides whether to wrap a
+      # session's command in `nix develop` by evaluating a flake attribute, so
+      # the test covering it needs a `nix` that answers. Pinned to the version
+      # `nix.yml` already uses. Nothing is fetched — the flake that test writes
+      # declares no inputs.
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.0
+
       # Formatting and lints first: both are cheap and both fail on the kind of
       # thing that is quicker to read than a test failure.
       - name: Format
