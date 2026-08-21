@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
 mod checks;
+mod comments;
 mod commits;
 mod conversations;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
@@ -46,6 +47,7 @@ mod runner;
 pub mod sandbox;
 mod sessions;
 mod sets;
+mod settling;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
 ///

@@ -247,6 +247,11 @@ pub(crate) enum Checked {
 /// [`Trouble`], which is what *Verkstead could not ask* means. This asks a
 /// question that has an answer.
 ///
+/// The rollup is about the pull request's head commit, so it moves when a fix
+/// session pushes: the run that was green belonged to the commit before it, and
+/// what comes back here is the new one — see [`crate::checks`], where that is
+/// what puts a settled wrap-up back to waiting.
+///
 /// A pull request with nothing running against it comes back empty, which is a
 /// repository with no CI. That is nothing to wait on rather than something
 /// missing — see [`crate::checks`], where it is read as green.
@@ -351,6 +356,250 @@ fn read_check(status: &str, conclusion: &str, state: &str) -> Checked {
     }
 }
 
+/// One thing said on a pull request, as the wrap-up's comment watcher reads it.
+///
+/// Not [`verkstead_render::Comment`], which is the details pane's and arrives
+/// rendered: this one is read by an agent rather than by a browser, so it keeps
+/// the markdown it was written in — and it carries the identity, which is the
+/// whole of how a comment already dispatched for is told from a new one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Comment {
+    /// What this comment is, for as long as it exists. GitHub's node id where
+    /// there is one, its URL where there is not — see [`identity`].
+    pub(crate) which: String,
+
+    /// Who said it, empty for an account that has since gone.
+    pub(crate) author: String,
+
+    /// When, RFC 3339, as GitHub gives it.
+    pub(crate) at: String,
+
+    /// Where on the branch they said it: the file and the line, for a comment
+    /// left on the diff. Empty for one said about the pull request as a whole,
+    /// which is what the conversation and a review's own words are.
+    pub(crate) about: String,
+
+    /// And what they said, in the markdown they wrote.
+    pub(crate) markdown: String,
+}
+
+/// Everything said on pull request `number`, as the host's `gh` finds it now.
+///
+/// **Three places a human writes, and all three count.** The pull request's
+/// conversation, the words at the top of a review, and the comments left on the
+/// lines of the diff — the last of which is where most code feedback actually
+/// lands, so a Verkstead that read only the conversation would miss the reviews
+/// it most needs to act on. They come back as one list in the order they were
+/// said in, because that is what they are: one human talking.
+///
+/// Two calls rather than three: `pr view` answers for the conversation and the
+/// reviews together, and the comments on the diff are the REST endpoint's, which
+/// `gh pr view` has no field for.
+///
+/// Read afresh every poll and never written down. What Verkstead remembers is
+/// which of them it has already dispatched a session for, which is a much
+/// smaller thing than the comments themselves.
+///
+/// A pull request nobody has said anything on comes back empty, which is every
+/// pull request the moment it opens.
+pub(crate) fn comments(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Comment>, Trouble> {
+    let mut said = conversation(gh, repo, number)?;
+    said.extend(on_the_diff(gh, repo, number)?);
+
+    // In the order they were said in, across all three places. The timestamps
+    // are RFC 3339 in UTC, which sorts as text.
+    said.sort_by(|one, next| one.at.cmp(&next.at));
+
+    Ok(said)
+}
+
+/// What was said about the pull request as a whole: its conversation, and the
+/// words at the top of each review.
+///
+/// A review with nothing written at the top of it is left out. An approval with
+/// no words is somebody saying they are happy, and dispatching a session to
+/// address it would be Verkstead inventing work out of agreement.
+fn conversation(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Comment>, Trouble> {
+    /// What `--json comments,reviews` comes back as.
+    #[derive(Deserialize)]
+    struct Said {
+        #[serde(default)]
+        comments: Vec<One>,
+        #[serde(default)]
+        reviews: Vec<Reviewed>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct One {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        url: String,
+        #[serde(default)]
+        author: Login,
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        created_at: String,
+    }
+
+    /// A review carries its time in another field from a comment's, and that is
+    /// the whole of the difference worth reading: what a review *is* — approved,
+    /// changes requested — is not something to address, and what it says is.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reviewed {
+        #[serde(default)]
+        id: String,
+        #[serde(default)]
+        author: Login,
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        submitted_at: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "comments,reviews",
+        ],
+    )?;
+
+    let said: Said = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    let comments = said.comments.into_iter().map(|one| Comment {
+        which: identity(&one.id, &one.url, &one.author.login, &one.created_at),
+        author: one.author.login,
+        at: one.created_at,
+        about: String::new(),
+        markdown: one.body,
+    });
+
+    let reviews = said
+        .reviews
+        .into_iter()
+        .filter(|review| !review.body.trim().is_empty())
+        .map(|review| Comment {
+            which: identity(&review.id, "", &review.author.login, &review.submitted_at),
+            author: review.author.login,
+            at: review.submitted_at,
+            about: String::new(),
+            markdown: review.body,
+        });
+
+    Ok(comments.chain(reviews).collect())
+}
+
+/// And what was said on the lines of the diff, which is where a review of code
+/// mostly happens.
+///
+/// `gh api` rather than `gh pr view`, because `pr view` has no field for these:
+/// they are the REST API's review comments, and `{owner}` and `{repo}` are
+/// filled in by `gh` from the repository it is run inside. Paginated, so a
+/// review that left thirty comments arrives whole rather than one page of it.
+fn on_the_diff(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Comment>, Trouble> {
+    /// One entry of it. The REST API spells its fields with underscores and puts
+    /// the author under `user`, where the GraphQL one `gh pr view` wraps says
+    /// `author` — which is why this is read apart from the reviews above rather
+    /// than into the same shape.
+    #[derive(Deserialize)]
+    struct OnALine {
+        #[serde(default)]
+        node_id: String,
+        #[serde(default)]
+        html_url: String,
+        #[serde(default)]
+        user: Login,
+        #[serde(default)]
+        body: String,
+        #[serde(default)]
+        created_at: String,
+        #[serde(default)]
+        path: String,
+
+        /// Which line it is against now. Null for a comment on a line the branch
+        /// has since moved past, which is a comment to read all the same.
+        line: Option<i64>,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "api",
+            &format!("repos/{{owner}}/{{repo}}/pulls/{number}/comments"),
+            "--paginate",
+        ],
+    )?;
+
+    // `--paginate` concatenates the pages as separate arrays where it cannot
+    // merge them, so this reads what came back as one array and says so plainly
+    // when it is something else.
+    let said: Vec<OnALine> = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(said
+        .into_iter()
+        .map(|one| Comment {
+            which: identity(
+                &one.node_id,
+                &one.html_url,
+                &one.user.login,
+                &one.created_at,
+            ),
+            author: one.user.login,
+            at: one.created_at,
+            about: where_said(&one.path, one.line),
+            markdown: one.body,
+        })
+        .collect())
+}
+
+/// Who said it. A comment left by an account that has since gone comes back with
+/// no author at all, which is a comment to act on rather than one to drop.
+#[derive(Default, Deserialize)]
+struct Login {
+    #[serde(default)]
+    login: String,
+}
+
+/// Where on the branch a comment was left, as the session that reads it is told.
+///
+/// The file alone where GitHub gave no line, which is a comment on a line the
+/// branch has moved past — still worth pointing at the file, because that is
+/// where whoever fixes it has to look.
+fn where_said(path: &str, line: Option<i64>) -> String {
+    match (path.trim().is_empty(), line) {
+        (true, _) => String::new(),
+        (false, Some(line)) => format!("`{path}` line {line}"),
+        (false, None) => format!("`{path}`"),
+    }
+}
+
+/// What a comment is called, for the table that remembers which ones have been
+/// dispatched for.
+///
+/// GitHub's node id first, because that is what it is. The URL after it, which
+/// carries the same id in a different spelling. And, where a `gh` gave neither,
+/// who said it and when — weaker than the other two, but a comment with no
+/// identity at all would be one dispatched for again on every poll for ever,
+/// which is the one outcome worth ruling out.
+fn identity(id: &str, url: &str, author: &str, at: &str) -> String {
+    for named in [id, url] {
+        if !named.trim().is_empty() {
+            return named.trim().to_owned();
+        }
+    }
+
+    format!("{author} at {at}")
+}
+
 /// What is on the pull request now: the commits it carries and what has been
 /// said about it.
 ///
@@ -392,15 +641,6 @@ pub(crate) fn details(
         body: String,
         #[serde(default)]
         created_at: String,
-    }
-
-    /// Who said it. A comment left by an account that has since gone comes back
-    /// with no author at all, which is a comment to draw rather than a reason to
-    /// refuse the whole pane.
-    #[derive(Default, Deserialize)]
-    struct Login {
-        #[serde(default)]
-        login: String,
     }
 
     let said = gh.ask(
@@ -727,5 +967,147 @@ mod tests {
         let details = details(&gh, dir.path(), 41).unwrap();
 
         assert!(details.commits.is_empty() && details.comments.is_empty());
+    }
+
+    /// A `gh` that answers `viewed` for `gh pr view` and `on_the_diff` for `gh
+    /// api`.
+    ///
+    /// Reading everything said on a pull request takes both: `gh pr view` has no
+    /// field for the comments left on the lines of the diff, so those are the
+    /// REST endpoint's and arrive spelled the REST API's way.
+    fn stub_reading(viewed: &str, on_the_diff: &str) -> (tempfile::TempDir, Gh) {
+        let dir = tempfile::tempdir().unwrap();
+
+        (
+            dir,
+            Gh::running(vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                format!(
+                    "if [ \"$1\" = api ]; then printf '%s' '{on_the_diff}'; \
+                     else printf '%s' '{viewed}'; fi"
+                ),
+                "gh".to_owned(),
+            ]),
+        )
+    }
+
+    /// All three places a human writes on a pull request, read as one list in
+    /// the order they were said in: the conversation, the words at the top of a
+    /// review, and the comments left on the lines of the diff.
+    ///
+    /// The last is where a review of code mostly happens, so a Verkstead that
+    /// read only the first would miss the feedback it most needs to act on.
+    #[test]
+    fn everything_said_on_a_pull_request_reads_back_in_the_order_it_was_said() {
+        let (dir, gh) = stub_reading(
+            r#"{"comments":[{"id":"IC_1","url":"https://github.com/tobico/verkstead/pull/41#issuecomment-1",
+                 "author":{"login":"tobico"},"body":"Reading this now.","createdAt":"2026-08-21T09:00:00Z"}],
+                "reviews":[{"id":"PRR_1","author":{"login":"tobico"},"state":"CHANGES_REQUESTED",
+                 "body":"Two things.","submittedAt":"2026-08-21T09:02:00Z"}]}"#,
+            r#"[{"node_id":"PRRC_1","html_url":"https://github.com/tobico/verkstead/pull/41#discussion_r1",
+                 "user":{"login":"tobico"},"body":"Wrong way round.","created_at":"2026-08-21T09:01:00Z",
+                 "path":"src/window.rs","line":12}]"#,
+        );
+
+        assert_eq!(
+            comments(&gh, dir.path(), 41).unwrap(),
+            vec![
+                Comment {
+                    which: "IC_1".to_owned(),
+                    author: "tobico".to_owned(),
+                    at: "2026-08-21T09:00:00Z".to_owned(),
+                    about: String::new(),
+                    markdown: "Reading this now.".to_owned(),
+                },
+                Comment {
+                    which: "PRRC_1".to_owned(),
+                    author: "tobico".to_owned(),
+                    at: "2026-08-21T09:01:00Z".to_owned(),
+                    about: "`src/window.rs` line 12".to_owned(),
+                    markdown: "Wrong way round.".to_owned(),
+                },
+                Comment {
+                    which: "PRR_1".to_owned(),
+                    author: "tobico".to_owned(),
+                    at: "2026-08-21T09:02:00Z".to_owned(),
+                    about: String::new(),
+                    markdown: "Two things.".to_owned(),
+                },
+            ],
+        );
+    }
+
+    /// A review with nothing written at the top of it is somebody saying they
+    /// are happy. Dispatching a session to address it would be Verkstead
+    /// inventing work out of agreement.
+    #[test]
+    fn a_review_with_no_words_in_it_is_nothing_to_address() {
+        let (dir, gh) = stub_reading(
+            r#"{"comments":[],"reviews":[{"id":"PRR_1","author":{"login":"tobico"},
+                 "state":"APPROVED","body":"","submittedAt":"2026-08-21T09:02:00Z"}]}"#,
+            "[]",
+        );
+
+        assert!(comments(&gh, dir.path(), 41).unwrap().is_empty());
+    }
+
+    /// Where a comment on the diff was left is half of what it means, so it
+    /// travels with it — and a line GitHub no longer has is still a file worth
+    /// pointing at.
+    #[test]
+    fn a_comment_on_the_diff_is_placed_by_its_file_and_line() {
+        assert_eq!(
+            where_said("src/window.rs", Some(12)),
+            "`src/window.rs` line 12"
+        );
+        assert_eq!(where_said("src/window.rs", None), "`src/window.rs`");
+        assert_eq!(where_said("", None), "");
+    }
+
+    /// The identity falls back rather than being empty, because a comment with
+    /// no identity would be one dispatched for again on every poll for ever.
+    #[test]
+    fn a_comment_gh_gave_no_id_for_is_still_told_apart_from_the_next_one() {
+        assert_eq!(
+            identity("IC_1", "https://…/#issuecomment-1", "tobico", ""),
+            "IC_1"
+        );
+        assert_eq!(
+            identity("", "https://…/#issuecomment-1", "tobico", ""),
+            "https://…/#issuecomment-1",
+        );
+        assert_eq!(
+            identity("", "", "tobico", "2026-08-21T09:00:00Z"),
+            "tobico at 2026-08-21T09:00:00Z",
+        );
+    }
+
+    /// A `gh` that cannot answer about the comments is *not knowing* rather than
+    /// *nobody said anything*, the same way the checks are — and that holds
+    /// whichever of the two calls it is that cannot answer.
+    #[test]
+    fn a_gh_that_cannot_answer_about_comments_says_so_rather_than_saying_none() {
+        let (dir, gh) = stub("", "gh: To use GitHub CLI, run: gh auth login");
+
+        assert_eq!(comments(&gh, dir.path(), 41), Err(Trouble::NotLoggedIn));
+
+        // The conversation answers and the comments on the diff do not, which is
+        // an account that has the pull request and not the endpoint. Half the
+        // feedback is not an answer, so this is trouble too.
+        let dir = tempfile::tempdir().unwrap();
+        let gh = Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            "if [ \"$1\" = api ]; then printf 'HTTP 404: Not Found\\n' >&2; exit 1; fi; \
+             printf '%s' '{\"comments\":[],\"reviews\":[]}'"
+                .to_owned(),
+            "gh".to_owned(),
+        ]);
+
+        assert_eq!(
+            comments(&gh, dir.path(), 41),
+            Err(Trouble::Refused("HTTP 404: Not Found".to_owned())),
+        );
     }
 }

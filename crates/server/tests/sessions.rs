@@ -58,12 +58,12 @@ struct Grilling {
     /// Dropped last, and only these keep the directories alive: a worktree that
     /// vanished mid-session would fail obscurely.
     _watched: tempfile::TempDir,
-    _home: tempfile::TempDir,
+    home: tempfile::TempDir,
     state: tempfile::TempDir,
 
     /// A directory every sandbox gets read-write, so that a session can leave
     /// evidence of itself somewhere that outlives its worktree.
-    _spill: tempfile::TempDir,
+    spill: tempfile::TempDir,
 
     app: Router,
     id: i64,
@@ -109,6 +109,33 @@ impl Grilling {
         .await;
 
         transcript.text
+    }
+
+    /// A second server over the same database, sandboxes, home and agent, which
+    /// is what a restart is: nothing a wrap-up is watching lives in the process
+    /// that started it.
+    ///
+    /// The caller holds on to what comes back — dropping the Router is the second
+    /// server going away again.
+    async fn restarted(&self, stub: &str, gh: &str) -> Router {
+        router_running_sessions(
+            open_database(&self.database).await.unwrap(),
+            WatchedPaths::none(),
+            self.state.path().to_owned(),
+            Agents::running(
+                vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
+                Home {
+                    path: self.home.path().to_owned(),
+                    gh_config: self.home.path().join(".config/gh"),
+                },
+                Reachable::at(LISTENING),
+                SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
+                Skills::installed(self.state.path()).expect("this binary carries skills"),
+                Handoffs::under(self.state.path()),
+            )
+            .at_pace(BRISKLY),
+            gh_stub(gh),
+        )
     }
 
     /// And one commit's diff, as the same pane fetches that.
@@ -256,12 +283,17 @@ const BRISKLY: Pace = Pace {
 /// these ask is what Verkstead does with the answer, and asking GitHub itself
 /// would be a test that needed a network, an account and a pull request.
 ///
-/// It tells the two questions apart by the fields being asked for, because that
-/// is what tells them apart on the command line.
+/// It tells the questions apart by the fields being asked for, because that is
+/// what tells them apart on the command line — except the comments left on the
+/// lines of the diff, which are `gh api`'s and so are told by `$1`.
 const PULL_REQUEST: &str = r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *commits*)
     printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}]}'
+    ;;
+*comments*)
+    printf '{"comments":[],"reviews":[]}'
     ;;
 *)
     printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
@@ -278,12 +310,16 @@ esac
 fn gh_checking(how: &str) -> String {
     format!(
         r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
     printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
     ;;
 *commits*)
     printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
     ;;
 *)
     printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
@@ -292,6 +328,68 @@ esac
 "#
     )
 }
+
+/// A `gh` whose pull request answers `rollup` about its checks, carries `said`
+/// in its conversation and `on_the_diff` on the lines of its diff — each of them
+/// the entries of the answer, so a test can hand it however many it needs and
+/// none at all.
+///
+/// The comments on the diff are told by `$1`, because they are `gh api`'s rather
+/// than `gh pr view`'s. The rest are told by the fields being asked for, in the
+/// order the field lists have to be told apart in: the details pane asks for
+/// `commits,comments` and the comment watcher asks for `comments,reviews`, and
+/// only the first of those contains `commits`.
+fn gh_about(rollup: &str, said: &str, on_the_diff: &str) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[{on_the_diff}]'; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+{rollup}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[{said}],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
+/// A green suite, as [`gh_about`]'s answer about the checks.
+const GREEN: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
+
+/// One that has gone back to running once `landed` is there — which is what a
+/// commit pushed to the pull request does to it, GitHub starting a whole new run
+/// against the new head.
+fn green_until(landed: &Path) -> String {
+    format!(
+        r#"    if [ -e {landed} ]; then how=IN_PROGRESS; else how=COMPLETED; fi
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$how""#,
+        landed = quoted(landed),
+    )
+}
+
+/// And one that cannot be asked about the checks at all, which is how a test
+/// keeps a wrap-up from settling while it watches what the comments do.
+const CHECKS_UNANSWERABLE: &str = r#"    printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+    exit 1"#;
+
+/// Three comments said in the space of a minute in the pull request's
+/// conversation, which is one human making one point rather than three.
+const THREE_COMMENTS: &str = r#"{"id":"IC_1","author":{"login":"tobico"},"body":"Rename the window field.","createdAt":"2026-08-21T09:00:00Z"},
+{"id":"IC_2","author":{"login":"tobico"},"body":"And the test that pins it.","createdAt":"2026-08-21T09:00:20Z"},
+{"id":"IC_3","author":{"login":"tobico"},"body":"Otherwise this reads well.","createdAt":"2026-08-21T09:00:40Z"}"#;
+
+/// And two left on the lines of the diff, which is where a review of code
+/// mostly happens — the entries of the REST endpoint's answer, spelled its way.
+const TWO_ON_THE_DIFF: &str = r#"{"node_id":"PRRC_1","user":{"login":"tobico"},"body":"This is the wrong way round.","created_at":"2026-08-21T09:03:00Z","path":"src/window.rs","line":12},
+{"node_id":"PRRC_2","user":{"login":"tobico"},"body":"And this one has no home any more.","created_at":"2026-08-21T09:03:20Z","path":"src/clock.rs","line":null}"#;
 
 /// The same, for a check that is red until `green` is there and passing once it
 /// is — which is how a test moves GitHub on between one poll and the next.
@@ -307,6 +405,7 @@ fn gh_checking_until(green: &Path) -> String {
 /// checks — an account whose login has expired, which is the ordinary way this
 /// goes wrong on a machine nobody is sitting at.
 const CHECKS_UNASKABLE: &str = r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
 case "$5" in
 *statusCheckRollup*)
     printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
@@ -314,6 +413,9 @@ case "$5" in
     ;;
 *commits*)
     printf '{"commits":[],"comments":[]}'
+    ;;
+*comments*)
+    printf '{"comments":[],"reviews":[]}'
     ;;
 *)
     printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
@@ -438,9 +540,9 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
 
     Grilling {
         _watched: watched,
-        _home: home,
+        home,
         state,
-        _spill: spill,
+        spill,
         app,
         id,
         database,
@@ -2260,6 +2362,258 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     assert!(
         told.contains("Rust") && told.contains("/actions/runs/1/job/2"),
         "the fix session that was waiting is about the red check: {told}",
+    );
+}
+
+/// Whether Verkstead has recorded that nothing said on this pull request is left
+/// unaddressed.
+async fn comments_settled(fixture: &Grilling) -> bool {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    settled.contains(&verkstead_server::store::WaitingOn::Comments)
+}
+
+/// What is said on the pull request reaches a session — from all three places a
+/// human writes — and everything said in a minute reaches **one**.
+///
+/// A human writing five times is making one point, and five sessions racing each
+/// other in one Worktree is the thing a batch prevents. So the whole batch goes
+/// to one session inside the bundled addressing skill, which commits and pushes
+/// as that skill says.
+///
+/// Three of them are in the pull request's conversation and two are on the lines
+/// of the diff, which is where a review of code mostly happens: a watcher that
+/// read only the conversation would miss the feedback it most needs to act on.
+#[tokio::test]
+async fn new_comments_dispatch_one_session_between_them_rather_than_one_each() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, THREE_COMMENTS, TWO_ON_THE_DIFF),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&dispatched).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "what was said was never addressed",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls of a pull request whose comments have all
+    // been dispatched for.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let told = std::fs::read_to_string(&dispatched).unwrap();
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one session between the five, rather than one each: {told}",
+    );
+    assert!(
+        told.contains("addressing/SKILL.md"),
+        "inside the bundled addressing skill: {told}",
+    );
+    assert!(
+        told.contains("Rename the window field.")
+            && told.contains("And the test that pins it.")
+            && told.contains("Otherwise this reads well."),
+        "everything said in the conversation reached it: {told}",
+    );
+    assert!(
+        told.contains("This is the wrong way round.")
+            && told.contains("And this one has no home any more."),
+        "and so did what was said on the lines of the diff: {told}",
+    );
+    assert!(
+        told.contains("`src/window.rs` line 12"),
+        "with where it was said, which is half of what it means: {told}",
+    );
+}
+
+/// Which comments have been dispatched for is written down rather than held in
+/// the process, so a server that comes back up does not dispatch a session about
+/// feedback that was addressed yesterday.
+///
+/// The checks cannot be asked about here, which is what keeps the Conversation
+/// wrapping up long enough for a second server to take it over: a wrap-up that
+/// had finished would be one there was nothing left to dispatch from.
+#[tokio::test]
+async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_restart() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING);
+    let gh = gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&dispatched).await;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&dispatched).unwrap()).len(),
+        1,
+        "the first server dispatched once for the batch",
+    );
+
+    // A second server over the same database, sandboxes and agent — which knows
+    // nothing about the comments except what was written down.
+    let _restarted = fixture.restarted(&stub, &gh).await;
+
+    // Long enough for many polls of both of them.
+    tokio::time::sleep(Duration::from_millis(800)).await;
+
+    let told = std::fs::read_to_string(&dispatched).unwrap();
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "a restarted server dispatched about comments that had already been addressed: {told}",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and the wrap-up is still going, because its checks were never green",
+    );
+}
+
+/// The rule that ends a wrap-up: the checks green, the review answered and
+/// nothing said left unaddressed, all three together. Verkstead decides it
+/// itself — there is nobody at the workbench to press anything.
+///
+/// And what it does not wait for is the merge. The pull request is open the whole
+/// time and nothing here ever asks GitHub whether it is: stages stack on unmerged
+/// predecessors, so a Conversation that waited would hold up every stage behind
+/// it.
+#[tokio::test]
+async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_merge() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let questions = spill.path().join("gh-questions");
+
+    // A `gh` that writes down every question it is asked, so that what was never
+    // asked can be read back.
+    let recording = format!(
+        "printf '%s\\n' \"$5\" >> {questions}\n{}",
+        gh_about(GREEN, "", ""),
+        questions = quoted(&questions),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &recording,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    // The move is on the record like every other, and it is the last thing to
+    // have happened.
+    assert_eq!(
+        view.timeline.iter().rev().find_map(|event| match event {
+            TimelineEvent::Moved(moved) => Some(moved.state),
+            _ => None,
+        }),
+        Some(Lifecycle::Done),
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing stopped: {:?}",
+        interruptions(&view),
+    );
+    assert_eq!(
+        fixes(&view),
+        0,
+        "and nothing was dispatched, because nothing was wrong",
+    );
+
+    let asked = std::fs::read_to_string(&questions).unwrap();
+
+    assert!(
+        !asked.contains("merge"),
+        "nothing ever asked GitHub whether the pull request had been merged: {asked}",
+    );
+}
+
+/// A commit landing on the pull request is a new run to wait on, so the green the
+/// last one left does not stand.
+///
+/// The commit here is one a fix session pushes; what GitHub does with it is start
+/// a run against the new head, and what the wrap-up does is stop being settled
+/// until that one is green. A wrap-up that kept yesterday's green would finish a
+/// Conversation on a suite that had never seen its last commit.
+#[tokio::test]
+async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let landed = spill.path().join("landed");
+
+    // The review reads the branch and then waits on the human, so it never
+    // settles — which is what keeps the Conversation wrapping up while this
+    // watches what the checks do.
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT),
+        &gh_about(&green_until(&landed), "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(Instant::now() < deadline, "the checks never settled");
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    std::fs::write(&landed, "").unwrap();
+
+    let deadline = Instant::now() + PATIENCE;
+    while checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "a commit landed and the checks stayed settled from the run before it",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls of a run that has not finished.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "and they stay waiting until the new run is green",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "so the wrap-up is not over",
     );
 }
 

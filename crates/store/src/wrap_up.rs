@@ -1,32 +1,40 @@
-//! What wrap-up is still waiting on, and how many goes the machine has had at a
-//! red check.
+//! What wrap-up is still waiting on, how many goes the machine has had at a red
+//! check, which comments it has already dispatched about — and the move to Done
+//! that having settled all three is.
 //!
-//! Two small tables and no Timeline Events, which is the whole shape of this
-//! module. Everything a human reads about wrap-up is already an Event — the pull
-//! request, the commits a fix session lands, the Interruption where it stops
-//! asking the machine. What is kept here is the bookkeeping underneath: facts
-//! that decide what Verkstead does next and that nobody would want a row on a
-//! Timeline for.
+//! Three small tables and one Timeline Event, which is the whole shape of this
+//! module. Everything else a human reads about wrap-up is already an Event — the
+//! pull request, the commits a fix session lands, the Interruption where it
+//! stops asking the machine. What is kept here is the bookkeeping underneath:
+//! facts that decide what Verkstead does next and that nobody would want a row
+//! on a Timeline for.
 //!
-//! Both survive a restart, and both have to. A server that came back up having
-//! forgotten how many fix sessions a check had already had would dispatch them
-//! again for ever, which is exactly the failure *two attempts, then ask the
-//! human* exists to prevent.
+//! All three survive a restart, and all three have to. A server that came back
+//! up having forgotten how many fix sessions a check had already had would
+//! dispatch them again for ever, which is exactly the failure *two attempts,
+//! then ask the human* exists to prevent; one that had forgotten which comments
+//! it had read would dispatch a session about feedback that was addressed
+//! yesterday.
 //!
-//! What is *settled* is written down and what is red is not: the checks are
-//! asked of GitHub on every poll, so a red suite needs no memory. The row is
-//! deleted again the moment they stop being green — see [`unsettle_wrap_up`] —
-//! which is what makes a commit pushed to the pull request put its checks back
-//! to waiting rather than leaving yesterday's green standing.
+//! What is *settled* is written down and what is outstanding is not: the checks
+//! and the comments are asked of GitHub on every poll, so a red suite needs no
+//! memory. The row is deleted again the moment one of them stops being true —
+//! see [`unsettle_wrap_up`] — which is what makes a commit pushed to the pull
+//! request put its checks back to waiting rather than leaving yesterday's green
+//! standing, and a comment landing after a quiet spell something to deal with.
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
 
+use super::conversations::{Lifecycle, moved};
+
 /// One of the things a Conversation has to have settled before wrap-up is over.
 ///
-/// The pull request's comments being addressed is the other one, and it arrives
-/// with the stage that produces it — there is nothing yet that could settle it,
-/// and a variant nothing ever writes would be a wrap-up that could never finish.
+/// All three together and nothing else. What is *not* here is the merge: stages
+/// stack on unmerged predecessors, so a Conversation that stayed in Wrapping
+/// until its pull request landed would hold up every stage behind it — and
+/// merging is the human act this pipeline is built around rather than a step in
+/// it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitingOn {
     /// The pull request's checks are green.
@@ -39,6 +47,15 @@ pub enum WaitingOn {
     /// read what it found and said which of it to fix, and a commit landing
     /// afterwards does not un-say that.
     Review,
+
+    /// Nothing has been said on the pull request that has not had a session
+    /// dispatched about it.
+    ///
+    /// Like the checks and unlike the review: a comment landing after this
+    /// settled unsettles it again, because a wrap-up that stopped reading its
+    /// pull request the first time it went quiet would be one a human could not
+    /// reach.
+    Comments,
 }
 
 impl WaitingOn {
@@ -48,6 +65,7 @@ impl WaitingOn {
         match self {
             Self::Checks => "checks",
             Self::Review => "review",
+            Self::Comments => "comments",
         }
     }
 
@@ -58,17 +76,42 @@ impl WaitingOn {
         Ok(match word {
             "checks" => Self::Checks,
             "review" => Self::Review,
+            "comments" => Self::Comments,
             other => bail!("a wrap-up is waiting on the unknown thing {other:?}"),
         })
     }
 }
 
-/// The two tables wrap-up keeps its bookkeeping in.
+/// Everything wrap-up has to have settled before it is over.
 ///
-/// Both hang off a Conversation rather than off a Timeline Event, unlike nearly
-/// everything else here, and that is the point: neither is something that
-/// happened, so neither is something to draw. They are what Verkstead knows
-/// about a Conversation it is wrapping up.
+/// Written out rather than derived, because what it is for is the one question
+/// [`finish_wrap_up`] asks — and a list that grew a variant without anybody
+/// deciding it belonged here would be a wrap-up quietly waiting on something new.
+pub const WAITED_ON: [WaitingOn; 3] = [WaitingOn::Checks, WaitingOn::Review, WaitingOn::Comments];
+
+/// What became of asking whether a wrap-up is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Finished {
+    /// It is: the Conversation is Done, and the move is on its Timeline.
+    Done,
+
+    /// Something is still outstanding, so it stays where it is.
+    StillWaiting,
+
+    /// It is not wrapping up any more — aborted out from under the watchers, or
+    /// finished by the poll before this one.
+    NotWrapping,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// The three tables wrap-up keeps its bookkeeping in.
+///
+/// All of them hang off a Conversation rather than off a Timeline Event, unlike
+/// nearly everything else here, and that is the point: none of them is something
+/// that happened, so none of them is something to draw. They are what Verkstead
+/// knows about a Conversation it is wrapping up.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS wrap_up_settled (
@@ -97,6 +140,21 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the check fix attempts table")?;
+
+    // Keyed by what GitHub calls the comment, which is what survives a restart:
+    // a server that came back up and read every comment as new would dispatch a
+    // session about feedback that was addressed yesterday.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS addressed_comments (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             comment_id      TEXT NOT NULL,
+             at              TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, comment_id)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the addressed comments table")?;
 
     Ok(())
 }
@@ -217,6 +275,137 @@ pub async fn record_fix_attempt(
     })?;
 
     Ok(attempts)
+}
+
+/// Which of a pull request's comments have already had a session dispatched
+/// about them.
+///
+/// The whole set rather than one asked about at a time, because what it is for
+/// is the question *which of these are new* — which is about all of them at once,
+/// and the comments arrive from GitHub as a list.
+pub async fn addressed_comments(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT comment_id FROM addressed_comments WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(pool)
+            .await
+            .with_context(|| {
+                format!(
+                    "reading which of Conversation {conversation_id}'s comments have been \
+                     dispatched for"
+                )
+            })?;
+
+    Ok(rows.into_iter().map(|(comment_id,)| comment_id).collect())
+}
+
+/// Record that a session has been dispatched about these comments, so the next
+/// poll does not dispatch another one.
+///
+/// The whole batch in one transaction, because one batch is what one session is
+/// dispatched for: half a batch written down would be a restart that dispatched
+/// a second session about the other half.
+///
+/// Written as the session is dispatched rather than as it ends, for the reason a
+/// fix attempt is counted that way — see [`record_fix_attempt`]: a comment a
+/// server had dispatched for and not written down is one the next server
+/// dispatches for again.
+pub async fn record_addressed_comments(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    comments: &[String],
+) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("recording which comments have been dispatched for")?;
+
+    for comment in comments {
+        sqlx::query(
+            "INSERT INTO addressed_comments (conversation_id, comment_id, at)
+             VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT (conversation_id, comment_id) DO NOTHING",
+        )
+        .bind(conversation_id)
+        .bind(comment)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "recording that {comment:?} has been dispatched for on Conversation \
+                 {conversation_id}"
+            )
+        })?;
+    }
+
+    tx.commit()
+        .await
+        .context("recording which comments have been dispatched for")?;
+
+    Ok(())
+}
+
+/// Move the Conversation to Done, where its wrap-up has settled everything it
+/// waits on.
+///
+/// The rule that ends a wrap-up, and Verkstead's own to apply: there is nobody at
+/// the workbench to press anything, which is the whole of what running unattended
+/// means. Any one of [`WAITED_ON`] still outstanding leaves it where it is.
+///
+/// One transaction, as every move is, and the settlements are read inside it so
+/// that the answer still holds when the update acts on it — which is what makes
+/// two watchers asking at once safe: the first makes the move and the second
+/// finds a Conversation that is not wrapping up any more.
+///
+/// What it does *not* wait for is the merge. Done means Verkstead has finished
+/// with the work, not that it is on `main`.
+pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<Finished> {
+    let mut tx = pool.begin().await.context("finishing a wrap-up")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(conversation_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {conversation_id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Finished::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+        return Ok(Finished::NotWrapping);
+    }
+
+    let settled: Vec<(String,)> =
+        sqlx::query_as("SELECT waiting_on FROM wrap_up_settled WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_all(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("reading what the wrap-up of Conversation {conversation_id} has settled")
+            })?;
+
+    let settled: Vec<WaitingOn> = settled
+        .into_iter()
+        .map(|(waiting_on,)| WaitingOn::read(&waiting_on))
+        .collect::<Result<_>>()?;
+
+    if !WAITED_ON.iter().all(|one| settled.contains(one)) {
+        return Ok(Finished::StillWaiting);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Done.stored())
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {conversation_id} to done"))?;
+
+    moved(&mut tx, conversation_id, Lifecycle::Done).await?;
+
+    tx.commit().await.context("finishing a wrap-up")?;
+
+    Ok(Finished::Done)
 }
 
 /// Forget what a Conversation's checks have already been given, so they start

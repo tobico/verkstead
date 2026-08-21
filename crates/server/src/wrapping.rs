@@ -122,20 +122,24 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 }
 
 /// Everything a wrapping Conversation has going on: its pull request's checks
-/// watched, and its branch reviewed where nobody has read it yet.
+/// watched, its comments read, its branch reviewed where nobody has read it yet,
+/// and the rule that ends the whole thing waiting to be true.
 ///
 /// One place that says what a wrap-up *is*, because four things start one and all
 /// four have to start the whole of it: the finish step opening the pull request,
 /// a server coming back up over a Conversation it left wrapping, and either of
-/// the two Interruptions being retried — each of which stopped the other half
-/// too, since nothing advances past an open one.
+/// the two Interruptions being retried — each of which stopped the rest too,
+/// since nothing advances past an open one.
 ///
-/// Both halves decide for themselves whether there is anything to do, so starting
+/// Each of them decides for itself whether there is anything to do, so starting
 /// them twice is not starting two of anything: a review that has already asked
-/// returns, and a Conversation that has stopped wrapping up stops both.
+/// returns, a second settling watcher finds the move already made, and a
+/// Conversation that has stopped wrapping up stops every one of them.
 pub(crate) fn watching(state: &AppState, conversation_id: i64) {
     tokio::spawn(crate::checks::watch(state.clone(), conversation_id));
+    tokio::spawn(crate::comments::watch(state.clone(), conversation_id));
     tokio::spawn(crate::review::run(state.clone(), conversation_id));
+    tokio::spawn(crate::settling::watch(state.clone(), conversation_id));
 }
 
 /// Start watching every Conversation that was already wrapping up.

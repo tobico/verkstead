@@ -61,7 +61,8 @@ pub use repos::{Repo, register_repo, registered_repos};
 pub use transcripts::{Summary, append_transcript, start_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
-    WaitingOn, fix_attempts, forget_fix_attempts, record_fix_attempt, settle_wrap_up,
+    Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
+    forget_fix_attempts, record_addressed_comments, record_fix_attempt, settle_wrap_up,
     unsettle_wrap_up, wrap_up_settled,
 };
 
