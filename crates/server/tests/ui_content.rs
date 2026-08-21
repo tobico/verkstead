@@ -1317,6 +1317,27 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And the session's own record of what it was saying while it printed that,
+    // which is what the pane draws instead of the bytes wherever there is one.
+    // The lines are the shape a backend writes them in, because that is what the
+    // renderer reads — and one of everything, because what the pane has to draw
+    // is one of everything.
+    store::append_transcript(
+        &pool,
+        capture,
+        &[
+            r#"{"type":"user","message":{"role":"user","content":"What should the queue do with a delivery that keeps failing?"}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Forty attempts is not a retry policy, it is a loop.","signature":"..."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Looking at how the queue is **drained**."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"rg -n 'retry' crates/server/src","description":"Find where a delivery is retried"}}]}}"#.to_owned(),
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"crates/server/src/queue.rs:118:    retry(delivery).await;"}]}}"#.to_owned(),
+            r#"{"type":"attachment","attachment":{"type":"todos","content":"three things still to do"}}"#.to_owned(),
+            r#"{"type":"divination","omen":"a kind from a version nobody here has met"}"#.to_owned(),
+        ],
+    )
+    .await
+    .unwrap();
+
     // And the two Question Sets that session put to the human: one answered and
     // one still waiting, which are the two ways a Set reads on a Timeline. Both
     // are needed, because what the row draws turns on which — the answered one
@@ -1782,6 +1803,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &get(
             &app,
             &format!("/api/ui/conversations/{grilling}/capture/{capture}"),
+        )
+        .await,
+    );
+
+    // And what that pane draws instead wherever the session left a record of its
+    // own conversation, which is the same Event read the other way.
+    write(
+        "transcript.json",
+        &get(
+            &app,
+            &format!("/api/ui/conversations/{grilling}/transcript/{capture}"),
         )
         .await,
     );

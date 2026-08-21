@@ -36,6 +36,7 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
+  TranscriptView,
   UpdateNotice,
 } from "./types";
 
@@ -123,6 +124,21 @@ export function loadConversation(id: string): Promise<ConversationView> {
 /// time this page hears the world moved.
 export function loadCapture(id: number, event: number): Promise<Capture> {
   return get<Capture>(`/api/ui/conversations/${id}/capture/${event}`);
+}
+
+/// And what it said, as a conversation.
+///
+/// The same Event read the other way: the Capture is how the session looked and
+/// this is what it was saying, parsed and rendered by the server out of the
+/// lines its own backend wrote. A session that left no such record comes back
+/// with nothing in it, which is what sends the pane to the Capture.
+export function loadTranscript(
+  id: number,
+  event: number,
+): Promise<TranscriptView> {
+  return get<TranscriptView>(
+    `/api/ui/conversations/${id}/transcript/${event}`,
+  );
 }
 
 /// One commit's diff, rendered.

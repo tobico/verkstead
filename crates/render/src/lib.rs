@@ -24,6 +24,7 @@ mod conversations;
 mod profiles;
 mod push;
 mod repos;
+mod transcript;
 mod update;
 mod view;
 
@@ -47,6 +48,10 @@ pub use profiles::{
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{Registered, Registration, RepoEntry};
+pub use transcript::{
+    Bookkeeping, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
+    transcript_view,
+};
 pub use update::UpdateNotice;
 pub use view::{Answered, AskView, DiffView, OptionView, QuestionView, SetView, Standing};
 

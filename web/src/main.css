@@ -1721,6 +1721,104 @@ main:has(.workbench) {
   border-radius: 0.6rem;
 }
 
+/* And the same session read the other way: what it was saying rather than how
+   it looked. A list of turns down the pane, each one drawn as what it is —
+   because what makes a Transcript readable is telling a person's turn from a
+   tool's answer without having to read either. */
+.transcript {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.transcript .turn {
+  margin: 0 0 0.75rem;
+}
+
+/* The agent's own words, and the turns put to it: the two things a reader came
+   for, and the only two that are not folded away. The human's turn is set apart
+   by a rule down its left rather than by a colour, so that a pane of prose reads
+   as a conversation and not as a highlight reel. */
+.transcript .prose .markdown,
+.transcript .put .markdown {
+  font-size: 0.95rem;
+}
+
+.transcript .put {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--accent);
+}
+
+/* Everything that folds. A summary is one line whatever is behind it, and the
+   marker is the only thing saying which way it is. */
+.transcript details > summary,
+.bookkeeping > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.transcript .tool-use .tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+.transcript .tool-use .about {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.transcript .tool-result.failed > details > summary {
+  color: var(--stopped);
+}
+
+/* What is behind a fold: a call's input, a tool's answer, and a line nobody
+   here knows. All three are text somebody else wrote rather than prose, so all
+   three are set the way the Capture is — wrapped rather than scrolled sideways,
+   because a pane on a phone is narrow. */
+.transcript pre,
+.bookkeeping pre {
+  margin: 0.35rem 0 0;
+  padding: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+/* The backend's own bookkeeping, in one group under the conversation: a third
+   of every log, and none of what anybody opened this to read. */
+.bookkeeping {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.bookkeeping ol {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bookkeeping li {
+  margin-bottom: 0.5rem;
+}
+
+.bookkeeping .kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
 .close-event {
   padding: 0;
   font: inherit;

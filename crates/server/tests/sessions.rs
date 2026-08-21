@@ -28,7 +28,7 @@ use verkstead_render::{
     AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
     ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
-    TaskListEvent, TimelineEvent,
+    TaskListEvent, TimelineEvent, TranscriptView, Turn,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -111,15 +111,45 @@ impl Grilling {
         capture.text
     }
 
-    /// The Transcript of a session, as the store now holds it: every line the
-    /// agent wrote in its own log, in the order it wrote them.
+    /// The Transcript of a session, as the store holds it: every line the agent
+    /// wrote in its own log, in the order it wrote them.
     ///
-    /// Read from the database rather than over the wire, because nothing shows
-    /// it yet — what the tailer stores is rendered by the task after this one.
+    /// Read from the database rather than over the wire, because what is on the
+    /// wire is the rendering of these lines and this is about the lines: what
+    /// the store keeps is what the agent wrote, verbatim, whether or not
+    /// anything knows how to draw it.
     async fn transcript(&self, event: i64) -> Vec<String> {
         let pool = open_database(&self.database).await.unwrap();
 
-        verkstead_store::transcript(&pool, event).await.unwrap()
+        verkstead_store::transcript(&pool, self.id, event)
+            .await
+            .unwrap()
+            .expect("the session's output is on this Conversation's Timeline")
+    }
+
+    /// And the same Transcript as the details pane fetches it: read, rendered,
+    /// and read back until it holds `turns` of them.
+    async fn spoken(&self, event: i64, turns: usize) -> TranscriptView {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let view: TranscriptView = get(
+                &self.app,
+                &format!("/api/ui/conversations/{}/transcript/{event}", self.id),
+            )
+            .await;
+
+            if view.turns.len() >= turns {
+                return view;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the session's log was never drawn that far. The pane says: {view:?}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     /// Read it back until it has that many lines, or give up.
@@ -973,6 +1003,64 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
     assert!(
         said.contains("Reading the brief.\n") && said.contains("Asking.\n"),
         "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the details pane reads that log as a conversation while the session is
+/// still having it: the lines are parsed and rendered on the way out, which is
+/// what keeps the reading of somebody else's file format to the one crate that
+/// has the parsers in it (ADR 0006).
+///
+/// The stub writes a line of each of the three classes — the conversation
+/// itself, the backend's own bookkeeping, and a kind nobody has ever heard of —
+/// because what the pane does with the three is the whole of what makes a log
+/// readable.
+#[tokio::test]
+async fn a_running_sessions_log_is_read_back_as_a_conversation() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}\n' > "$log"
+        printf '{"type":"attachment","attachment":{"type":"todos"}}\n' >> "$log"
+        printf '{"type":"divination","omen":"a raven"}\n' >> "$log"
+        printf 'Reading the brief.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let view = fixture.spoken(event, 2).await;
+
+    assert_eq!(
+        view.turns.first(),
+        Some(&Turn::Prose(verkstead_render::Prose {
+            html: "<p>Reading the <strong>brief</strong>.</p>\n".to_owned()
+        })),
+        "the agent's prose should arrive rendered: {:?}",
+        view.turns
+    );
+    assert!(
+        matches!(view.turns.get(1), Some(Turn::Unread(_))),
+        "a kind nobody knows should arrive as itself rather than as nothing: {:?}",
+        view.turns
+    );
+    assert_eq!(
+        view.bookkeeping.len(),
+        1,
+        "and the backend's own bookkeeping should be out of the conversation: {:?}",
+        view.bookkeeping
     );
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);

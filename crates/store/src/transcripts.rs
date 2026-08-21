@@ -85,11 +85,31 @@ pub async fn append_transcript(pool: &SqlitePool, event_id: i64, lines: &[String
 
 /// One session's Transcript, every line of it in the order it was written.
 ///
-/// Empty where the session left no log, which is not the same question as
-/// whether the Event exists: a session that kept no record of itself and one
-/// that has not started talking yet both say nothing here, and what tells them
-/// apart is the Capture.
-pub async fn transcript(pool: &SqlitePool, event_id: i64) -> Result<Vec<String>> {
+/// `None` where that Conversation has no such Event, which is not the same
+/// question as whether the session said anything: a session that kept no record
+/// of itself and one that has not started talking yet both come back with no
+/// lines at all, and what tells them apart is the Capture.
+pub async fn transcript(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    event_id: i64,
+) -> Result<Option<Vec<String>>> {
+    // Against the Timeline rather than against the lines, because there is no
+    // row here until a session has said something — a Transcript with nothing on
+    // it is an ordinary answer, and an Event on somebody else's Conversation is
+    // not.
+    let found: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM timeline_events WHERE id = ? AND conversation_id = ?")
+            .bind(event_id)
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("looking for the Transcript of Event {event_id}"))?;
+
+    if found.is_none() {
+        return Ok(None);
+    }
+
     let lines: Vec<(String,)> =
         sqlx::query_as("SELECT line FROM transcript_lines WHERE event_id = ? ORDER BY seq")
             .bind(event_id)
@@ -97,5 +117,5 @@ pub async fn transcript(pool: &SqlitePool, event_id: i64) -> Result<Vec<String>>
             .await
             .with_context(|| format!("reading the Transcript of Event {event_id}"))?;
 
-    Ok(lines.into_iter().map(|(line,)| line).collect())
+    Ok(Some(lines.into_iter().map(|(line,)| line).collect()))
 }

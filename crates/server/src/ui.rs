@@ -55,6 +55,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`capture`].
         .route("/api/ui/conversations/{id}/capture/{event}", get(capture))
+        // And the same session's own record of what it said, which is what that
+        // pane draws wherever there is one — see [`transcript`].
+        .route(
+            "/api/ui/conversations/{id}/transcript/{event}",
+            get(transcript),
+        )
         // And one commit's diff, fetched the same way and for the same reason —
         // see [`commit_diff`].
         .route(
@@ -700,6 +706,38 @@ async fn capture(
     }
 }
 
+/// `GET /api/ui/conversations/{id}/transcript/{event}` — what one session
+/// said, as a conversation.
+///
+/// Its own request rather than a field on the Conversation, for the Capture's
+/// reason and to the same size: this is an hour of talking, and the Timeline is
+/// re-read every time an open page hears the world moved.
+///
+/// The lines were stored verbatim and are read here, on the way out, which is
+/// what keeps the coupling to somebody else's file format to the one crate that
+/// has the parsers in it (ADR 0006). An empty Transcript is an ordinary answer
+/// and not a failure: it is every session that left no log, and the pane's
+/// answer to one is to show the Capture instead.
+async fn transcript(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Read as permissively as every other pair of ids here: neither of them
+    // naming a number cannot name a Transcript.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_transcript();
+    };
+
+    match store::transcript(&state.pool, id, event).await {
+        Ok(Some(lines)) => Json(verkstead_render::transcript_view(&lines)).into_response(),
+        Ok(None) => no_such_transcript(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Transcript failed");
+            unavailable("the Transcript could not be read")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
 /// rendered.
 ///
@@ -1246,6 +1284,17 @@ fn no_such_capture() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Capture on that Conversation"),
+    )
+}
+
+/// And no such Transcript, which for the Capture's reason is worded without
+/// either id — and for the Capture's reason again is about the Event rather
+/// than about the lines: a session that said nothing has a Transcript with
+/// nothing on it, and that is an answer rather than a refusal.
+fn no_such_transcript() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such Transcript on that Conversation"),
     )
 }
 

@@ -22,7 +22,7 @@ use crate::{
     DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
-    Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -84,6 +84,12 @@ fn the_viewers_types_are_written_from_these() {
     // A Question Set on the Timeline is the same arrangement, and its full self
     // is the `SetView` above.
     Capture::export_all(&config).unwrap();
+
+    // And what it said, which is the same pane's other payload and the one it
+    // draws wherever there is one. Its turns are already rendered: the reading
+    // of the log and the rendering of what is in it both happen on this side of
+    // the wire, so what the viewer receives is HTML to put in the page.
+    TranscriptView::export_all(&config).unwrap();
 
     // And what a session committed. The summary rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff

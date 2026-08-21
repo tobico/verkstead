@@ -138,6 +138,19 @@ commit: string | null, };
 export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCommit";
 
 /**
+ * One line of the backend's own bookkeeping.
+ */
+export type Bookkeeping = { 
+/**
+ * What the log called it.
+ */
+kind: string, 
+/**
+ * The line itself.
+ */
+line: string, };
+
+/**
  * What the branch is to be called.
  */
 export type BranchRename = { branch: string, };
@@ -644,6 +657,11 @@ direction: Direction,
 rationale_html: string, };
 
 /**
+ * The agent's prose, rendered.
+ */
+export type Prose = { html: string, };
+
+/**
  * One comment on a pull request: who said it, when, and what they said.
  *
  * The body arrives rendered, like everything else an outsider wrote — a comment
@@ -741,6 +759,11 @@ url: string, };
 export type PushKey = { key: string, };
 
 /**
+ * A turn put to the agent, rendered.
+ */
+export type Put = { html: string, };
+
+/**
  * A Question Set as the Timeline shows it: what it was called, the table of
  * what was asked against what was decided, and where it stands.
  *
@@ -800,6 +823,11 @@ heading: boolean,
  * Sub-questions have none, because the nav does not list them.
  */
 nav_text: string, };
+
+/**
+ * The agent's reasoning, rendered.
+ */
+export type Reasoning = { html: string, };
 
 /**
  * What became of a registration.
@@ -1086,6 +1114,60 @@ tasks: Array<TaskEntry>, };
  * this one add their kinds here.
  */
 export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
+
+/**
+ * What a tool answered.
+ */
+export type ToolResult = { 
+/**
+ * Whether the tool failed.
+ */
+failed: boolean, 
+/**
+ * What it said, as it said it.
+ */
+text: string, };
+
+/**
+ * A tool call, as one line plus what it was called with.
+ */
+export type ToolUse = { 
+/**
+ * What the tool is called.
+ */
+name: string, 
+/**
+ * The one line about it. Empty where the call said nothing this could
+ * summarise, which leaves the name standing on its own.
+ */
+about: string, 
+/**
+ * What it was called with, whole.
+ */
+input: string, };
+
+/**
+ * One session's Transcript as the details pane receives it.
+ */
+export type TranscriptView = { 
+/**
+ * The conversation, in the order it happened.
+ */
+turns: Array<Turn>, 
+/**
+ * Everything that was not the conversation.
+ */
+bookkeeping: Array<Bookkeeping>, };
+
+/**
+ * One thing that was said, or done, or put.
+ */
+export type Turn = { "Prose": Prose } | { "Reasoning": Reasoning } | { "ToolUse": ToolUse } | { "ToolResult": ToolResult } | { "Put": Put } | { "Unread": Unread };
+
+/**
+ * A line nothing here knows how to draw.
+ */
+export type Unread = { line: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the
