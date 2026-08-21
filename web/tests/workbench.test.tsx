@@ -73,7 +73,29 @@ const BRIEF = (() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The state is the instance's own, over the one every other test reads off
+  // the prototype — so it goes when the test does.
+  delete (document as { visibilityState?: DocumentVisibilityState })
+    .visibilityState;
 });
+
+/// The read of the open Conversation, which is the one worth counting: the page
+/// fetches three other things around it.
+const READING = `/api/ui/conversations/${OPEN.id}`;
+
+/// The page reading everything it is showing again, provoked the way coming back
+/// to the app provokes it — the cheapest of the three ways it happens, the other
+/// two being the ten-second poll and a Nudge. What is asked here is what a read
+/// does to the page, and all three do the same one.
+function readAgain(): void {
+  for (const state of ["hidden", "visible"] as const) {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => state,
+    });
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+  }
+}
 
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in
@@ -404,6 +426,43 @@ describe("writing the brief", () => {
       "# Too late\n",
     );
     expect(fetching).toHaveBeenCalled();
+  });
+
+  /// The page reads its Conversation again every ten seconds, on every Nudge and
+  /// on every return to it, and a field being typed into has to live through all
+  /// of them: a Brief half written is the only copy of it there is, and one that
+  /// went every time the world was read again could never be finished.
+  it("lives through the page reading the conversation again", async () => {
+    // The read that lands while the field is open comes back with something
+    // else about the Conversation changed — the branch renamed from another
+    // device — so the test can wait for it to have landed rather than sleep
+    // until it has. What is asked here is what a read does to the field, and it
+    // does the same whether or not anything came back different.
+    const RENAMED: ConversationView = { ...OPEN, branch: "work/renamed-away" };
+    let standing = OPEN;
+    const fetching = serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(READING, () => json(standing)()),
+    );
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    edit();
+    fireEvent.input(screen.getByLabelText("Brief"), {
+      target: { value: "# Half a thought" },
+    });
+
+    standing = RENAMED;
+    readAgain();
+    await waitFor(() => screen.getByRole("heading", { name: RENAMED.branch }));
+
+    // The read landed, and the field is still open on what was typed into it.
+    expect((screen.getByLabelText("Brief") as HTMLTextAreaElement).value).toBe(
+      "# Half a thought",
+    );
+    expect(askedFor(fetching, READING)).toBeGreaterThan(1);
   });
 
   it("puts the field away again on Cancel", async () => {

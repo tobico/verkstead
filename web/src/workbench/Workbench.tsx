@@ -184,6 +184,22 @@ export function Workbench(): JSX.Element {
     // a refetch every ten seconds swaps Events rather than blinking the pane
     // through a loading state the human is trying to read past.
     refetchInterval: REFRESH,
+
+    // Merge each read into the Conversation already drawn rather than replacing
+    // it, so that an Event which did not change stays the same Event and the row
+    // drawn for it is left alone.
+    //
+    // Solid Query turns the core's structural sharing off and offers this in its
+    // place, and off is not a setting this page can live with: every ten seconds
+    // it reads a Timeline that has mostly not moved, and without this each read
+    // is a new object for every Event on it, so `For` throws away every row and
+    // builds it again. What goes with the rows is everything they were holding —
+    // the Brief being typed into above all, which is a half-written document and
+    // the only copy of itself there is.
+    //
+    // Keyed by `id`, which every Event carries and is the server's own identity
+    // for it.
+    reconcile: "id",
   }));
 
   return (
