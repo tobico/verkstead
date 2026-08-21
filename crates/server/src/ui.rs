@@ -395,6 +395,25 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // Which of this Conversation's output Events is still being written into,
+    // which is a question about a process rather than about the record: a
+    // restarted server has no sessions, and every transcript it holds is of one
+    // that is over.
+    //
+    // Asked *before* the Timeline it is read against, and the order is the whole
+    // of what makes the answer safe. A relay takes itself off this register only
+    // once it has flushed the last of what it printed, so a session this says has
+    // ended is one whose output is already in the store — and a Timeline read
+    // after that is a Timeline with all of it. Read the other way round, a
+    // session that finished in between would leave its Event drawn as stopped
+    // with the transcript from before it flushed: `0 lines`, nothing printed,
+    // nothing running, and a page saying the session never said anything when it
+    // had.
+    //
+    // The other order costs nothing: an Event drawn as running that has just
+    // stopped is right again on the next read, a second later.
+    let writing = state.sessions.writing(id);
+
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -514,12 +533,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             _ => None,
         })
         .map(verkstead_render::proposal_view);
-
-    // Which of this Conversation's output Events is still being written into,
-    // which is a question about a process rather than about the record: a
-    // restarted server has no sessions, and every transcript it holds is of one
-    // that is over.
-    let writing = state.sessions.writing(id);
 
     // What the work has stopped on, read off the Timeline for the reason the
     // Brief and the proposal are: it is already here. The store's index makes at

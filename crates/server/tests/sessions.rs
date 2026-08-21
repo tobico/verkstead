@@ -841,12 +841,30 @@ async fn the_details_pane_gets_the_transcript_byte_for_byte() {
 
 /// A session that has ended is a Conversation with a transcript, not one with an
 /// agent in it.
+///
+/// Read on every poll rather than only at the end, because the moment worth
+/// asking about is the one where the session stops: a relay leaves the register
+/// of what is running only once it has flushed the last of what it printed, so
+/// an Event drawn as stopped is one whose output is all in the store. Drawn as
+/// stopped with nothing in it, it is that order having come apart, and what the
+/// page then says is that the session never spoke — which is the one thing about
+/// a session that is hardest to tell from the truth.
 #[tokio::test]
 async fn a_session_that_exits_leaves_a_conversation_that_says_so() {
     let fixture = grilling("printf 'done\\n'").await;
 
     let summary = fixture
-        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .until(|view| {
+            let output = output(view)?;
+
+            assert!(
+                output.running || output.lines > 0,
+                "the session is drawn as stopped having printed nothing, and it \
+                 printed: {output:?}",
+            );
+
+            (!output.running).then(|| output.clone())
+        })
         .await;
 
     assert_eq!(summary.latest, "done");
