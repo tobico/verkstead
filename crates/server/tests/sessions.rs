@@ -2273,6 +2273,29 @@ async fn until_written(path: &Path) -> String {
     }
 }
 
+/// The same, waiting until what is there says something in particular — for the
+/// tests where an earlier session has already written to the file, so that
+/// merely finding it there says nothing about the one being waited on.
+async fn until_written_saying(path: &Path, said: &str) -> String {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        if let Ok(written) = std::fs::read_to_string(path) {
+            if written.contains(said) {
+                return written;
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "no session ever wrote {said:?} to {}",
+            path.display(),
+        );
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// How many sessions wrote to one of those files.
 fn prompts(written: &str) -> Vec<&str> {
     written
@@ -4017,7 +4040,13 @@ sleep 300
 /// write and no grilling to run, so what the human settles is the two Profiles
 /// and then presses once.
 async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
-    let bench = bench(spill, stub, PULL_REQUEST).await;
+    adopting_asking(spill, stub, PULL_REQUEST).await
+}
+
+/// The same, with something else where `gh` goes — for the test that carries an
+/// adopted stage the whole way to a settled wrap-up.
+async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
 
     a_roadmap_already_committed(&bench.repo);
 
@@ -4125,5 +4154,167 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
     assert!(
         prompt.contains("not stacked on anything"),
         "and told its branch stands on nothing: adoption never stacks: {prompt:?}",
+    );
+}
+
+/// A stub that carries a roadmap stage the whole way on its own: plans it, works
+/// the one task the plan wrote, finishes it, and reads the branch back finding
+/// nothing worth raising.
+///
+/// The plan commit is the piece the chain turns on, and it is written the way
+/// `/next-stage` writes one: `.tasks/`, plus the in-progress annotation naming
+/// the branch it is on. That annotation is what touches the roadmap — so the
+/// branch has written to `docs/roadmaps/` by the time the wrap-up settles, which
+/// is the only thing the carry-on path ever looks for.
+///
+/// Which stage it is planning it reads off the branch it is standing on, because
+/// that is the fact it has: a stage's branch is its brief's name, so the entry to
+/// annotate is the one whose link names it.
+fn a_stage_planned_and_worked_to_a_finish(planning: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    printf 'planned=%s\n' "$branch" >> {planning}
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    sed -i "/-$branch.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
+    git add -A
+    git commit --quiet -m "chore: plan the $branch stage"
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'working %s\n' "$next"
+        printf 'a counter\n' >> counter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+    else
+        printf 'finishing\n'
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish the stage'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+    )
+}
+
+/// The join adoption rests on: an adopted stage that settles starts the stage
+/// after it, down the path a staged roadmap has always gone down.
+///
+/// Nothing was changed to make that happen, and that is the whole claim. Adopting
+/// starts *one* stage; that stage's own plan commit writes the roadmap's
+/// annotation onto its branch, which is what the carry-on path reads when the
+/// wrap-up settles — so from the first stage onwards an adopted roadmap is a
+/// staged one, and the entry point is all adoption ever had to be.
+#[tokio::test]
+async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // The adopted stage runs itself the rest of the way with nothing pressed:
+    // planned, worked, finished, reviewed, green.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        until_written_saying(&planning, "planned=counter")
+            .await
+            .contains("planned=counter"),
+        "the adopted stage is the one that was planned",
+    );
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "refusing",
+        "the stage after the adopted one, on a branch of its own",
+    );
+    assert_eq!(
+        next.state,
+        Lifecycle::Implementing,
+        "started the ordinary way, by the stage before it settling",
+    );
+    assert_eq!(
+        next.repo.path,
+        fixture.view().await.repo.path,
+        "against the same Repo the roadmap was adopted out of",
+    );
+
+    let brief = next
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief.markdown.clone()),
+            _ => None,
+        })
+        .expect("a Conversation's first Event is its Brief");
+
+    assert!(
+        brief.contains("Refuse the rest"),
+        "primed with the brief of the stage after the adopted one: {brief:?}",
+    );
+
+    // And the notice is the unattended path's own wording rather than adoption's:
+    // nobody pressed anything for this one.
+    let said = notices(&next).join("\n");
+
+    assert!(
+        said.contains("Stage 02") && said.contains("<code>rate-limiting</code>"),
+        "the stage says which stage of which roadmap it is: {said:?}",
+    );
+    assert!(
+        said.contains("with nobody asked"),
+        "and that nothing was pressed for it, unlike the stage before it: {said:?}",
+    );
+
+    // The Conversation that settled says what became of it, where the human who
+    // pressed Adopt would be looking.
+    let carried_on = fixture
+        .until(|view| {
+            let said = notices(view).join("\n");
+
+            said.contains("Stage 02").then_some(said)
+        })
+        .await;
+
+    assert!(
+        carried_on.contains("<code>refusing</code>"),
+        "the adopted Conversation says which stage started and on what: {carried_on:?}",
+    );
+
+    // And the session it started is the same fork of next-stage the adopted stage
+    // itself was planned by, this time with nobody at the workbench at all.
+    let planned = until_written_saying(&planning, "planned=refusing").await;
+
+    assert_eq!(
+        planned.matches("planned=").count(),
+        2,
+        "one planning session for the adopted stage and one for the stage after \
+         it: {planned:?}",
     );
 }

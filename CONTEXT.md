@@ -225,6 +225,34 @@ after it, so a Stage whose work has settled is still the box that says *in
 progress* on this branch.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
+**Adopt**:
+Take a roadmap the Repo already holds — written by the old tools, by hand, by
+anything that was not this Verkstead — into the pipeline, by starting its next
+Stage as a Conversation. The human's press stands in for the Stage before it
+that would otherwise have started it, so there is no grilling and no Brief to
+write: what they settle is the two Profiles and the base commit, and the stage
+brief becomes the Brief. One Stage is the whole of what adopting starts, and all
+it has to start — that Stage's own plan commit writes to the roadmap, so when it
+settles the Stage after it begins the ordinary unattended way, and an adopted
+roadmap is a staged one from there on. Never stacks: there is no predecessor
+Conversation to stack on, and building on an unmerged branch is the human's
+move, made by setting the base commit.
+_Avoid_: import, attach, resume, take over, migrate
+
+**Abandoned**:
+What a roadmap in a registered Repo is when it has a Stage startable right now
+and nothing driving it — the one state Adopt is offered for. Four things
+together, read at the Repo's default branch tip: an unchecked box, a readable
+brief for the lowest of them, no in-progress annotation naming a branch that
+still exists, and the Stage's own slug branch not taken. A roadmap that is
+finished, one already in flight and one whose next brief is missing are each not
+abandoned and each draw nothing, because what the human can do something about
+is the only thing worth saying. Read from the repositories every time it is
+drawn and never stored, like the pinned stage lists — and with nothing to
+dismiss one by, a roadmap's score being the repository's to keep: an unwanted
+notice is silenced there, by ticking the box or annotating the stage.
+_Avoid_: stale, orphaned, dormant, unmanaged, needs attention
+
 **Interruption**:
 Something Verkstead detected about an unattended run and cannot resolve itself: a
 session that exited badly, or one that ended having landed nothing. It is an
