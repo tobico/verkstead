@@ -37,7 +37,7 @@ mod transcripts;
 mod waits;
 mod wrap_up;
 
-pub use captures::{Summary, append_capture, capture, start_capture};
+pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,

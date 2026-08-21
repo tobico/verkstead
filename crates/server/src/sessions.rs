@@ -835,12 +835,19 @@ async fn relay(
                 }
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
-                flush(pool, nudges, event_id, &mut pending, &reading).await;
+                let said = tail.as_ref().and_then(Tail::latest);
+                flush(pool, nudges, event_id, &mut pending, &reading, said).await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
-                if let Some(tail) = tail.as_mut() {
-                    tail.poll(pool, nudges, event_id).await;
+                // Summarised on the poll that moved it rather than waiting for
+                // the next flush: an agent that has stopped to think is one
+                // whose terminal has gone quiet, and that is exactly when the
+                // row saying what it last said is being read.
+                if let Some(tail) = tail.as_mut()
+                    && tail.poll(pool, nudges, event_id).await
+                {
+                    summarise(pool, nudges, event_id, &reading, tail.latest()).await;
                 }
 
                 tailed = Instant::now();
@@ -859,7 +866,8 @@ async fn relay(
     }
 
     pending.push_str(&reading.finish());
-    flush(pool, nudges, event_id, &mut pending, &reading).await;
+    let said = tail.as_ref().and_then(Tail::latest);
+    flush(pool, nudges, event_id, &mut pending, &reading, said).await;
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -888,8 +896,14 @@ async fn relay(
     // reaped rather than when its terminal closed: an agent's final lines are
     // written on its way out, and a poll that stopped at the terminal would
     // leave a Transcript ending before the session did.
-    if let Some(tail) = tail.as_mut() {
-        tail.poll(pool, nudges, event_id).await;
+    //
+    // Which is also why the summary is written again here. Those final lines
+    // are ordinarily the whole point of the row — an agent says what it did as
+    // it goes — and by now there is no output left to carry them.
+    if let Some(tail) = tail.as_mut()
+        && tail.poll(pool, nudges, event_id).await
+    {
+        summarise(pool, nudges, event_id, &reading, tail.latest()).await;
     }
 
     if let Some(complaints) = complaints
@@ -907,7 +921,8 @@ async fn relay(
         // Last, after everything the session printed, because that is what it
         // is: the account of how the session came to stop saying anything.
         let mut note = reading.take(plumbing(&said).as_bytes());
-        flush(pool, nudges, event_id, &mut note, &reading).await;
+        let latest = tail.as_ref().and_then(Tail::latest);
+        flush(pool, nudges, event_id, &mut note, &reading, latest).await;
     }
 
     ended
@@ -929,18 +944,23 @@ fn plumbing(said: &str) -> String {
 
 /// Put what has been printed since last time in the store, and tell whoever is
 /// watching that it is there.
+///
+/// `said` is the last thing the session's agent said in its own log, which is
+/// what the Timeline row is summarised by where there is one — see
+/// [`Reading::summary`].
 async fn flush(
     pool: &SqlitePool,
     nudges: &Nudges,
     event_id: i64,
     pending: &mut String,
     reading: &Reading,
+    said: Option<&str>,
 ) {
     if pending.is_empty() {
         return;
     }
 
-    match store::append_capture(pool, event_id, pending, &reading.summary()).await {
+    match store::append_capture(pool, event_id, pending, &reading.summary(said)).await {
         // Kept rather than dropped: the next flush carries it, and a store that
         // is briefly unwritable should cost latency rather than a hole in a
         // record nothing can go back and fill.
@@ -951,6 +971,28 @@ async fn flush(
             pending.clear();
             nudges.announce();
         }
+    }
+}
+
+/// Say again what the Timeline row reads, where the session said something
+/// without printing anything to carry it.
+///
+/// The other half of [`flush`], and the two are the same write: what a session
+/// says reaches the Transcript and what it prints reaches the Capture, and the
+/// row is a line about both. A session that has stopped to think has moved one
+/// and not the other.
+async fn summarise(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    event_id: i64,
+    reading: &Reading,
+    said: Option<&str>,
+) {
+    match store::summarise_capture(pool, event_id, &reading.summary(said)).await {
+        Err(error) => {
+            tracing::error!(error = ?error, event_id, "summarising a session failed")
+        }
+        Ok(()) => nudges.announce(),
     }
 }
 

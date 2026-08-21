@@ -10,10 +10,11 @@
 //!
 //! The summary sits beside them because of the shape of the reading. Every open
 //! page reads the whole Timeline, and working out a line count and a last
-//! statement from the chunks would mean reading every Capture of every session
-//! to draw two lines of text. What writes it is the relay that writes the
-//! chunks — see the server's `capture` module — which is following the output
-//! anyway and can say both a chunk at a time.
+//! statement would mean reading every Capture and every Transcript of every
+//! session to draw two lines of text. What writes it is the relay that writes
+//! the chunks — see the server's `capture` module — which is following both the
+//! output and the session's own log anyway, and can say either a flush at a
+//! time.
 //!
 //! Nothing here says whether a session is still running. A running session is a
 //! process, and a table cannot hold one: what a restarted server has is the
@@ -34,8 +35,10 @@ pub struct Summary {
     /// How many lines the session has printed.
     pub lines: i64,
 
-    /// The last of them that said anything, with the terminal's own control
-    /// sequences taken out. Empty where the session has printed nothing yet.
+    /// The last thing the agent said, off the log it keeps of its own
+    /// conversation — or, where it keeps none, the last line it printed with
+    /// the terminal's control sequences taken out. Empty where the session has
+    /// said nothing yet.
     pub latest: String,
 }
 
@@ -153,6 +156,30 @@ pub async fn append_capture(
         .with_context(|| format!("summarising the Capture of Event {event_id}"))?;
 
     tx.commit().await.context("adding to a Capture")?;
+
+    Ok(())
+}
+
+/// Say again what a Capture's Timeline row reads, without adding to the
+/// Capture.
+///
+/// For the one moment the two move apart. A session's summary is the last thing
+/// its agent said, which is on the Transcript rather than here — and an agent
+/// writes its closing words on the way out, after the terminal it was printing
+/// to has already closed. So the last of the Capture arrives before the last of
+/// what the session said, and this is what carries the difference.
+///
+/// Everything else writes the chunk and the summary together through
+/// [`append_capture`], which is what keeps a Timeline from saying something the
+/// details pane disagrees with.
+pub async fn summarise_capture(pool: &SqlitePool, event_id: i64, summary: &Summary) -> Result<()> {
+    sqlx::query("UPDATE captures SET lines = ?, latest = ? WHERE event_id = ?")
+        .bind(summary.lines)
+        .bind(&summary.latest)
+        .bind(event_id)
+        .execute(pool)
+        .await
+        .with_context(|| format!("summarising the Capture of Event {event_id}"))?;
 
     Ok(())
 }

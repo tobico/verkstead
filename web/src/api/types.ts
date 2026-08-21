@@ -19,8 +19,9 @@ at: string,
  */
 lines: number, 
 /**
- * The last of them that said anything, with the terminal's own control
- * sequences taken out. Empty where nothing has been printed yet.
+ * The last thing the agent said, off its own log — or, where it kept none,
+ * the last line it printed with the terminal's control sequences taken
+ * out. Empty where it has said nothing yet.
  */
 latest: string, 
 /**
@@ -471,10 +472,11 @@ how: string,
  */
 git_status: string, 
 /**
- * The tail of what the session printed, with the terminal's own control
- * sequences taken out. The tail and not the Capture: what went wrong is
- * at the end, and the whole of it is on the Timeline already as the session's
- * own Event. Empty where it printed nothing at all.
+ * The tail of what the session said: its own prose off the Transcript, or
+ * what it printed with the terminal's control sequences taken out where it
+ * kept no log. The tail and not the whole: what went wrong is at the end,
+ * and the whole of it is on the Timeline already as the session's own
+ * Event. Empty where it said nothing at all.
  */
 tail: string, 
 /**

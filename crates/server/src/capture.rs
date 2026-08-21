@@ -6,6 +6,12 @@
 //! the way in would be a record of something else — so the tidying happens here,
 //! for the one line the Timeline shows, and nowhere else.
 //!
+//! The tidying is the fallback rather than the first answer. A session whose
+//! backend keeps a log has its own prose on the Transcript beside this, and the
+//! two places that quote a session in miniature — the Timeline row and an
+//! Interruption's evidence — read that instead. What is left here is every
+//! session that has no such log, for which the terminal is the whole record.
+//!
 //! What the sandbox's own plumbing said goes through this too, though it came off
 //! a pipe rather than the terminal — see `plumbing` in [`crate::sessions`]. It
 //! is written down like anything else a session produced, which is what makes it
@@ -80,20 +86,35 @@ impl Reading {
 
     /// What the Timeline shows: how many lines, and the last thing said.
     ///
+    /// `said` is the agent's own latest prose, off the log it keeps of the
+    /// conversation it is having — see [`crate::transcript`]. Where there is
+    /// such a log that is what the row reads, because it is what the session
+    /// said: the terminal underneath it is a display being redrawn, and the last
+    /// line of one is as likely to be a spinner or the edge of a box as a
+    /// sentence.
+    ///
+    /// `None` reads the terminal instead, and that is a whole answer rather than
+    /// an apology. It is every stub agent the test suite runs, every backend
+    /// that keeps no such log, and every session that has not said anything yet
+    /// — and for a session that never started, the terminal is the only place
+    /// the reason exists.
+    ///
     /// The line being printed now counts as the latest where it has anything in
     /// it, and is not counted in the total. A session goes quiet in the middle
     /// of a line exactly when it has stopped to ask something, and a summary
     /// that waited for the newline would say nothing at the one moment somebody
     /// is reading it.
-    pub(crate) fn summary(&self) -> Summary {
+    pub(crate) fn summary(&self, said: Option<&str>) -> Summary {
         let current = plain(&self.current);
+
+        let printed = match current.is_empty() {
+            true => &self.latest,
+            false => &current,
+        };
 
         Summary {
             lines: self.lines,
-            latest: shorten(match current.is_empty() {
-                true => &self.latest,
-                false => &current,
-            }),
+            latest: shorten(said.unwrap_or(printed)),
         }
     }
 
@@ -319,7 +340,7 @@ mod tests {
         let kept = reading.take(b"before\xffafter\n");
 
         assert_eq!(kept, "before\u{fffd}after\n");
-        assert_eq!(reading.summary().latest, "before\u{fffd}after");
+        assert_eq!(reading.summary(None).latest, "before\u{fffd}after");
     }
 
     #[test]
@@ -328,12 +349,36 @@ mod tests {
 
         reading.take(b"first\r\nsecond\r\n\r\n");
 
-        let summary = reading.summary();
+        let summary = reading.summary(None);
         assert_eq!(summary.lines, 3, "a blank line is a line that was printed");
         assert_eq!(
             summary.latest, "second",
             "the last line with anything in it is what there is to show"
         );
+    }
+
+    /// What the agent said beats what its interface drew. A terminal in the
+    /// middle of a redraw says nothing anybody wants a row to read.
+    #[test]
+    fn what_the_agent_said_is_what_the_summary_says() {
+        let mut reading = Reading::default();
+
+        reading.take("╭──────────╮\n│ Thinking…\r".as_bytes());
+
+        let summary = reading.summary(Some("The counter lives in the limiter."));
+        assert_eq!(summary.latest, "The counter lives in the limiter.");
+        assert_eq!(
+            summary.lines, 1,
+            "and how much was printed is still how much was printed"
+        );
+    }
+
+    #[test]
+    fn a_statement_off_the_transcript_is_cut_to_a_row_like_any_other() {
+        let said = "x".repeat(LATEST_LIMIT * 2);
+        let summary = Reading::default().summary(Some(&said));
+
+        assert_eq!(summary.latest.chars().count(), LATEST_LIMIT);
     }
 
     /// A session goes quiet mid-line exactly when it has stopped to ask
@@ -344,7 +389,7 @@ mod tests {
 
         reading.take(b"thinking\nWhat should happen when the queue is full?");
 
-        let summary = reading.summary();
+        let summary = reading.summary(None);
         assert_eq!(summary.lines, 1, "only the finished line is counted");
         assert_eq!(summary.latest, "What should happen when the queue is full?");
     }
@@ -355,7 +400,7 @@ mod tests {
 
         reading.take(b"\x1b[2m\x1b[38;5;244mdimmed\x1b[0m and bold\x1b[1m\x1b(B\n");
 
-        assert_eq!(reading.summary().latest, "dimmed and bold");
+        assert_eq!(reading.summary(None).latest, "dimmed and bold");
     }
 
     #[test]
@@ -364,7 +409,7 @@ mod tests {
 
         reading.take(b"\x1b]0;a title nobody printed\x07what was printed\n");
 
-        assert_eq!(reading.summary().latest, "what was printed");
+        assert_eq!(reading.summary(None).latest, "what was printed");
     }
 
     /// A spinner redraws its line over and over. What it says is the last of
@@ -375,7 +420,7 @@ mod tests {
 
         reading.take("Thinking.\rThinking..\rThinking…\n".as_bytes());
 
-        let summary = reading.summary();
+        let summary = reading.summary(None);
         assert_eq!(summary.latest, "Thinking…");
         assert_eq!(summary.lines, 1, "one line, drawn three times");
     }
@@ -386,7 +431,7 @@ mod tests {
 
         reading.take("x".repeat(LATEST_LIMIT * 2).as_bytes());
 
-        assert_eq!(reading.summary().latest.chars().count(), LATEST_LIMIT);
+        assert_eq!(reading.summary(None).latest.chars().count(), LATEST_LIMIT);
     }
 
     /// Everything printed is kept whatever the summary does with it — the

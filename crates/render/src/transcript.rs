@@ -170,6 +170,36 @@ const ABOUT: &[&str] = &[
 /// about itself.
 const ABOUT_LIMIT: usize = 120;
 
+/// What the agent itself said, out of a Transcript's lines: one entry per
+/// statement, in the order it made them and in the markdown it wrote.
+///
+/// The prose alone — not its thinking, not the tools it called, not what was put
+/// to it. What this is for is the two places a session is quoted in miniature,
+/// its Timeline row and the evidence an Interruption carries, and both of those
+/// are asking what the session last *said*.
+///
+/// Markdown as it stands rather than rendered, because neither of those two
+/// draws HTML: a Timeline row is one line of text and evidence is a block of it.
+pub fn statements(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|entry| entry["type"].as_str() == Some("assistant"))
+        .flat_map(|entry| {
+            let Some(blocks) = entry["message"]["content"].as_array() else {
+                return Vec::new();
+            };
+
+            blocks
+                .iter()
+                .filter(|block| block["type"].as_str() == Some("text"))
+                .map(|block| block["text"].as_str().unwrap_or_default().trim().to_owned())
+                .filter(|said| !said.is_empty())
+                .collect()
+        })
+        .collect()
+}
+
 /// The Transcript's lines, read into the conversation they record.
 ///
 /// One line can be more than one turn — an agent that wrote prose and then
@@ -577,5 +607,25 @@ mod tests {
 
         assert!(view.turns.is_empty());
         assert!(view.bookkeeping.is_empty());
+    }
+
+    /// The prose and nothing else. A summary of a session is what the session
+    /// said, and what a tool answered is neither said nor the session's.
+    #[test]
+    fn what_the_agent_said_is_its_prose_alone() {
+        let lines: Vec<String> = FIXTURE.iter().map(|line| (*line).to_owned()).collect();
+
+        assert_eq!(statements(&lines), vec!["I'll start with the *tables*."]);
+    }
+
+    #[test]
+    fn a_session_that_has_only_called_tools_has_said_nothing_yet() {
+        let lines: Vec<String> = FIXTURE[..2]
+            .iter()
+            .chain(FIXTURE[3..].iter())
+            .map(|line| (*line).to_owned())
+            .collect();
+
+        assert!(statements(&lines).is_empty(), "{:?}", statements(&lines));
     }
 }

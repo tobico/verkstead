@@ -9,10 +9,13 @@
 //! out where the backend would have put it, which means reimplementing a private
 //! algorithm belonging to somebody else's program (ADR 0006).
 //!
-//! Lines go to the store exactly as they were written, and nothing here reads
+//! Lines go to the store exactly as they were written, and nothing here parses
 //! one. That is what holds the coupling to somebody else's file format down to
 //! whoever renders it: a format that changes can leave a line nothing knows how
-//! to draw, and it can never lose what was said.
+//! to draw, and it can never lose what was said. The one thing read back out of
+//! a batch on its way past is the last thing the agent said, which the Timeline
+//! row is summarised by — and even that is read by the crate with the parser in
+//! it rather than here.
 //!
 //! Following is plain polling, on the cadence the byte relay already flushes on
 //! — the relay is awake on that interval anyway, and a file watcher would be a
@@ -68,6 +71,14 @@ pub(crate) struct Tail {
     /// a store that is briefly unwritable should cost latency rather than a hole
     /// in a record nothing can go back and fill.
     pending: Vec<String>,
+
+    /// The last thing the agent said in its own words, as far as the log has
+    /// been followed. What the Timeline row reads — see
+    /// [`crate::capture::Reading::summary`].
+    ///
+    /// `None` until it says something, which is most of a session's first
+    /// minute and the whole of a session whose backend keeps no log.
+    latest: Option<String>,
 }
 
 impl Tail {
@@ -80,12 +91,21 @@ impl Tail {
             read: 0,
             partial: Vec::new(),
             pending: Vec::new(),
+            latest: None,
         }
+    }
+
+    /// The last thing the agent said, for whoever is summarising the session.
+    pub(crate) fn latest(&self) -> Option<&str> {
+        self.latest.as_deref()
     }
 
     /// Take whatever the session has written since the last poll, and put the
     /// whole lines of it on the Transcript.
-    pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) {
+    ///
+    /// Whether [`Tail::latest`] moved on, so that whoever is summarising the
+    /// session writes a row only where there is a new one to write.
+    pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if self.log.is_none() {
             self.log = self.find().await;
         }
@@ -94,7 +114,7 @@ impl Tail {
             self.take(&log).await;
         }
 
-        self.store(pool, nudges, event_id).await;
+        self.store(pool, nudges, event_id).await
     }
 
     /// Look for the log, and hand back where it is.
@@ -174,21 +194,51 @@ impl Tail {
     /// One contentless Nudge for the batch, because that is all there is to say:
     /// an open pane's answer to being nudged is to read everything again (ADR
     /// 0005), so nothing finer would change what it does.
-    async fn store(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) {
+    ///
+    /// Whether the batch carried something the agent said, which is what tells
+    /// the caller the summary has moved. A batch of tool calls has not.
+    async fn store(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if self.pending.is_empty() {
-            return;
+            return false;
         }
 
         match store::append_transcript(pool, event_id, &self.pending).await {
             Err(error) => {
-                tracing::error!(error = ?error, event_id, "keeping a session's Transcript failed")
+                tracing::error!(error = ?error, event_id, "keeping a session's Transcript failed");
+                false
             }
             Ok(()) => {
+                let said = latest(&self.pending);
+                let moved = said.is_some();
+
+                if moved {
+                    self.latest = said;
+                }
+
                 self.pending.clear();
                 nudges.announce();
+
+                moved
             }
         }
     }
+}
+
+/// The newest thing the agent said in a batch of Transcript lines, or `None`
+/// where the batch was all tools, thinking and bookkeeping.
+///
+/// The last line of the last statement rather than the whole of it. What reads
+/// this is one row of a Timeline, and an agent that wrote three paragraphs
+/// before asking a question has the question at the end of them — which is the
+/// half somebody glancing at the row came for.
+fn latest(lines: &[String]) -> Option<String> {
+    verkstead_render::statements(lines)
+        .last()?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next_back()
+        .map(str::to_owned)
 }
 
 /// Whether there is a file at `path`, asked without blocking the loop doing the
@@ -197,4 +247,37 @@ async fn is_file(path: &Path) -> bool {
     tokio::fs::metadata(path)
         .await
         .is_ok_and(|found| found.is_file())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An agent writes what it is about to do, does it, and says how it went.
+    /// The row reads the last of those, and the end of it: what a session is
+    /// waiting on is the last thing it wrote, not the first.
+    #[test]
+    fn the_last_thing_said_is_the_end_of_the_last_thing_said() {
+        let lines = vec![
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The counter has no home.\n\nWhere should it live?"}]}}"#.to_owned(),
+        ];
+
+        assert_eq!(latest(&lines).as_deref(), Some("Where should it live?"));
+    }
+
+    #[test]
+    fn a_batch_of_nothing_but_tools_has_not_moved_what_was_said() {
+        let lines = vec![
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#.to_owned(),
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"limiter.md"}]}}"#.to_owned(),
+        ];
+
+        assert_eq!(latest(&lines), None);
+    }
+
+    #[test]
+    fn a_session_that_keeps_no_log_has_nothing_to_say_for_itself() {
+        assert_eq!(latest(&[]), None);
+    }
 }

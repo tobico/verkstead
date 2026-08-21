@@ -1089,6 +1089,98 @@ async fn a_session_that_keeps_no_log_leaves_no_transcript() {
     );
 }
 
+/// The Timeline row reads what the agent said, and it keeps up while the
+/// session is still saying it.
+///
+/// The terminal underneath is a display being redrawn — a box, a spinner, a
+/// status line saying which key interrupts — and the last line of one at any
+/// given moment is whatever the interface happened to be drawing. What the row
+/// is for is somebody deciding from one line whether to open the pane, so it
+/// reads the agent's own prose off the log beside it.
+#[tokio::test]
+async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
+        printf '\033[2m╭──────────────────╮\033[0m\n'
+        sleep 1
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Where should the counter live?"}]}}\n' >> "$log"
+        printf '\033[2m│ esc to interrupt │\033[0m\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.latest == "Where should the counter live?")
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        summary.running,
+        "the session is still sitting on its `sleep`, so the row moved on while it ran"
+    );
+
+    // What the terminal had on it at the same moment, which is what the row
+    // would have read instead.
+    let drawn = fixture.capture(summary.id).await;
+    assert!(
+        drawn.contains("esc to interrupt"),
+        "the interface was drawing something else the whole time: {drawn:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And it reads the last of it once the session has gone.
+///
+/// An agent writes its closing words on the way out, which is after the
+/// terminal it was printing to has closed — so the last thing said reaches the
+/// Transcript after the last thing printed reaches the Capture, and a row
+/// written only by the output would stop one statement short of the point.
+#[tokio::test]
+async fn a_finished_sessions_row_reads_its_closing_words() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '\033[2m│ working │\033[0m\n'
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The limiter is written and the tests pass."}]}}\n' > "$log"
+        "#,
+    )
+    .await;
+
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
+        .await;
+
+    assert_eq!(
+        summary.latest, "The limiter is written and the tests pass.",
+        "a session that has ended is summarised by what it said on its way out"
+    );
+}
+
 /// A grilling session runs for an hour. A Timeline that said nothing until it
 /// finished would be a Timeline nobody could watch.
 #[tokio::test]
@@ -3521,6 +3613,63 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
     assert!(
         worktree.join("limiter.md").exists(),
         "and the repo is left exactly as the session left it",
+    );
+}
+
+/// And where the session kept a log, the evidence is what it said rather than
+/// what its terminal was drawing.
+///
+/// An agent that gives up says why in a sentence. Underneath that sentence is a
+/// display of it — the box it was drawn in, the colours, the status line — which
+/// says the same thing at ten times the length, and this is read on a phone by
+/// somebody deciding between retrying and taking over.
+#[tokio::test]
+async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            log=$HOME/.claude/projects/verkstead/$name.jsonl
+            mkdir -p "$(dirname "$log")"
+
+            printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The window type is not where the brief says it is, so I have stopped."}]}}\n' > "$log"
+            printf '\033[2m╭─ esc to interrupt ─╮\033[0m\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.tail, "The window type is not where the brief says it is, so I have stopped.",
+        "the evidence should be the agent's own account of why it stopped",
+    );
+    assert!(
+        !stopped.tail.contains("esc to interrupt"),
+        "and not the interface it was drawn inside: {:?}",
+        stopped.tail,
     );
 }
 
