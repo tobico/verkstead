@@ -13,10 +13,11 @@ separate, maintained product; Verkstead diverges freely from it.
 
 ## Status
 
-**Early, private, and not yet installable.** There is no release to download
-and no adoption story — the pieces that exist are askance's, under Verkstead's
-name, while the workbench is built on top of them. This README is a placeholder
-until there is something to install.
+**Early, private, and unreleased.** There is no binary to download — the flake
+builds it and the NixOS module runs it. The workbench, the sandboxed sessions,
+the task-list and roadmap pipelines and the per-PR wrap-up are built; what has
+not happened yet is a real repository driven through them end to end, which is
+where [adoption](docs/adoption.md) stands.
 
 NixOS only for now: Linux and bwrap are a hard requirement.
 
@@ -30,6 +31,10 @@ a Verkstead that covers the whole loop, and the brief for each.
 
 **[CONTEXT.md](CONTEXT.md)** — the project's vocabulary. Conversation, Brief,
 Timeline, Question Set, Answer and the rest, defined once.
+
+**[Adoption](docs/adoption.md)** — what Verkstead replaces, how to get it
+running, and how a day's work goes through it from Brief to settled pull
+request.
 
 **[Development](docs/development.md)** — the dev shell, building the viewer,
 and the loop for working on Verkstead itself.
