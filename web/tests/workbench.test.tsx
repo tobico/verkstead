@@ -18,6 +18,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AbandonedRepo,
+  Adopted,
   AgentOutputEvent,
   CommitDiff,
   ConversationAborted,
@@ -34,8 +36,11 @@ import type {
   Transcript,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
+import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
+import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
+import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import direction from "./fixtures/conversation-direction.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
@@ -57,6 +62,11 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
 const REPOS = repos as RepoEntry[];
+const ABANDONED = abandoned as AbandonedRepo[];
+
+/// The conversation that clicking one of those roadmaps made: a draft adopting
+/// `mvp`, on the page shaped for adopting.
+const ADOPTING = adopting as ConversationView;
 const PROFILES = profiles as ProfileEntry[];
 
 /// The one the fixture opens, which is the second row of the sidebar.
@@ -130,6 +140,7 @@ function theWorkbench(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
+    whenever("/api/ui/abandoned-roadmaps", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,
   );
@@ -302,6 +313,326 @@ describe("starting a conversation", () => {
         repo_id: REPOS[0]!.id,
       }),
     );
+  });
+});
+
+describe("the abandoned roadmaps notice", () => {
+  /// The whole of it: one notice per Repo, its roadmaps inside, each named with
+  /// the stage that would be started.
+  it("names the repo, its roadmaps and the stage each one is up to", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount();
+
+    const notices = await waitFor(() => {
+      const drawn = container.querySelectorAll(".abandoned-notice");
+      expect(drawn.length).toBe(ABANDONED.length);
+      return drawn;
+    });
+
+    const notice = notices[0]!;
+    expect(notice.textContent).toContain(ABANDONED[0]!.repo);
+
+    const roadmaps = notice.querySelectorAll("li");
+    expect(roadmaps.length).toBe(ABANDONED[0]!.roadmaps.length);
+
+    for (const [n, roadmap] of ABANDONED[0]!.roadmaps.entries()) {
+      const said = roadmaps[n]!.textContent!;
+      expect(said).toContain(roadmap.name);
+      expect(said).toContain(roadmap.stage);
+      expect(said).toContain(roadmap.stage_title);
+    }
+  });
+
+  /// Under the box that starts a conversation, which is what it is an
+  /// alternative to — and above the conversations themselves, which are the work
+  /// already under way.
+  it("is drawn under the new conversation box", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount();
+
+    const notice = await drawn(container, ".abandoned");
+    const box = container.querySelector(".start-conversation")!;
+
+    expect(box.compareDocumentPosition(notice)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  /// Nothing to adopt is nothing to say. A Repo whose roadmaps are all
+  /// complete, mid-flight or broken contributes no notice at all, and a
+  /// workbench with none draws no heading over an empty list.
+  it("says nothing when there is nothing to adopt", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    expect(container.querySelector(".abandoned")).toBeNull();
+  });
+
+  /// Read again with everything else the page is showing, because the server
+  /// reads it off the repositories every time it is asked: a roadmap somebody
+  /// has since picked up stops being on the list, and the notice goes with it.
+  it("is read again when the page looks again", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+    );
+    const { container } = mount();
+    await drawn(container, ".abandoned-notice");
+
+    const before = askedFor(fetching, "/api/ui/abandoned-roadmaps");
+    readAgain();
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/abandoned-roadmaps")).toBeGreaterThan(
+        before,
+      ),
+    );
+  });
+
+  /// Clicking a roadmap starts a conversation to adopt it with, and goes
+  /// straight into it — which is where both profiles and the base commit are
+  /// fixed, and where adopting is pressed.
+  ///
+  /// What goes out is the repo and the roadmap and nothing else: which stage is
+  /// next is the roadmap's own answer at the commit the conversation ends up
+  /// branching from, and the page reads it back there.
+  it("starts a conversation to adopt the roadmap that was clicked", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+      whenever(
+        "/api/ui/adoptions",
+        json({ Started: { id: OPEN.id } }),
+        "POST",
+      ),
+    );
+    const { container, history } = mount();
+
+    const notice = await drawn(container, ".abandoned-notice");
+    const roadmaps = notice.querySelectorAll<HTMLButtonElement>("li button");
+    fireEvent.click(roadmaps[1]!);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
+        repo_id: ABANDONED[0]!.repo_id,
+        roadmap: ABANDONED[0]!.roadmaps[1]!.name,
+      }),
+    );
+    await waitFor(() => expect(history.get()).toBe(`/conversations/${OPEN.id}`));
+  });
+});
+
+/// The page a conversation started from that notice opens on: the roadmap and
+/// its stage named, the two profiles and the base commit to fix, and one press.
+describe("the adoption page", () => {
+  /// Everything the server said about the roadmap at this conversation's base
+  /// commit — which is what the press would start, rather than what the notice
+  /// happened to show when it was clicked.
+  const ADOPTION = ADOPTING.adopting!;
+
+  /// The workbench with the adopting conversation opened instead of the
+  /// drafting one. Both fixtures carry the same id, which is what the sidebar
+  /// row and the URL are shared through.
+  function theAdoption(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
+      ...answers,
+    );
+  }
+
+  it("names the roadmap and the stage adopting would start", async () => {
+    theAdoption();
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, ".adoption");
+    expect(panel.textContent).toContain(ADOPTION.roadmap);
+    expect(panel.textContent).toContain(ADOPTION.title);
+    expect(panel.textContent).toContain(ADOPTION.stage!.label);
+    expect(panel.textContent).toContain(ADOPTION.stage!.title);
+
+    // And where the brief comes from, and what the work will be done on — which
+    // is the stage's own slug rather than the name the server invented for the
+    // row.
+    expect(panel.textContent).toContain(ADOPTION.stage!.brief_path);
+    expect(panel.textContent).toContain(ADOPTION.stage!.branch);
+  });
+
+  it("offers both profiles, the base commit and one adopt press", async () => {
+    theAdoption();
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    await drawn(container, ".adoption");
+    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
+
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    expect(screen.getByLabelText("Implementation")).toBeTruthy();
+    expect(screen.getByLabelText("Base commit")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
+  });
+
+  /// There is nothing to type and nothing to grill: the brief is the stage
+  /// brief, and it arrives when the stage is adopted. The branch is not offered
+  /// either — a stage is worked on its own slug, so the name the row carries is
+  /// discarded at the press.
+  it("offers no brief editor, no start grilling and no branch field", async () => {
+    theAdoption();
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    await drawn(container, ".adoption");
+
+    expect(container.querySelector(".edit-brief")).toBeNull();
+    expect(container.querySelector(".start-grilling")).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+  });
+
+  /// The stage is the server's reading at the base commit, so a base recorded
+  /// is a page read again — and what it names then is the stage that is next
+  /// *there*.
+  it("names the stage again when the base commit changes", async () => {
+    const elsewhere: ConversationView = {
+      ...ADOPTING,
+      base_commit: "9a1c3e5b7d90f2468ace13579bdf02468ace1357",
+      adopting: {
+        ...ADOPTION,
+        stage: {
+          label: "03",
+          title: "Implementation",
+          brief_path: "docs/roadmaps/mvp/03-implementation.md",
+          branch: "implementation",
+        },
+      },
+    };
+
+    let recorded = false;
+    theAdoption(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, () =>
+        json(recorded ? elsewhere : ADOPTING)(),
+      ),
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/base`,
+        () => {
+          recorded = true;
+          return json("Recorded")();
+        },
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    await waitFor(() =>
+      expect(container.querySelector(".adoption .stage")!.textContent).toContain(
+        ADOPTION.stage!.title,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
+    fireEvent.input(screen.getByLabelText("Base commit"), {
+      target: { value: elsewhere.base_commit },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+
+    await waitFor(() =>
+      expect(container.querySelector(".adoption .stage")!.textContent).toContain(
+        "Implementation",
+      ),
+    );
+  });
+
+  /// A roadmap that has since been finished, gone, or picked up reads the same
+  /// way here: the roadmap is still named, and there is no stage under it.
+  /// Which of those it was is the press's to say by name.
+  it("says when there is no stage to adopt at the base commit", async () => {
+    const nothing: ConversationView = {
+      ...ADOPTING,
+      adopting: { ...ADOPTION, title: "", stage: null },
+    };
+    theAdoption(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(nothing)),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, ".adoption");
+    expect(panel.textContent).toContain(ADOPTION.roadmap);
+    expect(panel.querySelector(".empty")).toBeTruthy();
+    expect(panel.querySelector(".stage")).toBeNull();
+  });
+
+  /// The press posts to the conversation's own adopt route with nothing in the
+  /// body, for the reason starting a grilling sends nothing: which conversation
+  /// is in the path, and which stage is the roadmap's own answer at the base
+  /// commit — read again by the server when the button is pressed.
+  it("posts to the conversation's own adopt route, with nothing in the body", async () => {
+    const fetching = theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json("Adopted" satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${ADOPTING.id}/adopt`),
+      ).toEqual({}),
+    );
+  });
+
+  /// And what a press leaves behind is a conversation that has moved and a
+  /// notice with one roadmap fewer in it, so all three are read again.
+  it("reads the conversation and the notice again once it has been pressed", async () => {
+    const fetching = theAdoption(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json("Adopted" satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const before = askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`);
+    fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`),
+      ).toBeGreaterThan(before),
+    );
+  });
+
+  /// A press that was refused says which refusal it was. Every one of them is
+  /// something different to go and do — a profile to choose, a box somebody
+  /// ticked, a branch somebody is on — so a single "cannot adopt" would leave
+  /// the human guessing which.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of [
+      "NoImplementationProfile",
+      "RoadmapComplete",
+      "StageInFlight",
+      "BranchExists",
+    ] satisfies Adopted[]) {
+      theAdoption(
+        whenever(
+          `/api/ui/conversations/${ADOPTING.id}/adopt`,
+          json(outcome satisfies Adopted),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount(`/conversations/${ADOPTING.id}`);
+
+      fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+      await waitFor(() =>
+        expect(container.querySelector(".adoption .error")!.textContent).toBe(
+          ADOPT_REFUSAL[outcome],
+        ),
+      );
+
+      unmount();
+    }
   });
 });
 

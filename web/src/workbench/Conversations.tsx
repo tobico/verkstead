@@ -10,6 +10,15 @@
 //! what it does have the branch is the short line the human chose — and the one
 //! they can change while it is still drafting.
 //!
+//! Under that box are the roadmaps nothing is driving, one notice per Repo —
+//! see [`Abandoned`]. Read there because that is what they are about: work
+//! somebody staged before Verkstead was driving anything, with a stage waiting
+//! to be started.
+//!
+//! Clicking one of those roadmaps starts a conversation to adopt it with: a
+//! draft on a page shaped for adopting, which is the other way work gets into
+//! the pipeline.
+//!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are a line at the
 //! bottom of it rather than a page of their own to find.
@@ -18,7 +27,13 @@ import { A } from "@solidjs/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { listConversations, listRepos, startConversation } from "../api/client";
+import {
+  listAbandonedRoadmaps,
+  listConversations,
+  listRepos,
+  startAdoption,
+  startConversation,
+} from "../api/client";
 import type { ConversationEntry, Started } from "../api/types";
 
 export function Conversations(props: {
@@ -118,6 +133,8 @@ export function Conversations(props: {
         </Match>
       </Switch>
 
+      <Abandoned open={props.open} />
+
       <Switch>
         <Match when={conversations.isPending}>
           <p class="empty">Loading…</p>
@@ -160,6 +177,99 @@ export function Conversations(props: {
         </A>
       </nav>
     </>
+  );
+}
+
+/// The Repos holding roadmaps nothing is driving, one notice each.
+///
+/// Under the new-conversation box because that is what it is: another way to
+/// start work, on a roadmap somebody wrote before Verkstead was driving
+/// anything. What each one names is the roadmap and the stage that would be
+/// started, which is the whole of the decision.
+///
+/// Each roadmap is a button, and pressing it starts a conversation to adopt
+/// that roadmap with — a draft, on a page shaped for adopting rather than for
+/// grilling. Nothing is adopted by pressing it: both profiles have to be fixed
+/// first, and there is a press on that page for the adopting itself.
+///
+/// There is no way to dismiss one, now or later. The repository is the source
+/// of truth for its own roadmaps everywhere else, so a notice that is true and
+/// unwanted is silenced in the repository — tick the box, or annotate the
+/// stage. A dismissal Verkstead stored would be a second opinion about a
+/// roadmap the repository says has work left.
+function Abandoned(props: { open: (id: number) => void }): JSX.Element {
+  const queries = useQueryClient();
+
+  const abandoned = useQuery(() => ({
+    queryKey: ["abandoned-roadmaps"],
+    queryFn: listAbandonedRoadmaps,
+  }));
+
+  const adopt = useMutation(() => ({
+    mutationFn: ({ repoId, roadmap }: { repoId: number; roadmap: string }) =>
+      startAdoption(repoId, roadmap),
+    onSuccess: (outcome: Started) => {
+      if (typeof outcome === "string") {
+        // `NoSuchRepo`, against a notice read a moment ago: the Repo was there
+        // and is not now. Reading both lists again is the correction and the
+        // explanation together.
+        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+        return;
+      }
+
+      // Straight onto its page, which is where the two profiles and the base
+      // commit are fixed and where adopting is pressed.
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      props.open(outcome.Started.id);
+    },
+  }));
+
+  return (
+    <Show when={abandoned.data?.length}>
+      <div class="abandoned">
+        <For each={abandoned.data}>
+          {(repo) => (
+            <section class="abandoned-notice">
+              <p>
+                <code>{repo.repo}</code> holds roadmaps nothing is driving.
+              </p>
+              <ul>
+                <For each={repo.roadmaps}>
+                  {(roadmap) => (
+                    <li>
+                      <button
+                        type="button"
+                        class="adopt-roadmap"
+                        disabled={adopt.isPending}
+                        onClick={() =>
+                          adopt.mutate({
+                            repoId: repo.repo_id,
+                            roadmap: roadmap.name,
+                          })
+                        }
+                      >
+                        <code>{roadmap.name}</code>
+                        <span class="stage">
+                          next is stage {roadmap.stage}: {roadmap.stage_title}
+                        </span>
+                      </button>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              {/* A server that could not answer at all, which is the one thing
+                  here that is an error rather than an outcome. */}
+              <Show when={adopt.isError}>
+                <p class="error">
+                  The conversation could not be started: {adopt.error?.message}
+                </p>
+              </Show>
+            </section>
+          )}
+        </For>
+      </div>
+    </Show>
   );
 }
 

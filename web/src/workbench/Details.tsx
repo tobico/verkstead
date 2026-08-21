@@ -91,7 +91,13 @@ export function Details(props: {
         <dd class="state">{props.conversation.state}</dd>
       </dl>
 
-      <BranchName conversation={props.conversation} />
+      {/* No branch field where the conversation is adopting a roadmap: a stage
+          is worked on its own slug, so the name invented when the row was made
+          is discarded when the stage is adopted, and naming it here would be a
+          field with nothing behind it. */}
+      <Show when={!props.conversation.adopting}>
+        <BranchName conversation={props.conversation} />
+      </Show>
       <BaseCommit conversation={props.conversation} />
 
       <Worktree conversation={props.conversation} />
@@ -186,20 +192,38 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
           not a count of the two fields above: a profile whose pair has gone is
           not one to launch a session under, and there is more to being ready
           than the profiles. Said here because this is where the profiles are
-          fixed; the button it gates is in the timeline. */}
-      <p class="note readiness" classList={{ ready: props.conversation.ready_to_grill }}>
-        <Show
-          when={props.conversation.ready_to_grill}
-          fallback={
-            <>
-              Not ready to grill: this needs a brief, and both profiles chosen
-              and working.
-            </>
-          }
+          fixed; the button it gates is in the timeline.
+
+          An adopting conversation never grills, so that verdict is not the one
+          to draw for it — it would read as needing a brief nobody here writes.
+          What stands instead is why both profiles are fixed all the same. */}
+      <Show
+        when={!props.conversation.adopting}
+        fallback={
+          <p class="note">
+            Both profiles are fixed before adopting: the implementation one is
+            what the work runs under, and the grilling one is carried, because
+            the stages after this one inherit both from it.
+          </p>
+        }
+      >
+        <p
+          class="note readiness"
+          classList={{ ready: props.conversation.ready_to_grill }}
         >
-          Ready to grill.
-        </Show>
-      </p>
+          <Show
+            when={props.conversation.ready_to_grill}
+            fallback={
+              <>
+                Not ready to grill: this needs a brief, and both profiles chosen
+                and working.
+              </>
+            }
+          >
+            Ready to grill.
+          </Show>
+        </p>
+      </Show>
     </section>
   );
 }

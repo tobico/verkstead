@@ -46,13 +46,14 @@ const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 
 /// What the app fetches alongside the Conversation it is about — the sidebar,
 /// the Repos the picker on it needs, the Agent Profiles the details pane picks
-/// from, and the release check. Held to their own paths and out of the counting:
+/// from, the roadmaps nothing is driving, and the release check. Held to their own paths and out of the counting:
 /// a Nudge is never about a release, and which test pays for the rest is not
 /// something any of them is about.
 const BESIDE = [
   whenever("/api/ui/conversations", json(conversations as ConversationEntry[])),
   whenever("/api/ui/repos", json(repos as RepoEntry[])),
   whenever("/api/ui/profiles", json(profiles as ProfileEntry[])),
+  whenever("/api/ui/abandoned-roadmaps", json([])),
   whenever("/api/ui/update", json("Current")),
 ];
 

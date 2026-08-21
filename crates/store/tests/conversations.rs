@@ -5,9 +5,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Aborting, Edited, Event, Grilling, Lifecycle, abort_conversation, conversations,
+    Aborting, Edited, Event, Grilling, Lifecycle, abort_conversation, adopting, conversations,
     load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
-    set_state, start_conversation, start_grilling, timeline,
+    set_state, start_adoption, start_conversation, start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -570,5 +570,83 @@ async fn a_worktree_survives_the_database_being_reopened() {
     assert_eq!(
         conversation.worktree.as_deref(),
         Some(Path::new("/state/worktrees/verkstead-rate-limiting"))
+    );
+}
+
+/// The mark, which is the whole of what adoption stores: which roadmap, and
+/// nothing about what that roadmap says.
+#[tokio::test]
+async fn an_adopting_conversation_records_the_roadmap_it_is_adopting() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+        .await
+        .unwrap()
+        .expect("the Repo is registered, so the Conversation should start");
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.adopting.as_deref(), Some("mvp"));
+
+    // And it is a Conversation like any other otherwise: drafting, on the branch
+    // it was given, with an empty Brief nobody here writes.
+    assert_eq!(conversation.state, Lifecycle::Draft);
+    assert_eq!(conversation.branch, "spring-otter");
+    assert_eq!(brief(&pool, id).await, "");
+}
+
+#[tokio::test]
+async fn a_conversation_started_the_ordinary_way_is_adopting_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+
+    let id = start_conversation(&pool, repo_id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .adopting,
+        None
+    );
+    assert_eq!(adopting(&pool, id).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn an_adoption_cannot_be_started_against_a_repo_that_is_not_registered() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert!(
+        start_adoption(&pool, 404, "spring-otter", "mvp")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// The mark is a row like every other, so it is there after a restart — a page
+/// drawn for adopting before the reboot is drawn for adopting after it.
+#[tokio::test]
+async fn the_roadmap_being_adopted_survives_the_database_being_reopened() {
+    let (dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_adoption(&pool, repo_id, "spring-otter", "mvp")
+        .await
+        .unwrap()
+        .unwrap();
+    pool.close().await;
+
+    let reopened = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        adopting(&reopened, id).await.unwrap().as_deref(),
+        Some("mvp")
     );
 }

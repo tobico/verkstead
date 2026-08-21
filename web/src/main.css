@@ -735,6 +735,83 @@ main:has(.workbench) {
   background: none;
 }
 
+/* The roadmaps nothing is driving, under the box that starts a conversation:
+   another way in rather than something waiting on the human, so it is drawn as
+   the update banner is — a card with an accented edge — and not as a row of the
+   list below it. One card per Repo, with its roadmaps inside. */
+.abandoned {
+  margin-bottom: 1.5rem;
+}
+
+.abandoned-notice {
+  margin-bottom: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.abandoned-notice > p {
+  margin: 0;
+}
+
+.abandoned-notice ul {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* The roadmap's name over the stage that would be started, because on a phone
+   the two of them do not share a line. */
+.abandoned-notice li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+/* Each roadmap is a button, because pressing one starts a conversation to adopt
+   it with. Drawn as the text it already was rather than as a control: the card
+   it is in is the notice, and three buttons stacked in it would read as three
+   things to decide between rather than as what is lying about. */
+.abandoned-notice li button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  margin: -0.25rem -0.4rem;
+  font: inherit;
+  color: inherit;
+  text-align: start;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.abandoned-notice li button:hover {
+  border-color: var(--edge);
+}
+
+.abandoned-notice li button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.abandoned-notice .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+.abandoned-notice .stage {
+  color: var(--ink-soft);
+}
+
 /* The conversations themselves, drawn as the set lists' rows are: the whole card
    is the target, and a line of provenance under the name. */
 .conversation-list {
@@ -1755,6 +1832,58 @@ main:has(.workbench) {
 }
 
 .start-grilling .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* What happens next on an adopting conversation, in the place `Start grilling`
+   stands on every other one and never at the same time: an adopting
+   conversation has no brief to write and nothing to grill. What it names is the
+   roadmap and the stage the press would start. */
+.adoption {
+  margin-top: 1rem;
+}
+
+.adoption h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.adoption .roadmap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0 0 0.25rem;
+}
+
+.adoption .roadmap-title,
+.adoption .empty {
+  color: var(--ink-soft);
+}
+
+.adoption .stage {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.adoption .adopt {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.adoption .adopt:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.adoption .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
