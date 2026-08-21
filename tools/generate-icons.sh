@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Rasterize assets/icons/askance.svg into the PNG sizes the manifest and iOS ask
-# for.
+# Rasterize assets/icons/verkstead.svg into the PNG sizes the manifest and iOS
+# ask for.
 #
 # The PNGs are committed so that a build needs nothing but node and cargo, but
 # they are never hand-edited: change the SVG and run this. The script lives
@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../assets/icons"
 
-resvg --width 192 --height 192 askance.svg icon-192.png
-resvg --width 512 --height 512 askance.svg icon-512.png
+resvg --width 192 --height 192 verkstead.svg icon-192.png
+resvg --width 512 --height 512 verkstead.svg icon-512.png
 # iOS ignores the manifest's icons and takes this one, at this exact size.
-resvg --width 180 --height 180 askance.svg apple-touch-icon.png
+resvg --width 180 --height 180 verkstead.svg apple-touch-icon.png

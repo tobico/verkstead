@@ -1,18 +1,19 @@
-//! The Guide as the binary hands it over: `askance guide`, bare `askance`, and
-//! the promise that the CLI contract it quotes is the one this binary has.
+//! The Guide as the binary hands it over: `verkstead guide`, bare
+//! `verkstead`, and the promise that the CLI contract it quotes is the one
+//! this binary has.
 
 use std::process::{Command, Output};
 
-use askance_schema::{Question, QuestionSet};
+use verkstead_schema::{Question, QuestionSet};
 
 /// Run the binary with `args` and insist it had something to say.
 fn run(args: &[&str]) -> Output {
-    let output = Command::new(env!("CARGO_BIN_EXE_askance"))
+    let output = Command::new(env!("CARGO_BIN_EXE_verkstead"))
         .args(args)
         .output()
-        .expect("the askance binary should be built for its own tests");
+        .expect("the verkstead binary should be built for its own tests");
     eprintln!(
-        "askance {args:?} stderr:\n{}",
+        "verkstead {args:?} stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     output
@@ -98,7 +99,7 @@ fn lines(text: &str) -> Vec<&str> {
 fn the_guide_command_prints_the_guide() {
     let output = run(&["guide"]);
 
-    assert!(output.status.success(), "`askance guide` should exit 0");
+    assert!(output.status.success(), "`verkstead guide` should exit 0");
     assert!(
         stdout(&output).contains("## The CLI contract"),
         "the Guide should be on stdout, got:\n{}",
@@ -107,13 +108,13 @@ fn the_guide_command_prints_the_guide() {
 }
 
 #[test]
-fn bare_askance_prints_the_same_guide() {
+fn bare_verkstead_prints_the_same_guide() {
     let bare = run(&[]);
     let explicit = run(&["guide"]);
 
     assert!(
         bare.status.success(),
-        "bare `askance` should print the Guide rather than a usage error"
+        "bare `verkstead` should print the Guide rather than a usage error"
     );
     assert_eq!(
         stdout(&bare),
@@ -128,7 +129,7 @@ fn the_help_about_text_points_at_the_guide() {
 
     assert!(output.status.success());
     assert!(
-        stdout(&output).contains("askance guide"),
+        stdout(&output).contains("verkstead guide"),
         "an agent that starts at --help should be sent to the Guide, got:\n{}",
         stdout(&output)
     );
@@ -169,7 +170,7 @@ fn the_topic_contract_binds_gates_to_the_guide() {
          it has read enough"
     );
     assert!(
-        contract.contains("MUST") && contract.contains("askance guide gates"),
+        contract.contains("MUST") && contract.contains("verkstead guide gates"),
         "a Topic is required reading, not a suggestion — the contract section \
          should say MUST and name the command, got:\n{contract}"
     );
@@ -187,7 +188,7 @@ fn the_authoring_section_sends_approval_asks_to_the_gates_topic() {
         .unwrap();
 
     assert!(
-        authoring.contains("askance guide gates"),
+        authoring.contains("verkstead guide gates"),
         "the agent decides what to write in the authoring section, so that is \
          where an approval ask has to be sent to the Topic, got:\n{authoring}"
     );
@@ -199,7 +200,7 @@ fn the_gates_topic_prints_and_exits_zero() {
 
     assert!(
         output.status.success(),
-        "`askance guide gates` should exit 0"
+        "`verkstead guide gates` should exit 0"
     );
     assert!(
         stdout(&output).contains("# Confirmation gates"),
@@ -215,7 +216,7 @@ fn a_topic_is_not_the_core_guide() {
     assert_ne!(
         stdout(&run(&["guide", "gates"])),
         stdout(&run(&["guide"])),
-        "`askance guide gates` should print the Topic, not the core Guide"
+        "`verkstead guide gates` should print the Topic, not the core Guide"
     );
 }
 
@@ -543,7 +544,7 @@ fn the_guides_quoted_cli_contract_is_the_real_one() {
     assert_eq!(
         lines(&quoted),
         lines(&real),
-        "the Guide quotes `askance ask --help` verbatim — copy the current \
+        "the Guide quotes `verkstead ask --help` verbatim — copy the current \
          output into the CLI contract section of crates/cli/guide/core.md"
     );
 }

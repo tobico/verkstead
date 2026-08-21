@@ -6,13 +6,15 @@
 //! here has to be got right for correctness: a Nudge that never lands costs
 //! latency, and the ten-second poll underneath collects the change anyway.
 //!
-//! The three durable changes reach this stream over two channels rather than
-//! one. A settlement — a Response taken, or a Set closed unanswered — is
-//! already announced on [`Settlements`](askance_store::Settlements) from inside
-//! the store, on the single path the browser's submit and the agent's both
-//! take, so listening to it here is what makes it impossible to Nudge about a
-//! settlement from one namespace and silently not from the other. Only a Set
-//! arriving needs a channel of its own.
+//! The durable changes reach this stream over two channels rather than one. A
+//! settlement — a Response taken, or a Set closed unanswered — is already
+//! announced on [`Settlements`](verkstead_store::Settlements) from inside the
+//! store, on the single path the browser's submit and the agent's both take, so
+//! listening to it here is what makes it impossible to Nudge about a settlement
+//! from one namespace and silently not from the other. Everything else that
+//! moves — a Set arriving, a session printing another line of its transcript —
+//! is announced on [`Nudges`], which is the channel for what the store has no
+//! reason to know has happened.
 //!
 //! Liveness stays out of it, and so stays with the poll: the
 //! waiting/disconnected verdict cycles with the agent's long-poll rather than
@@ -30,11 +32,11 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::AppState;
 
-/// How many Sets may arrive before a page that is behind is told it is. It
-/// costs nothing to be told: a Nudge carries nothing, so a page that missed a
-/// burst of them is nudged once for the whole burst and reads the world back
-/// as it now is.
-const CREATION_BACKLOG: usize = 16;
+/// How much may happen before a page that is behind is told it is. It costs
+/// nothing to be told: a Nudge carries nothing, so a page that missed a burst of
+/// them is nudged once for the whole burst and reads the world back as it now
+/// is.
+const NUDGE_BACKLOG: usize = 16;
 
 /// How often the stream says something into the quiet. Anything between the
 /// page and the server may close a connection that has gone silent, and a
@@ -42,23 +44,25 @@ const CREATION_BACKLOG: usize = 16;
 /// the stream open rather than reopened.
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
 
-/// Word that a Question Set has just been created.
+/// Word that the world moved in a way the store has no reason to announce: a
+/// Question Set arriving, a session saying something.
 ///
-/// The counterpart to the store's `Settlements`, for the one durable change
-/// that has nowhere else to come from: nothing waits on a Set arriving, so
-/// until the viewer wanted to hear about it there was nobody to tell.
+/// The counterpart to the store's `Settlements`, for the changes that have
+/// nowhere else to come from. Nothing waits on a Set arriving and nothing waits
+/// on a transcript growing, so until the viewer wanted to hear about them there
+/// was nobody to tell.
 #[derive(Debug, Clone)]
-pub(crate) struct Creations(broadcast::Sender<()>);
+pub(crate) struct Nudges(broadcast::Sender<()>);
 
-impl Creations {
+impl Nudges {
     pub(crate) fn new() -> Self {
-        let (arrivals, _) = broadcast::channel(CREATION_BACKLOG);
-        Self(arrivals)
+        let (moves, _) = broadcast::channel(NUDGE_BACKLOG);
+        Self(moves)
     }
 
-    /// Tell the open pages that a Set has arrived. A send error means none are
-    /// open, which is the ordinary case — there is usually no browser pointed
-    /// at this at all.
+    /// Tell the open pages to look again. A send error means none are open,
+    /// which is the ordinary case — there is usually no browser pointed at this
+    /// at all.
     pub(crate) fn announce(&self) {
         let _ = self.0.send(());
     }
@@ -75,13 +79,13 @@ pub(crate) async fn nudges(
     // Subscribed to before the response goes back, so a change landing while
     // the page is still opening the stream is one it hears rather than one that
     // slips past it.
-    let arrived = BroadcastStream::new(state.creations.subscribe());
+    let moved = BroadcastStream::new(state.nudges.subscribe());
     let settled = BroadcastStream::new(state.settlements.subscribe());
 
     // Falling behind is folded in with everything else rather than handled: a
     // page cannot miss what a Nudge said, because a Nudge says nothing. Being
     // overtaken and being told are the same event here.
-    let nudges = arrived
+    let nudges = moved
         .map(|_| ())
         .merge(settled.map(|_| ()))
         .map(|()| Ok(nudge()));

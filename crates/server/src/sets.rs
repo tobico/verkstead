@@ -1,19 +1,33 @@
-//! The Question Set endpoint: an agent's YAML comes in, an id goes back.
+//! The Question Set endpoint: an agent's YAML comes in, an id goes back, and the
+//! Set is on the Timeline of the Conversation its session is running for.
+//!
+//! Which Conversation is in the path, because it is in the base URL the sandbox
+//! was given (see [`crate::sandbox::Reachable`]) — so the CLI attributes every
+//! Set explicitly without knowing it is doing so, and nothing is inferred from
+//! the project or the branch it derived. Two Conversations grilling one Repo
+//! would be indistinguishable by either of those.
 
-use askance_schema::{ApiError, QuestionSet};
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
+use verkstead_schema::{ApiError, QuestionSet};
 
 use crate::reply::yaml;
 use crate::{AppState, store};
 
-/// `POST /api/v1/sets` — parse, validate, store, and answer with the id the
-/// waiting agent will poll on.
+/// `POST /conversations/{conversation}/api/v1/sets` — parse, validate, put it on
+/// that Conversation's Timeline, and answer with the id the waiting agent will
+/// poll on.
 ///
 /// Malformed YAML is a 400; a well-formed Set that breaks the question grammar
-/// is a 422 listing every violation, each naming the Question it belongs to.
-pub(crate) async fn create_set(State(state): State<AppState>, body: String) -> Response {
+/// is a 422 listing every violation, each naming the Question it belongs to. A
+/// Conversation that is not there is a 404: there is nowhere for the Set to land
+/// and nobody who would ever see it.
+pub(crate) async fn create_set(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<i64>,
+    body: String,
+) -> Response {
     let set = match QuestionSet::from_yaml(&body) {
         Ok(set) => set,
         Err(error) => {
@@ -34,21 +48,29 @@ pub(crate) async fn create_set(State(state): State<AppState>, body: String) -> R
         );
     }
 
-    match store::insert_set(&state.pool, &set).await {
-        Ok(created) => {
+    match store::ask(&state.pool, conversation_id, &set).await {
+        Ok(Some(created)) => {
             // Behind the answer, never in front of it: the agent hears that its
             // Set is stored the moment it is, and a push service that cannot be
             // reached costs a notification rather than the Set.
             crate::push::announce(&state.pool, created.id, &set);
 
             // And the pages that are already open, which hear it here rather
-            // than the long way round through a push service.
-            state.creations.announce();
+            // than the long way round through a push service. This is what puts
+            // the Set in front of a human watching the Timeline it just landed
+            // on.
+            state.nudges.announce();
 
             yaml(StatusCode::CREATED, &created)
         }
+        Ok(None) => yaml(
+            StatusCode::NOT_FOUND,
+            &ApiError::new(format!(
+                "there is no Conversation {conversation_id} to ask from"
+            )),
+        ),
         Err(error) => {
-            tracing::error!(error = ?error, "storing a Question Set failed");
+            tracing::error!(error = ?error, conversation_id, "storing a Question Set failed");
             yaml(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &ApiError::new("the Question Set could not be stored"),

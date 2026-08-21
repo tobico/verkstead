@@ -12,9 +12,9 @@ use anyhow::{Context, Result, anyhow};
 /// The core Guide: everything any ask needs.
 const CORE: &str = include_str!("../guide/core.md");
 
-/// The Topics, each under the name `askance guide <topic>` takes. Order is the
-/// order they are listed back in, so it stays the order the core Guide names
-/// them in.
+/// The Topics, each under the name `verkstead guide <topic>` takes. Order is
+/// the order they are listed back in, so it stays the order the core Guide
+/// names them in.
 const TOPICS: &[(&str, &str)] = &[("gates", include_str!("../guide/gates.md"))];
 
 /// Print the core Guide, or one of its Topics, on stdout.

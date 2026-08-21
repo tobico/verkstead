@@ -14,7 +14,7 @@
 
 /// Where the wrap setting lives. Namespaced like the drafts beside it, so
 /// everything this app leaves in a browser is legible as its own.
-const WRAP = "askance.diff-wrap";
+const WRAP = "verkstead.diff-wrap";
 
 /// Whether Diffs are drawn wrapped on this device.
 ///

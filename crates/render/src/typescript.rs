@@ -12,13 +12,17 @@
 //! test in the crate the type is defined in, and two crates' test binaries are
 //! two processes, which would race to create the one file and each write half of
 //! it. Exporting from here writes it once, in one process — dependencies and all,
-//! including the Set types over in `askance-schema`.
+//! including the Set types over in `verkstead-schema`.
 
 use ts_rs::TS;
 
 use crate::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Submitted, Subscribed, Subscription,
-    Unsubscribe, UpdateNotice,
+    Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
+    CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
+    DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
+    Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -32,9 +36,8 @@ fn the_viewers_types_are_written_from_these() {
     // see `.cargo/config.toml`, which is where both are said once.
     let config = ts_rs::Config::from_env();
 
-    // The two lists, and one Set.
-    PendingEntry::export_all(&config).unwrap();
-    ArchiveEntry::export_all(&config).unwrap();
+    // One Set, whole — which is what both the standalone page and the details
+    // pane of the Timeline it landed on are drawn from.
     SetView::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of
@@ -43,16 +46,82 @@ fn the_viewers_types_are_written_from_these() {
     Submitted::export_all(&config).unwrap();
     Archived::export_all(&config).unwrap();
 
+    // The Repos Verkstead has been told about, and adding one by path.
+    RepoEntry::export_all(&config).unwrap();
+    Registration::export_all(&config).unwrap();
+    Registered::export_all(&config).unwrap();
+
+    // The workbench: the sidebar, one Conversation with its Timeline, and the
+    // three things the human changes about a drafting one. Each edit brings its
+    // own request shape and its own named outcome, because each of them is a
+    // different sentence to put in front of the human.
+    ConversationEntry::export_all(&config).unwrap();
+    ConversationView::export_all(&config).unwrap();
+    NewConversation::export_all(&config).unwrap();
+    Started::export_all(&config).unwrap();
+    BriefEdit::export_all(&config).unwrap();
+    BriefSaved::export_all(&config).unwrap();
+    BranchRename::export_all(&config).unwrap();
+    BranchRenamed::export_all(&config).unwrap();
+    BaseCommitOverride::export_all(&config).unwrap();
+    BaseRecorded::export_all(&config).unwrap();
+
+    // And the two actions that make and unmake what a Conversation works in.
+    // Neither takes a request shape — which Conversation is in the path, and
+    // there is nothing else to say about either — so it is the outcomes alone.
+    GrillingStarted::export_all(&config).unwrap();
+    ConversationAborted::export_all(&config).unwrap();
+
+    // How the work gets built, once the grilling has proposed wrapping up. The
+    // recommendation and its reasoning ride on the `ConversationView` above,
+    // because the chooser draws them beside the buttons; this is the choice
+    // going back.
+    DirectionChoice::export_all(&config).unwrap();
+    DirectionChosen::export_all(&config).unwrap();
+
+    // What a session printed. The summary rides on the Timeline; the transcript
+    // is its own payload, because it is fetched by the one pane that shows it.
+    // A Question Set on the Timeline is the same arrangement, and its full self
+    // is the `SetView` above.
+    Transcript::export_all(&config).unwrap();
+
+    // And what a session committed. The summary rides on the Timeline too; the
+    // diff is its own payload, rendered by the same renderer an attached Diff
+    // goes through — which is why this writes no new Diff types.
+    CommitDiff::export_all(&config).unwrap();
+
+    // And what the finish step opened. The PR itself rides on the Conversation
+    // as a pinned Event — a number, a title and a URL; what is *on* it is its
+    // own payload, because reading that is asking GitHub over the network.
+    PullRequestDetails::export_all(&config).unwrap();
+
+    // What the human does about a run that stopped. The Interruption itself
+    // rides on the Timeline whole, evidence and all — it is the one Event with
+    // nothing behind a second fetch — so this is the choice going back and how
+    // it was answered.
+    RemedyChoice::export_all(&config).unwrap();
+    RemedySettled::export_all(&config).unwrap();
+
+    // The Agent Profiles a session can be run under, the one shape saving and
+    // rewriting one both take, and the two choices a Conversation makes of them.
+    // A `ProfileEntry` writes the agent type and the broken-ness it carries.
+    ProfileEntry::export_all(&config).unwrap();
+    ProfileEdit::export_all(&config).unwrap();
+    ProfileSaved::export_all(&config).unwrap();
+    ProfileDeleted::export_all(&config).unwrap();
+    ProfileChoice::export_all(&config).unwrap();
+    ProfileChosen::export_all(&config).unwrap();
+
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();
     Subscription::export_all(&config).unwrap();
     Subscribed::export_all(&config).unwrap();
     Unsubscribe::export_all(&config).unwrap();
 
-    // Whether there is a newer Askance than the one serving the page.
+    // Whether there is a newer Verkstead than the one serving the page.
     UpdateNotice::export_all(&config).unwrap();
 
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.
-    askance_schema::ApiError::export_all(&config).unwrap();
+    verkstead_schema::ApiError::export_all(&config).unwrap();
 }

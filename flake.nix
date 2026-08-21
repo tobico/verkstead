@@ -1,5 +1,5 @@
 {
-  description = "Askance — a service and CLI through which coding agents put questions to a human";
+  description = "Verkstead — a service and CLI through which coding agents put questions to a human";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
@@ -25,23 +25,34 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        default = askance;
-        # The released binary, downloaded — see nix/askance.nix for why that is
-        # what `nix run github:tobico/askance` should get. The build from this
+        default = verkstead;
+        # The released binary, downloaded — see nix/verkstead.nix for why that is
+        # what `nix run github:tobico/verkstead` should get. The build from this
         # tree is one attribute away, under its own name.
-        askance = pkgs.callPackage ./nix/askance.nix { };
-        askance-source = pkgs.callPackage ./nix/askance-source.nix { inherit viewer; };
+        #
+        # Until the first Release there is nothing to download: the manifest
+        # ships with `systems` empty, and a package whose `src` cannot be named
+        # is one `nix flake check` refuses to evaluate — so `verkstead` *is* the
+        # source build for exactly as long as that is true. `release.yml`
+        # writing a real manifest is what switches it over, which means nothing
+        # here has to be remembered and undone.
+        verkstead =
+          if (nixpkgs.lib.importJSON ./nix/release.json).systems ? ${pkgs.stdenv.hostPlatform.system} then
+            pkgs.callPackage ./nix/verkstead.nix { }
+          else
+            verkstead-source;
+        verkstead-source = pkgs.callPackage ./nix/verkstead-source.nix { inherit viewer; };
         # The viewer's static files on their own. Nothing serves them from here —
-        # `askance` embeds them — but they are worth building alone when what is
+        # `verkstead` embeds them — but they are worth building alone when what is
         # being looked at is the vite output.
         viewer = pkgs.callPackage ./nix/web.nix { };
       });
 
       # The module runs the package above, so it closes over this flake rather
-      # than looking for `pkgs.askance`, which is nowhere to be found.
+      # than looking for `pkgs.verkstead`, which is nowhere to be found.
       nixosModules = rec {
-        default = askance;
-        askance = import ./nix/module.nix self;
+        default = verkstead;
+        verkstead = import ./nix/module.nix self;
       };
 
       # `nix flake check` builds whatever is in here. The viewer's suite runs
@@ -55,8 +66,8 @@
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           module = pkgs.callPackage ./nix/vm-test.nix {
-            module = self.nixosModules.askance;
-            package = self.packages.${pkgs.stdenv.hostPlatform.system}.askance-source;
+            module = self.nixosModules.verkstead;
+            package = self.packages.${pkgs.stdenv.hostPlatform.system}.verkstead-source;
           };
         }
       );
@@ -66,7 +77,7 @@
       apps = forAllSystems (
         pkgs:
         let
-          askance = self.packages.${pkgs.stdenv.hostPlatform.system}.askance;
+          verkstead = self.packages.${pkgs.stdenv.hostPlatform.system}.verkstead;
         in
         {
           default = {
@@ -74,15 +85,15 @@
             # An app is a program and no arguments, and the server is a verb of
             # the one binary now — so what `nix run` runs is a script that
             # supplies the verb and passes the caller's own flags on through.
-            program = "${pkgs.writeShellScript "askance-serve" ''
-              exec ${askance}/bin/askance serve "$@"
+            program = "${pkgs.writeShellScript "verkstead-serve" ''
+              exec ${verkstead}/bin/verkstead serve "$@"
             ''}";
-            meta.description = "The Askance server, agent API and UI both";
+            meta.description = "The Verkstead server, agent API and UI both";
           };
-          askance = {
+          verkstead = {
             type = "app";
-            program = "${askance}/bin/askance";
-            meta.description = "The Askance CLI, through which an agent asks";
+            program = "${verkstead}/bin/verkstead";
+            meta.description = "The Verkstead CLI, through which an agent asks";
           };
         }
       );
@@ -101,6 +112,14 @@
               # The CLI derives `project`, `branch` and the Diff by shelling out
               # to git, so git is a runtime dependency and not just a habit.
               git
+              # What a session runs inside. Verkstead is Linux-and-bwrap only by
+              # design, and the sandbox's own tests prove the surface by running
+              # a probe in one rather than by reading the flags.
+              bubblewrap
+              # The probe's one tool: it proves the sandbox is on the host's
+              # network by reaching a listener the test itself is holding open,
+              # which is the sharing proved without touching the internet.
+              curl
               # The PWA icons are one SVG rasterized to the PNG sizes the manifest
               # and iOS need — see tools/generate-icons.sh.
               resvg

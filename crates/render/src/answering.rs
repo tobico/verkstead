@@ -41,12 +41,13 @@ pub enum Submitted {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Archived {
-    /// Closed: the Set is off the pending list and in the Archive, and a CLI
-    /// still holding a wait on it has been told.
+    /// Closed: the Set has stopped waiting on the human, stands on its
+    /// Conversation's Timeline as the Set nobody answered, and a CLI still
+    /// holding a wait on it has been told.
     Closed,
 
-    /// It was answered before this arrived, so it is in the Archive as a
-    /// decision. Nothing was changed — a decision is not something to close.
+    /// It was answered before this arrived, so it stands as the decision that
+    /// was made. Nothing was changed — a decision is not something to close.
     AlreadyAnswered,
 
     /// It had already been archived, from another device or another tab.

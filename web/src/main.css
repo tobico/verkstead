@@ -7,7 +7,12 @@
   --paper: #faf8f5;
   --card: #ffffff;
   --edge: #e3ddd4;
-  --accent: #7a5c3e;
+  /* The icon's ember, taken down until it carries text. `--accent` is both a
+     foreground on `--paper` and a button background with `--paper` on it, so it
+     has to clear 4.5:1 against the paper either way round — which the icon's
+     own #f08a3c does not, at 2.4:1 on this light paper. This is the same hue at
+     5.5:1. Dark mode has the opposite problem and so gets the bright one. */
+  --accent: #a34b12;
 
   /* Inline code gets a wash of its own rather than the fenced block's: a span of
      it is a few characters inside a line of prose, with no box and no margin to
@@ -24,6 +29,14 @@
   --removed: #b3382c;
   --removed-wash: #fbeceb;
   --hunk: #f2ede6;
+
+  /* A run that has stopped. Its own name rather than borrowing the Diff's
+     `--removed`, because it means something else — nothing was deleted, the work
+     is waiting on you — and the two would drift apart the moment either was
+     tuned. The same value for now, and it has to clear 4.5:1 both ways round:
+     it is text on the card at 6.0:1, and the *blocked on you* badge is `--paper`
+     on it at 5.6:1. */
+  --stopped: #b3382c;
 
   --tok-comment: #8d857a;
   --tok-string: #4a7a4f;
@@ -42,7 +55,9 @@
     --paper: #171614;
     --card: #201e1b;
     --edge: #35312c;
-    --accent: #c9a87c;
+    /* The icon's ember unaltered: against this paper it is 7.2:1, and the
+       deeper light-mode one would be far too dark to read here. */
+    --accent: #f08a3c;
 
     --code-wash: #2e2b26;
     --marked: #4a3f1c;
@@ -52,6 +67,11 @@
     --removed: #e0857a;
     --removed-wash: #2d1f1d;
     --hunk: #26241f;
+
+    /* The light-mode red is far too dark to read on this paper, so this is the
+       same hue lifted: 6.2:1 as text on the card, and 6.9:1 the other way round
+       under the badge. */
+    --stopped: #e0857a;
 
     --tok-comment: #8b8378;
     --tok-string: #9dc493;
@@ -140,9 +160,9 @@ main {
   max-width: calc(var(--measure) + 2rem);
 }
 
-/* The two lists' pages, whole: a row carries a title and a line of provenance,
-   and neither ever wanted more room than the reading column — so the page
-   keeps to it, and sits in the middle of whatever the window offers past it. */
+/* A list page, whole: a row carries a name and a line of provenance, and never
+   wanted more room than the reading column — so the page keeps to it, and sits
+   in the middle of whatever the window offers past it. */
 .list-page {
   max-width: calc(var(--measure) + 2rem);
   margin-inline: auto;
@@ -293,9 +313,9 @@ textarea::placeholder {
   white-space: nowrap;
 }
 
-/* The two lists of Sets — what is waiting and what was decided — are drawn as
-   the same card, because they are read the same way and the same Set is looked
-   at in both. Only the last thing on the meta line differs. */
+/* The list pages — the Repos and the Agent Profiles — are drawn as the same
+   card, because they are read the same way: a name, and a line of what the row
+   is settled against. Only the last thing on the meta line differs. */
 
 .set-list {
   list-style: none;
@@ -332,34 +352,17 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
-.set-row .project {
-  color: var(--accent);
-  font-weight: 500;
-}
-
 .set-row .branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* A word rather than a light, because the list is scanned on a phone and
-   "agent disconnected" has to read as itself without a legend. Waiting is the
-   ordinary state and stays as quiet as the rest of the line; only the Set nobody
-   is listening on speaks up. */
-.pending-set .liveness.disconnected,
+/* A word rather than a light, because a Set is read on a phone and "agent
+   disconnected" has to read as itself without a legend. Waiting is the ordinary
+   state and stays as quiet as the rest of the line; only the Set nobody is
+   listening on speaks up. */
 .standing .liveness.disconnected {
   color: var(--removed);
   font-weight: 500;
-}
-
-.pending-set .age,
-.archived-set .decided-at {
-  margin-left: auto;
-}
-
-/* A Set that was closed without ever being answered is not a decision, and the
-   log must not be skimmed as though it were. */
-.archived-set.unanswered .decided-at {
-  font-style: italic;
 }
 
 .empty,
@@ -372,14 +375,1580 @@ textarea::placeholder {
 }
 
 /* Where else there is to go, in the same slot on every page: back out of a Set,
-   and between the two lists. */
+   and out to the pages a Conversation is settled against. */
 
 .back,
-.to-archive {
+.to-repos,
+.to-profiles {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
+}
+
+/* More than one of them on a line, which is the conversations sidebar alone. */
+.elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1.25rem;
+}
+
+/* Registering a repo: a path typed, and the button that sends it. The label
+   stands over both, because what has to be understood before typing is that the
+   path is an absolute one. */
+
+.add-repo {
+  margin-bottom: 1.5rem;
+}
+
+.add-repo label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* Wrapping, so a phone puts the button under the field rather than squeezing a
+   path into what is left of the line. */
+.add-repo-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.add-repo input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.add-repo button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.add-repo button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.add-repo .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A registered repo is a list row with nowhere to go yet, so the card is the
+   row's own rather than a link's. */
+.repo-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.repo-row .path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Agent profiles: the account a session runs under. One form does both saving
+   and rewriting — a profile is four fields with nothing built from them yet, so
+   editing one is filling the same form in with what it already says. */
+.edit-profile {
+  margin-bottom: 1.5rem;
+}
+
+.edit-profile h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.edit-profile label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.edit-profile label code {
+  font-size: 0.9em;
+}
+
+.edit-profile input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.edit-profile-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.edit-profile-buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.edit-profile-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the brief editor's cancel is. */
+.edit-profile-buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.edit-profile .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A saved profile is a list row with its two controls on the far end: nowhere to
+   go, but two things to do to it. */
+.profile-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.profile-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.profile-row .path,
+.profile-row .model {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Which one the form above is about, said with the accent down the near edge —
+   the same mark the open conversation carries. */
+.profile-row.editing {
+  border-color: var(--accent);
+  box-shadow: inset 0.2rem 0 0 var(--accent);
+}
+
+/* A profile whose pair has gone. Said in the row rather than only in the words
+   under it, because a list is scanned before it is read. */
+.profile-row.broken {
+  border-color: var(--removed);
+}
+
+.profile-row .broken {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.profile-actions button {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.profile-actions .remove {
+  color: var(--removed);
+}
+
+/* The workbench: conversations, the selected one's timeline, and the details of
+   what the timeline cannot show.
+
+   A hierarchy rather than three columns that happen to sit together — a
+   conversation is picked, then read, then its details are looked at — so a
+   narrow window shows one level of it at a time and a wide one shows the levels
+   side by side. Which level is showing is `data-pane` on the frame, put there by
+   the page; below the first breakpoint it is the whole of what decides what is
+   drawn, and above the last it decides nothing.
+
+   The panes are always in the document. A pane that was rendered away would
+   have to be rebuilt — and its scroll position found again — every time the
+   human walked back into it. */
+
+/* The one page that wants the window rather than the reading column: three
+   panes side by side have nothing to do with the measure. */
+main:has(.workbench) {
+  max-width: none;
+  padding: 0;
+}
+
+.workbench {
+  display: grid;
+}
+
+.pane {
+  padding: 1.25rem 1rem 3rem;
+  min-width: 0;
+}
+
+/* Phone-first, as everything here is: one pane, and it is whichever one the
+   page says. */
+.workbench > .pane {
+  display: none;
+}
+
+.workbench[data-pane="conversations"] > .conversations-pane,
+.workbench[data-pane="timeline"] > .timeline-pane,
+.workbench[data-pane="details"] > .details-pane {
+  display: block;
+}
+
+/* A pane's title with the ways out of it either side. Wrapping, so a narrow
+   pane puts the title under the way back rather than squeezing both onto one
+   line. */
+.pane-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.pane-head h1 {
+  margin: 0;
+}
+
+/* The ways between the panes: back out of this level, and on to the next.
+   Buttons rather than links, because moving between panes is not going
+   anywhere — the workbench is one page, and the URL follows the conversation
+   rather than the pane. Drawn as the links they stand in for. */
+.pane-back,
+.pane-forward {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The way back sits above the title rather than beside it, in the slot every
+   other page's "← Pending" sits in. */
+.pane-back {
+  flex-basis: 100%;
+}
+
+/* Starting a conversation: which repo the work is in, and nothing else — the
+   branch name is prefilled by the server and the brief is written in the
+   timeline. */
+.start-conversation {
+  margin-bottom: 1.5rem;
+}
+
+.start-conversation label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.start-conversation-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.start-conversation select {
+  flex: 1 1 8rem;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.start-conversation button,
+.field-line button,
+.edit-brief-buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.start-conversation button:disabled,
+.field-line button:disabled,
+.edit-brief-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, so it is drawn as the outline of
+   the one beside it. */
+.edit-brief-buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+/* The conversations themselves, drawn as the set lists' rows are: the whole card
+   is the target, and a line of provenance under the name. */
+.conversation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.conversation-row button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+/* Which one is open, said with the accent down the near edge rather than with a
+   fill: the row is read, and a wash behind it would fight the words. */
+.conversation-row.selected button {
+  border-color: var(--accent);
+  box-shadow: inset 0.2rem 0 0 var(--accent);
+}
+
+.conversation-row .title {
+  font-weight: 600;
+}
+
+.conversation-row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The pinned events, above the timeline and stuck to the top of what scrolls:
+   the fixed set — a task list, a stage list and a PR — each of which is
+   the current state of something the work is against rather than a moment in
+   the record. Sticky rather than fixed, because it belongs to the pane it is
+   the top of: a narrow window scrolls the whole page and a wide one scrolls
+   this pane, and sticky is right in both. */
+.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* The paper behind it, so the record scrolls under it rather than through
+     it — and past the pane's own padding, so nothing shows down either side. */
+  margin: 0 -1rem 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--paper);
+}
+
+/* The backlog and the roadmap: the whole list either way, because the whole
+   list is short and it is what a conversation being built from one is about.
+   The same card the events are, so each reads as one of them held still rather
+   than as furniture — and the same rules for both, because a roadmap is the
+   same kind of thing one level up.
+
+   Under `.pinned` rather than on its own, because `task-list` is also the word
+   the directed line carries as its class — the direction is one of three words
+   and that is one of them. Two different things answering to one bare selector
+   would be a rule waiting to land on the wrong element. */
+.pinned .task-list,
+.pinned .stage-list {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.pinned .task-list .event-head,
+.pinned .stage-list .event-head {
+  margin-bottom: 0.5rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+/* What the list is called, which is its own heading rather than anything
+   Verkstead named. */
+.pinned .task-list .feature,
+.pinned .stage-list .feature {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* How far through it the work has got, on the other end of the line from the
+   heading — the one thing about a list worth reading before its entries. */
+.pinned .task-list .progress,
+.pinned .stage-list .progress {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pinned .task-list .tasks,
+.pinned .stage-list .stages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pinned .task-list .tasks li,
+.pinned .stage-list .stages li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* The number the entry answers to, as the list writes it. Monospaced so the
+   column reads straight down whatever the numbers are. */
+.pinned .task-list .n,
+.pinned .stage-list .n {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pinned .task-list .what,
+.pinned .stage-list .what {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pinned .task-list .state,
+.pinned .stage-list .state {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* One that is done is struck through and taken down, the way a checked item
+   reads on any list. */
+.pinned .task-list .tasks li.done .what,
+.pinned .stage-list .stages li.done .what {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
+/* The pull request: the same card as the backlog above it, because it is the
+   same kind of thing — the current state of something the work is against. */
+.pinned .pull-request {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.pinned .pull-request.selected {
+  border-color: var(--accent);
+}
+
+.pinned .pull-request .event-head {
+  margin-bottom: 0.4rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+/* What everybody calls it by, beside the heading rather than in the title:
+   `#41` is the name of the pull request and the title is the name of the work. */
+.pinned .pull-request .number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The way out to GitHub, on the other end of the line: merging happens over
+   there, and getting there must not depend on any pane of this page. */
+.pinned .pull-request .out {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+/* And what opens the pane: the title, pressed. A button drawn as the line of
+   text it is, because what is being pressed is the pull request itself. */
+.open-pull-request {
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The pull request, opened: what it is and where, above the two lists fetched
+   from GitHub — so a pane walked into on a phone still says which PR this is. */
+.pull-request-summary {
+  margin: 0 0 1rem;
+}
+
+.pull-request-summary .title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pull-request-summary .where {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pull-request-summary .number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The commit list and the comments, each a section of the pane. Both are a
+   reading of GitHub as it stands rather than anything Verkstead wrote down. */
+.pr-commits,
+.pr-comments {
+  margin-bottom: 1.5rem;
+}
+
+.pr-commits h2,
+.pr-comments h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.pr-commits .commits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pr-commits .commits li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.pr-commits .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pr-commits .subject {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pr-comments .comments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pr-comments .comments li {
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* Who said it and when, over what they said — the header a comment is read by
+   anywhere else it is drawn. */
+.pr-comments .said-by {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pr-comments .author {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* A comment is prose from the public internet, and reads at the measure like
+   every other block of it. */
+.pr-comments .markdown {
+  max-width: var(--measure);
+}
+
+/* The timeline: everything that has happened, in order, each event a card of its
+   own. */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.timeline-event > * {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* An event's own heading with its one control on the other end of the line. */
+.event-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.event-head h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.edit-brief {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.edit-brief-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* The brief is prose, and reads at the measure like every other block of it. */
+.brief-body {
+  max-width: var(--measure);
+}
+
+/* The handoff is the same kind of card, and prose for the same reason — what the
+   grilling settled, written out for whoever builds it. Nothing to press: it is
+   the agent's account of a conversation that is over. */
+.handoff > .markdown {
+  max-width: var(--measure);
+}
+
+/* What a conversation is, beside what has happened to it: the repo it is
+   attached to, and where it has got to. Read rather than changed — a
+   conversation is attached to a repo when it is started. */
+.conversation-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 1rem;
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+}
+
+.conversation-facts dt {
+  color: var(--ink-soft);
+}
+
+.conversation-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-facts .path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* And what is still the human's to change while it drafts: the branch name and
+   the base commit, each a field with the button that records it. */
+.branch-name,
+.base-commit {
+  margin-bottom: 1.5rem;
+}
+
+.branch-name label,
+.base-commit label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.field-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.field-line input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* What an empty field means, which is a rule rather than a missing value — so it
+   is said in words under the field rather than left to be guessed. */
+.note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.note .default-branch,
+.base-commit input {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.branch-name .error,
+.base-commit .error,
+.start-conversation .error,
+.edit-brief-form .error,
+.conversation-profiles .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* The two accounts the work runs under. Separate choices because they are
+   genuinely separate accounts and models, so they are drawn as two fields rather
+   than as one with a note about the other. */
+.conversation-profiles {
+  margin-bottom: 1.5rem;
+}
+
+.conversation-profiles h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.profile-choice {
+  margin-bottom: 1rem;
+}
+
+.profile-choice label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.profile-choice select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* A chosen profile whose pair has gone: the select still shows it, because it is
+   what was chosen, and the reason it will not do is said under it. */
+.profile-choice .broken {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* Whether this conversation will grill. The server's rule rather than a count of
+   the two fields above, so it is stated rather than inferred. */
+.readiness.ready {
+  color: var(--added);
+}
+
+/* Where the work is actually being done, once there is somewhere. A fact rather
+   than a field: the path is Verkstead's to choose. */
+.conversation-worktree {
+  margin-bottom: 1.5rem;
+}
+
+.conversation-worktree h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.conversation-worktree .path {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+/* A worktree that has gone from under Verkstead. Struck through rather than
+   merely annotated, so the path reads as the thing that is wrong with it. */
+.conversation-worktree .path.missing {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.conversation-worktree .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* A move: the conversation changing hands. A line rather than a card, because
+   there is nothing to it but the fact — so it is drawn out of the run of cards
+   the other events make, as something that happened between them. */
+.timeline-event > .moved {
+  margin: 0;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.timeline-event > .moved.aborted {
+  color: #b3382c;
+}
+
+/* And something Verkstead did on its own account, which reads as the same kind
+   of thing again — a fact about the work, said by the one voice on a Timeline
+   that is neither the human's nor an agent's. Marked off by a rule at its left
+   rather than by a card: there is nothing to open, and nothing to do about it. */
+.timeline-event > .notice {
+  margin: 0;
+  padding: 0.15rem 0 0.15rem 0.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--edge);
+}
+
+.timeline-event > .notice > :first-child {
+  margin-top: 0;
+}
+
+.timeline-event > .notice > :last-child {
+  margin-bottom: 0;
+}
+
+/* And the direction the human chose, which reads as the same kind of thing: a
+   fact about the work rather than a card to open. */
+.timeline-event > .directed {
+  margin: 0;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+/* What a session has printed, summarised. A button, because the whole of it is
+   in the details pane and this is how it is opened — so it is a card that says
+   it can be pressed rather than one with a control in it. */
+.timeline-event > .agent-output {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event > .agent-output.selected {
+  border-color: var(--accent);
+}
+
+.agent-output .event-head {
+  margin-bottom: 0.35rem;
+  justify-content: flex-start;
+}
+
+.agent-output .what {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.agent-output .lines {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* A session that is still talking. The colour the accent already is, because
+   what this says is that something is happening here rather than that something
+   is wrong. */
+.live {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+/* The last thing the agent said, on one line: what it said before that is what
+   the details pane is for. */
+.agent-output .latest {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* A Question Set the session put to the human: the table of what was asked
+   against what was decided. A button, as a session's output is, and for the same
+   reason — the whole document is in the details pane and this is how it is
+   opened. */
+.timeline-event > .question-set {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event > .question-set.selected {
+  border-color: var(--accent);
+}
+
+/* One still waiting on the human is the one thing on a timeline that is asking
+   for something, so it says so rather than sitting among the record. */
+.timeline-event > .question-set.waiting {
+  border-color: var(--accent);
+  box-shadow: inset 0.2rem 0 0 var(--accent);
+}
+
+.question-set .event-head {
+  margin-bottom: 0.5rem;
+  justify-content: flex-start;
+}
+
+.question-set .what {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.question-set .set-title {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* A Set nobody was ever going to answer. Said quietly: it is a fact about the
+   record rather than something to do. */
+.question-set .closed {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+/* The summary itself: the number, the question and the answer. Fixed layout so
+   the three columns keep their proportions whatever the longest answer is, and
+   every cell clipped to its line — the whole of any of it is a click away. */
+.question-set .asked {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.question-set .asked td {
+  padding: 0.15rem 0.4rem 0.15rem 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: baseline;
+}
+
+.question-set .asked .n {
+  width: 3.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink-soft);
+}
+
+/* A sub-question sits under the question it belongs to, which is the one thing
+   the table has to say about the shape of a Set. */
+.question-set .asked tr.nested .n {
+  padding-left: 0.9rem;
+}
+
+.question-set .asked .question {
+  width: 50%;
+}
+
+.question-set .asked .answer {
+  color: var(--ink-soft);
+}
+
+/* Nothing decided here. On a waiting Set that is every row and means "not yet";
+   on a settled one it is the question the human left open. */
+.question-set .asked .open {
+  opacity: 0.6;
+}
+
+/* A commit a session landed on the branch. A button, as the two events above
+   are, because the whole of it — the diff — is in the details pane and this is
+   how it is opened. */
+.timeline-event > .commit {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.timeline-event > .commit.selected {
+  border-color: var(--accent);
+}
+
+.commit .event-head {
+  margin-bottom: 0.35rem;
+  justify-content: flex-start;
+}
+
+.commit .what {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* The hash, shortened for reading. Monospaced wherever it appears, because it
+   is a thing to type into git rather than a thing to read as words. */
+.commit .sha,
+.commit-summary .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What the commit was called: the first line of its message, on one line — the
+   rest of the message is in the diff. */
+.commit .subject {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* And what it moved, which is the design's summary for a commit: the counts,
+   in a row that reads left to right as files, added, removed. */
+.commit .changed,
+.commit-summary .changed {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.commit .added,
+.commit-summary .added {
+  color: #1a7f37;
+  font-weight: 600;
+}
+
+.commit .removed,
+.commit-summary .removed {
+  color: #b3382c;
+  font-weight: 600;
+}
+
+/* One commit, opened: the same three facts the timeline row shows, above the
+   diff — so a pane walked into on a phone still says which commit this is. */
+.commit-summary {
+  margin: 0 0 1rem;
+}
+
+.commit-summary .subject {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* A run that stopped. A card and not a button, unlike the three events above it:
+   this one has something to press *inside* it, so the way into the details pane
+   is a control of its own rather than the whole card. */
+.timeline-event > .interruption.selected {
+  border-color: var(--accent);
+}
+
+/* One nobody has answered is the other thing on a timeline that is asking for
+   something, so it is marked the way a waiting question set is — in the colour
+   that means stopped rather than the one that means happening. */
+.timeline-event > .interruption.open {
+  border-color: var(--stopped);
+  box-shadow: inset 0.2rem 0 0 var(--stopped);
+}
+
+.interruption .event-head {
+  justify-content: flex-start;
+}
+
+/* Not `.live`, which is the accent and means something is happening here. This
+   means the opposite: nothing is happening, and it is waiting on you. */
+.interruption .event-head .live {
+  color: var(--stopped);
+}
+
+/* The way into the evidence, on the other end of the heading line. Worded rather
+   than drawn as a chevron: what it opens is a thing with a name. */
+.interruption .open-event {
+  margin-left: auto;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Which step failed, and how it ended. The first reads as the heading of the
+   thing that went wrong; the second is the machine's own account of it. */
+.interruption .what,
+.interruption-summary .what {
+  margin: 0;
+  font-weight: 600;
+}
+
+.interruption .how,
+.interruption-summary .how {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* What was decided, once it has been. The remedies go and this stays: a run that
+   was retried and stopped again has both stops on the record, each saying what
+   was chosen. */
+.interruption .settled {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+.interruption .settled .note {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 400;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The three remedies, and what the human wants said alongside. The field is
+   above the buttons because it is written first: what it says goes with
+   whichever of them is then pressed. */
+.remedies {
+  margin-top: 1rem;
+}
+
+.remedies > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.remedies .remedy-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.remedies .remedy {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Ending the run is the one of the three that cannot be taken back, so it does
+   not look like the other two. */
+.remedies .Abort .remedy {
+  color: var(--stopped);
+  border-color: var(--stopped);
+}
+
+.remedies .note {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The one thing true of all three, said once under them rather than three times
+   over. */
+.remedies .left-as-it-is {
+  margin-top: 1rem;
+}
+
+/* The evidence, in the details pane: what git made of the worktree, and the tail
+   of what the session said. Preformatted, because neither is markdown and the
+   columns are the whole of what makes a status readable — and scrolled sideways
+   rather than wrapped, for the same reason. */
+.interruption-summary {
+  margin: 0 0 1rem;
+}
+
+.evidence {
+  margin-bottom: 1.5rem;
+}
+
+.evidence .git-status,
+.evidence .tail {
+  margin: 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: var(--code-wash);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.evidence .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What the conversation has stopped on, said where the conversation is named. A
+   button rather than a badge, because it goes to the event that stopped it — a
+   timeline is long by the time a run gets far enough to stop. */
+.blocked {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--paper);
+  background: var(--stopped);
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+/* One session's output, opened: what the terminal was sent, as it was sent.
+   Wrapped rather than scrolled sideways — a pane on a phone is narrow, and a
+   transcript nobody can read the right-hand end of is one line of it. */
+.transcript-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.transcript {
+  margin: 0;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.close-event {
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* What happens next, under everything that has happened so far. Outside the
+   list, because it is not an event — and an event is exactly what it would look
+   like sitting at the end of one. */
+.start-grilling {
+  margin-top: 1rem;
+}
+
+.start-grilling .start {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.start-grilling .start:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.start-grilling .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* The other thing that happens next, in the other state: what the grilling
+   proposed, and the choice of how the work gets built. In the same place as
+   `Start grilling` and never at the same time, because a conversation is in one
+   state at once. */
+.direction-chooser {
+  margin-top: 1rem;
+}
+
+.direction-chooser h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+/* The agent's reasoning, which is what the human is deciding against. Set apart
+   from the buttons so it reads as something to take in before pressing one. */
+.direction-chooser .proposal {
+  margin-bottom: 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--edge);
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.direction-chooser .directions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.direction-chooser .direction {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* The one the stage after this has not built yet. Drawn so the shape of the
+   decision is visible, and plainly not pressable. */
+.direction-chooser .direction:disabled {
+  color: var(--ink-soft);
+  background: none;
+  border-color: var(--edge);
+  cursor: not-allowed;
+}
+
+/* What the agent recommended, marked beside the button rather than preselected
+   on it: nothing is chosen until the human presses something. */
+.direction-chooser .mark {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.direction-chooser .chosen .direction {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.direction-chooser .note {
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.direction-chooser .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* What can be done to the conversation as a whole. A menu rather than a button,
+   because aborting throws a worktree away and the header is somewhere the
+   cursor passes on the way to everything else. */
+.conversation-actions {
+  position: relative;
+}
+
+.conversation-actions summary {
+  list-style: none;
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.conversation-actions summary::-webkit-details-marker {
+  display: none;
+}
+
+.conversation-actions[open] summary {
+  color: var(--ink);
+}
+
+/* Over the timeline rather than in the flow of the header, so opening the menu
+   does not move the title it hangs off. */
+.conversation-actions .menu {
+  position: absolute;
+  top: 1.75rem;
+  right: 0;
+  z-index: 1;
+  width: 17rem;
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
+}
+
+.conversation-actions .abort {
+  padding: 0.4rem 0.8rem;
+  font: inherit;
+  font-weight: 600;
+  color: #b3382c;
+  background: none;
+  border: 1px solid #b3382c;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.conversation-actions .abort:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.conversation-actions .note,
+.conversation-actions .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* From 60rem the window holds the sidebar beside the level being read: the
+   conversations stay, and the second column is the timeline or the details.
+   Each pane scrolls on its own from here, because two columns of one page's
+   scroll would move the list the human is not reading. */
+@media (min-width: 60rem) {
+  .workbench {
+    grid-template-columns: 20rem minmax(0, 1fr);
+    height: 100dvh;
+  }
+
+  .pane {
+    overflow-y: auto;
+  }
+
+  .workbench > .conversations-pane {
+    display: block;
+    border-right: 1px solid var(--edge);
+  }
+
+  .workbench:not([data-pane="details"]) > .timeline-pane,
+  .workbench[data-pane="details"] > .details-pane {
+    display: block;
+  }
+
+  /* The conversations are on screen, so the timeline needs no way back to
+     them. The details still do: they are what the second column gives up to. */
+  .timeline-pane .pane-back {
+    display: none;
+  }
+}
+
+/* And from 80rem all three stand together, which is the workbench as it is
+   meant to be read: pick, read, and look into. Nothing is anywhere else to go
+   to, so the ways between the panes go away. */
+@media (min-width: 80rem) {
+  .workbench {
+    grid-template-columns: 20rem minmax(0, 1fr) 24rem;
+  }
+
+  .workbench > .pane {
+    display: block;
+  }
+
+  .workbench > .details-pane {
+    border-left: 1px solid var(--edge);
+  }
+
+  .pane-back,
+  .pane-forward {
+    display: none;
+  }
 }
 
 /* The set view: one long column, read top to bottom and answered on the way

@@ -1,10 +1,10 @@
 //! The registry of held waits: taking a slot, and giving it back however the
 //! wait ends.
 
-use askance_schema::Liveness;
-use askance_store::Waits;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use verkstead_schema::Liveness;
+use verkstead_store::Waits;
 
 /// A Set created long enough ago that its own grace window is closed: what these
 /// tests are asking about is the waits held on it, not its age.

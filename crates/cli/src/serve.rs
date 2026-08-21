@@ -1,16 +1,16 @@
-//! `askance serve` — the server, run out of the binary the agent already has.
+//! `verkstead serve` — the server, run out of the binary the agent already has.
 //!
 //! One binary carries both halves (ADR-0004), so this is where the two parts
 //! the server needs and no other verb does are assembled: the async runtime,
 //! and somewhere for the server's `tracing` to go.
 
 use anyhow::{Context, Result};
-use askance_server::Config;
 use tracing_subscriber::EnvFilter;
+use verkstead_server::Config;
 
 /// What the server logs when `RUST_LOG` says nothing: its own startup line and
 /// whatever else it has to report, and nothing from the crates beneath it.
-const DEFAULT_FILTER: &str = "askance_server=info";
+const DEFAULT_FILTER: &str = "verkstead_server=info";
 
 /// Serve until the process is stopped.
 ///
@@ -28,5 +28,5 @@ pub fn serve(config: Config) -> Result<()> {
         .enable_all()
         .build()
         .context("starting the async runtime")?
-        .block_on(askance_server::run(config))
+        .block_on(verkstead_server::run(config))
 }

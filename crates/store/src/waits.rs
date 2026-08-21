@@ -1,5 +1,5 @@
 //! Who is still waiting: the registry of held waits, and the window that turns
-//! it into what the pending list says.
+//! it into the badge a waiting Set carries.
 //!
 //! The server knows whether a long-poll is currently held for a Set, because it
 //! is the thing holding it. This lives beside [`Settlements`](crate::Settlements)
@@ -17,9 +17,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-use askance_schema::Liveness;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
+use verkstead_schema::Liveness;
 
 /// How long after the last wait was released a Set still reads as waiting.
 ///
@@ -75,8 +75,8 @@ impl Waits {
         }
     }
 
-    /// What the pending list should say about this Set, given its `created_at`
-    /// as the store holds it.
+    /// What the badge on this Set should say, given its `created_at` as the
+    /// store holds it.
     pub fn liveness(&self, set_id: i64, created_at: &str, now: OffsetDateTime) -> Liveness {
         let entries = self.entries();
         let held = entries.get(&set_id);
@@ -157,9 +157,9 @@ fn verdict(
 #[cfg(test)]
 mod tests {
     use super::{GRACE, verdict};
-    use askance_schema::Liveness;
     use time::OffsetDateTime;
     use time::format_description::well_known::Rfc3339;
+    use verkstead_schema::Liveness;
 
     fn at(stamp: &str) -> OffsetDateTime {
         OffsetDateTime::parse(stamp, &Rfc3339).unwrap()

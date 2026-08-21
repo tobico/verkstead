@@ -1,14 +1,16 @@
 //! Submitting a Question Set: what the store keeps, and what the API refuses.
 
-use askance_schema::{ApiError, QuestionSet, SetCreated};
-use askance_server::store;
-use askance_server::{open_database, router};
+use std::path::Path;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_schema::{ApiError, QuestionSet, SetCreated};
+use verkstead_server::store;
+use verkstead_server::{open_database, router};
 
 const VALID_SET: &str = r#"
 title: Storage layout for the pending list
@@ -16,7 +18,7 @@ preface: |
   We need to settle how Sets are stored before the UI lands.
 
   The candidates differ mainly in how much SQL the Archive view needs.
-project: askance
+project: verkstead
 branch: api-core-and-cli
 questions:
   - label: Q1
@@ -44,16 +46,42 @@ questions:
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
     (dir, pool)
 }
 
+/// The Conversation these Sets are asked from, made once per database and found
+/// again after that.
+///
+/// Every Set is asked from one — that is what the base URL a session is given
+/// says — so a test posting one needs somewhere for it to land. What the
+/// Conversation is does not matter to anything here; that there is one does.
+async fn asking_from(pool: &SqlitePool) -> i64 {
+    if let Some(row) = store::conversations(pool).await.unwrap().first() {
+        return row.id;
+    }
+
+    let repo = store::register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    store::start_conversation(pool, repo.id, "api-core-and-cli")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered")
+}
+
 async fn post_set(pool: &SqlitePool, yaml: &str) -> Response {
+    let conversation = asking_from(pool).await;
+
     router(pool.clone())
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{conversation}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -106,7 +134,7 @@ async fn a_valid_set_is_stored_and_answered_with_its_id() {
     assert_eq!(stored.set.title, "Storage layout for the pending list");
     assert_eq!(stored.set.questions.len(), 2);
     assert_eq!(stored.set.questions[1].subquestions.len(), 2);
-    assert_eq!(stored.set.project.as_deref(), Some("askance"));
+    assert_eq!(stored.set.project.as_deref(), Some("verkstead"));
     assert_eq!(stored.set.branch.as_deref(), Some("api-core-and-cli"));
 }
 
@@ -329,18 +357,22 @@ async fn the_store_keeps_the_pending_list_columns_alongside_the_body() {
             .unwrap();
 
     assert_eq!(title, "Storage layout for the pending list");
-    assert_eq!(project.as_deref(), Some("askance"));
+    assert_eq!(project.as_deref(), Some("verkstead"));
     assert_eq!(branch.as_deref(), Some("api-core-and-cli"));
 }
 
 #[tokio::test]
 async fn the_schema_is_applied_to_an_existing_database() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("askance.db");
+    let path = dir.path().join("verkstead.db");
 
     let pool = open_database(&path).await.unwrap();
     let set = QuestionSet::from_yaml(VALID_SET).unwrap();
-    let created = store::insert_set(&pool, &set).await.unwrap();
+    let conversation = asking_from(&pool).await;
+    let created = store::ask(&pool, conversation, &set)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
     pool.close().await;
 
     let pool = open_database(&path).await.unwrap();

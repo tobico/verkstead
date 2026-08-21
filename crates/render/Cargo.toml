@@ -1,11 +1,11 @@
 [package]
-name = "askance-render"
+name = "verkstead-render"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-askance-schema.workspace = true
+verkstead-schema.workspace = true
 serde.workspace = true
 # The clock and the calendar behind the two dates the viewer is handed already
 # worded — a pending Set's age and a settled one's day. Both sides of the wire
@@ -33,4 +33,4 @@ default = ["typescript"]
 # git is what says whether anything moved. It is off wherever it would only be
 # weight, which is every build that ships: the workspace takes this crate with
 # `default-features = false`, so a release binary carries none of it.
-typescript = ["askance-schema/typescript", "dep:ts-rs"]
+typescript = ["verkstead-schema/typescript", "dep:ts-rs"]

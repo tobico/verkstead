@@ -1,7 +1,7 @@
-//! The Update Notice: the banner the pending page draws when the server says a
-//! newer Askance has been released than the one serving it.
+//! The Update Notice: the banner the Repo page draws when the server says a
+//! newer Verkstead has been released than the one serving it.
 //!
-//! Mounted through the pending list rather than on its own, because where it
+//! Mounted through the Repo list rather than on its own, because where it
 //! sits is half of what it is: a banner above the list, in the reading column
 //! the list is in. What the server answers with is `UpdateNotice` from
 //! `src/api/types.ts`, which `cargo test` writes out of the Rust the endpoint
@@ -11,18 +11,18 @@
 import { screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PendingEntry, UpdateNotice } from "../src/api/types";
-import { PendingList } from "../src/pending/PendingList";
+import type { RepoEntry, UpdateNotice } from "../src/api/types";
+import { RepoList } from "../src/repos/RepoList";
 import { mount } from "./listing";
 import { json, serving, whenever } from "./serving";
-import pending from "./fixtures/pending.json" with { type: "json" };
+import repos from "./fixtures/repos.json" with { type: "json" };
 
-const SETS = pending as PendingEntry[];
-const A_SET = SETS[0]!;
+const REPOS = repos as RepoEntry[];
+const A_REPO = REPOS[0]!;
 
 /// Where the README says how to update. Stage 06 of the public-release roadmap
 /// writes that section; the anchor is the one agreed with it.
-const UPDATING = "https://github.com/tobico/askance#updating";
+const UPDATING = "https://github.com/tobico/verkstead#updating";
 
 /// What the server says about updating, whenever the page asks.
 const saying = (notice: UpdateNotice) =>
@@ -30,7 +30,7 @@ const saying = (notice: UpdateNotice) =>
 
 /// The list itself, which every test here serves the same way: the banner is
 /// what is under test, and the rows are only what it has to sit above.
-const list = () => whenever("/api/ui/pending", json(SETS));
+const list = () => whenever("/api/ui/repos", json(REPOS));
 
 const banner = () => document.querySelector(".update-notice");
 
@@ -44,17 +44,17 @@ afterEach(() => {
 });
 
 describe("the Update Notice", () => {
-  it("asks the server whether there is a newer Askance", async () => {
+  it("asks the server whether there is a newer Verkstead", async () => {
     const fetching = serving(list(), saying("Current"));
-    mount(PendingList);
+    mount(RepoList);
 
-    await waitFor(() => screen.getByText(A_SET.title));
+    await waitFor(() => screen.getByText(A_REPO.name));
     expect(fetching).toHaveBeenCalledWith("/api/ui/update", expect.anything());
   });
 
   it("names the release when the server says there is one", async () => {
     serving(list(), saying({ Available: { version: "0.4.0" } }));
-    mount(PendingList);
+    mount(RepoList);
 
     await waitFor(() => expect(banner()).not.toBeNull());
     expect(banner()!.textContent).toContain("0.4.0");
@@ -62,7 +62,7 @@ describe("the Update Notice", () => {
 
   it("links the updating instructions, and offers nothing that installs", async () => {
     serving(list(), saying({ Available: { version: "0.4.0" } }));
-    const { container } = mount(PendingList);
+    const { container } = mount(RepoList);
 
     await waitFor(() => expect(banner()).not.toBeNull());
 
@@ -71,17 +71,21 @@ describe("the Update Notice", () => {
     const links = [...banner()!.querySelectorAll("a")];
     expect(links.map((link) => link.getAttribute("href"))).toEqual([UPDATING]);
     expect(banner()!.querySelectorAll("button, input, form")).toHaveLength(0);
-    expect(container.querySelectorAll("button, input, form")).toHaveLength(
-      // Only the pending list's own: the notifications switch, which was there
-      // before the banner and is not the banner's.
-      container.querySelectorAll(".notifications button, .notifications input")
-        .length,
-    );
+    // And it added nothing outside itself either: what the page can be pressed
+    // and typed into is the Repo form and the notifications switch, both of
+    // which were there before the banner and are not the banner's.
+    const pressable = [...container.querySelectorAll("button, input, form")];
+    expect(
+      pressable.filter(
+        (found) =>
+          !found.closest(".add-repo") && !found.closest(".notifications"),
+      ),
+    ).toHaveLength(0);
   });
 
   it("stands above the list, in the column the list is read in", async () => {
     serving(list(), saying({ Available: { version: "0.4.0" } }));
-    const { container } = mount(PendingList);
+    const { container } = mount(RepoList);
 
     await waitFor(() => expect(banner()).not.toBeNull());
 
@@ -97,9 +101,9 @@ describe("the Update Notice", () => {
 
   it("draws nothing when the server says there is nothing to update to", async () => {
     serving(list(), saying("Current"));
-    mount(PendingList);
+    mount(RepoList);
 
-    await waitFor(() => screen.getByText(A_SET.title));
+    await waitFor(() => screen.getByText(A_REPO.name));
     expect(banner()).toBeNull();
   });
 
@@ -111,11 +115,11 @@ describe("the Update Notice", () => {
         json({ error: "the update check could not be read" }, 500),
       ),
     );
-    mount(PendingList);
+    mount(RepoList);
 
     // The list is exactly as it was: a page that cannot reach the endpoint says
     // nothing about updating, and nothing about the failure either.
-    await waitFor(() => screen.getByText(A_SET.title));
+    await waitFor(() => screen.getByText(A_REPO.name));
     expect(banner()).toBeNull();
     expect(screen.queryByText(/update/i)).toBeNull();
   });
@@ -137,9 +141,9 @@ describe("the Update Notice", () => {
         ),
       ),
     );
-    mount(PendingList);
+    mount(RepoList);
 
-    await waitFor(() => screen.getByText(A_SET.title));
+    await waitFor(() => screen.getByText(A_REPO.name));
     expect(banner()).toBeNull();
 
     deliver!();
@@ -148,8 +152,8 @@ describe("the Update Notice", () => {
 
   it("asks at its own cadence rather than the list's", async () => {
     const fetching = serving(list(), saying("Current"));
-    mount(PendingList);
-    await waitFor(() => screen.getByText(A_SET.title));
+    mount(RepoList);
+    await waitFor(() => screen.getByText(A_REPO.name));
 
     const asking = () =>
       fetching.mock.calls.filter(([path]) => path === "/api/ui/update").length;

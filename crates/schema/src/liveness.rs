@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// What the pending list says about a Set: whether an agent is currently
-/// waiting on it, or nothing is holding a wait any more.
+/// What a Set still waiting on the human says about itself: whether an agent is
+/// currently waiting on it, or nothing is holding a wait any more.
 ///
 /// Display state only (ADR-0001). A disconnected Set is still answerable and is
 /// never withdrawn on its own — the CLI reconnects through transient drops, and

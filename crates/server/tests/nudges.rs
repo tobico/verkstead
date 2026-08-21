@@ -3,23 +3,28 @@
 //!
 //! Read off the wire rather than off the channel behind it, because what has to
 //! hold is that a page listening over HTTP hears each durable change — the
-//! three that move a Set on or off the pending list, and nothing else. A Nudge
+//! three that settle a Set or put a new one to the human, and nothing else. A Nudge
 //! is contentless, so every assertion here is about *how many* arrived and
 //! *when*, never about what one said.
 
+use std::path::Path;
 use std::time::Duration;
 
-use askance_schema::SetCreated;
-use askance_server::{open_database, router};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
+use verkstead_schema::SetCreated;
+use verkstead_server::{open_database, router, store};
+
+/// The Conversation every Set in this file is asked from, made by [`fresh_app`]
+/// over a database with nothing in it.
+const ASKING_FROM: i64 = 1;
 
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: nudge
 questions:
   - label: Q1
@@ -50,7 +55,23 @@ const SETTLING: Duration = Duration::from_millis(300);
 /// listening through one clone has to hear a Set posted through another.
 async fn fresh_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // Somewhere for the Sets to land: every Set is asked from a Conversation,
+    // and a Nudge is what tells an open page that one arrived on a Timeline.
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "nudge")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     (dir, router(pool))
 }
 
@@ -157,7 +178,7 @@ async fn post_set(app: &Router) -> i64 {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(SET))
                 .unwrap(),
@@ -225,7 +246,9 @@ async fn a_response_from_the_agents_half_nudges_the_open_pages_too() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/api/v1/sets/{id}/response"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response"
+                ))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from("answers:\n  - label: Q1\n    selected: 2\n"))
                 .unwrap(),
@@ -268,7 +291,9 @@ async fn an_agents_wait_opening_and_closing_nudges_nobody() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{id}/response?hold=1"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response?hold=1"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

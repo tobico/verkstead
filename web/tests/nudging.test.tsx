@@ -14,38 +14,88 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
-import type { PendingEntry, SetView } from "../src/api/types";
+import type {
+  ConversationEntry,
+  ConversationView,
+  ProfileEntry,
+  QuestionSetEvent,
+  RepoEntry,
+  SetView,
+  TimelineEvent,
+} from "../src/api/types";
 import { askedFor, json, serving, whenever } from "./serving";
 import { worker } from "./worker";
-import pending from "./fixtures/pending.json" with { type: "json" };
+import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
+import conversations from "./fixtures/conversations.json" with { type: "json" };
+import profiles from "./fixtures/profiles.json" with { type: "json" };
+import repos from "./fixtures/repos.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
-const SETS = pending as PendingEntry[];
+/// The renderer is a page's own doing and neither Set fixture has a Diagram;
+/// mocked so nothing here loads megabytes of mermaid.
+vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-/// The page asks about updating as well as about the Sets, and is told there is
-/// nothing to update to throughout: a Nudge is never about a release, so the
-/// banner's own request stays out of the counting here.
-const CURRENT = whenever("/api/ui/update", json("Current"));
+/// The Conversation the human is looking at, with a session's Question Sets on
+/// its Timeline — which is where a Set arrives now that there is no list of
+/// them.
+const CONVERSATION = grilling as ConversationView;
 
 /// The read a Nudge is meant to cause, and the only one worth counting.
-const PENDING = "/api/ui/pending";
+const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
+
+/// What the app fetches alongside the Conversation it is about — the sidebar,
+/// the Repos the picker on it needs, the Agent Profiles the details pane picks
+/// from, and the release check. Held to their own paths and out of the counting:
+/// a Nudge is never about a release, and which test pays for the rest is not
+/// something any of them is about.
+const BESIDE = [
+  whenever("/api/ui/conversations", json(conversations as ConversationEntry[])),
+  whenever("/api/ui/repos", json(repos as RepoEntry[])),
+  whenever("/api/ui/profiles", json(profiles as ProfileEntry[])),
+  whenever("/api/ui/update", json("Current")),
+];
 
 /// One Set twice over: waiting when the page was drawn, answered from another
 /// device by the time a Nudge says to look again.
 const WAITING = answering as SetView;
 const ANSWERED = answered as SetView;
 
-/// The Set the stream is there to be immediate about — submitted while the
-/// human is looking straight at the list it belongs on.
-const ARRIVAL: PendingEntry = {
-  id: 7,
+/// The Set on the fixture's Timeline that is still waiting, to build an arrival
+/// out of: an Event of the shape the server really writes.
+///
+/// The waiting one rather than the answered one because its title is the
+/// Timeline's alone — the answered Set is titled after the Brief above it, and a
+/// title drawn twice on one page is not one a test can look for.
+const ASKED: QuestionSetEvent = (() => {
+  const found = CONVERSATION.timeline.find(
+    (event): event is { QuestionSet: QuestionSetEvent } =>
+      "QuestionSet" in event && "Waiting" in event.QuestionSet.standing,
+  );
+  if (!found) {
+    throw new Error("the fixture's Timeline should carry a waiting Question Set");
+  }
+  return found.QuestionSet;
+})();
+
+/// What the Timeline already carried when the page was drawn.
+const ALREADY_THERE = ASKED.title;
+
+/// The Set the stream is there to be immediate about — put to the human while
+/// they are looking straight at the Timeline it lands on.
+const ARRIVAL: QuestionSetEvent = {
+  ...ASKED,
+  id: ASKED.id + 100,
+  set_id: ASKED.set_id + 100,
   title: "Whether to keep the outbound queue at all",
-  project: "askance",
-  branch: "outbound-retries",
-  age: "just now",
-  created_stamp: "2026-08-03 09:17 UTC",
-  liveness: "waiting",
+  standing: { Waiting: "waiting" },
+};
+
+/// The same Conversation a moment later, with the arrival at the foot of its
+/// Timeline.
+const MOVED_ON: ConversationView = {
+  ...CONVERSATION,
+  timeline: [...CONVERSATION.timeline, { QuestionSet: ARRIVAL } as TimelineEvent],
 };
 
 /// A stand-in for the browser's `EventSource`, which jsdom has none of — and
@@ -152,9 +202,9 @@ async function pushed(container: Container): Promise<void> {
   const sw = worker();
   sw.opens();
   await sw.pushes({
-    id: ARRIVAL.id,
+    id: ARRIVAL.set_id,
     title: ARRIVAL.title,
-    project: ARRIVAL.project,
+    project: "verkstead",
   });
 
   for (const message of sw.relayed) {
@@ -177,8 +227,8 @@ afterEach(() => {
 
 describe("the Nudge stream", () => {
   it("listens on the server's stream for as long as the app is running", () => {
-    window.history.pushState({}, "", "/");
-    serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, json(CONVERSATION));
     const { unmount } = render(() => <App />);
 
     expect(stream().url).toBe("/api/ui/nudges");
@@ -190,10 +240,10 @@ describe("the Nudge stream", () => {
   });
 
   it("shows the Set a Nudge is about without waiting on the poll", async () => {
-    window.history.pushState({}, "", "/");
-    const fetching = serving(CURRENT, json(SETS), json([ARRIVAL, ...SETS]));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
     render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
+    await waitFor(() => screen.getByText(ALREADY_THERE));
     stream().opens();
 
     stream().nudges();
@@ -201,15 +251,15 @@ describe("the Nudge stream", () => {
     await waitFor(() => screen.getByText(ARRIVAL.title));
     // The clock never moved, so the ten-second poll never ran: the second read
     // is the Nudge's doing and nothing else's.
-    expect(askedFor(fetching, PENDING)).toBe(2);
+    expect(askedFor(fetching, OPENED)).toBe(2);
   });
 
   it("reads everything back when a dropped stream reconnects", async () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
     // Answered from another device while the stream was dead — so what the page
     // has to catch up on is a Set leaving the list, which no Nudge arrived to
     // say. The reconnect is the whole of the news.
-    serving(CURRENT, json([ARRIVAL, ...SETS]), json(SETS));
+    serving(...BESIDE, json(MOVED_ON), json(CONVERSATION));
     render(() => <App />);
     stream().opens();
     await waitFor(() => screen.getByText(ARRIVAL.title));
@@ -220,47 +270,47 @@ describe("the Nudge stream", () => {
   });
 
   it("asks for nothing when the stream first opens", async () => {
-    window.history.pushState({}, "", "/");
-    const fetching = serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION));
     render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
+    await waitFor(() => screen.getByText(ALREADY_THERE));
 
     stream().opens();
     await vi.advanceTimersByTimeAsync(0);
 
     // The page has just read the world; opening the stream it reads the world
     // over is not news that the world moved.
-    expect(askedFor(fetching, PENDING)).toBe(1);
+    expect(askedFor(fetching, OPENED)).toBe(1);
   });
 
   it("leaves the poll running underneath it", async () => {
-    window.history.pushState({}, "", "/");
-    const fetching = serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION));
     render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
+    await waitFor(() => screen.getByText(ALREADY_THERE));
     stream().opens();
 
     await vi.advanceTimersByTimeAsync(10_000);
 
     // The stream is the fast path, never the only one: a page that cannot have
     // one at all still keeps up, ten seconds at a time.
-    expect(askedFor(fetching, PENDING)).toBe(2);
+    expect(askedFor(fetching, OPENED)).toBe(2);
   });
 });
 
 describe("a Nudge relayed by the worker", () => {
   it("shows the Set the push was about, with no stream to hear it on", async () => {
-    window.history.pushState({}, "", "/");
-    // The list as the server would answer for it now, which the arrival changes
-    // under the open page exactly as it does in the world.
-    let listed = SETS;
-    const fetching = serving(CURRENT, () => json(listed)());
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    // The Conversation as the server would answer for it now, which the arrival
+    // changes under the open page exactly as it does in the world.
+    let standing = CONVERSATION;
+    const fetching = serving(...BESIDE, () => json(standing)());
     const container = attaches();
     render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
-    const read = askedFor(fetching, PENDING);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    const read = askedFor(fetching, OPENED);
 
-    listed = [ARRIVAL, ...SETS];
+    standing = MOVED_ON;
     await pushed(container);
 
     await waitFor(() => screen.getByText(ARRIVAL.title));
@@ -268,12 +318,12 @@ describe("a Nudge relayed by the worker", () => {
     // stream never opened — which is what a suspended PWA leaves behind — and
     // the clock never moved, so the poll never ran either. The push is the whole
     // of how this page found out.
-    expect(askedFor(fetching, PENDING)).toBe(read + 1);
+    expect(askedFor(fetching, OPENED)).toBe(read + 1);
   });
 
   it("reads everything back, exactly as a Nudge on the stream does", async () => {
     window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    serving(CURRENT, json(WAITING), json(ANSWERED));
+    serving(...BESIDE, json(WAITING), json(ANSWERED));
     const container = attaches();
     const { container: page } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: the page
@@ -290,29 +340,29 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("ignores a message that is not a Nudge", async () => {
-    window.history.pushState({}, "", "/");
-    const fetching = serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION));
     const container = attaches();
     render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
-    const read = askedFor(fetching, PENDING);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    const read = askedFor(fetching, OPENED);
 
-    container.delivers({ askance: "something else" });
+    container.delivers({ verkstead: "something else" });
     container.delivers("a message from somewhere else entirely");
     container.delivers(null);
     await vi.advanceTimersByTimeAsync(0);
 
     // Whatever else may one day be posted to a page, by this worker or another,
     // is not a Nudge until it says so.
-    expect(askedFor(fetching, PENDING)).toBe(read);
+    expect(askedFor(fetching, OPENED)).toBe(read);
   });
 
   it("stops listening when the app goes", async () => {
-    window.history.pushState({}, "", "/");
-    serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, json(CONVERSATION));
     const container = attaches();
     const { unmount } = render(() => <App />);
-    await waitFor(() => screen.getByText(SETS[0]!.title));
+    await waitFor(() => screen.getByText(ALREADY_THERE));
     expect(container.listening).toBe(true);
 
     unmount();
@@ -322,13 +372,13 @@ describe("a Nudge relayed by the worker", () => {
   });
 
   it("shrugs where the browser has no worker at all", async () => {
-    window.history.pushState({}, "", "/");
-    serving(CURRENT, json(SETS));
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, json(CONVERSATION));
 
     // No `attaches()`: jsdom has no `navigator.serviceWorker`, which is the same
     // absence a browser without service workers presents. The page loses the
     // relay and nothing else.
     expect(() => render(() => <App />)).not.toThrow();
-    await waitFor(() => screen.getByText(SETS[0]!.title));
+    await waitFor(() => screen.getByText(ALREADY_THERE));
   });
 });

@@ -3,7 +3,7 @@
 //!
 //! The one irreversible act in the whole UI, and the only one confirmed in as
 //! many words. It settles the Set the way a Response does — the agent's wait
-//! ends, and the Set goes into the Archive — except that there is no Response,
+//! ends, and the Set stops waiting — except that there is no Response,
 //! because there never was one.
 
 import { fireEvent, waitFor } from "@solidjs/testing-library";
@@ -11,13 +11,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Archived, SetView } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
-import { answering } from "./reading";
+import { answering, posts } from "./reading";
 import { json } from "./serving";
+import archivedSet from "./fixtures/set-archived.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 const WAITING = waiting as SetView;
+
+/// The same Set once it has been closed: what the server answers with when the
+/// page reads it back where it stands.
+const ARCHIVED = { ...(archivedSet as SetView), id: WAITING.id };
 const KEY = draftKey(WAITING.id);
 
 const archived = (outcome: Archived) => json(outcome);
@@ -102,25 +107,30 @@ describe("the offer to close a Set unanswered", () => {
     const asking = page.querySelector(".confirm")!;
     expect(asking.getAttribute("role")).toBe("dialog");
     // The one irreversible act in the UI has to be asked about as one — and it
-    // has to say where the Set is going, because it is not being deleted.
+    // has to say where the Set stays, because it is not being deleted.
     expect(asking.querySelector(".note")!.textContent).toContain(
       "cannot be undone",
     );
-    expect(asking.querySelector(".note")!.textContent).toContain("Archive");
-    expect(fetching, "only the Set has been fetched").toHaveBeenCalledTimes(1);
+    expect(asking.querySelector(".note")!.textContent).toContain(
+      "Conversation's timeline",
+    );
+    expect(posts(fetching), "nothing has been sent").toHaveLength(0);
 
     press(page, "Keep it pending");
     expect(page.querySelector(".confirm")).toBeNull();
-    expect(fetching).toHaveBeenCalledTimes(1);
+    expect(posts(fetching), "and still nothing was sent").toHaveLength(0);
   });
 });
 
 describe("closing a Set unanswered", () => {
-  it("settles it as archived and files it where it can be read", async () => {
-    const { page, fetching, history } = await answering(
+  it("settles it as archived and reads it back where it stands", async () => {
+    const { page, fetching, history, settles } = await answering(
       WAITING,
       archived("Closed"),
     );
+    // What the page reads back once the Set is closed: it stays put, so the
+    // sheet it redraws is the record of a Set nobody ever answered.
+    settles(ARCHIVED);
 
     reachForArchive(page);
     // The dialog's own button, which is the second one reading this.
@@ -128,15 +138,19 @@ describe("closing a Set unanswered", () => {
       page.querySelector(".confirm-actions button:last-child") as HTMLElement,
     );
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
-    const [path, init] = fetching.mock.calls[1]!;
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
+    const [path, init] = posts(fetching)[0]!;
     expect(path).toBe(`/api/ui/sets/${WAITING.id}/archive`);
     expect(init?.method).toBe("POST");
 
-    // To the Archive rather than to the pending list: this Set was not
-    // discarded, it was filed, and seeing it filed unanswered is the
-    // confirmation that nothing was lost.
-    await waitFor(() => expect(history.get()).toBe("/archive"));
+    // The Set was not discarded, it was closed — so the page stays on it and
+    // says so, which is the confirmation that nothing was lost. The way out
+    // leads where it always did: the Conversation this Set was asked from.
+    await waitFor(() => expect(page.querySelector(".archived-at")).toBeTruthy());
+    expect(history.get()).toBe(`/sets/${WAITING.id}`);
+    expect(page.querySelector("a.back")!.getAttribute("href")).toBe(
+      `/conversations/${WAITING.conversation}`,
+    );
   });
 
   it("drops the draft, which this Set can never take a Response from now", async () => {
@@ -153,13 +167,13 @@ describe("closing a Set unanswered", () => {
       page.querySelector(".confirm-actions button:last-child") as HTMLElement,
     );
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() => expect(localStorage.getItem(KEY)).toBeNull());
   });
 
   it("says why it was not archived, when it was not", async () => {
     for (const [outcome, said] of [
-      ["AlreadyAnswered", "it is in the Archive as a decision"],
+      ["AlreadyAnswered", "it stands as the decision that was made"],
       ["AlreadyArchived", "This Set has already been archived."],
       ["NoSuchSet", "This Set is no longer here."],
     ] as Array<[Archived, string]>) {
@@ -170,7 +184,7 @@ describe("closing a Set unanswered", () => {
         page.querySelector(".confirm-actions button:last-child") as HTMLElement,
       );
 
-      await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(posts(fetching)).toHaveLength(1));
       await waitFor(() =>
         expect(page.querySelector(".meta .error")!.textContent).toContain(
           said,
@@ -190,7 +204,7 @@ describe("closing a Set unanswered", () => {
       page.querySelector(".confirm-actions button:last-child") as HTMLElement,
     );
 
-    await waitFor(() => expect(fetching).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
       expect(page.querySelector(".meta .error")!.textContent).toContain(
         "the Question Set could not be archived",

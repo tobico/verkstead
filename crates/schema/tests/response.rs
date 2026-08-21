@@ -1,7 +1,7 @@
 //! The Response as it comes back from the human: what YAML parses into, and
 //! which Responses fail to resolve the Set they claim to answer.
 
-use askance_schema::{QuestionSet, Response};
+use verkstead_schema::{QuestionSet, Response};
 
 /// A Set of one Question with Options, one Heading over two Sub-questions, and
 /// a Sub-question without Options of its own.
@@ -434,7 +434,7 @@ comment: |
 }
 
 /// The complete Response to [`SET`], with `extra` appended to its answers.
-fn complete_but(extra: &str) -> Result<(), askance_schema::ValidationError> {
+fn complete_but(extra: &str) -> Result<(), verkstead_schema::ValidationError> {
     let response = Response::from_yaml(&format!(
         "
 answers:

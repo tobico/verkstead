@@ -1,0 +1,32 @@
+[
+  {
+    "branch": "task-runner",
+    "id": 5,
+    "repo": "verkstead",
+    "state": "Implementing"
+  },
+  {
+    "branch": "usage-limits",
+    "id": 4,
+    "repo": "verkstead",
+    "state": "Direction"
+  },
+  {
+    "branch": "outbound-retries",
+    "id": 3,
+    "repo": "verkstead",
+    "state": "Grilling"
+  },
+  {
+    "branch": "amber-kestrel",
+    "id": 2,
+    "repo": "askance",
+    "state": "Draft"
+  },
+  {
+    "branch": "rate-limiting",
+    "id": 1,
+    "repo": "verkstead",
+    "state": "Draft"
+  }
+]

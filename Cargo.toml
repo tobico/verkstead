@@ -16,9 +16,9 @@ rust-version = "1.85"
 [workspace.dependencies]
 # Default features off drops the TypeScript emitter, which is a test's business
 # and nothing a binary should carry — see the `typescript` feature there.
-askance-render = { path = "crates/render", default-features = false }
-askance-schema = { path = "crates/schema" }
-askance-store = { path = "crates/store" }
+verkstead-render = { path = "crates/render", default-features = false }
+verkstead-schema = { path = "crates/schema" }
+verkstead-store = { path = "crates/store" }
 # The Preface is agent-supplied markdown, so what pulldown-cmark renders is
 # untrusted HTML and ammonia is not optional dressing.
 ammonia = "4"
@@ -28,6 +28,12 @@ anyhow = "1"
 # protocol both speak.
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
+# The one thing in Verkstead that is picked rather than derived: the random
+# branch name a Conversation is prefilled with. The operating system's own
+# generator and nothing around it — there is no distribution to sample and no
+# sequence to reproduce, so a whole random-number crate would be a generator, a
+# seeding strategy and a trait hierarchy for one call.
+getrandom = "0.4"
 # Generating the VAPID keypair, which is a P-256 one because Web Push says so.
 # Default features off drops the ECDSA half: nothing here signs anything — the
 # key is generated, encoded, and stored.

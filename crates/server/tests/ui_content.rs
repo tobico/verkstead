@@ -14,24 +14,67 @@
 //! that nobody carried across shows up as a failing fixture rather than as a
 //! viewer that draws the wrong thing.
 
-use askance_render::{Answered, SetView, Standing};
-use askance_schema::{
-    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, Subquestion,
-};
-use askance_server::{open_database, router, store};
+use std::path::Path;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_render::{Answered, SetView, Standing};
+use verkstead_schema::{
+    Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
+};
+use verkstead_server::{open_database, router, store};
 
-/// A router over a fresh database, plus the pool and the directory keeping it
-/// alive.
-async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
+/// The Conversation every Set in this file is asked from.
+///
+/// Every Set is asked from one, so a test that wants a Set needs somewhere for it
+/// to land. [`fresh_app`] makes it over a database with nothing in it, so it is
+/// always the first Conversation there is — and what it is about matters to
+/// nothing here, which is all about the rendering of a Set.
+const ASKING_FROM: i64 = 1;
+
+/// A router over a database with nothing in it at all, plus the pool and the
+/// directory keeping it alive.
+///
+/// What the fixtures of the workbench are written over: a sidebar carrying the
+/// Conversation [`fresh_app`] keeps for its own bookkeeping would be a list with
+/// a stranger in it.
+async fn empty_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
     (dir, pool.clone(), router(pool))
+}
+
+/// The same, with somewhere for a Set to be asked from — see [`ASKING_FROM`].
+async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
+    let (dir, pool, app) = empty_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
+    (dir, pool, app)
+}
+
+/// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
+/// store one.
+async fn put(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    Ok(store::ask(pool, ASKING_FROM, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
 }
 
 fn option(n: u32, text: &str, recommended: bool) -> QuestionOption {
@@ -105,7 +148,9 @@ fn full_grammar_set() -> QuestionSet {
             },
         ],
         postscript: None,
-        project: Some("askance".to_owned()),
+        proposal: None,
+        review: None,
+        project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
     }
@@ -256,7 +301,7 @@ fn modified_and_untracked_diff() -> String {
 /// HTML *not* reaching the viewer, and the cheapest honest way to say "nowhere in
 /// this payload" is to look at the payload.
 async fn set_json(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     fetch_set(app, stored.id).await
 }
 
@@ -296,7 +341,7 @@ async fn answered_set(
         .validate(set)
         .expect("the Response a test answers with has to resolve its Set");
 
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     store::insert_response(pool, stored.id, response)
         .await
         .unwrap()
@@ -308,7 +353,7 @@ async fn answered_set(
 /// A Set the human closed unanswered: the third standing, and the one with no
 /// Response behind it.
 async fn archived_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
-    let stored = store::insert_set(pool, set).await.unwrap();
+    let stored = put(pool, set).await.unwrap();
     let archiving = store::archive_set(pool, &store::Settlements::new(1), stored.id)
         .await
         .unwrap();
@@ -334,7 +379,7 @@ fn asked(set: &SetView) -> Vec<&str> {
 
 /// The Option of this Set carrying `needle` in its rendered text, wherever it
 /// was offered.
-fn option_with<'a>(set: &'a SetView, needle: &str) -> &'a askance_render::OptionView {
+fn option_with<'a>(set: &'a SetView, needle: &str) -> &'a verkstead_render::OptionView {
     set.questions
         .iter()
         .flat_map(|question| std::iter::once(&question.ask).chain(question.subquestions.iter()))
@@ -780,7 +825,7 @@ async fn where_the_ask_came_from_travels_with_it_and_nothing_does_when_there_is_
 
     let (from_a_repo, _) = set_json(&app, &pool, &full_grammar_set()).await;
     assert_eq!(from_a_repo.title, "Rate limiting for the public API");
-    assert_eq!(from_a_repo.project.as_deref(), Some("askance"));
+    assert_eq!(from_a_repo.project.as_deref(), Some("verkstead"));
     assert_eq!(from_a_repo.branch.as_deref(), Some("solid-viewer"));
 
     let mut outside = full_grammar_set();
@@ -1022,6 +1067,55 @@ fn assert_sanitised(json: &str, wrote_it: &str) {
     );
 }
 
+/// The grilling's closing move: one answerable question, and the `proposal`
+/// block that makes answering it end the grilling.
+///
+/// The rationale is markdown, because the chooser renders it — which is the
+/// whole reason it travels as a rationale rather than as a word.
+fn wrap_up_proposal() -> QuestionSet {
+    QuestionSet {
+        title: "Ready to build the usage-limit pause".to_owned(),
+        preface: Some("We settled all four questions. Here is what I think we build.\n".to_owned()),
+        questions: vec![Question {
+            label: "Q9".to_owned(),
+            text: "Ready to build it this way?".to_owned(),
+            columns: Vec::new(),
+            options: vec![
+                option(1, "Yes, go ahead", true),
+                option(2, "Not yet — more to work through", false),
+            ],
+            subquestions: Vec::new(),
+        }],
+        postscript: None,
+        proposal: Some(verkstead_schema::Proposal {
+            direction: verkstead_schema::Direction::TaskList,
+            accepted_by: "Q9.1".to_owned(),
+            rationale: "Five changes that barely touch each other: the detector, the \
+                        pause, the notification, the resume and the window arithmetic.\n\n\
+                        - **Inline** would be one session holding all five at once\n\
+                        - **A roadmap** is more ceremony than two days of work needs\n"
+                .to_owned(),
+        }),
+        review: None,
+        project: Some("verkstead".to_owned()),
+        branch: Some("usage-limits".to_owned()),
+        diff: None,
+    }
+}
+
+/// The human accepting it, which is what moves the Conversation on.
+fn accepting_the_proposal() -> Response {
+    Response {
+        answers: vec![Answer {
+            label: "Q9".to_owned(),
+            selected: Some(1),
+            free_text: None,
+            unanswered: false,
+        }],
+        comment: None,
+    }
+}
+
 /// Where the golden fixtures are written, relative to this crate.
 const FIXTURES: &str = "../../web/tests/fixtures";
 
@@ -1032,73 +1126,11 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 /// A viewer test fed by a hand-written mock proves only that the mock and the
 /// component agree — these files are what the endpoint actually said.
 ///
-/// Everything a clock would otherwise decide is pinned, so that a run today
-/// and a run next week write the same bytes. The worded times are pinned by
-/// arrangement — each row is created or settled at a distance from now whose
-/// wording never moves, "just now" or "3h ago" or far enough back to be said
-/// as its date — and the exact stamps behind them, which would carry the run's
-/// own clock, are overwritten with stated minutes after the fact.
+/// Everything a clock would otherwise decide is pinned, so that a run today and
+/// a run next week write the same bytes: every settling stamp is overwritten
+/// with a stated minute after the fact, and it is the viewer that words one.
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
-    let now = time::OffsetDateTime::now_utc();
-
-    // The pending list: one Set whose agent has just sent it, and one nothing has
-    // waited on for hours — the two badges, and two ages worth wording.
-    let (_dir, pool, app) = fresh_app().await;
-    store::insert_set(&pool, &full_grammar_set()).await.unwrap();
-    let mut stale_set = full_grammar_set();
-    stale_set.title = "Retry policy for the outbound queue".to_owned();
-    stale_set.branch = Some("outbound-retries".to_owned());
-    let stale = store::insert_set(&pool, &stale_set).await.unwrap();
-    stamp(
-        &pool,
-        "UPDATE question_sets SET created_at = ? WHERE id = ?",
-        &rfc3339(now - time::Duration::hours(3)),
-        stale.id,
-    )
-    .await;
-    write(
-        "pending.json",
-        &pin_rows(
-            &get(&app, "/api/ui/pending").await,
-            "created_stamp",
-            &["2026-08-03 06:16 UTC", "2026-08-03 09:16 UTC"],
-        ),
-    );
-
-    // The Archive: a decision, and a Set nobody was ever going to answer — one
-    // settled a moment ago and one long since, which are also the two ways a
-    // settling is worded: the age while it is fresh, and the date once it is
-    // not. Long since rather than days ago, because "4d ago" would say
-    // something different next week and these bytes must not.
-    let (_dir, pool, app) = fresh_app().await;
-    let decided = store::insert_set(&pool, &full_grammar_set()).await.unwrap();
-    store::insert_response(&pool, decided.id, &decided_every_way())
-        .await
-        .unwrap()
-        .unwrap();
-    stamp(
-        &pool,
-        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
-        "2025-08-03T09:07:11.000Z",
-        decided.id,
-    )
-    .await;
-    let mut orphan_set = full_grammar_set();
-    orphan_set.title = "Backfill for the archived rows".to_owned();
-    let orphan = store::insert_set(&pool, &orphan_set).await.unwrap();
-    store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
-        .await
-        .unwrap();
-    write(
-        "archive.json",
-        &pin_rows(
-            &get(&app, "/api/ui/archive").await,
-            "settled_stamp",
-            &["2026-08-03 17:31 UTC", "2025-08-03 09:07 UTC"],
-        ),
-    );
-
     // A Set to answer: every feature of the question grammar, the agent's markup
     // throughout, and a Diff attached.
     let (_dir, pool, app) = fresh_app().await;
@@ -1122,22 +1154,775 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = set_json(&app, &pool, &diagrammed_set()).await;
     write("set-diagram.json", &json);
+
+    // The Repo list: two registrations, put in through the store rather than
+    // through the endpoint, because what is being written here is the shape of a
+    // row — and going in the front way would mean building a git repository
+    // inside a Watched Path, which is `repos.rs`'s subject and not this one's.
+    let (_dir, pool, app) = empty_app().await;
+    for (path, name, branch) in [
+        ("/srv/repos/verkstead", "verkstead", "main"),
+        ("/srv/repos/askance", "askance", "trunk"),
+    ] {
+        store::register_repo(&pool, std::path::Path::new(path), name, branch)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    write("repos.json", &get(&app, "/api/ui/repos").await);
+
+    // The workbench: the sidebar, and one Conversation opened — a Brief written,
+    // a branch named, and the base commit overridden, which is the whole of what
+    // a drafting Conversation carries. Put in through the store for the reason
+    // the Repos are: going in the front way means a git repository inside a
+    // Watched Path, which is `conversations.rs`'s subject and not this one's.
+    let (_dir, pool, app) = empty_app().await;
+    let mut repos = Vec::new();
+    for (path, name, branch) in [
+        ("/srv/repos/verkstead", "verkstead", "main"),
+        ("/srv/repos/askance", "askance", "trunk"),
+    ] {
+        repos.push(
+            store::register_repo(&pool, std::path::Path::new(path), name, branch)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+
+    // Two Agent Profiles, so the pickers are a choice rather than a row — and so
+    // the two roles can hold different ones, which is the ordinary arrangement:
+    // grill on fable, implement on opus. Their pairs are paths nothing is at,
+    // which is exactly what the broken reading is for: this app watches nothing,
+    // so every Profile it reads back is broken, and these fixtures are what the
+    // viewer's tests draw that state from.
+    let mut profiles = Vec::new();
+    for (name, home, model) in [
+        ("fable", "/srv/accounts/fable", "claude-fable-5"),
+        ("opus", "/srv/accounts/opus", "claude-opus-5"),
+    ] {
+        profiles.push(
+            store::create_profile(
+                &pool,
+                &store::ProfileFacts {
+                    name: name.to_owned(),
+                    claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
+                    config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
+                    model: model.to_owned(),
+                    agent_type: store::AgentType::Claude,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        );
+    }
+    write(
+        "profiles.json",
+        &pin_health(&get(&app, "/api/ui/profiles").await),
+    );
+
+    let drafting = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, drafting, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, drafting, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        drafting,
+        "# Rate limiting for the public API\n\n\
+         `POST /v1/messages` has no rate limit. One client sent 40k requests in a\n\
+         minute and the queue was backed up for twenty.\n\n\
+         - decide where the counter lives\n\
+         - decide what a refused request is told\n",
+    )
+    .await
+    .unwrap();
+    store::set_base_commit(
+        &pool,
+        drafting,
+        Some("6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7"),
+    )
+    .await
+    .unwrap();
+
+    // A second one, so the sidebar is a list rather than a row — and against the
+    // other Repo, because what a row names beside the branch is which repository
+    // the work is in.
+    store::start_conversation(&pool, repos[1].id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // And a third that has been started, which is the other shape the middle
+    // pane draws: a Brief that is frozen, a move on the Timeline, and a worktree
+    // to say where the work is being done. Recorded through the store rather than
+    // by pressing the button, for the reason the Repos are registered this way —
+    // going in the front way means a real repository to make a real worktree in,
+    // which is `conversations.rs`'s subject and not this one's.
+    let grilling = store::start_conversation(&pool, repos[0].id, "outbound-retries")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, grilling, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, grilling, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        grilling,
+        "# Retry policy for the outbound queue\n\n\
+         Failed deliveries are retried forever, so one dead endpoint holds up\n\
+         everything behind it.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        grilling,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-outbound-retries"),
+    )
+    .await
+    .unwrap();
+
+    // And what the session running against it has printed so far, which is the
+    // other shape the Timeline draws. Written through the store rather than by
+    // running an agent, for the reason the worktree is recorded rather than
+    // made: what a session's output does to a Timeline is this file's subject,
+    // and whether a session runs at all is `tests/sessions.rs`'s.
+    //
+    // It reads as a session that has stopped: the fixture is a payload rather
+    // than a moment, and a running one would be a page drawing a spinner over
+    // something that has not moved since 2026.
+    let transcript = store::start_transcript(&pool, grilling).await.unwrap();
+    store::append_transcript(
+        &pool,
+        transcript,
+        "\u{1b}[2mReading the brief.\u{1b}[0m\r\n\
+         Looking at how the queue is drained.\r\n\
+         What should happen to a delivery that has failed forty times?\r\n",
+        &store::Summary {
+            lines: 3,
+            latest: "What should happen to a delivery that has failed forty times?".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    // And the two Question Sets that session put to the human: one answered and
+    // one still waiting, which are the two ways a Set reads on a Timeline. Both
+    // are needed, because what the row draws turns on which — the answered one
+    // has an answer against every question and the waiting one has none, and it
+    // is the waiting one the human is offered a sheet for.
+    let mut asked = full_grammar_set();
+    asked.title = "Retry policy for the outbound queue".to_owned();
+    asked.branch = Some("outbound-retries".to_owned());
+    let answered = store::ask(&pool, grilling, &asked).await.unwrap().unwrap();
+    store::insert_response(&pool, answered.id, &decided_every_way())
+        .await
+        .unwrap()
+        .unwrap();
+    stamp(
+        &pool,
+        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
+        "2026-08-03T09:07:11.000Z",
+        answered.id,
+    )
+    .await;
+
+    let mut waiting = full_grammar_set();
+    waiting.title = "What a delivery that has failed forty times becomes".to_owned();
+    waiting.branch = Some("outbound-retries".to_owned());
+    store::ask(&pool, grilling, &waiting)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // And a fourth that the grilling has handed over: its closing proposal
+    // answered, so it is out of Grilling and choosing how the work gets built.
+    // The chooser draws the recommendation marked and the reasoning beside it,
+    // and both of those come off this payload.
+    //
+    // Answered through `submit_response`, which is the one path a Response takes
+    // and the one thing that moves a Conversation here — pressing the state into
+    // the store by hand would write a fixture no Answer could ever produce.
+    let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, directing, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, directing, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        directing,
+        "# Pausing when an account runs out of window\n\n\
+         A session that hits its usage limit mid-run fails silently and the\n\
+         conversation looks stalled.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        directing,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-usage-limits"),
+    )
+    .await
+    .unwrap();
+
+    let proposing = wrap_up_proposal();
+    let proposed = store::ask(&pool, directing, &proposing)
+        .await
+        .unwrap()
+        .unwrap();
+    store::submit_response(
+        &pool,
+        &verkstead_store::Settlements::new(4),
+        proposed.id,
+        &accepting_the_proposal(),
+    )
+    .await
+    .unwrap();
+    stamp(
+        &pool,
+        "UPDATE responses SET submitted_at = ? WHERE set_id = ?",
+        "2026-08-03T11:42:03.000Z",
+        proposed.id,
+    )
+    .await;
+
+    // And the other half of that closing move: the document the grilling wrote
+    // before it proposed, which Verkstead takes onto the Timeline as the
+    // proposal is accepted. Recorded here for the reason the worktree is
+    // recorded rather than made — where the file came from is
+    // `tests/conversations.rs`'s subject, and what the Timeline does with it is
+    // this one's.
+    store::record_handoff(
+        &pool,
+        directing,
+        "# Pausing on a usage limit\n\n\
+         The detector reads the account's own error rather than guessing from a\n\
+         failure, because every other failure looks the same from outside.\n\n\
+         ## Left open\n\n\
+         Whether a resumed session starts over or carries on — decide it when the\n\
+         resume path is written.\n",
+    )
+    .await
+    .unwrap();
+
+    // And the commits on its branch, which is what a session leaves behind
+    // besides its output. Recorded here rather than made, exactly as the
+    // worktree and the handoff are: what a commit does to a Timeline is this
+    // file's subject, and whether watching a branch notices one is
+    // `tests/sessions.rs`'s.
+    //
+    // Two of them, because a Timeline row has to read as one of several rather
+    // than as a lone event — and on the Conversation that has been through a
+    // grilling, because that is where a branch first has anything on it.
+    for commit in [
+        store::Commit {
+            sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
+            subject: "chore: plan the usage-limit pause".to_owned(),
+            files: 2,
+            insertions: 74,
+            deletions: 3,
+        },
+        store::Commit {
+            sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
+            subject: "feat: read the account's own limit error".to_owned(),
+            files: 5,
+            insertions: 213,
+            deletions: 41,
+        },
+    ] {
+        store::record_commit(&pool, directing, &commit)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    // And a fifth, whose direction was a task list: the breaking-down session
+    // has written `.tasks/` into its worktree, and Verkstead reads it back as
+    // the pinned Event.
+    //
+    // Its worktree is the one in these fixtures that has to be a real
+    // directory, because a task list is not in the store at all — it is the
+    // Worktree as it stands, read every time the Conversation is. So the
+    // backlog is written into a temporary directory and the path is pinned
+    // afterwards, the way every other filesystem reading here is.
+    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, tasked, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, tasked, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        tasked,
+        "# One session per task\n\n\
+         The backlog is worked one task at a time, each in a session of its\n\
+         own.\n",
+    )
+    .await
+    .unwrap();
+
+    let worktree = _dir.path().join("worktrees/verkstead-task-runner");
+    let backlog = worktree.join(".tasks");
+    std::fs::create_dir_all(&backlog).unwrap();
+    std::fs::write(
+        backlog.join("TODO.md"),
+        "# Task runner\n\n\
+         Working a backlog one task at a time, unattended.\n\n\
+         ## Tasks\n\n\
+         - [x] 01: Pick the next task — [details](01-next-task.md)\n\
+         - [x] 02: Run it in a session of its own — [details](02-one-session.md)\n\
+         - [ ] 03: Notice when it is finished — [details](03-done-signal.md)\n\
+         - [ ] 04: Move on to the next one — [details](04-advancing.md)\n",
+    )
+    .unwrap();
+    for still_to_do in ["03-done-signal.md", "04-advancing.md"] {
+        std::fs::write(backlog.join(still_to_do), "# a task\n").unwrap();
+    }
+
+    store::start_grilling(
+        &pool,
+        tasked,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        &worktree,
+    )
+    .await
+    .unwrap();
+
+    // Through the states it went through, because that is what a Conversation
+    // with a backlog *is*: a grilling that handed over, a direction the human
+    // chose, and the work being built off it.
+    store::move_to_direction(&pool, tasked).await.unwrap();
+    store::choose_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, tasked).await.unwrap();
+
+    store::record_commit(
+        &pool,
+        tasked,
+        &store::Commit {
+            sha: "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2".to_owned(),
+            subject: "chore: plan the task-runner tasks".to_owned(),
+            files: 5,
+            insertions: 132,
+            deletions: 0,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    write(
+        "conversations.json",
+        &get(&app, "/api/ui/conversations").await,
+    );
+    write(
+        "conversation.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{drafting}")).await,
+        )),
+    );
+    write(
+        "conversation-grilling.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{grilling}")).await,
+        )),
+    );
+    write(
+        "conversation-direction.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{directing}")).await,
+        )),
+    );
+
+    write(
+        "conversation-tasks.json",
+        &pin_worktree(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
+            )),
+            "/var/lib/verkstead/worktrees/verkstead-task-runner",
+        ),
+    );
+
+    // And the same Conversation with its run stopped, which is the one shape a
+    // viewer test cannot reach any other way: an Interruption is raised by a
+    // session dying, and there are no sessions here. Recorded after the fixture
+    // above is written, so the two are the same backlog before and after it went
+    // wrong.
+    store::record_interruption(
+        &pool,
+        tasked,
+        &store::Evidence {
+            step: store::Step::Task,
+            what: "the task in .tasks/03-commit-events.md".to_owned(),
+            how: "the session exited with status 1".to_owned(),
+            git_status: "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n"
+                .to_owned(),
+            tail: "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\n\
+                   error: could not compile `verkstead-store` (lib) due to 1 previous error"
+                .to_owned(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    write(
+        "conversation-interrupted.json",
+        &pin_worktree(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
+            )),
+            "/var/lib/verkstead/worktrees/verkstead-task-runner",
+        ),
+    );
+
+    // And a sixth, whose backlog is worked through: the finish step pushed and
+    // opened a pull request, Verkstead found it through the host's `gh`, and the
+    // Conversation moved into Wrapping on the strength of it. The PR is pinned
+    // where the task list was — its worktree has no `.tasks/` left, because the
+    // finish commit took it away.
+    //
+    // Recorded rather than found, exactly as the commits above are recorded
+    // rather than watched for: what a pull request does to a Conversation is
+    // this file's subject, and whether `gh` can find one is `src/github.rs`'s.
+    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, wrapping, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, wrapping, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        wrapping,
+        "# Rate limiting\n\n\
+         The API has none, so one account can exhaust it for everybody.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        wrapping,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+    )
+    .await
+    .unwrap();
+    store::move_to_direction(&pool, wrapping).await.unwrap();
+    store::choose_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, wrapping).await.unwrap();
+
+    store::record_commit(
+        &pool,
+        wrapping,
+        &store::Commit {
+            sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8".to_owned(),
+            subject: "chore: finish rate-limiting".to_owned(),
+            files: 1,
+            insertions: 0,
+            deletions: 24,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        wrapping,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    write(
+        "conversation-wrapping.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{wrapping}")).await,
+        )),
+    );
+
+    // And a seventh, whose direction was a staged roadmap: the staging session
+    // has written `docs/roadmaps/` into its worktree, and Verkstead reads it
+    // back as the pinned stage-list Event.
+    //
+    // Its worktree has to be a real *repository* rather than merely a real
+    // directory, which is where this differs from the backlog above. Which
+    // roadmap is a Conversation's is asked of git against the base commit the
+    // branch came off — a repository keeps its finished roadmaps, and a
+    // Conversation is about the one its branch wrote — so there is a real
+    // commit here and a real roadmap written over it. Both are pinned
+    // afterwards, the way every other filesystem reading here is.
+    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, staged, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, staged, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        staged,
+        "# A staged roadmap\n\n\
+         Too much for one feature, so it is cut into stages and each becomes a\n\
+         feature of its own.\n",
+    )
+    .await
+    .unwrap();
+
+    let worktree = _dir.path().join("worktrees/verkstead-mvp-roadmap");
+    std::fs::create_dir_all(&worktree).unwrap();
+    git(&worktree, &["init", "--initial-branch", "main"]);
+    git(
+        &worktree,
+        &["config", "user.email", "test@verkstead.invalid"],
+    );
+    git(&worktree, &["config", "user.name", "Verkstead Test"]);
+
+    // What was here before the staging session, so that the roadmap it goes on
+    // to write is one the branch wrote rather than one it inherited.
+    std::fs::write(worktree.join("README.md"), "# a repository\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "chore: what was here already"]);
+
+    let base = git(&worktree, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let roadmap = worktree.join("docs/roadmaps/mvp");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(
+        roadmap.join("ROADMAP.md"),
+        "# MVP roadmap\n\n\
+         Turns the clone into the platform it was designed as.\n\n\
+         ## Stages\n\n\
+         - [x] 01: Workbench — [brief](01-workbench.md)\n\
+         - [x] 02: Grilling — [brief](02-grilling.md)\n\
+         - [ ] 03: Implementation — [brief](03-implementation.md)\n\
+         - [ ] 04: Wrap-up — [brief](04-wrap-up.md)\n",
+    )
+    .unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "docs: stage the mvp roadmap"]);
+
+    store::start_grilling(&pool, staged, &base, &worktree)
+        .await
+        .unwrap();
+    store::move_to_direction(&pool, staged).await.unwrap();
+    store::choose_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, staged).await.unwrap();
+
+    // And what Verkstead did on its own account: the roadmap's first stage
+    // started as a Conversation of its own, said on the Timeline of the
+    // Conversation that started it. Written here rather than driven, because
+    // what starts a stage is a wrap-up settling and there is none of that in a
+    // file about wire shapes — the wording is `continuing.rs`'s, which
+    // `tests/sessions.rs` is what checks.
+    store::note(
+        &pool,
+        staged,
+        "Stage 01 of the `mvp` roadmap — *Workbench* — has started as a Conversation of its \
+         own, on `workbench`.",
+    )
+    .await
+    .unwrap();
+
+    write(
+        "conversation-roadmap.json",
+        &pin_base(
+            &pin_worktree(
+                &pin_health(&pin_timeline(
+                    &get(&app, &format!("/api/ui/conversations/{staged}")).await,
+                )),
+                "/var/lib/verkstead/worktrees/verkstead-mvp-roadmap",
+            ),
+            "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        ),
+    );
+
+    // What the details pane fetches when that Conversation's output Event is
+    // opened. Nothing to pin: a transcript is bytes a session printed.
+    write(
+        "transcript.json",
+        &get(
+            &app,
+            &format!("/api/ui/conversations/{grilling}/transcript/{transcript}"),
+        )
+        .await,
+    );
 }
 
-/// Pin a list's exact stamps to stated minutes, one value per row in order, so
-/// the fixture does not carry the run's own clock. The worded times beside
-/// them need no pinning — the rows are arranged so their wording never moves.
-fn pin_rows(json: &str, field: &str, values: &[&str]) -> String {
+/// Pin everything in a payload that the filesystem would otherwise decide: a
+/// Profile's pair, a Conversation's worktree, and the readiness that turns on
+/// the first of them.
+///
+/// These fixtures name accounts under `/srv/accounts` and worktrees under
+/// `/var/lib/verkstead` that nothing is at — read as they stand, every Profile
+/// would come back broken and every worktree missing, which is the exceptional
+/// case and not the shape a viewer test wants to be fed. That the server does
+/// report both, and when, is `tests/profiles.rs`'s and `tests/conversations.rs`'s
+/// subject.
+///
+/// Readiness is pinned to what it would be with the pairs mended rather than to
+/// `true`: it turns on the Conversation still drafting as well, and a
+/// Conversation that has started is not ready to start again.
+fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    let rows = payload.as_array_mut().unwrap();
-    assert_eq!(rows.len(), values.len(), "one stated minute per row");
-    for (row, value) in rows.iter_mut().zip(values) {
-        assert!(
-            row.get(field).is_some(),
-            "no {field} on this row to pin:\n{row}"
-        );
-        row[field] = (*value).into();
+    // A list of Profiles, or one Conversation carrying the two it has chosen.
+    match payload.as_array_mut() {
+        Some(rows) => rows.iter_mut().for_each(mend),
+        None => {
+            let mut ready = payload["state"] == "Draft";
+
+            for role in ["grilling_profile", "implementation_profile"] {
+                match payload.get_mut(role).filter(|it| !it.is_null()) {
+                    Some(profile) => mend(profile),
+                    None => ready = false,
+                }
+            }
+
+            payload["ready_to_grill"] = ready.into();
+
+            if let Some(worktree) = payload.get_mut("worktree").filter(|it| !it.is_null()) {
+                worktree["missing"] = false.into();
+            }
+        }
+    }
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin where a Conversation's worktree is, for the one fixture whose worktree
+/// has to be a real directory.
+///
+/// A task list is not in the store at all — it is read out of `.tasks/` every
+/// time the Conversation is — so the payload carrying one is written over a
+/// temporary directory whose name is different on every run. The path is put
+/// back to a stated one here, exactly as [`pin_health`] puts back everything
+/// else the filesystem would otherwise decide.
+fn pin_worktree(json: &str, at: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload["worktree"].get("path").is_some(),
+        "no worktree here to pin:\n{payload}"
+    );
+    payload["worktree"]["path"] = at.into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin what a Conversation's branch came off, for the one fixture whose base
+/// commit has to be a real one.
+///
+/// A stage list is not in the store either — which roadmap is the
+/// Conversation's is asked of git against this commit — so the payload carrying
+/// one is written over a repository made fresh on every run, whose commits have
+/// a different hash each time.
+fn pin_base(json: &str, commit: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload["base_commit"].is_string(),
+        "no base commit here to pin:\n{payload}"
+    );
+    payload["base_commit"] = commit.into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Run git in `dir` and take its stdout, for the one fixture whose worktree is a
+/// repository rather than a directory.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(output.status.success(), "git {args:?} failed");
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn mend(profile: &mut serde_json::Value) {
+    assert!(
+        profile.get("broken").is_some(),
+        "no Profile here to pin:\n{profile}"
+    );
+    profile["broken"] = serde_json::Value::Null;
+}
+
+/// Pin the times a Conversation's Timeline carries, so the fixture does not
+/// change with the clock. Every Event gets the one stated minute: what the
+/// viewer's tests read off these is what an Event says, not when this run
+/// happened to write it.
+fn pin_timeline(json: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    for event in payload["timeline"].as_array_mut().unwrap() {
+        // Each Event is its kind and its body — the stamp is inside.
+        let (_, body) = event.as_object_mut().unwrap().iter_mut().next().unwrap();
+        body["at"] = "2026-08-03T09:07:11.000Z".into();
+
+        // And a Question Set carries a second one, in the standing of a Set that
+        // has been answered. It is the only value in these payloads the server
+        // hands over raw — the viewer words it, against its own clock.
+        if let Some(answered) = body
+            .get_mut("standing")
+            .and_then(|standing| standing.get_mut("Answered"))
+        {
+            answered["submitted_at"] = "2026-08-03T09:07:11.000Z".into();
+        }
+    }
+
+    // And the one pinned Event that carries a stamp of its own: the pull
+    // request is on the record, unlike the task list beside it, so it is
+    // stamped like everything else on it.
+    for pinned in payload["pinned"].as_array_mut().unwrap() {
+        let (_, body) = pinned.as_object_mut().unwrap().iter_mut().next().unwrap();
+
+        if body.get("at").is_some() {
+            body["at"] = "2026-08-03T09:07:11.000Z".into();
+        }
     }
 
     serde_json::to_string(&payload).unwrap()
@@ -1160,23 +1945,6 @@ fn pinned(json: &str) -> String {
     }
 
     serde_json::to_string(&payload).unwrap()
-}
-
-/// A time as the store holds one. Written out by hand because `time` is built
-/// here for parsing only — as it is in the server, which words its dates the
-/// same way rather than formatting them.
-fn rfc3339(when: time::OffsetDateTime) -> String {
-    let when = when.to_offset(time::UtcOffset::UTC);
-
-    format!(
-        "{}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
-        when.year(),
-        u8::from(when.month()),
-        when.day(),
-        when.hour(),
-        when.minute(),
-        when.second(),
-    )
 }
 
 async fn stamp(pool: &SqlitePool, query: &str, stamp: &str, id: i64) {

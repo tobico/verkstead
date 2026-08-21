@@ -10,7 +10,7 @@ use crate::validate::Violation;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// What `POST /api/v1/sets` returns once a Set is stored: the identity the
+/// What `POST …/api/v1/sets` returns once a Set is stored: the identity the
 /// server stamped on it. The CLI waits on `id`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetCreated {
@@ -20,7 +20,7 @@ pub struct SetCreated {
     pub created_at: String,
 }
 
-/// What `POST /api/v1/sets/{id}/response` returns once a Response is stored.
+/// What `POST …/api/v1/sets/{id}/response` returns once a Response is stored.
 /// The human's device gets this; the agent gets the Response itself, off the
 /// wait.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

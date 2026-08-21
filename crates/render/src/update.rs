@@ -1,4 +1,4 @@
-//! What the viewer is told about updating: whether a newer Askance has been
+//! What the viewer is told about updating: whether a newer Verkstead has been
 //! released than the one serving the page.
 //!
 //! The Update Notice informs and nothing else — nothing is installed on the
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// Whether there is a newer Askance to update to.
+/// Whether there is a newer Verkstead to update to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum UpdateNotice {

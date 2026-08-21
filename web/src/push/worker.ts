@@ -1,5 +1,5 @@
-//! Installing the service worker, which is what makes Askance installable — and
-//! what a push notification is delivered to.
+//! Installing the service worker, which is what makes Verkstead installable —
+//! and what a push notification is delivered to.
 
 /// Register the worker, from `/sw.js` so that its scope is the whole site.
 ///

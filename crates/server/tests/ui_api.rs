@@ -9,14 +9,9 @@
 //! nor the waits are their own files': the Nudge stream, which is listened on
 //! rather than asked, is `nudges.rs`'s, and `/api/ui/update` is `updates.rs`'s.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-use askance_render::{
-    ArchiveEntry, Archived, PendingEntry, PushKey, SetView, Standing, Submitted, Subscribed,
-    Subscription,
-};
-use askance_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
-use askance_server::{open_database, router, store};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -24,12 +19,18 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_render::{
+    Archived, ConversationView, PushKey, QuestionSetEvent, SetView, Standing, Submitted,
+    Subscribed, Subscription, TimelineEvent,
+};
+use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
+use verkstead_server::{open_database, router, store};
 
 /// Two Questions, one with Sub-questions, so a Response has to account for
 /// `Q1`, `Q2`, `Q2a` and `Q2b`.
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: solid-viewer
 questions:
   - label: Q1
@@ -57,12 +58,35 @@ questions:
 /// nothing of its own, so no entry comes back for it.
 const QUESTIONS: [&str; 3] = ["Q1", "Q2a", "Q2b"];
 
+/// The Conversation every Set in this file is asked from.
+///
+/// Every Set is asked from one — that is what the base URL a session is given
+/// says — so a test that wants a Set needs somewhere for it to land. [`fresh_app`]
+/// makes it over a database with nothing in it, so it is always the first
+/// Conversation there is, which is what lets the helpers below name it without
+/// threading it through every test. What it is about matters to nothing here.
+const ASKING_FROM: i64 = 1;
+
 /// One router over a fresh database, shared by every request in a test: a wait
 /// held through one clone has to hear a submit made through another, which is
 /// the whole point of the two namespaces sharing their state.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "solid-viewer")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     (dir, pool.clone(), router(pool))
 }
 
@@ -117,7 +141,7 @@ async fn post_set(app: &Router, yaml: &str) -> i64 {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -135,7 +159,9 @@ async fn wait_for_response(app: &Router, id: i64, hold: u64) -> axum::response::
     app.clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{id}/response?hold={hold}"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response?hold={hold}"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -152,26 +178,43 @@ fn hold_a_wait(app: &Router, id: i64) -> tokio::task::JoinHandle<()> {
     })
 }
 
-/// The pending list, asked for until the row for `id` reads as `liveness`.
+/// The Question Sets on [`ASKING_FROM`]'s Timeline, oldest first.
+///
+/// The one way there is to reach a Set from the viewer now: a Set belongs to the
+/// Conversation it was asked from, and the standalone lists that used to be the
+/// second way in have gone.
+async fn asked_sets(app: &Router) -> Vec<QuestionSetEvent> {
+    let view: ConversationView = get(app, &format!("/api/ui/conversations/{ASKING_FROM}")).await;
+
+    view.timeline
+        .into_iter()
+        .filter_map(|event| match event {
+            TimelineEvent::QuestionSet(asked) => Some(asked),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Timeline, asked for until the Set `id` on it reads as `liveness`.
 ///
 /// A wait takes its slot as its handler starts running, which is a moment after
-/// the request opening it goes in — so the list is asked again rather than once
-/// after a guessed pause.
-async fn pending_where(app: &Router, id: i64, liveness: Liveness) -> Vec<PendingEntry> {
+/// the request opening it goes in — so the Timeline is asked again rather than
+/// once after a guessed pause.
+async fn asked_where(app: &Router, id: i64, liveness: Liveness) -> Vec<QuestionSetEvent> {
     let deadline = Instant::now() + Duration::from_secs(5);
 
     loop {
-        let pending: Vec<PendingEntry> = get(app, "/api/ui/pending").await;
-        if pending
+        let asked = asked_sets(app).await;
+        if asked
             .iter()
-            .any(|row| row.id == id && row.liveness == liveness)
+            .any(|row| row.set_id == id && row.standing == Standing::Waiting(liveness))
         {
-            return pending;
+            return asked;
         }
 
         assert!(
             Instant::now() < deadline,
-            "waited for Set {id} to read as {liveness:?} in vain: {pending:?}"
+            "waited for Set {id} to read as {liveness:?} in vain: {asked:?}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -213,6 +256,14 @@ fn decided() -> Response {
     }
 }
 
+/// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
+/// store one — the endpoint above is the same thing with a router in front.
+async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
+    Ok(store::ask(pool, ASKING_FROM, set)
+        .await?
+        .expect("the Conversation is there to ask from"))
+}
+
 /// A Set with nothing but a title, for the lists, which never look inside one.
 fn bare(title: &str) -> QuestionSet {
     QuestionSet {
@@ -220,57 +271,51 @@ fn bare(title: &str) -> QuestionSet {
         preface: None,
         questions: Vec::new(),
         postscript: None,
-        project: Some("askance".to_owned()),
+        proposal: None,
+        review: None,
+        project: Some("verkstead".to_owned()),
         branch: Some("solid-viewer".to_owned()),
         diff: None,
     }
 }
 
 #[tokio::test]
-async fn every_waiting_set_is_listed_newest_first_with_its_age_and_its_liveness() {
+async fn every_waiting_set_is_on_its_conversations_timeline_with_its_liveness() {
     let (_dir, pool, app) = fresh_app().await;
     for title in ["the older ask", "the newer ask"] {
-        store::insert_set(&pool, &bare(title)).await.unwrap();
+        asked(&pool, &bare(title)).await.unwrap();
     }
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
+    let asked = asked_sets(&app).await;
 
-    let titles: Vec<&str> = pending.iter().map(|row| row.title.as_str()).collect();
-    assert_eq!(titles, ["the newer ask", "the older ask"]);
-
-    let row = &pending[0];
-    assert_eq!(row.project.as_deref(), Some("askance"));
-    assert_eq!(row.branch.as_deref(), Some("solid-viewer"));
-    // All three arrive decided rather than as a timestamp: the age in the
-    // words the list is scanned in, the exact minute behind it for the
-    // tooltip, and the badge from the registry of held waits. A Set this new
-    // is one whose agent is on its way to its first wait.
-    assert_eq!(row.age, "just now");
-    assert!(
-        row.created_stamp.ends_with(" UTC"),
-        "expected the exact minute behind the age, got {:?}",
-        row.created_stamp
+    let titles: Vec<&str> = asked.iter().map(|row| row.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        ["the older ask", "the newer ask"],
+        "oldest first, which is reading order: a Timeline is read down, where a \
+         list was scanned from the top",
     );
-    assert_eq!(row.liveness, Liveness::Waiting);
+
+    // The badge arrives decided rather than as a timestamp: this is the side
+    // with the registry of held waits. A Set this new is one whose agent is on
+    // its way to its first wait.
+    assert_eq!(asked[0].standing, Standing::Waiting(Liveness::Waiting));
 }
 
 #[tokio::test]
 async fn a_set_nothing_has_waited_on_for_long_enough_reads_as_disconnected() {
     let (_dir, pool, app) = fresh_app().await;
-    let stored = store::insert_set(&pool, &bare("nobody is listening"))
-        .await
-        .unwrap();
+    let stored = asked(&pool, &bare("nobody is listening")).await.unwrap();
     // Old enough that the window measured from its creation has closed, and no
     // wait was ever held on it.
     backdate_created(&pool, stored.id, "2026-08-03T09:00:00.000Z").await;
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
+    let asked = asked_sets(&app).await;
 
-    assert_eq!(pending[0].liveness, Liveness::Disconnected);
-    assert!(
-        pending[0].age.ends_with(" ago"),
-        "expected an age in words, got {:?}",
-        pending[0].age
+    assert_eq!(
+        asked[0].standing,
+        Standing::Waiting(Liveness::Disconnected),
+        "a Set nothing is waiting on is still waiting on the human",
     );
 }
 
@@ -278,7 +323,7 @@ async fn a_set_nothing_has_waited_on_for_long_enough_reads_as_disconnected() {
 async fn the_badge_is_the_wait_the_agents_half_is_genuinely_holding() {
     let (_dir, pool, app) = fresh_app().await;
     let waited_on = post_set(&app, SET).await;
-    let orphan = store::insert_set(&pool, &bare("the one whose agent went"))
+    let orphan = asked(&pool, &bare("the one whose agent went"))
         .await
         .unwrap()
         .id;
@@ -289,18 +334,18 @@ async fn the_badge_is_the_wait_the_agents_half_is_genuinely_holding() {
     }
 
     let agent = hold_a_wait(&app, waited_on);
-    let pending = pending_where(&app, waited_on, Liveness::Waiting).await;
+    let asked = asked_where(&app, waited_on, Liveness::Waiting).await;
 
     // And a wait held on one Set says nothing about another: the registry is
     // asked per Set, not read as "somebody is about".
-    let other = pending
+    let other = asked
         .iter()
-        .find(|row| row.id == orphan)
-        .expect("the Set nothing is waiting on is still pending");
+        .find(|row| row.set_id == orphan)
+        .expect("the Set nothing is waiting on is still on the Timeline");
     assert_eq!(
-        other.liveness,
-        Liveness::Disconnected,
-        "the Set nothing is waiting on keeps its own badge: {pending:?}"
+        other.standing,
+        Standing::Waiting(Liveness::Disconnected),
+        "the Set nothing is waiting on keeps its own badge: {asked:?}"
     );
 
     // The set view is fed from the same registry, because the two badges are one
@@ -323,8 +368,8 @@ async fn a_disconnected_set_is_still_answerable_from_the_viewer() {
     let id = post_set(&app, SET).await;
     backdate_created(&pool, id, "2026-08-03T09:00:00.000Z").await;
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
-    assert_eq!(pending[0].liveness, Liveness::Disconnected);
+    let asked = asked_sets(&app).await;
+    assert_eq!(asked[0].standing, Standing::Waiting(Liveness::Disconnected));
 
     // Display state only (ADR-0001): the badge never gates an answer, and a Set
     // whose agent has gone is neither withdrawn nor closed on its own.
@@ -336,82 +381,77 @@ async fn a_disconnected_set_is_still_answerable_from_the_viewer() {
     .await;
     assert_eq!(outcome, Submitted::Accepted);
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
+    let asked = asked_sets(&app).await;
     assert!(
-        pending.is_empty(),
-        "the answered Set should be off the list: {pending:?}"
+        matches!(asked[0].standing, Standing::Answered(_)),
+        "the answered Set should read as the decision it now is: {asked:?}"
     );
 }
 
 #[tokio::test]
-async fn an_answered_set_leaves_the_pending_list_for_the_archive() {
+async fn an_answered_set_reads_as_a_decision_while_the_rest_still_wait() {
     let (_dir, pool, app) = fresh_app().await;
-    let answered = store::insert_set(&pool, &bare("already answered"))
-        .await
-        .unwrap();
-    store::insert_set(&pool, &bare("still waiting"))
-        .await
-        .unwrap();
+    let answered = asked(&pool, &bare("already answered")).await.unwrap();
+    asked(&pool, &bare("still waiting")).await.unwrap();
     store::insert_response(&pool, answered.id, &Response::default())
         .await
         .unwrap()
         .expect("the Set had no Response yet");
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
-    let archive: Vec<ArchiveEntry> = get(&app, "/api/ui/archive").await;
+    let asked = asked_sets(&app).await;
 
+    let standings: Vec<(&str, bool)> = asked
+        .iter()
+        .map(|row| {
+            (
+                row.title.as_str(),
+                matches!(row.standing, Standing::Answered(_)),
+            )
+        })
+        .collect();
     assert_eq!(
-        pending.iter().map(|row| &row.title).collect::<Vec<_>>(),
-        ["still waiting"]
-    );
-    assert_eq!(
-        archive.iter().map(|row| &row.title).collect::<Vec<_>>(),
-        ["already answered"]
+        standings,
+        [("already answered", true), ("still waiting", false)],
+        "a settled Set stays where it was asked, saying what became of it: \
+         nothing leaves a Timeline",
     );
 }
 
 #[tokio::test]
-async fn the_archive_words_each_settling_and_says_which_were_never_answered() {
+async fn the_timeline_tells_a_decision_from_a_set_nobody_ever_answered() {
     let (_dir, pool, app) = fresh_app().await;
 
-    // Settled long ago, so however far today drifts from the stamp, it stays
-    // past the week that ends the relative wording: this row is dated.
-    let decided_set = store::insert_set(&pool, &bare("decided")).await.unwrap();
+    let decided_set = asked(&pool, &bare("decided")).await.unwrap();
     store::insert_response(&pool, decided_set.id, &Response::default())
         .await
         .unwrap()
         .unwrap();
     settle_at(&pool, decided_set.id, "2025-08-03T09:07:00.000Z").await;
 
-    // Archived just now, which is inside the week: this row is aged.
-    let orphan = store::insert_set(&pool, &bare("nobody ever answered"))
-        .await
-        .unwrap();
+    let orphan = asked(&pool, &bare("nobody ever answered")).await.unwrap();
     store::archive_set(&pool, &store::Settlements::new(1), orphan.id)
         .await
         .unwrap();
 
-    let archive: Vec<ArchiveEntry> = get(&app, "/api/ui/archive").await;
+    let asked = asked_sets(&app).await;
 
-    // Newest settling first, whichever way each of them was settled — aged
-    // while fresh, dated once it is not, with the exact minute beside both.
-    let rows: Vec<(&str, &str, bool)> = archive
-        .iter()
-        .map(|row| (row.title.as_str(), row.settled_at.as_str(), row.unanswered))
-        .collect();
-    assert_eq!(
-        rows,
-        [
-            ("nobody ever answered", "just now", true),
-            ("decided", "2025-08-03", false),
-        ]
-    );
-    assert_eq!(archive[1].settled_stamp, "2025-08-03 09:07 UTC");
-    assert!(
-        archive[0].settled_stamp.ends_with(" UTC"),
-        "expected the exact minute behind the age, got {:?}",
-        archive[0].settled_stamp
-    );
+    // The two kinds of settling are not the same thing to read back — one is a
+    // decision that was made, the other is a Set nobody answered — and each
+    // carries the moment it was settled. The stamp travels raw: this is the one
+    // time on this wire the viewer words itself, because it belongs to the
+    // Standing rather than to the Event.
+    let Standing::Answered(answered) = &asked[0].standing else {
+        panic!("expected a decision, got {:?}", asked[0].standing);
+    };
+    assert_eq!(answered.submitted_at, "2025-08-03T09:07:00.000Z");
+
+    let Standing::ArchivedUnanswered(closed_at) = &asked[1].standing else {
+        panic!(
+            "expected a Set closed unanswered, got {:?}",
+            asked[1].standing
+        );
+    };
+    assert!(!closed_at.is_empty(), "expected when it was closed");
 }
 
 #[tokio::test]
@@ -603,11 +643,12 @@ async fn archiving_a_set_ends_a_wait_held_on_it_and_files_it_unanswered() {
     // Nothing is ever coming, and the CLI is told so rather than left polling.
     assert_eq!(agent.await.unwrap().status(), StatusCode::GONE);
 
-    let pending: Vec<PendingEntry> = get(&app, "/api/ui/pending").await;
-    assert!(pending.is_empty(), "an archived Set is off the list");
-
-    let archive: Vec<ArchiveEntry> = get(&app, "/api/ui/archive").await;
-    assert!(archive[0].unanswered, "it reached the Archive unanswered");
+    let asked = asked_sets(&app).await;
+    assert!(
+        matches!(asked[0].standing, Standing::ArchivedUnanswered(_)),
+        "the Timeline stops claiming the Set is waiting, and says it was never \
+         answered rather than showing a decision: {asked:?}"
+    );
 
     let set: SetView = get(&app, &format!("/api/ui/sets/{id}")).await;
     assert!(
@@ -763,7 +804,9 @@ async fn the_agents_contract_still_speaks_its_own_language() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri(format!("/api/v1/sets/{id}/response?hold=0"))
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/{id}/response?hold=0"
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -785,6 +828,12 @@ async fn the_agents_contract_still_speaks_its_own_language() {
 }
 
 /// Age a Set, so the window Liveness is measured in has closed.
+///
+/// Both stamps, because there are two and they are one fact: the Set's own
+/// creation time, which its page is read against, and the stamp of the Timeline
+/// Event it landed on, which its row on that Timeline is. The one transaction
+/// that puts a Set to a Conversation writes them together, so a test that moved
+/// only one would be asking about an arrangement that cannot happen.
 async fn backdate_created(pool: &SqlitePool, id: i64, created_at: &str) {
     sqlx::query("UPDATE question_sets SET created_at = ? WHERE id = ?")
         .bind(created_at)
@@ -792,9 +841,19 @@ async fn backdate_created(pool: &SqlitePool, id: i64, created_at: &str) {
         .execute(pool)
         .await
         .unwrap();
+
+    sqlx::query(
+        "UPDATE timeline_events SET at = ?
+         WHERE id = (SELECT event_id FROM set_events WHERE set_id = ?)",
+    )
+    .bind(created_at)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
-/// Move when a Response landed, so the Archive's dates are a test's to decide.
+/// Move when a Response landed, so a settling's date is a test's to decide.
 async fn settle_at(pool: &SqlitePool, id: i64, submitted_at: &str) {
     sqlx::query("UPDATE responses SET submitted_at = ? WHERE set_id = ?")
         .bind(submitted_at)

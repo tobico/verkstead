@@ -13,7 +13,7 @@ import { disable, enable, look, said as saidAbout } from "./browser";
 import type { Standing } from "./standing";
 import { flippable, said } from "./standing";
 
-/// The switch on the pending list: where this device stands, and the one flip
+/// The switch on the Repo list: where this device stands, and the one flip
 /// that changes it.
 export function Notifications(): JSX.Element {
   const [standing, setStanding] = createSignal<Standing>("unknown");

@@ -70,22 +70,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - asset: askance-linux-x64
+          - asset: verkstead-linux-x64
             runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-          - asset: askance-linux-arm64
+          - asset: verkstead-linux-arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-          - asset: askance-macos-x64
+          - asset: verkstead-macos-x64
             runner: macos-15-intel
             target: x86_64-apple-darwin
-          - asset: askance-macos-arm64
+          - asset: verkstead-macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
     env:
       # Where cargo leaves it, said once: every step below either runs this file
       # or asks something of it.
-      BINARY: target/${{ matrix.target }}/release/askance
+      BINARY: target/${{ matrix.target }}/release/verkstead
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -130,22 +130,22 @@ jobs:
           key: ${{ matrix.target }}
 
       # The package by name rather than the whole workspace, for the reason
-      # `nix/askance-source.nix` gives: `askance-render`'s default features turn on
-      # the TypeScript emitter, which is a test's business, and a
+      # `nix/verkstead-source.nix` gives: `verkstead-render`'s default features
+      # turn on the TypeScript emitter, which is a test's business, and a
       # workspace-wide build would unify it into the release binary.
       - name: Build
         run: >
           cargo build --release --locked
-          --package askance-cli --target ${{ matrix.target }}
+          --package verkstead-cli --target ${{ matrix.target }}
 
       # The claim the paragraph above makes, checked rather than trusted: the
-      # emitter is a normal dependency of `askance-render` whenever its
+      # emitter is a normal dependency of `verkstead-render` whenever its
       # `typescript` feature is on, so it is in this tree or it is in nothing
       # that was linked. `--edges normal` is what makes that the binary's
       # question — dev-dependencies enable the feature and are no part of it.
       - name: The build does not carry the TypeScript emitter
         run: |
-          tree=$(cargo tree --package askance-cli --edges normal \
+          tree=$(cargo tree --package verkstead-cli --edges normal \
             --target ${{ matrix.target }})
           echo "$tree"
           if printf '%s\n' "$tree" | grep -q 'ts-rs'; then
@@ -164,7 +164,7 @@ jobs:
       - name: The viewer is inside the binary
         run: |
           ./"$BINARY" serve --listen 127.0.0.1:8422 \
-            --database "$RUNNER_TEMP/askance.db" &
+            --database "$RUNNER_TEMP/verkstead.db" &
           server=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
@@ -206,7 +206,7 @@ jobs:
               ;;
           esac
 
-      # Under the name it will carry as a Release asset — `askance-linux-x64`
+      # Under the name it will carry as a Release asset — `verkstead-linux-x64`
       # rather than a target triple, because that name is what the README's
       # install command will spell out. An artifact is a zip, so the executable
       # bit does not survive the trip; the binary was run above, where it still
@@ -249,7 +249,7 @@ jobs:
       - name: Fetch the binaries
         uses: actions/download-artifact@v8.0.1
         with:
-          pattern: askance-*
+          pattern: verkstead-*
           merge-multiple: true
           path: binaries
 
@@ -263,7 +263,7 @@ jobs:
           # So that a glob matching nothing counts as none, rather than as the
           # one unexpanded pattern bash would otherwise leave behind.
           shopt -s nullglob
-          binaries=(binaries/askance-*)
+          binaries=(binaries/verkstead-*)
           if [ "${#binaries[@]}" -ne 4 ]; then
             echo "::error::Expected four binaries, found ${#binaries[@]}."
             exit 1
@@ -294,7 +294,7 @@ jobs:
             *) prerelease=() ;;
           esac
           gh release create "$TAG" --generate-notes "${prerelease[@]}" \
-            binaries/askance-*
+            binaries/verkstead-*
 
       # What GitHub says it now has, in the log of the run that put it there —
       # the asset names an adopter's url has to match, and whether the tag was
@@ -339,7 +339,7 @@ jobs:
 
       # Keyed by nix system name rather than by asset name, because a nix system
       # name is what the consumer already has in hand — the flake asks for
-      # `x86_64-linux`, not for `askance-linux-x64`.
+      # `x86_64-linux`, not for `verkstead-linux-x64`.
       #
       # Hashes are SRI, which is what `fetchurl` takes verbatim, so there is no
       # conversion step at the point of use. `sha256sum` speaks hex and SRI is
@@ -355,10 +355,10 @@ jobs:
           mkdir -p downloads
           systems='{}'
           for pair in \
-            x86_64-linux:askance-linux-x64 \
-            aarch64-linux:askance-linux-arm64 \
-            x86_64-darwin:askance-macos-x64 \
-            aarch64-darwin:askance-macos-arm64
+            x86_64-linux:verkstead-linux-x64 \
+            aarch64-linux:verkstead-linux-arm64 \
+            x86_64-darwin:verkstead-macos-x64 \
+            aarch64-darwin:verkstead-macos-arm64
           do
             system=${pair%%:*}
             asset=${pair#*:}

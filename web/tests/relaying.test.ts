@@ -17,13 +17,13 @@ import { ORIGIN, UNREADABLE, worker } from "./worker";
 const NOTICE = {
   id: 7,
   title: "Whether to keep the outbound queue at all",
-  project: "askance",
+  project: "verkstead",
 };
 
 /// What the worker posts to say the pending world moved. Named, and asserted as
 /// a literal, because the page's half of this cannot import it: the worker is a
 /// static file served from the site root rather than a module of the bundle.
-const NUDGE = { askance: "nudge" };
+const NUDGE = { verkstead: "nudge" };
 
 describe("a push arriving at the worker", () => {
   it("nudges every window that is open", async () => {

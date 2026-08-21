@@ -4,29 +4,67 @@
 //! A Set and a Response are each kept as one JSON body — JSON rather than YAML
 //! because it preserves a Preface's whitespace exactly, and the Preface is
 //! markdown the human reads back verbatim. `title`, `project` and `branch` are
-//! lifted into columns beside the Set so the pending list can be drawn without
-//! deserializing every Set.
+//! lifted into columns beside the body, so that what a Set is *about* can be
+//! read without deserializing it.
+//!
+//! Every Set is asked from a Conversation and lands on its Timeline — see
+//! [`ask`], which is the one way one is stored. What answering it does is here
+//! all the same: a Response reaches the waiting agent the same way whether it
+//! came from the workbench, from a phone or from `curl`.
 //!
 //! The store sits below both the agent API and the web UI: the UI's server
-//! functions live in the shared `askance-app` crate, which cannot reach back
+//! functions live in the shared `verkstead-app` crate, which cannot reach back
 //! into the server binary that links it.
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use askance_schema::{QuestionSet, Response, ResponseAccepted, SetCreated, ValidationError};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
+use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
+mod commits;
+mod conversations;
+mod interruptions;
+mod profiles;
+mod pull_requests;
 mod push;
+mod repos;
+mod transcripts;
 mod waits;
+mod wrap_up;
 
+pub use commits::{Commit, commit, record_commit, recorded_commits};
+pub use conversations::{
+    Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
+    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, ask,
+    asked_from, choose_direction, conversations, load_conversation, move_to_direction, note,
+    record_handoff, rename_branch, review_asked, save_brief, set_asked_from, set_base_commit,
+    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_conversation,
+    start_grilling, start_implementing, start_stage, timeline,
+};
+pub use interruptions::{
+    Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
+    record_interruption, settle_interruption,
+};
+pub use profiles::{
+    AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
+    load_profile, profiles, update_profile,
+};
+pub use pull_requests::{PullRequest, Wrapping, pull_request, record_pull_request};
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
 };
+pub use repos::{Repo, register_repo, registered_repos};
+pub use transcripts::{Summary, append_transcript, start_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
+pub use wrap_up::{
+    Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
+    forget_fix_attempts, record_addressed_comments, record_fix_attempt, settle_wrap_up,
+    unsettle_wrap_up, wrap_up_settled,
+};
 
 /// A Set as the store holds it: the agent's Set plus the identity the server
 /// stamped on it.
@@ -43,44 +81,6 @@ pub struct StoredResponse {
     pub set_id: i64,
     pub submitted_at: String,
     pub response: Response,
-}
-
-/// One row of the pending list: a Set still waiting on the human, drawn from
-/// the lifted columns without touching its body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PendingSet {
-    pub id: i64,
-    pub created_at: String,
-    pub title: String,
-    pub project: Option<String>,
-    pub branch: Option<String>,
-}
-
-/// One row of the Archive: a Set that has been settled, drawn from the lifted
-/// columns and the stamp of whichever event settled it, without touching any
-/// body.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchivedSet {
-    pub id: i64,
-    pub settled_at: String,
-    pub settled: Settled,
-    pub title: String,
-    pub project: Option<String>,
-    pub branch: Option<String>,
-}
-
-/// What put a Set in the Archive.
-///
-/// The two are kept apart because they are not the same thing to read back: one
-/// is a decision that was made, the other is a Set nobody ever answered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Settled {
-    /// The human answered it, and the Archive holds what they decided.
-    Answered,
-
-    /// The human closed it unanswered, because nobody was ever going to answer
-    /// it. There is no Response and there never will be.
-    ArchivedUnanswered,
 }
 
 /// How a Set was settled, for whoever is waiting to hear that it was.
@@ -135,11 +135,88 @@ impl Settlements {
     }
 }
 
+/// A Response that was taken: what the Set now says, and what answering it moved.
+///
+/// What it moved travels back with the acceptance rather than being logged here,
+/// because the store has no voice of its own: what it does is hand back what
+/// happened, and whichever half of the server took the Response is what says so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Taken {
+    pub accepted: ResponseAccepted,
+
+    /// What became of the wrap-up proposal this Set carried, or `None` where it
+    /// carried none — which is every ordinary Set.
+    pub proposed: Option<Proposed>,
+
+    /// And what became of the self-review it carried, the same way.
+    pub reviewed: Option<Reviewed>,
+}
+
+/// What became of a self-review the human has just answered.
+///
+/// Answering it is the whole of it: the review stops being one of the things
+/// wrap-up waits on whether they accepted every finding or none. What they
+/// accepted is work to dispatch, and the store hands it back rather than doing
+/// anything about it — launching sessions is the server's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reviewed {
+    /// Answered, and these are the findings to fix — in the order the review
+    /// raised them.
+    ///
+    /// Empty where the human declined every one of them, which is an answered
+    /// review with nothing to do about it rather than an unanswered one.
+    Answered {
+        conversation_id: i64,
+        fixing: Vec<Fixing>,
+    },
+
+    /// The Set is on no Timeline, so there is no wrap-up to settle and nowhere
+    /// to dispatch anything.
+    ///
+    /// Cannot happen for a stored Set — [`ask`] writes the Set, its Event and
+    /// the row joining them in one transaction — so it is a broken record rather
+    /// than a review of nothing.
+    NoSuchConversation,
+}
+
+/// One finding the human said to fix, as the session that will fix it is told
+/// about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fixing {
+    /// The finding as the review wrote it for whoever fixes it.
+    pub what: String,
+
+    /// And whatever the human wrote alongside their Answer, or empty where they
+    /// wrote nothing — which is the ordinary way of agreeing with the
+    /// recommendation.
+    pub said: String,
+}
+
+/// What became of a wrap-up proposal the human has just answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Proposed {
+    /// The human did not pick the Option that means go ahead, so the grilling
+    /// carries on.
+    ///
+    /// Nothing is recorded and nothing is wrong: this is how a human disagrees.
+    /// The session that proposed is still holding the thread and has their
+    /// Response to read, and what it does with it — keep grilling, or propose
+    /// again — is the agent's own to decide.
+    SentBack,
+
+    /// Accepted, and this is what became of moving the Conversation on.
+    ///
+    /// [`Directing::NotGrilling`] is not a failure here either: a grilling that
+    /// put two proposals has the first acceptance move the Conversation, and the
+    /// second finds the move already made.
+    Accepted(Directing),
+}
+
 /// What became of a submitted Response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Submission {
     /// Stored as the Set's answer, and everyone waiting on it has been told.
-    Accepted(ResponseAccepted),
+    Accepted(Taken),
 
     /// There is no Set with that id to answer.
     NoSuchSet,
@@ -162,6 +239,12 @@ pub enum Submission {
 /// This is the one path a Response takes, whether it came from the human's
 /// browser or from `curl`, so a wait ends the same way either way — and so an
 /// archived Set is refused the same way either way.
+///
+/// It is also where a grilling ends. A Set carrying a `proposal` is the grilling
+/// agent's closing move, and answering one moves its Conversation out of Grilling
+/// and into Direction — here, rather than in either endpoint, for the reason
+/// everything else about answering is here: the browser and `curl` must not be
+/// able to leave a Conversation in different states for the same Answer.
 pub async fn submit_response(
     pool: &SqlitePool,
     settlements: &Settlements,
@@ -185,24 +268,111 @@ pub async fn submit_response(
         });
     };
 
+    // After the Response is stored, and only for the Set that carries a
+    // proposal. The insert is what makes a Set answered once, so a proposal is
+    // settled once too: a second Response to the same Set never gets this far.
+    let proposed = match &stored.set.proposal {
+        Some(proposal) if proposal.accepted(response) => {
+            Some(Proposed::Accepted(accept_proposal(pool, set_id).await?))
+        }
+        // Answered some other way, which is how a human disagrees: the grilling
+        // carries on, and the agent has their Response.
+        Some(_) => Some(Proposed::SentBack),
+        None => None,
+    };
+
+    // And, on the one Set a wrap-up's review asks, the same again for what it
+    // found. Settled here rather than in either endpoint for the reason the
+    // proposal's move is: the browser and `curl` must not be able to leave a
+    // Conversation's wrap-up in different states for the same Answer.
+    let reviewed = match &stored.set.review {
+        Some(review) => Some(answer_review(pool, set_id, review, response).await?),
+        None => None,
+    };
+
     settlements.announce(set_id);
 
-    Ok(Submission::Accepted(accepted))
+    Ok(Submission::Accepted(Taken {
+        accepted,
+        proposed,
+        reviewed,
+    }))
+}
+
+/// Settle the review of the Conversation this Set was asked from, and pick out
+/// the findings the human said to fix.
+///
+/// Settled whatever they answered. What wrap-up was waiting on is *the review
+/// being answered*, and a human who declined every finding has answered it — the
+/// review is over either way, and the difference between the two is only how
+/// much work it left behind.
+///
+/// The order is the review's own rather than the Response's: the findings were
+/// raised in the order the review thought about them, and that is the order they
+/// are worth fixing in.
+async fn answer_review(
+    pool: &SqlitePool,
+    set_id: i64,
+    review: &verkstead_schema::Review,
+    response: &Response,
+) -> Result<Reviewed> {
+    let Some(conversation_id) = asked_from(pool, set_id).await? else {
+        return Ok(Reviewed::NoSuchConversation);
+    };
+
+    settle_wrap_up(pool, conversation_id, WaitingOn::Review).await?;
+
+    let fixing = review
+        .findings
+        .iter()
+        .filter(|finding| finding.accepted(response))
+        .map(|finding| Fixing {
+            what: finding.what.trim().to_owned(),
+            said: finding.said(response).to_owned(),
+        })
+        .collect();
+
+    Ok(Reviewed::Answered {
+        conversation_id,
+        fixing,
+    })
+}
+
+/// Move the Conversation an accepted proposal was asked from on to choosing a
+/// direction.
+///
+/// A Set is on exactly one Timeline, so which Conversation to move is read off
+/// the Set rather than passed in: the agent-facing endpoint knows which
+/// Conversation it is answering for and the viewer's does not, and this is the
+/// one path both of them take.
+///
+/// [`Directing::NoSuchConversation`] therefore covers a Set on no Timeline as
+/// well, which cannot happen for a stored Set — [`ask`] writes the Set, its Event
+/// and the row joining them in one transaction. It is handed back rather than
+/// raised because the Response is stored by the time this runs, and failing the
+/// submission now would leave a waiting agent holding a Set that has in fact been
+/// answered.
+async fn accept_proposal(pool: &SqlitePool, set_id: i64) -> Result<Directing> {
+    let Some(conversation_id) = asked_from(pool, set_id).await? else {
+        return Ok(Directing::NoSuchConversation);
+    };
+
+    move_to_direction(pool, conversation_id).await
 }
 
 /// What became of archiving a Set unanswered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Archiving {
-    /// Closed: the Set is off the pending list, in the Archive, and anyone
-    /// holding a wait on it has been told.
+    /// Closed: the Set has stopped waiting on the human, and anyone holding a
+    /// wait on it has been told.
     Archived(SetArchived),
 
     /// There is no Set with that id to archive.
     NoSuchSet,
 
-    /// The Set has a Response, so it is in the Archive as a decision already.
-    /// Archiving unanswered is for a Set nobody will ever answer, and it does
-    /// not touch what is already filed.
+    /// The Set has a Response, so it is a decision already. Archiving
+    /// unanswered is for a Set nobody will ever answer, and it does not touch
+    /// what was decided.
     AlreadyAnswered,
 
     /// The Set was archived before this arrived — from another device, or
@@ -210,8 +380,8 @@ pub enum Archiving {
     AlreadyArchived,
 }
 
-/// Close a Set the human is never going to be able to answer: file it in the
-/// Archive unanswered, and tell whoever is waiting on it.
+/// Close a Set the human is never going to be able to answer: settle it
+/// unanswered, and tell whoever is waiting on it.
 ///
 /// Only a human may do this (ADR-0001): a disconnected agent is never enough,
 /// because the CLI reconnects through transient drops. Nothing here consults
@@ -307,32 +477,41 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // the keypair when this is the database's first run.
     push::apply_schema(pool).await?;
 
+    // The Repos registered from inside the Watched Paths.
+    repos::apply_schema(pool).await?;
+
+    // The Agent Profiles a session can be run under.
+    profiles::apply_schema(pool).await?;
+
+    // The Conversations attached to them, and their Timelines. After the Repos
+    // and the Profiles, because a Conversation's row references all three.
+    conversations::apply_schema(pool).await?;
+
+    // What the sessions run against them printed. After the Timelines, because a
+    // transcript hangs off the Event it is the full self of.
+    transcripts::apply_schema(pool).await?;
+
+    // And what they committed, which hangs off the Timelines for the same
+    // reason — and off the Conversations too, which is what makes one commit
+    // per Conversation a rule the database keeps.
+    commits::apply_schema(pool).await?;
+
+    // And where a run stopped, which hangs off the Timelines for the same reason
+    // again — and off the Conversations too, which is what makes *one open
+    // Interruption per Conversation* a rule the database keeps.
+    interruptions::apply_schema(pool).await?;
+
+    // And what the work ended up on, which hangs off the Timelines the same way
+    // — and off the Conversations, which is what makes *one pull request per
+    // Conversation* a rule the database keeps.
+    pull_requests::apply_schema(pool).await?;
+
+    // And what wrapping that pull request up is still waiting on, which hangs
+    // off the Conversations alone: none of it is something that happened, so
+    // none of it is an Event.
+    wrap_up::apply_schema(pool).await?;
+
     Ok(())
-}
-
-/// Store a Set, stamping it with an id and a creation time.
-///
-/// The Set is expected to have been validated already — the store is not where
-/// the question grammar is enforced.
-pub async fn insert_set(pool: &SqlitePool, set: &QuestionSet) -> Result<SetCreated> {
-    let body = serde_json::to_string(set).context("serialising the Question Set")?;
-
-    // SQLite stamps the time as it assigns the id, so both come from one place.
-    // `%f` gives seconds to the millisecond, making the whole string RFC 3339.
-    let (id, created_at): (i64, String) = sqlx::query_as(
-        "INSERT INTO question_sets (created_at, title, project, branch, body)
-         VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?)
-         RETURNING id, created_at",
-    )
-    .bind(&set.title)
-    .bind(&set.project)
-    .bind(&set.branch)
-    .bind(body)
-    .fetch_one(pool)
-    .await
-    .context("storing the Question Set")?;
-
-    Ok(SetCreated { id, created_at })
 }
 
 /// Read a Set back, or `None` if no Set has that id.
@@ -367,97 +546,6 @@ pub async fn set_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
         .with_context(|| format!("looking for Question Set {id}"))?;
 
     Ok(found.is_some())
-}
-
-/// The Sets still waiting on the human, newest first.
-///
-/// A Set leaves this list by being answered or by being archived unanswered:
-/// either way it is settled, and the point of the list is that everything on it
-/// is really still waiting.
-///
-/// Ordered by id rather than `created_at`: the id is handed out in submission
-/// order, so it says "newest" without two Sets stamped in the same millisecond
-/// coming back in an arbitrary order.
-pub async fn pending_sets(pool: &SqlitePool) -> Result<Vec<PendingSet>> {
-    /// The lifted columns in the order the query below selects them.
-    type Row = (i64, String, String, Option<String>, Option<String>);
-
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT s.id, s.created_at, s.title, s.project, s.branch
-         FROM question_sets s
-         LEFT JOIN responses r ON r.set_id = s.id
-         LEFT JOIN archivings a ON a.set_id = s.id
-         WHERE r.set_id IS NULL AND a.set_id IS NULL
-         ORDER BY s.id DESC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("listing the pending Question Sets")?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(id, created_at, title, project, branch)| PendingSet {
-            id,
-            created_at,
-            title,
-            project,
-            branch,
-        })
-        .collect())
-}
-
-/// The Sets in the Archive, newest first: everything that has been answered,
-/// and everything the human archived unanswered.
-///
-/// Ordered by when each Set was settled rather than by when it was asked: in the
-/// Archive the day it was closed is what the log is read along, whichever event
-/// closed it. Two stamps can agree to the millisecond, so the id — handed out in
-/// submission order, and unique — breaks the tie.
-///
-/// Like the pending list, drawn from the lifted columns alone: the Archive is
-/// permanent and only grows, and a list is scanned rather than read.
-pub async fn archived_sets(pool: &SqlitePool) -> Result<Vec<ArchivedSet>> {
-    /// The columns in the order the query below selects them, the third being
-    /// whether this row is here without a Response.
-    type Row = (i64, String, i64, String, Option<String>, Option<String>);
-
-    // An archived Set that somehow also had a Response would be one Set in the
-    // log twice, so the second half excludes it — the answering is the decision,
-    // and it is the one already filed.
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT s.id AS id, r.submitted_at AS settled_at, 0 AS unanswered,
-                s.title, s.project, s.branch
-         FROM question_sets s
-         JOIN responses r ON r.set_id = s.id
-         UNION ALL
-         SELECT s.id, a.archived_at, 1, s.title, s.project, s.branch
-         FROM question_sets s
-         JOIN archivings a ON a.set_id = s.id
-         LEFT JOIN responses r ON r.set_id = s.id
-         WHERE r.set_id IS NULL
-         ORDER BY settled_at DESC, id DESC",
-    )
-    .fetch_all(pool)
-    .await
-    .context("listing the archived Question Sets")?;
-
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, settled_at, unanswered, title, project, branch)| ArchivedSet {
-                id,
-                settled_at,
-                settled: if unanswered == 0 {
-                    Settled::Answered
-                } else {
-                    Settled::ArchivedUnanswered
-                },
-                title,
-                project,
-                branch,
-            },
-        )
-        .collect())
 }
 
 /// Store the Response to a Set, stamping it with a submission time.

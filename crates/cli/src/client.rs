@@ -10,7 +10,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use askance_schema::{ApiError, QuestionSet, Response, SetCreated};
+use verkstead_schema::{ApiError, QuestionSet, Response, SetCreated};
 
 /// How long the server is asked to hold each wait open. Its own ceiling is a
 /// minute; well under that leaves room for a reply to make it back before any
@@ -33,7 +33,7 @@ pub struct Client {
 }
 
 impl Client {
-    /// A client pointed at an Askance server, e.g. `http://127.0.0.1:8422`.
+    /// A client pointed at a Verkstead server, e.g. `http://127.0.0.1:8422`.
     pub fn new(base: &str) -> Self {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
@@ -95,7 +95,7 @@ impl Client {
                 Err(Interrupted::Fatal(error)) => return Err(error),
                 Err(Interrupted::Transient(error)) => {
                     eprintln!(
-                        "# askance: {error:#}; retrying in {}s",
+                        "# verkstead: {error:#}; retrying in {}s",
                         backoff.as_secs().max(1)
                     );
                     std::thread::sleep(backoff);

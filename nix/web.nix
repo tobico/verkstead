@@ -22,7 +22,7 @@
 }:
 
 stdenvNoCC.mkDerivation (finalAttrs: {
-  pname = if runTests then "askance-web-tests" else "askance-web";
+  pname = if runTests then "verkstead-web-tests" else "verkstead-web";
   version = (lib.importTOML ../Cargo.toml).workspace.package.version;
 
   # `web/` and the assets vite copies verbatim into the site root, and nothing
@@ -53,7 +53,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     inherit (finalAttrs) version src;
     # Named for the build in both cases, so that turning `runTests` on does not ask
     # for a second copy of the same store under a second name.
-    pname = "askance-web";
+    pname = "verkstead-web";
     sourceRoot = "${finalAttrs.src.name}/web";
     fetcherVersion = 2;
     hash = "sha256-yn9kKviolL5dXn+vLQ1hSHSgS4htUhBit/ZmfWLhdcs=";
@@ -97,7 +97,8 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   '';
 
   meta = {
-    description = if runTests then "The Askance viewer's vitest suite" else "The Askance viewer, built";
+    description =
+      if runTests then "The Verkstead viewer's vitest suite" else "The Verkstead viewer, built";
     platforms = lib.platforms.unix;
   };
 })

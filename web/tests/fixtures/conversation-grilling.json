@@ -1,0 +1,179 @@
+{
+  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "blocked_on": null,
+  "branch": "outbound-retries",
+  "direction": null,
+  "grilling_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/fable/.claude",
+    "config_file": "/srv/accounts/fable/.claude.json",
+    "id": 1,
+    "model": "claude-fable-5",
+    "name": "fable"
+  },
+  "id": 3,
+  "implementation_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/opus/.claude",
+    "config_file": "/srv/accounts/opus/.claude.json",
+    "id": 2,
+    "model": "claude-opus-5",
+    "name": "opus"
+  },
+  "pinned": [],
+  "proposal": null,
+  "ready_to_grill": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Grilling",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>Retry policy for the outbound queue</h1>\n<p>Failed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.</p>\n",
+        "id": 3,
+        "markdown": "# Retry policy for the outbound queue\n\nFailed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.\n"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 4,
+        "state": "Grilling"
+      }
+    },
+    {
+      "AgentOutput": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 5,
+        "latest": "What should happen to a delivery that has failed forty times?",
+        "lines": 3,
+        "running": false
+      }
+    },
+    {
+      "QuestionSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 6,
+        "rows": [
+          {
+            "answer": "In-process, per instance.",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "A 429 plus RateLimit headers. — and document them in the changelog",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "keep them short",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
+        "set_id": 1,
+        "standing": {
+          "Answered": {
+            "response": {
+              "answers": [
+                {
+                  "label": "Q1",
+                  "selected": 1
+                },
+                {
+                  "free_text": "and document them in the changelog",
+                  "label": "Q2",
+                  "selected": 2
+                },
+                {
+                  "label": "Q2a",
+                  "unanswered": true
+                },
+                {
+                  "free_text": "keep them short",
+                  "label": "Q2b"
+                },
+                {
+                  "label": "Q3",
+                  "unanswered": true
+                }
+              ],
+              "comment": "Do the in-process one first; we can move it later."
+            },
+            "submitted_at": "2026-08-03T09:07:11.000Z"
+          }
+        },
+        "title": "Retry policy for the outbound queue"
+      }
+    },
+    {
+      "QuestionSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 7,
+        "rows": [
+          {
+            "answer": "",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
+        "set_id": 2,
+        "standing": {
+          "Waiting": "waiting"
+        },
+        "title": "What a delivery that has failed forty times becomes"
+      }
+    }
+  ],
+  "worktree": {
+    "missing": false,
+    "path": "/var/lib/verkstead/worktrees/verkstead-outbound-retries"
+  }
+}

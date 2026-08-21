@@ -144,92 +144,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d902e3d592a523def97af8f317b08ce16b7ab854c1985a0c671e6f15cebc236"
 
 [[package]]
-name = "askance-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "askance-schema",
- "askance-server",
- "axum",
- "clap",
- "serde-saphyr",
- "tempfile",
- "tokio",
- "tracing-subscriber",
- "ureq",
-]
-
-[[package]]
-name = "askance-render"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "askance-schema",
- "pulldown-cmark",
- "serde",
- "syntect",
- "time",
- "ts-rs",
- "two-face",
-]
-
-[[package]]
-name = "askance-schema"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde-saphyr",
- "ts-rs",
-]
-
-[[package]]
-name = "askance-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "askance-render",
- "askance-schema",
- "askance-store",
- "axum",
- "base64",
- "clap",
- "http",
- "http-body-util",
- "p256",
- "reqwest",
- "rust-embed",
- "semver",
- "serde",
- "serde-saphyr",
- "serde_json",
- "sqlx",
- "tempfile",
- "time",
- "tokio",
- "tokio-stream",
- "tower",
- "tracing",
- "web-push-native",
-]
-
-[[package]]
-name = "askance-store"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "askance-schema",
- "base64",
- "p256",
- "serde",
- "serde-saphyr",
- "serde_json",
- "sqlx",
- "tempfile",
- "time",
- "tokio",
-]
-
-[[package]]
 name = "atoi"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2901,6 +2815,94 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "verkstead-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "serde-saphyr",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+ "ureq",
+ "verkstead-schema",
+ "verkstead-server",
+]
+
+[[package]]
+name = "verkstead-render"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "pulldown-cmark",
+ "serde",
+ "syntect",
+ "time",
+ "ts-rs",
+ "two-face",
+ "verkstead-schema",
+]
+
+[[package]]
+name = "verkstead-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde-saphyr",
+ "ts-rs",
+]
+
+[[package]]
+name = "verkstead-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64",
+ "clap",
+ "getrandom 0.4.3",
+ "http",
+ "http-body-util",
+ "p256",
+ "reqwest",
+ "rust-embed",
+ "semver",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "verkstead-render",
+ "verkstead-schema",
+ "verkstead-store",
+ "web-push-native",
+]
+
+[[package]]
+name = "verkstead-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "p256",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "time",
+ "tokio",
+ "verkstead-schema",
+]
 
 [[package]]
 name = "version_check"

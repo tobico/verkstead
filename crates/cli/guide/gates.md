@@ -4,7 +4,7 @@ Some Questions aren't asking the human to choose between designs — they are a
 hard stop waiting on a yes. A commit-approval gate, or a gate before a finished
 feature is landed, is the type case. Put these to the human too, and
 preferentially: a gate is exactly the moment where finished work sits unlanded
-until a human says so, which is the situation askance exists for.
+until a human says so, which is the situation verkstead exists for.
 
 A gate is a degenerate Set — one Question, proceed or don't. That makes the
 `preface` do all the work: it carries what was built and what happens on a yes,

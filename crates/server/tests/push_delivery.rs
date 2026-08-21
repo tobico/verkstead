@@ -9,8 +9,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use askance_schema::SetCreated;
-use askance_server::{open_database, router, store};
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
@@ -24,11 +22,17 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
+use verkstead_schema::SetCreated;
+use verkstead_server::{open_database, router, store};
+
+/// The Conversation every Set in this file is asked from, made by [`fresh_app`]
+/// over a database with nothing in it.
+const ASKING_FROM: i64 = 1;
 use web_push_native::Auth;
 
 const SET: &str = r#"
 title: Rate limiting for the public API
-project: askance
+project: verkstead
 branch: pwa-and-push
 questions:
   - label: Q1
@@ -161,7 +165,28 @@ async fn nowhere() -> String {
 /// through the viewer's.
 async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
-    let pool = open_database(&dir.path().join("askance.db")).await.unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    // Somewhere for the Sets to land: every Set is asked from a Conversation,
+    // and what is pushed is the news that one arrived.
+    let repo = store::register_repo(
+        &pool,
+        std::path::Path::new("/srv/verkstead"),
+        "verkstead",
+        "main",
+    )
+    .await
+    .unwrap()
+    .expect("nothing is registered at that path yet");
+
+    let conversation = store::start_conversation(&pool, repo.id, "push")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+    assert_eq!(conversation, ASKING_FROM);
+
     let app = router(pool.clone());
     (dir, pool, app)
 }
@@ -202,7 +227,7 @@ async fn post_set(app: &Router, yaml: &str) -> (StatusCode, SetCreated) {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/v1/sets")
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -352,7 +377,7 @@ async fn a_set_arriving_is_pushed_once_to_every_device() {
         let notice = device.read(push);
         assert_eq!(notice["id"], created.id);
         assert_eq!(notice["title"], "Rate limiting for the public API");
-        assert_eq!(notice["project"], "askance");
+        assert_eq!(notice["project"], "verkstead");
     }
 }
 

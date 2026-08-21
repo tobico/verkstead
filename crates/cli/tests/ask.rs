@@ -1,4 +1,4 @@
-//! The `askance ask` round trip: a Set goes out, the CLI blocks, and the
+//! The `verkstead ask` round trip: a Set goes out, the CLI blocks, and the
 //! human's Response comes back on stdout — across a server restart if need be.
 //!
 //! The last test here is the quickstart in `docs/development.md`, run against
@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use askance_schema::Response;
-use askance_server::store::{self, StoredSet};
 use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
+use verkstead_schema::Response;
+use verkstead_server::store::{self, StoredSet};
 
 /// Two Questions, one with a Sub-question, so a Response has to cover `Q1`,
 /// `Q2` and `Q2a`. `project` and `branch` are forged: the CLI derives both
@@ -63,6 +63,10 @@ comment: |
   The agent parses stdout; keep the noise on stderr.
 ";
 
+/// The Conversation these Sets are asked from, made by the server fixture over a
+/// database with nothing in it — so it is always the first there is.
+const ASKING_FROM: i64 = 1;
+
 /// A third level of nesting, which the question grammar forbids. The CLI has
 /// to refuse this itself, before anything reaches the server.
 const THREE_LEVELS_DEEP: &str = "
@@ -105,12 +109,32 @@ impl Server {
         let (listener, addr, pool) = runtime.block_on(async {
             let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
             let addr = listener.local_addr().unwrap();
-            let pool = askance_server::open_database(&database).await.unwrap();
+            let pool = verkstead_server::open_database(&database).await.unwrap();
+
+            // Somewhere for the Sets to land. Every Set is asked from a
+            // Conversation, and the base URL a session is given is what says
+            // which — so a test standing in for a session has to be given the
+            // same thing. Made only where there is none: this server is brought
+            // up twice over one database, and the second time is a restart.
+            if store::conversations(&pool).await.unwrap().is_empty() {
+                let repo =
+                    store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+                        .await
+                        .unwrap()
+                        .expect("nothing is registered at that path yet");
+
+                let conversation = store::start_conversation(&pool, repo.id, "api-core-and-cli")
+                    .await
+                    .unwrap()
+                    .expect("the Repo was just registered");
+                assert_eq!(conversation, ASKING_FROM);
+            }
+
             (listener, addr, pool)
         });
 
         runtime.spawn(async move {
-            let _ = axum::serve(listener, askance_server::router(pool)).await;
+            let _ = axum::serve(listener, verkstead_server::router(pool)).await;
         });
 
         Server {
@@ -120,8 +144,16 @@ impl Server {
         }
     }
 
-    fn url(&self) -> String {
+    /// Where the server is, whole — the viewer's namespace hangs off this, and
+    /// it is nobody's Conversation.
+    fn base(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// And what a session is given as `VERKSTEAD_SERVER`: the same server,
+    /// scoped to the Conversation it is asking from.
+    fn url(&self) -> String {
+        format!("{}/conversations/{ASKING_FROM}", self.base())
     }
 
     fn block_on<F: Future>(&self, future: F) -> F::Output {
@@ -145,7 +177,9 @@ impl Server {
     /// file — the store is where the enriched Set can actually be seen.
     fn stored_set(&self, id: i64) -> Option<StoredSet> {
         self.block_on(async {
-            let pool = askance_server::open_database(&self.database).await.unwrap();
+            let pool = verkstead_server::open_database(&self.database)
+                .await
+                .unwrap();
             let stored = store::load_set(&pool, id).await.unwrap();
             pool.close().await;
             stored
@@ -180,7 +214,7 @@ impl Server {
     /// viewer's namespace and nowhere else: the agent API has no route for it,
     /// because only a human may close a Set nobody is going to answer.
     fn archive(&self, id: i64) {
-        let reply = ureq::post(format!("{}/api/ui/sets/{id}/archive", self.url()))
+        let reply = ureq::post(format!("{}/api/ui/sets/{id}/archive", self.base()))
             .header("Content-Type", "application/json")
             .send("{}")
             .unwrap();
@@ -188,13 +222,13 @@ impl Server {
     }
 }
 
-/// `askance ask`, pointed at the test server and running in `dir`, with its
+/// `verkstead ask`, pointed at the test server and running in `dir`, with its
 /// three streams on pipes the test can drive and read back.
 fn command(server: &Server, dir: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_askance"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_verkstead"));
     command
         .arg("ask")
-        .env("ASKANCE_SERVER", server.url())
+        .env("VERKSTEAD_SERVER", server.url())
         .current_dir(dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -202,11 +236,11 @@ fn command(server: &Server, dir: &Path) -> Command {
     command
 }
 
-/// Start `askance ask`, feeding it `set` on stdin, running in `dir`.
+/// Start `verkstead ask`, feeding it `set` on stdin, running in `dir`.
 fn ask(server: &Server, dir: &Path, set: &str) -> Child {
     let mut child = command(server, dir)
         .spawn()
-        .expect("the askance binary should be built for its own tests");
+        .expect("the verkstead binary should be built for its own tests");
 
     // Dropping the handle closes the pipe, which is the CLI's end of input.
     let mut stdin = child.stdin.take().unwrap();
@@ -216,13 +250,13 @@ fn ask(server: &Server, dir: &Path, set: &str) -> Child {
     child
 }
 
-/// Start `askance ask <file>`, the form the quickstart uses.
+/// Start `verkstead ask <file>`, the form the quickstart uses.
 fn ask_file(server: &Server, dir: &Path, file: &Path) -> Child {
     command(server, dir)
         .arg(file)
         .stdin(Stdio::null())
         .spawn()
-        .expect("the askance binary should be built for its own tests")
+        .expect("the verkstead binary should be built for its own tests")
 }
 
 /// Cut a still-waiting CLI short — the wait has no other end — without leaving
@@ -236,7 +270,7 @@ fn kill(mut child: Child) {
 fn finished(child: Child) -> Output {
     let output = child.wait_with_output().unwrap();
     eprintln!(
-        "askance stderr:\n{}",
+        "verkstead stderr:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
     output
@@ -253,7 +287,7 @@ fn stderr(output: &Output) -> String {
 #[test]
 fn a_schema_violating_set_is_refused_locally_naming_the_question() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
     let output = finished(ask(&server, tmp.path(), THREE_LEVELS_DEEP));
 
@@ -279,7 +313,7 @@ fn a_schema_violating_set_is_refused_locally_naming_the_question() {
 #[test]
 fn the_response_is_delivered_on_stdout_as_yaml() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
     server.await_stored_set(1);
@@ -304,7 +338,7 @@ fn the_response_is_delivered_on_stdout_as_yaml() {
         "a multi-line comment comes out as a block scalar, got:\n{printed}"
     );
     assert!(
-        !printed.contains("askance:"),
+        !printed.contains("verkstead:"),
         "the CLI's own chatter belongs on stderr, got:\n{printed}"
     );
     assert!(
@@ -318,7 +352,7 @@ fn the_response_is_delivered_on_stdout_as_yaml() {
 #[test]
 fn the_cli_reconnects_when_the_server_restarts_mid_wait() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
     server.await_stored_set(1);
@@ -359,7 +393,7 @@ fn the_cli_reconnects_when_the_server_restarts_mid_wait() {
 #[test]
 fn a_set_archived_unanswered_ends_the_wait_for_good() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
     server.await_stored_set(1);
@@ -394,7 +428,7 @@ fn a_set_archived_unanswered_ends_the_wait_for_good() {
 #[test]
 fn project_branch_and_diff_are_derived_from_the_working_directory() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
     let root = repo_with_a_commit(tmp.path());
     let linked = linked_worktree(&root, "feature");
@@ -446,10 +480,10 @@ fn example(name: &str) -> PathBuf {
 #[test]
 fn the_quickstart_delivers_the_example_response() {
     let tmp = tempfile::tempdir().unwrap();
-    let server = Server::start(tmp.path().join("askance.db"));
+    let server = Server::start(tmp.path().join("verkstead.db"));
 
-    // `askance ask examples/questions.yaml`, and the Set is the first one this
-    // server has seen, so the id the quickstart curls is 1.
+    // `verkstead ask examples/questions.yaml`, and the Set is the first one
+    // this server has seen, so the id the quickstart curls is 1.
     let waiting = ask_file(&server, tmp.path(), &example("questions.yaml"));
     let stored = server.await_stored_set(1);
     assert_eq!(stored.set.title, "Rate limiting for the public API");

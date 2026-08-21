@@ -393,9 +393,9 @@ mod tests {
 
     #[test]
     fn prose_becomes_the_html_it_describes() {
-        let html = to_html("Run `askance ask`:\n\n- first\n- second\n");
+        let html = to_html("Run `verkstead ask`:\n\n- first\n- second\n");
 
-        assert!(html.contains("<code>askance ask</code>"), "{html}");
+        assert!(html.contains("<code>verkstead ask</code>"), "{html}");
         assert!(html.contains("<li>first</li>"), "{html}");
     }
 
@@ -624,10 +624,10 @@ mod tests {
 
     #[test]
     fn inline_markup_comes_through_without_a_paragraph_around_it() {
-        let html = to_inline_html("Run `askance ask` **now**, not ~~later~~.");
+        let html = to_inline_html("Run `verkstead ask` **now**, not ~~later~~.");
 
         assert_eq!(
-            html, "Run <code>askance ask</code> <strong>now</strong>, not <del>later</del>.",
+            html, "Run <code>verkstead ask</code> <strong>now</strong>, not <del>later</del>.",
             "the markup is the whole point; the paragraph would break the row",
         );
     }
@@ -682,9 +682,9 @@ mod tests {
 
     #[test]
     fn plain_text_is_the_words_with_every_mark_gone() {
-        let plain = to_plain("Run `askance ask` **now**, not ~~later~~.");
+        let plain = to_plain("Run `verkstead ask` **now**, not ~~later~~.");
 
-        assert_eq!(plain, "Run askance ask now, not later.");
+        assert_eq!(plain, "Run verkstead ask now, not later.");
     }
 
     #[test]

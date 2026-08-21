@@ -6,9 +6,9 @@
 //! to know which Set to open, and nothing that would put a Question in a
 //! notification the phone shows on a lock screen.
 //!
-//! Sending happens behind the answer to `POST /api/v1/sets`, never in front of
+//! Sending happens behind the answer to `POST …/api/v1/sets`, never in front of
 //! it. Delivery goes out through the browser vendors' push services, which is
-//! the one place Askance reaches the public internet, and none of it is
+//! the one place Verkstead reaches the public internet, and none of it is
 //! reliable enough to make an agent's submission depend on: a service that
 //! cannot be reached costs a notification, not the Set.
 //!
@@ -20,14 +20,14 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use askance_schema::QuestionSet;
-use askance_store::{PushSubscription, VapidKeys};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use p256::ecdsa::signature::Signer;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
+use verkstead_schema::QuestionSet;
+use verkstead_store::{PushSubscription, VapidKeys};
 use web_push_native::{Auth, WebPushBuilder};
 
 /// How long a push service should hold a notification for a phone that is off
@@ -46,9 +46,9 @@ const SIGNATURE_GOOD_FOR: i64 = 12 * 60 * 60;
 
 /// The contact the VAPID claim carries: whom a push service would complain to
 /// about this server's traffic. It wants a `mailto:` or an `https:` URI, and
-/// the project is the only thing that is true of every Askance — this is a
+/// the project is the only thing that is true of every Verkstead — this is a
 /// single-user tool with nobody's address configured in it.
-const CONTACT: &str = "https://github.com/tobico/askance";
+const CONTACT: &str = "https://github.com/tobico/verkstead";
 
 /// The one JWT header these signatures ever use, so it is spelled out rather
 /// than serialized: ES256 is what VAPID is defined in terms of.
@@ -114,12 +114,12 @@ pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
 /// handful of devices, and the timeout bounds what a slow push service can cost
 /// the ones behind it.
 async fn notify(pool: &SqlitePool, id: i64, notice: &[u8]) -> Result<()> {
-    let devices = askance_store::push_subscriptions(pool).await?;
+    let devices = verkstead_store::push_subscriptions(pool).await?;
     if devices.is_empty() {
         return Ok(());
     }
 
-    let keys = askance_store::vapid_keys(pool).await?;
+    let keys = verkstead_store::vapid_keys(pool).await?;
     let client = reqwest::Client::builder()
         .timeout(REACHABLE_WITHIN)
         .build()
@@ -135,7 +135,7 @@ async fn notify(pool: &SqlitePool, id: i64, notice: &[u8]) -> Result<()> {
                     endpoint = %device.endpoint,
                     "the push service has finished with this device, so it is forgotten",
                 );
-                askance_store::forget_subscription(pool, &device.endpoint).await?;
+                verkstead_store::forget_subscription(pool, &device.endpoint).await?;
             }
             // Logged rather than returned: the devices behind this one have
             // done nothing wrong, and there is nobody to hand the failure to —

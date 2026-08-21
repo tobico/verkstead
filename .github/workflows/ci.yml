@@ -35,6 +35,43 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.2
 
+      # The sandbox suite runs a real `bwrap` rather than a stand-in — what it
+      # checks is which paths come in writable, read-only and absent, and there
+      # is no way to ask that of anything but the tool itself. The runner image
+      # does not carry it.
+      #
+      # Present is not enough: Ubuntu 24.04 denies unprivileged user namespaces
+      # through AppArmor, which is exactly what the sandbox's `--unshare-all`
+      # asks for, and an installed bwrap fails at `setting up uid map` without
+      # the restriction lifted. The runner is a throwaway VM whose only job is
+      # this suite, so the sysctl goes off rather than a profile being written
+      # for one binary.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # For the dev-shell autodetection alone: it decides whether to wrap a
+      # session's command in `nix develop` by evaluating a flake attribute, so
+      # the test covering it needs a `nix` that answers. Pinned to the version
+      # `nix.yml` already uses. Nothing is fetched — the flake that test writes
+      # declares no inputs.
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31.11.0
+
+      # The same surface `Sandbox::command` builds, running the same `/bin/sh`
+      # the probe runs. A runner image that stops satisfying the sandbox fails
+      # here, in a line naming what is missing, rather than as nine test
+      # failures whose message is about the tool rather than the code.
+      - name: The sandbox surface works on this runner
+        run: |
+          bwrap --unshare-all --share-net \
+            --ro-bind /nix /nix --ro-bind /usr /usr --ro-bind /bin /bin \
+            --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /etc /etc \
+            --proc /proc --dev /dev --tmpfs /tmp \
+            /bin/sh -c 'echo "the sandbox surface holds"'
+
       # Formatting and lints first: both are cheap and both fail on the kind of
       # thing that is quicker to read than a test failure.
       - name: Format

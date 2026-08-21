@@ -1,4 +1,4 @@
-//! Askance's own service worker, run somewhere a test can drive it.
+//! Verkstead's own service worker, run somewhere a test can drive it.
 //!
 //! `assets/sw.js` is a static file rather than a module of this bundle — vite
 //! copies it to the site root untouched, because that is the only place a worker
@@ -13,11 +13,11 @@ import { vi } from "vitest";
 /// `server.fs.allow` is opened for under vitest — see `vite.config.ts`.
 import SOURCE from "../../assets/sw.js?raw";
 
-/// Where this Askance is, as the worker reads its own location.
-export const ORIGIN = "https://askance.example";
+/// Where this Verkstead is, as the worker reads its own location.
+export const ORIGIN = "https://verkstead.example";
 
 /// A push body that is not the JSON the worker expects — a push service having
-/// mangled it, or a sender that was never Askance.
+/// mangled it, or a sender that was never Verkstead.
 export const UNREADABLE = Symbol("a push body that is not JSON");
 
 /// An open window, as `clients.matchAll` hands one over.

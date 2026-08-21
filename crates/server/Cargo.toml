@@ -1,5 +1,5 @@
 [package]
-name = "askance-server"
+name = "verkstead-server"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,12 +7,14 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 # The rendering behind the viewer's namespace, and the types it answers with.
-askance-render.workspace = true
-askance-schema.workspace = true
-askance-store.workspace = true
+verkstead-render.workspace = true
+verkstead-schema.workspace = true
+verkstead-store.workspace = true
 axum = "0.8"
 base64.workspace = true
 clap.workspace = true
+# The random half of a Conversation's prefilled branch name.
+getrandom.workspace = true
 # The request `web-push-native` builds is an `http::Request`, and this is the
 # crate that type comes from — shared with reqwest and axum, so it is the same
 # request all the way out.
@@ -20,8 +22,9 @@ http = "1"
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }
-# Sending the push, and asking GitHub whether a newer Askance has been released
-# — between them the whole of what Askance says to the public internet. Default
+# Sending the push, and asking GitHub whether a newer Verkstead has been
+# released — between them the whole of what Verkstead says to the public
+# internet. Default
 # features are off to keep OpenSSL out of the build: rustls, with the roots it
 # bundles, is all that reaching an https endpoint takes. `json` is what reads
 # GitHub's answer, and costs nothing beyond the serde_json already here.
@@ -34,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = [
 # lets the folder be written relative to this manifest rather than to whatever
 # directory cargo was run from. `debug-embed` is deliberately *off*: in a debug
 # build the files are then read off disk per request, so a `pnpm build` is visible
-# to a running `cargo run -p askance-cli -- serve` without a recompile.
+# to a running `cargo run -p verkstead-cli -- serve` without a recompile.
 rust-embed = { version = "8", features = [
     "interpolate-folder-path",
     "mime-guess",
@@ -46,7 +49,16 @@ serde-saphyr.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
 time.workspace = true
-tokio = { workspace = true, features = ["signal", "sync", "time"] }
+# `process` and `io-util` are the session half: a grilling session is a child
+# process whose output is read as it arrives, and neither the spawning nor the
+# reading can block the runtime the server is answering requests on.
+tokio = { workspace = true, features = [
+    "io-util",
+    "process",
+    "signal",
+    "sync",
+    "time",
+] }
 # The Nudge stream is a broadcast channel turned into a `Stream` for axum's SSE
 # response, which is the `sync` feature and nothing else here uses.
 tokio-stream = { version = "0.1", features = ["sync"] }

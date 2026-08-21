@@ -7,7 +7,7 @@ use std::process::Command;
 
 /// The name given to every scratch repository, so a test can assert that the
 /// CLI reported *this* directory's name and not some tempdir's.
-pub const REPO_NAME: &str = "askance-root";
+pub const REPO_NAME: &str = "verkstead-root";
 
 /// Run git in `dir`, insisting it worked. This is test scaffolding, not the
 /// code under test, so a failure here is a broken test rather than a finding.
@@ -32,8 +32,8 @@ pub fn repo_with_a_commit(parent: &Path) -> PathBuf {
     std::fs::create_dir(&root).unwrap();
 
     git(&root, &["init", "--quiet", "--initial-branch", "main"]);
-    git(&root, &["config", "user.name", "Askance Tests"]);
-    git(&root, &["config", "user.email", "tests@askance.invalid"]);
+    git(&root, &["config", "user.name", "Verkstead Tests"]);
+    git(&root, &["config", "user.email", "tests@verkstead.invalid"]);
     git(&root, &["config", "commit.gpgsign", "false"]);
 
     std::fs::write(root.join("tracked.txt"), "hello\n").unwrap();

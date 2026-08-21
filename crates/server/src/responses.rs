@@ -1,10 +1,13 @@
 //! The Response endpoints: the human's reply in, and the waiting agent's
 //! long-poll out.
+//!
+//! Both are reached through the Conversation the Set was asked from, because
+//! that is what the session's base URL says — see [`crate::sets`]. A Set id that
+//! belongs to another Conversation names nothing here: a scope that was only
+//! written into the path and never read would be no scope at all.
 
 use std::time::Duration;
 
-use askance_schema::{ApiError, Response};
-use askance_store::{Settlement, Submission};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
@@ -12,12 +15,15 @@ use serde::Deserialize;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Instant, timeout};
+use verkstead_schema::{ApiError, Response};
+use verkstead_store::{Settlement, Submission};
 
 use crate::reply::yaml;
 use crate::{AppState, MAX_HOLD, store};
 
-/// `POST /api/v1/sets/{id}/response` — take the human's reply, check it
-/// resolves the Set, store it, and wake whoever is waiting.
+/// `POST /conversations/{conversation}/api/v1/sets/{id}/response` — take the
+/// human's reply, check it resolves the Set, store it, and wake whoever is
+/// waiting.
 ///
 /// Malformed YAML is a 400; a Response that leaves a question unaccounted for
 /// is a 422 naming it. A Set is answered once: a second Response is a 409 and
@@ -25,7 +31,7 @@ use crate::{AppState, MAX_HOLD, store};
 /// so a Response to one is a 410.
 pub(crate) async fn submit_response(
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path((conversation_id, id)): Path<(i64, i64)>,
     body: String,
 ) -> HttpResponse {
     let response = match Response::from_yaml(&body) {
@@ -38,8 +44,25 @@ pub(crate) async fn submit_response(
         }
     };
 
+    match asked_from(&state, conversation_id, id).await {
+        Ok(true) => {}
+        Ok(false) => return not_found(id),
+        Err(refusal) => return refusal,
+    }
+
     match store::submit_response(&state.pool, &state.settlements, id, &response).await {
-        Ok(Submission::Accepted(accepted)) => yaml(StatusCode::CREATED, &accepted),
+        Ok(Submission::Accepted(taken)) => {
+            crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
+
+            if let Some(reviewed) = taken.reviewed {
+                crate::review::answered(&state, reviewed);
+            }
+
+            // The acceptance and nothing about the move: what a waiting agent
+            // came for is that its Set is answered, and the Conversation moving
+            // on is the Timeline's business rather than the agent contract's.
+            yaml(StatusCode::CREATED, &taken.accepted)
+        }
         Ok(Submission::NoSuchSet) => not_found(id),
         Ok(Submission::Archived) => gone(id),
         Ok(Submission::Invalid(invalid)) => yaml(
@@ -71,7 +94,8 @@ pub(crate) struct Wait {
     hold: Option<u64>,
 }
 
-/// `GET /api/v1/sets/{id}/response` — hand the Response to the waiting agent.
+/// `GET /conversations/{conversation}/api/v1/sets/{id}/response` — hand the
+/// Response to the waiting agent.
 ///
 /// Answers straight away if the Set has been answered already; otherwise holds
 /// the connection until it is, or until the hold window closes and the reply
@@ -83,7 +107,7 @@ pub(crate) struct Wait {
 /// nobody will answer.
 pub(crate) async fn wait_for_response(
     State(state): State<AppState>,
-    Path(id): Path<i64>,
+    Path((conversation_id, id)): Path<(i64, i64)>,
     Query(wait): Query<Wait>,
 ) -> HttpResponse {
     let hold = wait
@@ -95,13 +119,12 @@ pub(crate) async fn wait_for_response(
     // this wait instead of slipping past it.
     let mut settlements = state.settlements.subscribe();
 
-    match store::set_exists(&state.pool, id).await {
+    // Which also answers whether the Set is there at all: a Set is on exactly
+    // one Timeline, so being on this Conversation's is the whole question.
+    match asked_from(&state, conversation_id, id).await {
         Ok(true) => {}
         Ok(false) => return not_found(id),
-        Err(error) => {
-            tracing::error!(error = ?error, set_id = id, "looking for a Question Set failed");
-            return unavailable("the Question Set could not be read");
-        }
+        Err(refusal) => return refusal,
     }
 
     // Taken once the Set is known to exist, so a 404 leaves no trace in the
@@ -153,6 +176,27 @@ async fn settled(settlements: &mut broadcast::Receiver<i64>, id: i64) -> bool {
             Err(RecvError::Closed) => return false,
         }
     }
+}
+
+/// Whether this Set was asked from this Conversation, or a refusal to answer
+/// with where the store could not say.
+///
+/// `Ok(false)` is both "no such Set" and "not this Conversation's", which the
+/// endpoints answer for the same way and should: a session reaches Verkstead
+/// through its own Conversation alone, so another one's Set is not a Set it may
+/// be told anything about, including that it exists.
+async fn asked_from(state: &AppState, conversation_id: i64, id: i64) -> Result<bool, HttpResponse> {
+    store::set_asked_from(&state.pool, conversation_id, id)
+        .await
+        .map_err(|error| {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                set_id = id,
+                "looking for a Question Set failed"
+            );
+            unavailable("the Question Set could not be read")
+        })
 }
 
 fn not_found(id: i64) -> HttpResponse {

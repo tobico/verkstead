@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use askance_schema::{QuestionSet, Response};
+use verkstead_schema::{QuestionSet, Response};
 
 /// Read one of the workspace's `examples/`, by the name the guide uses.
 fn example(name: &str) -> String {
@@ -31,7 +31,7 @@ fn the_example_set_is_a_legal_question_set() {
 
     // The CLI overwrites these from the working directory, so an example that
     // supplied them would only be teaching the reader a habit that does not
-    // survive contact with `askance ask`.
+    // survive contact with `verkstead ask`.
     assert_eq!(set.project, None, "the CLI derives the project");
     assert_eq!(set.branch, None, "the CLI derives the branch");
     assert_eq!(set.diff, None, "the CLI captures the Diff");

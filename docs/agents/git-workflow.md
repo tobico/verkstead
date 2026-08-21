@@ -100,13 +100,17 @@ What follows from the exception:
 
 ### Notes
 
-- Default branch: `main`, on `origin` (github.com/tobico/askance, **public**
-  since 2026-08-08 — flipped at the start of roadmap stage 03, which cannot be
-  exercised otherwise: release assets on a private repo need auth to download).
+- Default branch: `main`, on `origin` (github.com/tobico/verkstead, **private**
+  — and staying so until Verkstead works, per
+  [the design](../design/verkstead.md#product-decisions)).
 - PRs open as draft. Change "draft" to "ready" here to open ready-for-review.
-- This replaced a direct-merge process on 2026-08-08, at the start of the
-  `ci` stage — commits up to `e35ea47` landed on `main` without a PR, so
-  the history before that point shows merge commits and no PR references.
+- **The history before this repo existed is askance's.** Verkstead is a clone
+  of github.com/tobico/askance taken at `6f32b11`, so everything up to that
+  commit was written under the other name and against the other origin. Two
+  things in it are worth knowing when reading back: this pull-request process
+  replaced a direct-merge one on 2026-08-08, so commits up to `e35ea47` landed
+  on `main` with no PR to find; and the public/private flip recorded around
+  that date was askance's, not this repo's.
 - HTTPS over SSH: SSH to github.com fails on this machine with `Bad owner or
   permissions on …/ssh_config.d/20-systemd-ssh-proxy.conf`, so `origin` is an
   HTTPS URL authenticated by `gh`/`GITHUB_TOKEN`. That token needs the

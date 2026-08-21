@@ -88,7 +88,7 @@ function throughTheWorker(queries: QueryClient): () => void {
   const relayed = (event: MessageEvent) => {
     // Named, because a page is posted to by whatever has its window: anything
     // that does not say it is a Nudge is not treated as one.
-    if ((event.data as { askance?: string } | null)?.askance === RELAYED) {
+    if ((event.data as { verkstead?: string } | null)?.verkstead === RELAYED) {
       lookAgain(queries);
     }
   };

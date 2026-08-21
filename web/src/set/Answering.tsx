@@ -10,8 +10,7 @@
 //! and read back the next time the page is opened. The draft is per device and
 //! never sent anywhere: a phone and a laptop keep their own of the same Set.
 
-import { useNavigate } from "@solidjs/router";
-import { useMutation } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
@@ -103,7 +102,7 @@ export function Answering(props: {
   /// What the sheet says right now, as a Response.
   const response = (): Decided => drafted(sheet.filled, sheet.comment);
 
-  const navigate = useNavigate();
+  const queries = useQueryClient();
 
   const submit = useMutation(() => ({
     mutationFn: (sending: Decided) => submitResponse(props.id, sending),
@@ -120,12 +119,13 @@ export function Answering(props: {
       setSettled(true);
       clearDraft(props.id);
 
-      if (outcome === "Accepted") {
-        // Back to the pending list, where the Set's absence is the confirmation
-        // that the agent has its answer. Nothing is invalidated on the way: the
-        // list fetches as it mounts, and this page is leaving.
-        navigate("/");
-      }
+      // And the sheet stays where it is, read back as the record of what was
+      // decided rather than left behind for a list — there is no list. Which is
+      // why everything is invalidated rather than nothing: this page is not
+      // going anywhere, and the Set it is drawing has just changed. The
+      // Conversation's Timeline goes with it, because the row this Set is on
+      // has changed too, and in the workbench that row is on screen beside it.
+      void queries.invalidateQueries();
     },
   }));
 
