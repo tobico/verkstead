@@ -111,6 +111,38 @@ impl Grilling {
         capture.text
     }
 
+    /// The Transcript of a session, as the store now holds it: every line the
+    /// agent wrote in its own log, in the order it wrote them.
+    ///
+    /// Read from the database rather than over the wire, because nothing shows
+    /// it yet — what the tailer stores is rendered by the task after this one.
+    async fn transcript(&self, event: i64) -> Vec<String> {
+        let pool = open_database(&self.database).await.unwrap();
+
+        verkstead_store::transcript(&pool, event).await.unwrap()
+    }
+
+    /// Read it back until it has that many lines, or give up.
+    async fn transcript_of(&self, event: i64, lines: usize) -> Vec<String> {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let transcript = self.transcript(event).await;
+
+            if transcript.len() >= lines {
+                return transcript;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the session's log was never followed that far. \
+                 The Transcript says: {transcript:?}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     /// A second server over the same database, sandboxes, home and agent, which
     /// is what a restart is: nothing a wrap-up is watching lives in the process
     /// that started it.
@@ -875,6 +907,97 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
         "a log named for the session should land under the grilling Profile's own \
          directory, at {}",
         log.display()
+    );
+}
+
+/// The log a session keeps of its own conversation is followed while the session
+/// runs, and every line of it is kept exactly as it was written.
+///
+/// The stub writes its log where claude writes one, and writes one of its lines
+/// in two halves with a wait in between — which is a poll landing mid-line, and
+/// the thing a tailer that stored whatever was there would get wrong. It is all
+/// read back while the session is still going, because a Transcript that only
+/// turned up once the session was over would be a details pane nobody could
+/// watch.
+#[tokio::test]
+async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
+        printf 'Reading the brief.\n'
+
+        printf '{"type":"assistant","te' >> "$log"
+        sleep 2
+        printf 'xt":"Where does the counter live?"}\n' >> "$log"
+        printf 'Asking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 2).await;
+
+    assert_eq!(
+        transcript,
+        vec![
+            r#"{"type":"user","text":"Rate limiting"}"#.to_owned(),
+            r#"{"type":"assistant","text":"Where does the counter live?"}"#.to_owned(),
+        ],
+        "the log's lines should be kept exactly as the agent wrote them, and a line \
+         caught half-written should wait for the rest of itself"
+    );
+
+    let view = fixture.view().await;
+    let printed = output(&view).expect("the session is on the Timeline");
+
+    assert!(
+        printed.running,
+        "the session is still sitting on its `sleep`, so its Transcript arrived while \
+         it was running"
+    );
+
+    // And the Capture is being written the whole time, which is what a session
+    // that leaves no log has instead.
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    assert!(
+        said.contains("Reading the brief.\n") && said.contains("Asking.\n"),
+        "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// A session that keeps no log of itself leaves no Transcript, and nothing about
+/// that is a fault: it is every stub agent the test suite runs, and every
+/// backend that keeps no such record. What those sessions said is the Capture,
+/// which is a complete record on its own.
+#[tokio::test]
+async fn a_session_that_keeps_no_log_leaves_no_transcript() {
+    let fixture = grilling(r#"printf 'Nothing to say.\n'"#).await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    assert!(
+        fixture.transcript(event).await.is_empty(),
+        "a session that wrote no log should have left no Transcript behind"
+    );
+    assert_eq!(
+        fixture.capture(event).await,
+        "Nothing to say.\r\n",
+        "and what it said should be on the Capture as it always was"
     );
 }
 

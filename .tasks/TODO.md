@@ -22,6 +22,6 @@ Roadmap stage: [01: The Transcript](../docs/roadmaps/session-output/01-transcrip
 
 - [x] 01: Rename the byte capture — [details](01-rename-the-capture.md)
 - [x] 02: Name the session at spawn — [details](02-name-the-session.md)
-- [ ] 03: Tail and store the Transcript — [details](03-tail-the-session-log.md)
+- [x] 03: Tail and store the Transcript — [details](03-tail-the-session-log.md)
 - [ ] 04: Render the conversation — [details](04-render-the-conversation.md)
 - [ ] 05: Switch summaries and evidence — [details](05-summaries-and-evidence.md)

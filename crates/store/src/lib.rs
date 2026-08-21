@@ -33,6 +33,7 @@ mod pull_requests;
 mod push;
 mod repos;
 mod session_names;
+mod transcripts;
 mod waits;
 mod wrap_up;
 
@@ -61,6 +62,7 @@ pub use push::{
 };
 pub use repos::{Repo, register_repo, registered_repos};
 pub use session_names::session_id;
+pub use transcripts::{append_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
@@ -496,6 +498,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // And what Verkstead called each of those sessions, which hangs off the
     // same Event for the same reason.
     session_names::apply_schema(pool).await?;
+
+    // And the record those sessions kept of themselves, which hangs off the
+    // same Event again — one session is one Event, and one Event is one
+    // Transcript.
+    transcripts::apply_schema(pool).await?;
 
     // And what they committed, which hangs off the Timelines for the same
     // reason — and off the Conversations too, which is what makes one commit

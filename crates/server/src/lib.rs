@@ -60,6 +60,7 @@ mod settling;
 pub mod skills;
 mod stages;
 mod tasks;
+mod transcript;
 mod ui;
 mod updates;
 mod viewer;

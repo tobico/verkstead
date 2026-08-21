@@ -42,6 +42,7 @@ use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::skills::Skills;
 use crate::store;
+use crate::transcript::Tail;
 
 /// How much of a session's output to take off the pseudo-terminal at once.
 const CHUNK: usize = 8 * 1024;
@@ -501,6 +502,12 @@ impl Sessions {
 
         let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
 
+        // The log the agent keeps of itself is followed under the name Verkstead
+        // gave the session, inside the directory of the Profile it is running
+        // under. A session with no name has no log to look for — see
+        // [`crate::transcript`].
+        let tail = session.as_deref().map(|session| Tail::of(profile, session));
+
         let (stop, stopping) = oneshot::channel();
 
         // The two halves of what a driver holds a session by: the clock the
@@ -564,7 +571,8 @@ impl Sessions {
                         }
                     };
 
-                    let ended = relay(&pool, &nudges, event_id, &mut child, &quiet, stopping).await;
+                    let ended =
+                        relay(&pool, &nudges, event_id, &mut child, &quiet, tail, stopping).await;
 
                     // The session is over, so the branch is finished moving.
                     // Waited on rather than only asked to stop, because what it
@@ -756,7 +764,14 @@ fn shell_command(argv: &[String]) -> String {
 }
 
 /// Follow a session until it is over, putting what it prints on the Timeline as
-/// it arrives.
+/// it arrives — and, where it keeps a log of its own conversation, following
+/// that too.
+///
+/// The two are followed by the one loop because they move together and on the
+/// same cadence: the loop is awake every [`FLUSH_EVERY`] to write down what the
+/// session printed, and the log it is writing beside that has grown by the same
+/// amount of the session's talking. `tail` is `None` where there is no log to
+/// look for, which is every session Verkstead could not name.
 ///
 /// `quiet` is put back to now on everything read rather than on everything
 /// written down: what it is measuring is whether the session is still talking,
@@ -770,6 +785,7 @@ async fn relay(
     event_id: i64,
     child: &mut Child,
     quiet: &Quiet,
+    mut tail: Option<Tail>,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
     let mut output = match child.stdout.take() {
@@ -798,10 +814,12 @@ async fn relay(
     let mut buffer = vec![0u8; CHUNK];
     let mut pending = String::new();
     let mut flushed = Instant::now();
+    let mut tailed = Instant::now();
     let mut ending = false;
 
     loop {
         let deadline = tokio::time::Instant::from_std(flushed + FLUSH_EVERY);
+        let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
 
         tokio::select! {
             read = output.read(&mut buffer) => match read {
@@ -819,6 +837,13 @@ async fn relay(
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 flush(pool, nudges, event_id, &mut pending, &reading).await;
                 flushed = Instant::now();
+            }
+            _ = tokio::time::sleep_until(following), if tail.is_some() => {
+                if let Some(tail) = tail.as_mut() {
+                    tail.poll(pool, nudges, event_id).await;
+                }
+
+                tailed = Instant::now();
             }
             _ = &mut stopping, if !ending => {
                 ending = true;
@@ -858,6 +883,14 @@ async fn relay(
             Ended::Unknown
         }
     };
+
+    // And the last of the log, after the process that was writing it has been
+    // reaped rather than when its terminal closed: an agent's final lines are
+    // written on its way out, and a poll that stopped at the terminal would
+    // leave a Transcript ending before the session did.
+    if let Some(tail) = tail.as_mut() {
+        tail.poll(pool, nudges, event_id).await;
+    }
 
     if let Some(complaints) = complaints
         && let Ok(said) = complaints.await
