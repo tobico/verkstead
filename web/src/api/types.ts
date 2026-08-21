@@ -317,7 +317,16 @@ direction: Direction | null,
 /**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
-timeline: Array<TimelineEvent>, };
+timeline: Array<TimelineEvent>, 
+/**
+ * The Events that stay in view rather than scrolling past with the record.
+ *
+ * Apart from the Timeline rather than in it, because that is what pinning
+ * *is*: the list is a record of moments, and each of these is the current
+ * state of something the work is against. Empty is the ordinary case — a
+ * Conversation with no backlog has nothing to pin.
+ */
+pinned: Array<PinnedEvent>, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -460,6 +469,17 @@ text_html: string, recommended: boolean,
  * and a block in one of its cells would break the row apart.
  */
 cells: Array<string>, };
+
+/**
+ * An Event the Timeline keeps in view rather than letting scroll past.
+ *
+ * A fixed set — a task list now, a stage list and a PR as the stages that
+ * produce them arrive — and no manual pin or unpin: what is pinned is decided
+ * by what kind of thing it is, so there is no state here to flip and no route
+ * to flip it with. A tagged kind for the reason [`TimelineEvent`] is one: what
+ * gets drawn turns on which kind it is.
+ */
+export type PinnedEvent = { "TaskList": TaskListEvent };
 
 /**
  * Which Profile a Conversation is choosing for one of its two roles.
@@ -758,6 +778,46 @@ export type Subscribed = "Stored" | "Incomplete";
  * something the server has any reason to learn.
  */
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
+
+/**
+ * One task of a backlog: the number it answers to, what it is called, and
+ * whether it is done.
+ */
+export type TaskEntry = { 
+/**
+ * As the list writes it, zero-padding and all — `01`. A Timeline that
+ * renumbered the backlog would be showing its own list rather than the
+ * repository's.
+ */
+number: string, title: string, 
+/**
+ * Whether the task is finished, which is the task file having gone from
+ * `.tasks/`. That is the done-signal the task runner turns on, and a
+ * checkbox is how an entry is written rather than what says it is done.
+ */
+done: boolean, };
+
+/**
+ * The backlog as the Timeline shows it: what the work is called, and every
+ * task against whether it is done.
+ *
+ * No id and no stamp, unlike every Event in the record. It is read out of
+ * `.tasks/` each time the Conversation is — the repository owns the files, and
+ * Verkstead never does — so what it says is what the Worktree holds now rather
+ * than what it held at a moment worth stamping. Nothing opens it either: the
+ * whole of a task list is the list, which is why the design gives it no details
+ * pane.
+ */
+export type TaskListEvent = { 
+/**
+ * What the backlog is called: `TODO.md`'s heading, which is the feature
+ * name the breaking-down session picked. Empty where it wrote none.
+ */
+feature: string, 
+/**
+ * In the order the list has them, which is the order they get worked in.
+ */
+tasks: Array<TaskEntry>, };
 
 /**
  * One entry in a Timeline.

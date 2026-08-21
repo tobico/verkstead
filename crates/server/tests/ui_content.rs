@@ -1451,6 +1451,86 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             .unwrap();
     }
 
+    // And a fifth, whose direction was a task list: the breaking-down session
+    // has written `.tasks/` into its worktree, and Verkstead reads it back as
+    // the pinned Event.
+    //
+    // Its worktree is the one in these fixtures that has to be a real
+    // directory, because a task list is not in the store at all — it is the
+    // Worktree as it stands, read every time the Conversation is. So the
+    // backlog is written into a temporary directory and the path is pinned
+    // afterwards, the way every other filesystem reading here is.
+    let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, tasked, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, tasked, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        tasked,
+        "# One session per task\n\n\
+         The backlog is worked one task at a time, each in a session of its\n\
+         own.\n",
+    )
+    .await
+    .unwrap();
+
+    let worktree = _dir.path().join("worktrees/verkstead-task-runner");
+    let backlog = worktree.join(".tasks");
+    std::fs::create_dir_all(&backlog).unwrap();
+    std::fs::write(
+        backlog.join("TODO.md"),
+        "# Task runner\n\n\
+         Working a backlog one task at a time, unattended.\n\n\
+         ## Tasks\n\n\
+         - [x] 01: Pick the next task — [details](01-next-task.md)\n\
+         - [x] 02: Run it in a session of its own — [details](02-one-session.md)\n\
+         - [ ] 03: Notice when it is finished — [details](03-done-signal.md)\n\
+         - [ ] 04: Move on to the next one — [details](04-advancing.md)\n",
+    )
+    .unwrap();
+    for still_to_do in ["03-done-signal.md", "04-advancing.md"] {
+        std::fs::write(backlog.join(still_to_do), "# a task\n").unwrap();
+    }
+
+    store::start_grilling(
+        &pool,
+        tasked,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        &worktree,
+    )
+    .await
+    .unwrap();
+
+    // Through the states it went through, because that is what a Conversation
+    // with a backlog *is*: a grilling that handed over, a direction the human
+    // chose, and the work being built off it.
+    store::move_to_direction(&pool, tasked).await.unwrap();
+    store::choose_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, tasked).await.unwrap();
+
+    store::record_commit(
+        &pool,
+        tasked,
+        &store::Commit {
+            sha: "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2".to_owned(),
+            subject: "chore: plan the task-runner tasks".to_owned(),
+            files: 5,
+            insertions: 132,
+            deletions: 0,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,
@@ -1472,6 +1552,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{directing}")).await,
         )),
+    );
+
+    write(
+        "conversation-tasks.json",
+        &pin_worktree(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
+            )),
+            "/var/lib/verkstead/worktrees/verkstead-task-runner",
+        ),
     );
 
     // What the details pane fetches when that Conversation's output Event is
@@ -1523,6 +1613,26 @@ fn pin_health(json: &str) -> String {
             }
         }
     }
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin where a Conversation's worktree is, for the one fixture whose worktree
+/// has to be a real directory.
+///
+/// A task list is not in the store at all — it is read out of `.tasks/` every
+/// time the Conversation is — so the payload carrying one is written over a
+/// temporary directory whose name is different on every run. The path is put
+/// back to a stated one here, exactly as [`pin_health`] puts back everything
+/// else the filesystem would otherwise decide.
+fn pin_worktree(json: &str, at: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload["worktree"].get("path").is_some(),
+        "no worktree here to pin:\n{payload}"
+    );
+    payload["worktree"]["path"] = at.into();
 
     serde_json::to_string(&payload).unwrap()
 }

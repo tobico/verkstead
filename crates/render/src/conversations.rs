@@ -118,6 +118,14 @@ pub struct ConversationView {
 
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
+
+    /// The Events that stay in view rather than scrolling past with the record.
+    ///
+    /// Apart from the Timeline rather than in it, because that is what pinning
+    /// *is*: the list is a record of moments, and each of these is the current
+    /// state of something the work is against. Empty is the ordinary case — a
+    /// Conversation with no backlog has nothing to pin.
+    pub pinned: Vec<PinnedEvent>,
 }
 
 /// The grilling's closing proposal as the chooser draws it: which direction was
@@ -222,6 +230,59 @@ pub enum TimelineEvent {
     /// the same arrangement a transcript and a Question Set have, and for the
     /// same reason.
     Commit(CommitEvent),
+}
+
+/// An Event the Timeline keeps in view rather than letting scroll past.
+///
+/// A fixed set — a task list now, a stage list and a PR as the stages that
+/// produce them arrive — and no manual pin or unpin: what is pinned is decided
+/// by what kind of thing it is, so there is no state here to flip and no route
+/// to flip it with. A tagged kind for the reason [`TimelineEvent`] is one: what
+/// gets drawn turns on which kind it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PinnedEvent {
+    /// The backlog the Conversation's Worktree holds, and how far through it the
+    /// work has got.
+    TaskList(TaskListEvent),
+}
+
+/// The backlog as the Timeline shows it: what the work is called, and every
+/// task against whether it is done.
+///
+/// No id and no stamp, unlike every Event in the record. It is read out of
+/// `.tasks/` each time the Conversation is — the repository owns the files, and
+/// Verkstead never does — so what it says is what the Worktree holds now rather
+/// than what it held at a moment worth stamping. Nothing opens it either: the
+/// whole of a task list is the list, which is why the design gives it no details
+/// pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskListEvent {
+    /// What the backlog is called: `TODO.md`'s heading, which is the feature
+    /// name the breaking-down session picked. Empty where it wrote none.
+    pub feature: String,
+
+    /// In the order the list has them, which is the order they get worked in.
+    pub tasks: Vec<TaskEntry>,
+}
+
+/// One task of a backlog: the number it answers to, what it is called, and
+/// whether it is done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskEntry {
+    /// As the list writes it, zero-padding and all — `01`. A Timeline that
+    /// renumbered the backlog would be showing its own list rather than the
+    /// repository's.
+    pub number: String,
+
+    pub title: String,
+
+    /// Whether the task is finished, which is the task file having gone from
+    /// `.tasks/`. That is the done-signal the task runner turns on, and a
+    /// checkbox is how an entry is written rather than what says it is done.
+    pub done: bool,
 }
 
 /// A commit as the Timeline shows it: what it was called, and how much of the
@@ -652,6 +713,13 @@ pub fn commit_diff(patch: &str) -> CommitDiff {
     CommitDiff {
         diff: crate::diff::to_html(patch),
     }
+}
+
+/// A backlog as the Event that gets pinned. Nothing to render — a task is a
+/// number, a title and whether its file is still there — and here beside the
+/// rest for the reason a move is: one place knows how a Timeline is made.
+pub fn task_list_event(feature: String, tasks: Vec<TaskEntry>) -> PinnedEvent {
+    PinnedEvent::TaskList(TaskListEvent { feature, tasks })
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

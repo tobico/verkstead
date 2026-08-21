@@ -767,6 +767,105 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
+/* The pinned events, above the timeline and stuck to the top of what scrolls:
+   the fixed set — a task list, later a stage list and a PR — each of which is
+   the current state of something the work is against rather than a moment in
+   the record. Sticky rather than fixed, because it belongs to the pane it is
+   the top of: a narrow window scrolls the whole page and a wide one scrolls
+   this pane, and sticky is right in both. */
+.pinned {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* The paper behind it, so the record scrolls under it rather than through
+     it — and past the pane's own padding, so nothing shows down either side. */
+  margin: 0 -1rem 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--paper);
+}
+
+/* The backlog: the whole list, because the whole list is short and it is what a
+   conversation being built from one is about. The same card the events are, so
+   it reads as one of them held still rather than as furniture.
+
+   Under `.pinned` rather than on its own, because `task-list` is also the word
+   the directed line carries as its class — the direction is one of three words
+   and that is one of them. Two different things answering to one bare selector
+   would be a rule waiting to land on the wrong element. */
+.pinned .task-list {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.pinned .task-list .event-head {
+  margin-bottom: 0.5rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+/* What the backlog is called, which is the list's own heading rather than
+   anything Verkstead named. */
+.pinned .task-list .feature {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* How far through it the work has got, on the other end of the line from the
+   heading — the one thing about a backlog worth reading before the tasks. */
+.pinned .task-list .progress {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pinned .task-list .tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pinned .task-list .tasks li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* The number the task answers to, as the list writes it. Monospaced so the
+   column reads straight down whatever the numbers are. */
+.pinned .task-list .n {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pinned .task-list .what {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pinned .task-list .state {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* A task that is done is struck through and taken down, the way a checked item
+   reads on any list. */
+.pinned .task-list .tasks li.done .what {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
 /* The timeline: everything that has happened, in order, each event a card of its
    own. */
 .timeline {

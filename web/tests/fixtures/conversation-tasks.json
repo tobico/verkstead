@@ -1,0 +1,115 @@
+{
+  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "branch": "task-runner",
+  "direction": "task-list",
+  "grilling_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/fable/.claude",
+    "config_file": "/srv/accounts/fable/.claude.json",
+    "id": 1,
+    "model": "claude-fable-5",
+    "name": "fable"
+  },
+  "id": 5,
+  "implementation_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/opus/.claude",
+    "config_file": "/srv/accounts/opus/.claude.json",
+    "id": 2,
+    "model": "claude-opus-5",
+    "name": "opus"
+  },
+  "pinned": [
+    {
+      "TaskList": {
+        "feature": "Task runner",
+        "tasks": [
+          {
+            "done": true,
+            "number": "01",
+            "title": "Pick the next task"
+          },
+          {
+            "done": true,
+            "number": "02",
+            "title": "Run it in a session of its own"
+          },
+          {
+            "done": false,
+            "number": "03",
+            "title": "Notice when it is finished"
+          },
+          {
+            "done": false,
+            "number": "04",
+            "title": "Move on to the next one"
+          }
+        ]
+      }
+    }
+  ],
+  "proposal": null,
+  "ready_to_grill": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Implementing",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>One session per task</h1>\n<p>The backlog is worked one task at a time, each in a session of its\nown.</p>\n",
+        "id": 15,
+        "markdown": "# One session per task\n\nThe backlog is worked one task at a time, each in a session of its\nown.\n"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 16,
+        "state": "Grilling"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 17,
+        "state": "Direction"
+      }
+    },
+    {
+      "Directed": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "direction": "task-list",
+        "id": 18
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 19,
+        "state": "Implementing"
+      }
+    },
+    {
+      "Commit": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "deletions": 0,
+        "files": 5,
+        "id": 20,
+        "insertions": 132,
+        "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
+        "subject": "chore: plan the task-runner tasks"
+      }
+    }
+  ],
+  "worktree": {
+    "missing": false,
+    "path": "/var/lib/verkstead/worktrees/verkstead-task-runner"
+  }
+}

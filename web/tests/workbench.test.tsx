@@ -42,6 +42,7 @@ import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
+import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
 
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
@@ -1680,5 +1681,124 @@ describe("a commit on the timeline", () => {
 
     await waitFor(() => expect(row.classList).toContain("selected"));
     expect(row.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+/// The fifth shape the middle pane draws: a conversation being built from a
+/// backlog, with `.tasks/` in its worktree read back as the pinned task list.
+const TASKED = tasks as ConversationView;
+
+/// The list itself, off that payload.
+const BACKLOG = (() => {
+  const pinned = TASKED.pinned[0];
+  if (!pinned || !("TaskList" in pinned)) {
+    throw new Error("the fixture should carry a pinned task list");
+  }
+  return pinned.TaskList;
+})();
+
+/// The workbench with that conversation open.
+function theTasked(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${TASKED.id}`,
+      json({ ...TASKED, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+describe("the pinned task list", () => {
+  it("draws every task of the backlog, in the list's own order", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, ".pinned .task-list");
+
+    expect(BACKLOG.tasks).toHaveLength(4);
+    expect(
+      [...list.querySelectorAll(".tasks li")].map((row) => [
+        row.querySelector(".n")!.textContent,
+        row.querySelector(".what")!.textContent,
+      ]),
+    ).toEqual(BACKLOG.tasks.map((task) => [task.number, task.title]));
+  });
+
+  it("says which tasks are done", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, ".pinned .task-list");
+    const rows = [...list.querySelectorAll(".tasks li")];
+
+    expect(rows.map((row) => row.classList.contains("done"))).toEqual(
+      BACKLOG.tasks.map((task) => task.done),
+    );
+
+    // In words as well as in a class, so a row read aloud says it too.
+    expect(rows.map((row) => row.querySelector(".state")!.textContent)).toEqual(
+      BACKLOG.tasks.map((task) => (task.done ? "done" : "to do")),
+    );
+  });
+
+  it("says what the backlog is and how far through it the work is", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const head = await drawn(container, ".pinned .task-list .event-head");
+
+    expect(head.textContent).toContain("Task list");
+    expect(head.querySelector(".feature")!.textContent).toBe(BACKLOG.feature);
+    expect(head.querySelector(".progress")!.textContent).toBe("2 of 4 done");
+  });
+
+  /// Pinned is a thing an event *is*, decided by its kind: it is drawn outside
+  /// the record, so it does not scroll away with it.
+  it("is drawn above the record rather than in it", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+
+    expect(pinned.closest(".timeline")).toBeNull();
+    expect(container.querySelector(".timeline .tasks")).toBeNull();
+  });
+
+  /// Nothing pins or unpins one: the set is fixed, so there is no control for
+  /// it and no details pane to open — the whole of a task list is the list.
+  it("asks the human for nothing", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, ".pinned .task-list");
+
+    expect(list.querySelectorAll("button")).toHaveLength(0);
+    expect(list.textContent).not.toContain("Pin");
+  });
+
+  /// What `position: sticky` means is the stylesheet's, and jsdom lays nothing
+  /// out — so the rule itself is what is read, as the panes' own is.
+  it("stays in view while the record scrolls past it", () => {
+    expect(stylesheet).toContain(".pinned {\n  position: sticky;\n  top: 0;");
+  });
+
+  it("draws nothing at all where the worktree holds no backlog", async () => {
+    // Every other fixture here is a conversation with no `.tasks/`, which is
+    // the ordinary case: the server pins nothing and there is nothing to draw.
+    expect(OPEN.pinned).toEqual([]);
+
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".pinned")).toBeNull();
+    expect(container.querySelector(".task-list")).toBeNull();
   });
 });

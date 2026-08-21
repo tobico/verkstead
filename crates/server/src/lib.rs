@@ -43,6 +43,7 @@ mod sets;
 /// runs on rather than an implementation detail of an endpoint, and standing a
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
+mod tasks;
 mod transcript;
 mod ui;
 mod updates;

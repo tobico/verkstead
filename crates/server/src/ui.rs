@@ -409,6 +409,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // What the worktree holds that is not a moment in the record: the backlog,
+    // as `.tasks/` stands right now. Read off the filesystem for the reason the
+    // worktree's own missing-ness is — the repository owns those files, and a
+    // row remembering what they said would be one more thing to be wrong.
+    let pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
+
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
     let worktree = match crate::conversations::worktree(conversation.worktree).await {
@@ -485,6 +491,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         worktree,
         proposal,
         direction: conversation.direction,
+        pinned,
         timeline: timeline
             .into_iter()
             .map(|event| match event.event {

@@ -3,8 +3,13 @@
 //! The kinds of Event so far — the Brief, a move, what a session printed, a
 //! Question Set, the direction the human chose, the handoff, and the commits a
 //! session lands on the branch — drawn as a list of Events rather than as a
-//! Brief with a list under it. The stages after this one put task lists, PRs
-//! and interruptions on the same list.
+//! Brief with a list under it. The stages after this one put interruptions on
+//! the same list.
+//!
+//! Above the list are the pinned Events, which are a fixed set — the backlog
+//! now, the stage list and the PR as those stages arrive. They are not on the
+//! record and do not scroll with it: each is the current state of something the
+//! work is against rather than a moment in it.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. The Brief has
@@ -48,6 +53,7 @@ import type {
   Lifecycle,
   MovedEvent,
   QuestionSetEvent,
+  TaskListEvent,
 } from "../api/types";
 
 /// How much of a commit's hash the timeline shows.
@@ -154,6 +160,8 @@ export function Timeline(props: {
         </button>
       </div>
 
+      <Pinned conversation={props.conversation} />
+
       <ol class="timeline">
         <For each={props.conversation.timeline}>
           {(event) => (
@@ -223,6 +231,78 @@ export function Timeline(props: {
       <StartGrilling conversation={props.conversation} />
       <DirectionChooser conversation={props.conversation} />
     </>
+  );
+}
+
+/// The pinned events: what stays in view rather than scrolling past with the
+/// record.
+///
+/// Above the list rather than in it, and held at the top of the pane by the
+/// stylesheet. The rest of the timeline is a record of moments and reads in
+/// order; each of these is the current state of something the work is against,
+/// and is worth having on screen whichever part of the record is being read.
+///
+/// Nothing here can be pressed. Pinning is the fixed set — a task list, and the
+/// stage list and the PR as those stages arrive — so there is nothing to pin,
+/// nothing to unpin, and no control for either.
+function Pinned(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <Show when={props.conversation.pinned.length > 0}>
+      <div class="pinned">
+        <For each={props.conversation.pinned}>
+          {(event) => (
+            <Switch>
+              <Match when={"TaskList" in event && event.TaskList}>
+                {(tasks) => <TaskList tasks={tasks()} />}
+              </Match>
+            </Switch>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+/// The backlog: every task of it, and how far through it the work has got.
+///
+/// The whole list rather than a summary, because the whole list is short and it
+/// is the one thing a conversation being built from a backlog is *about*. There
+/// is nothing to open: the design gives a task list no details pane, since what
+/// a details pane would show is what is already drawn here.
+///
+/// Read out of `.tasks/` in the worktree every time the page reads the
+/// conversation, so a task finishing moves this without anybody pressing
+/// anything.
+function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
+  const done = () => props.tasks.tasks.filter((task) => task.done).length;
+
+  return (
+    <article class="task-list">
+      <div class="event-head">
+        <h2>Task list</h2>
+        <Show when={props.tasks.feature !== ""}>
+          <span class="feature">{props.tasks.feature}</span>
+        </Show>
+        <span class="progress">
+          {done()} of {props.tasks.tasks.length} done
+        </span>
+      </div>
+
+      <ol class="tasks">
+        <For each={props.tasks.tasks}>
+          {(task) => (
+            <li classList={{ done: task.done }}>
+              <span class="n">{task.number}</span>
+              <span class="what">{task.title}</span>
+              {/* The word travels with the row rather than being drawn by the
+                  stylesheet, so a list read aloud or copied out still says
+                  which tasks are finished. */}
+              <span class="state">{task.done ? "done" : "to do"}</span>
+            </li>
+          )}
+        </For>
+      </ol>
+    </article>
   );
 }
 

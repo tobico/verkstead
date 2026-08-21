@@ -21,8 +21,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
-    ConversationView, DirectionChosen, GrillingStarted, Lifecycle, ProfileSaved, Registered,
-    Started, TimelineEvent,
+    ConversationView, DirectionChosen, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
+    Registered, Started, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -1568,4 +1568,120 @@ async fn a_proposal_naming_an_option_the_set_does_not_offer_is_refused_as_it_arr
         refusal.contains("Q9"),
         "the refusal should name the question at fault, got: {refusal}"
     );
+}
+
+/// The backlog a session wrote into the worktree, as the breaking-down skill
+/// writes one: the list, and a task file per task still to do.
+fn plan(worktree: &Path, list: &str, files: &[&str]) {
+    let tasks = worktree.join(".tasks");
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(tasks.join("TODO.md"), list).unwrap();
+
+    for file in files {
+        std::fs::write(tasks.join(file), "# a task\n\n## What to build\n").unwrap();
+    }
+}
+
+const BACKLOG: &str = "\
+# Rate limiting
+
+Where the counter lives and what a refused request is told.
+
+## Tasks
+
+- [x] 01: The counter — [details](01-counter.md)
+- [ ] 02: What a refused request is told — [details](02-refusal.md)
+";
+
+/// The task list a view is carrying, of whatever is pinned to it.
+fn pinned(view: &ConversationView) -> Option<&verkstead_render::TaskListEvent> {
+    view.pinned
+        .iter()
+        .map(|event| match event {
+            PinnedEvent::TaskList(list) => list,
+        })
+        .next()
+}
+
+/// A Conversation whose worktree holds a backlog shows it, and shows it pinned
+/// rather than as one more thing on the record.
+#[tokio::test]
+async fn a_backlog_in_the_worktree_is_pinned_to_the_timeline() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &["02-refusal.md"]);
+
+    let view = opened(&app, id).await;
+    let list = pinned(&view).expect("the worktree has a backlog");
+
+    assert_eq!(list.feature, "Rate limiting");
+    assert_eq!(
+        list.tasks
+            .iter()
+            .map(|task| (task.number.as_str(), task.title.as_str(), task.done))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "The counter", true),
+            ("02", "What a refused request is told", false),
+        ]
+    );
+
+    // Pinned, which is a thing it is rather than a place it is drawn: nothing on
+    // the Timeline itself is the backlog.
+    assert!(
+        !view
+            .timeline
+            .iter()
+            .any(|event| format!("{event:?}").contains("Rate limiting\"")),
+        "the backlog belongs to the pinned set, not to the record"
+    );
+}
+
+/// What makes it worth pinning: it is the worktree as it stands, so finishing a
+/// task moves it without anything being written down.
+#[tokio::test]
+async fn the_task_list_follows_the_worktree_as_it_changes() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &["02-refusal.md"]);
+
+    assert!(!pinned(&opened(&app, id).await).unwrap().tasks[1].done);
+
+    // What a session finishing a task does: the file goes, and the entry is
+    // ticked off in the same commit.
+    std::fs::remove_file(worktree.join(".tasks/02-refusal.md")).unwrap();
+    std::fs::write(
+        worktree.join(".tasks/TODO.md"),
+        BACKLOG.replace("- [ ] 02", "- [x] 02"),
+    )
+    .unwrap();
+
+    assert!(pinned(&opened(&app, id).await).unwrap().tasks[1].done);
+
+    // And the whole backlog going — which is what finishing a feature does —
+    // leaves nothing pinned at all.
+    std::fs::remove_dir_all(worktree.join(".tasks")).unwrap();
+
+    assert!(opened(&app, id).await.pinned.is_empty());
+}
+
+/// The ordinary case, and the one every Conversation starts in.
+#[tokio::test]
+async fn a_conversation_with_no_backlog_has_nothing_pinned() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Before there is a worktree at all, and after there is one with nothing in
+    // it: both are a Conversation with no backlog.
+    assert!(opened(&app, id).await.pinned.is_empty());
+
+    grill(&app, id).await;
+
+    assert!(opened(&app, id).await.pinned.is_empty());
 }
