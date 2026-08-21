@@ -28,6 +28,7 @@ import type {
   CommitEvent,
   ConversationView,
   InterruptionEvent,
+  PullRequestEvent,
   QuestionSetEvent,
 } from "../api/types";
 import { Asked } from "./Asked";
@@ -36,6 +37,7 @@ import { Conversations } from "./Conversations";
 import { Details } from "./Details";
 import { Evidence } from "./Interruption";
 import { Output } from "./Output";
+import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
 
 /// How often the open page reads its Conversation again, in milliseconds.
@@ -54,20 +56,29 @@ type Opened =
   | { output: AgentOutputEvent }
   | { asked: QuestionSetEvent }
   | { commit: CommitEvent }
-  | { stopped: InterruptionEvent };
+  | { stopped: InterruptionEvent }
+  | { opened: PullRequestEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
 function which(
   open: Opened,
-): AgentOutputEvent | QuestionSetEvent | CommitEvent | InterruptionEvent {
+):
+  | AgentOutputEvent
+  | QuestionSetEvent
+  | CommitEvent
+  | InterruptionEvent
+  | PullRequestEvent {
   if ("output" in open) {
     return open.output;
   }
   if ("asked" in open) {
     return open.asked;
   }
-  return "commit" in open ? open.commit : open.stopped;
+  if ("commit" in open) {
+    return open.commit;
+  }
+  return "stopped" in open ? open.stopped : open.opened;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
@@ -86,6 +97,10 @@ function commitIn(open: Opened): CommitEvent | undefined {
 
 function stoppedIn(open: Opened): InterruptionEvent | undefined {
   return "stopped" in open ? open.stopped : undefined;
+}
+
+function pullRequestIn(open: Opened): PullRequestEvent | undefined {
+  return "opened" in open ? open.opened : undefined;
 }
 
 export function Workbench(): JSX.Element {
@@ -120,16 +135,21 @@ export function Workbench(): JSX.Element {
   /// self to show. An id whose Event has gone shows the Conversation instead,
   /// which is what the pane says when nothing is open.
   ///
-  /// Four kinds have one: a session's output, whose full self is its
+  /// Five kinds have one: a session's output, whose full self is its
   /// transcript; a Question Set, whose full self is the document it was asked
-  /// as; a commit, whose full self is its diff; and an interruption, whose full
-  /// self is the evidence it was raised with. The kind travels with it, because
-  /// it is what decides which pane is drawn.
+  /// as; a commit, whose full self is its diff; an interruption, whose full
+  /// self is the evidence it was raised with; and the pull request, whose full
+  /// self is what is on it at GitHub right now. The kind travels with it,
+  /// because it is what decides which pane is drawn.
+  ///
+  /// The pull request is looked for among the pinned events rather than in the
+  /// timeline, because that is where it is drawn: it is the one event that
+  /// stays in view rather than scrolling past, and it opens all the same.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = event();
 
-    return conversation.timeline
-      .map((entry): Opened | undefined => {
+    return [
+      ...conversation.timeline.map((entry): Opened | undefined => {
         if ("AgentOutput" in entry) {
           return { output: entry.AgentOutput };
         }
@@ -143,8 +163,11 @@ export function Workbench(): JSX.Element {
           return { stopped: entry.Interruption };
         }
         return undefined;
-      })
-      .find((open) => open !== undefined && which(open).id === id);
+      }),
+      ...conversation.pinned.map((pinned): Opened | undefined =>
+        "PullRequest" in pinned ? { opened: pinned.PullRequest } : undefined,
+      ),
+    ].find((open) => open !== undefined && which(open).id === id);
   };
 
   const conversation = useQuery(() => ({
@@ -251,6 +274,16 @@ export function Workbench(): JSX.Element {
                     {(stopped) => (
                       <Evidence
                         stopped={stopped()}
+                        back={() => setPane("timeline")}
+                        close={() => setEvent(null)}
+                      />
+                    )}
+                  </Match>
+                  <Match when={pullRequestIn(open())}>
+                    {(opened) => (
+                      <PullRequest
+                        conversation={conversation()}
+                        opened={opened()}
                         back={() => setPane("timeline")}
                         close={() => setEvent(null)}
                       />

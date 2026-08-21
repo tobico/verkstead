@@ -52,6 +52,7 @@ import type {
   HandoffEvent,
   Lifecycle,
   MovedEvent,
+  PullRequestEvent,
   QuestionSetEvent,
   TaskListEvent,
 } from "../api/types";
@@ -180,7 +181,12 @@ export function Timeline(props: {
         </button>
       </div>
 
-      <Pinned conversation={props.conversation} />
+      <Pinned
+        conversation={props.conversation}
+        selected={props.selected}
+        select={props.select}
+        details={props.details}
+      />
 
       <ol class="timeline">
         <For each={props.conversation.timeline}>
@@ -275,10 +281,19 @@ export function Timeline(props: {
 /// order; each of these is the current state of something the work is against,
 /// and is worth having on screen whichever part of the record is being read.
 ///
-/// Nothing here can be pressed. Pinning is the fixed set — a task list, and the
-/// stage list and the PR as those stages arrive — so there is nothing to pin,
-/// nothing to unpin, and no control for either.
-function Pinned(props: { conversation: ConversationView }): JSX.Element {
+/// Pinning is the fixed set — a task list and the pull request, with the stage
+/// list as that stage arrives — so there is nothing to pin, nothing to unpin,
+/// and no control for either.
+///
+/// One of them opens: a pull request has a full self, which is what is on it
+/// right now. A task list does not — what a details pane would show of one is
+/// what is already drawn here.
+function Pinned(props: {
+  conversation: ConversationView;
+  selected: number | null;
+  select: (event: number) => void;
+  details: () => void;
+}): JSX.Element {
   return (
     <Show when={props.conversation.pinned.length > 0}>
       <div class="pinned">
@@ -288,11 +303,51 @@ function Pinned(props: { conversation: ConversationView }): JSX.Element {
               <Match when={"TaskList" in event && event.TaskList}>
                 {(tasks) => <TaskList tasks={tasks()} />}
               </Match>
+              <Match when={"PullRequest" in event && event.PullRequest}>
+                {(opened) => (
+                  <PullRequest
+                    opened={opened()}
+                    selected={props.selected === opened().id}
+                    open={() => {
+                      props.select(opened().id);
+                      props.details();
+                    }}
+                  />
+                )}
+              </Match>
             </Switch>
           )}
         </For>
       </div>
     </Show>
+  );
+}
+
+/// The pull request the finish step opened: what it is called, and its number.
+///
+/// A button, because what is *on* it — the commits and the comments — is in the
+/// details pane, fetched from GitHub when this is opened. The link out is a link
+/// rather than part of the button: merging is the human's act and it happens
+/// over there, so getting there must not depend on this page's own panes.
+function PullRequest(props: {
+  opened: PullRequestEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <article class="pull-request" classList={{ selected: props.selected }}>
+      <div class="event-head">
+        <h2>Pull request</h2>
+        <span class="number">#{props.opened.number}</span>
+        <a class="out" href={props.opened.url} target="_blank" rel="noreferrer">
+          On GitHub
+        </a>
+      </div>
+
+      <button type="button" class="open-pull-request" onClick={props.open}>
+        {props.opened.title}
+      </button>
+    </article>
   );
 }
 

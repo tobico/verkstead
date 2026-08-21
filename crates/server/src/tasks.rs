@@ -228,6 +228,7 @@ Takes a Conversation from finished grilling to implemented work.
     fn list(dir: &tempfile::TempDir) -> verkstead_render::TaskListEvent {
         match backlog(dir.path()).expect("there is a backlog to read") {
             PinnedEvent::TaskList(list) => list,
+            pinned => panic!("a backlog is a task list, not {pinned:?}"),
         }
     }
 

@@ -231,7 +231,16 @@ in
       # it is the server that spawns one — the CLI half of the same binary has
       # no use for it, and there are systems the package builds for that have no
       # bwrap to offer.
-      path = [ pkgs.bubblewrap ];
+      #
+      # `gh` is how Verkstead reaches GitHub itself: the pull request a finish
+      # step opened, and what is on it. It runs as whoever the service's home is
+      # logged in as — there is no token here and no GitHub App — so a unit whose
+      # home has never run `gh auth login` will say so on the Timeline rather
+      # than move a Conversation into Wrapping.
+      path = [
+        pkgs.bubblewrap
+        pkgs.gh
+      ];
 
       serviceConfig = {
         # The flags rather than the environment variables behind them: what the

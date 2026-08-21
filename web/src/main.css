@@ -879,6 +879,158 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
+/* The pull request: the same card as the backlog above it, because it is the
+   same kind of thing — the current state of something the work is against. */
+.pinned .pull-request {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.pinned .pull-request.selected {
+  border-color: var(--accent);
+}
+
+.pinned .pull-request .event-head {
+  margin-bottom: 0.4rem;
+  justify-content: flex-start;
+  gap: 0.6rem;
+}
+
+/* What everybody calls it by, beside the heading rather than in the title:
+   `#41` is the name of the pull request and the title is the name of the work. */
+.pinned .pull-request .number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The way out to GitHub, on the other end of the line: merging happens over
+   there, and getting there must not depend on any pane of this page. */
+.pinned .pull-request .out {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+/* And what opens the pane: the title, pressed. A button drawn as the line of
+   text it is, because what is being pressed is the pull request itself. */
+.open-pull-request {
+  display: block;
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The pull request, opened: what it is and where, above the two lists fetched
+   from GitHub — so a pane walked into on a phone still says which PR this is. */
+.pull-request-summary {
+  margin: 0 0 1rem;
+}
+
+.pull-request-summary .title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pull-request-summary .where {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pull-request-summary .number {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* The commit list and the comments, each a section of the pane. Both are a
+   reading of GitHub as it stands rather than anything Verkstead wrote down. */
+.pr-commits,
+.pr-comments {
+  margin-bottom: 1.5rem;
+}
+
+.pr-commits h2,
+.pr-comments h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.pr-commits .commits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.pr-commits .commits li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+}
+
+.pr-commits .sha {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pr-commits .subject {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pr-comments .comments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.pr-comments .comments li {
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* Who said it and when, over what they said — the header a comment is read by
+   anywhere else it is drawn. */
+.pr-comments .said-by {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.pr-comments .author {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* A comment is prose from the public internet, and reads at the measure like
+   every other block of it. */
+.pr-comments .markdown {
+  max-width: var(--measure);
+}
+
 /* The timeline: everything that has happened, in order, each event a card of its
    own. */
 .timeline {

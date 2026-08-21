@@ -79,9 +79,39 @@ Take the list away and commit that:
     git add -A
     git commit -m "chore: finish <feature-name>"
 
-The feature name is `TODO.md`'s own heading. **Do not push and do not open a
-pull request** — getting the branch reviewed is a step of its own that Verkstead
-runs after this one. Then stop.
+The feature name is `TODO.md`'s own heading.
+
+### Then get the branch reviewed, the way this repository does it
+
+Read the repository's `docs/agents/git-workflow.md` — its `## Review process`,
+and the `### Finish sequence` inside it — and follow that sequence step by step.
+It is the repository's process rather than Verkstead's, so what is written there
+is what to do, whatever another project's habits would suggest.
+
+Two shapes, and which one this is, is a fact about the branch rather than a
+choice:
+
+- an **unstacked** branch — the ordinary case — is pushed, and then opened as a
+  **draft** pull request titled for the feature, with a summary of the completed
+  tasks as its body;
+- a **stacked** branch, one made with `gh stack init` / `gh stack add`, goes
+  through `gh stack submit --auto` instead, after which this branch's own pull
+  request has its title and body corrected. Leave the stack's other pull
+  requests alone: they belong to finished work.
+
+Work out which of the two this branch is before running either, and follow what
+the repository's own sequence says about it — `gh stack view` naming this branch
+is what says it is in a stack, and an error or a stack without it says it is not. A repository whose file says
+nothing about finishing, or has no such file: push the branch and open a draft
+pull request titled for the feature —
+
+    git push -u origin HEAD
+    gh pr create --draft --title '<feature name>' --body '<the tasks this delivered>'
+
+**Nothing waits on approval here either.** No gate, no confirmation and nobody
+at this terminal: the pull request opens unasked, and it opens as a *draft*
+because merging is the human's act and nothing here is allowed to look like it
+was theirs. Then stop.
 
 ## When you need the human
 

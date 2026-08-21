@@ -200,6 +200,20 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         store::Step::Planning => (Step::Planning, Prompt::BreakingDown),
         store::Step::Task | store::Step::Finish => match decide(&working_in).await {
             Step::Nothing => {
+                // Nothing left to work, which for a retried finish is the
+                // ordinary case rather than a dead end: the finish commit landed
+                // and what failed was finding the pull request it opened. So the
+                // retry is that question asked again — of a `gh` that has since
+                // been logged in, or of a PR the human opened by hand.
+                if step == store::Step::Finish {
+                    tracing::info!(
+                        conversation_id,
+                        "the backlog is finished, so the retry looks for the pull request again"
+                    );
+
+                    return crate::wrapping::opened(&state, conversation_id, None).await;
+                }
+
                 tracing::info!(
                     conversation_id,
                     "the backlog the retried step belonged to has gone, so nothing was launched"
@@ -232,11 +246,24 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 /// `first` is the step the session it is handed is running, decided before that
 /// session was started — see [`retry`] for why that ordering is the whole of it.
 async fn work(state: AppState, conversation_id: i64, first: Step, session: Session) {
-    if !see_out(&state, conversation_id, first, session).await {
-        return;
-    }
+    let mut ran = first;
+    let mut session = session;
 
     loop {
+        let Some(writing) = see_out(&state, conversation_id, ran.clone(), session).await else {
+            return;
+        };
+
+        // The finish step is the last one a backlog has, and landing it is not
+        // the end of the run: what the finish did was push and open a pull
+        // request, and the Conversation moves on to wrapping that up. Asked here
+        // rather than after the loop, because this is the one place that knows
+        // *which* step just landed.
+        if ran == Step::Finish {
+            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+            return;
+        }
+
         let Some(worktree) = worktree(&state, conversation_id).await else {
             return;
         };
@@ -262,13 +289,12 @@ async fn work(state: AppState, conversation_id: i64, first: Step, session: Sessi
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(session) = launch(&state, conversation_id, Prompt::NextTask, "").await else {
+        let Some(started) = launch(&state, conversation_id, Prompt::NextTask, "").await else {
             return;
         };
 
-        if !see_out(&state, conversation_id, step, session).await {
-            return;
-        }
+        ran = step;
+        session = started;
     }
 }
 
@@ -407,21 +433,29 @@ async fn stop(
 /// See one step's session out: end it once the step has landed and the session
 /// has gone quiet, and say whether the step landed at all.
 ///
-/// `false` is a session that is over with its step not done. That is a crash, a
+/// `None` is a session that is over with its step not done. That is a crash, a
 /// hang given up on, or an agent that stopped short — which of them is not
 /// something to guess at here, and none of them is a reason to launch the same
 /// step again on its own. The run stops at an Interruption, and it is the human
 /// who decides whether the step gets another run.
-async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session: Session) -> bool {
+///
+/// `Some` is the Timeline Event the session printed into. The step landed, and
+/// what comes after it may still want the session's own last words — the finish
+/// step's does, because an Interruption raised about what the finish left behind
+/// is answered from them.
+async fn see_out(
+    state: &AppState,
+    conversation_id: i64,
+    step: Step,
+    mut session: Session,
+) -> Option<i64> {
     let event_id = session.event_id;
 
     let (Some(landing), Some(stored)) = (step.landing(), step.stored()) else {
-        return false;
+        return None;
     };
 
-    let Some(worktree) = worktree(state, conversation_id).await else {
-        return false;
-    };
+    let worktree = worktree(state, conversation_id).await?;
 
     // Taken before the session is waited on: the two are asked about together
     // below, and the clock is shared with the relay rather than owned by the
@@ -443,7 +477,7 @@ async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session
         );
 
         state.sessions.end(conversation_id).await;
-        return true;
+        return Some(event_id);
     };
 
     // The session is over. It may have landed its step as its last act and
@@ -454,7 +488,7 @@ async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session
     // work and then fell over on its way out has not left the human anything to
     // decide about.
     if check(&worktree, &landing).await {
-        return true;
+        return Some(event_id);
     }
 
     // Verkstead ended it, which here means the human aborted the Conversation
@@ -468,7 +502,7 @@ async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session
             step = ?step,
             "the run was stopped from outside, so the backlog stops here without asking",
         );
-        return false;
+        return None;
     }
 
     tracing::warn!(
@@ -487,7 +521,7 @@ async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session
 
     stop(state, conversation_id, stored, &step.what(), &how, event_id).await;
 
-    false
+    None
 }
 
 /// Wait until `landing` has landed *and* the session has been quiet for the

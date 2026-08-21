@@ -448,20 +448,47 @@ mod tests {
     }
 
     /// The finish step is the other half of what the fork decides, and the
-    /// runner watches it the same way: `TODO.md` gone and committed. What it
-    /// must *not* do is the part the wrap-up stage runs.
+    /// runner watches it the same way: `TODO.md` gone and committed.
     #[test]
-    fn the_next_task_fork_finishes_the_feature_without_opening_anything() {
+    fn the_next_task_fork_finishes_the_feature_by_taking_the_list_away() {
         let next_task = skill("next-task/SKILL.md");
 
         assert!(
             next_task.contains("git rm .tasks/TODO.md"),
             "taking the list away is what says the feature is finished: {next_task}"
         );
+    }
+
+    /// And it carries the branch the rest of the way: pushed, and opened as a
+    /// draft pull request. How is the target repository's own business, so what
+    /// the fork carries is the instruction to read and follow its process —
+    /// naming both shapes, because which one applies is a fact about the branch.
+    #[test]
+    fn the_next_task_fork_opens_the_pull_request_the_repositorys_own_way() {
+        let next_task = skill("next-task/SKILL.md");
+
         assert!(
-            next_task.contains("Do not push") && next_task.contains("pull request"),
-            "pushing and opening the PR is a step of its own that Verkstead runs after this \
-             one: {next_task}"
+            next_task.contains("docs/agents/git-workflow.md")
+                && next_task.contains("Finish sequence"),
+            "the process is the repository's, read out of the file that records it: {next_task}"
+        );
+        assert!(
+            next_task.contains("gh stack submit --auto"),
+            "a stacked branch is submitted as a stack: {next_task}"
+        );
+        assert!(
+            next_task.contains("gh pr create --draft"),
+            "and an unstacked one opens a draft PR of its own: {next_task}"
+        );
+        assert!(
+            !next_task.contains("Do not push"),
+            "nothing holds the branch back any more — the finish carries it to a PR: \
+             {next_task}"
+        );
+        assert!(
+            next_task.contains("Nothing waits on approval here either"),
+            "and there is no gate in front of that either, as there is in front of none: \
+             {next_task}"
         );
     }
 

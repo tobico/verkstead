@@ -64,6 +64,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/commit/{event}",
             get(commit_diff),
         )
+        // And what is on the pull request the finish step opened, fetched by the
+        // pane that shows it — see [`pull_request`]. Fetched rather than
+        // remembered, and the reason is stronger here than for either of the two
+        // above: reading it is asking GitHub over the network.
+        .route(
+            "/api/ui/conversations/{id}/pull-request/{event}",
+            get(pull_request),
+        )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_commit))
@@ -423,7 +431,25 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // as `.tasks/` stands right now. Read off the filesystem for the reason the
     // worktree's own missing-ness is — the repository owns those files, and a
     // row remembering what they said would be one more thing to be wrong.
-    let pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
+    let mut pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
+
+    // And the pull request the work ended up on, which is pinned beside it. This
+    // one *is* on the record — it is what moved the Conversation into Wrapping —
+    // so it is read off the Timeline for the reason the Brief is: it is already
+    // here. What is not read here is what the PR holds, which is a request of its
+    // own; see [`pull_request`].
+    pinned.extend(timeline.iter().rev().find_map(|event| match &event.event {
+        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+            event.id,
+            event.at.clone(),
+            verkstead_render::PullRequestSummary {
+                number: opened.number,
+                title: opened.title.clone(),
+                url: opened.url.clone(),
+            },
+        )),
+        _ => None,
+    }));
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
@@ -517,74 +543,90 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         blocked_on,
         timeline: timeline
             .into_iter()
-            .map(|event| match event.event {
-                // Rendered on the way out where there is markdown to render —
-                // see [`verkstead_render`]. A move has none: it is one state.
-                store::Event::Brief(markdown) => {
-                    verkstead_render::brief_event(event.id, event.at, markdown)
-                }
-                store::Event::Moved(state) => {
-                    verkstead_render::moved_event(event.id, event.at, lifecycle(state))
-                }
-                // The summary and not the transcript: a Timeline is read every
-                // time an open page hears the world moved, and a session's
-                // output is megabytes the middle pane never shows.
-                store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
-                    event.id,
-                    event.at,
-                    summary.lines,
-                    summary.latest,
-                    writing == Some(event.id),
-                ),
-                // The table of what was asked against what was decided, and no
-                // more: the whole document is what the details pane fetches,
-                // from the endpoint one Set has always been read through.
-                //
-                // The Event's own stamp is what the Liveness verdict is aged
-                // against. It is the Set's creation time — both are written in
-                // the one transaction that puts a Set on a Timeline.
-                store::Event::QuestionSet(asked) => {
-                    let standing = standing(&state, asked.set_id, asked.settlement, &event.at, now);
-
-                    verkstead_render::question_set_event(
+            // `filter_map` rather than `map`, for the one Event that is on the
+            // record and not in the list: the pull request is drawn pinned above
+            // the Timeline — see `pinned` above — and what says on the record
+            // that it arrived is the move into Wrapping right beside it.
+            .filter_map(|event| {
+                Some(match event.event {
+                    // Rendered on the way out where there is markdown to render —
+                    // see [`verkstead_render`]. A move has none: it is one state.
+                    store::Event::Brief(markdown) => {
+                        verkstead_render::brief_event(event.id, event.at, markdown)
+                    }
+                    store::Event::Moved(state) => {
+                        verkstead_render::moved_event(event.id, event.at, lifecycle(state))
+                    }
+                    // The summary and not the transcript: a Timeline is read every
+                    // time an open page hears the world moved, and a session's
+                    // output is megabytes the middle pane never shows.
+                    store::Event::AgentOutput(summary) => verkstead_render::agent_output_event(
                         event.id,
                         event.at,
-                        asked.set_id,
-                        &asked.set,
-                        standing,
-                    )
-                }
-                // One of three words, like a move — and drawn as a line for the
-                // same reason.
-                store::Event::Directed(direction) => {
-                    verkstead_render::directed_event(event.id, event.at, direction)
-                }
-                // Rendered like the Brief, and inline like it: a document to
-                // read, with nothing of it a details pane would add.
-                store::Event::Handoff(markdown) => {
-                    verkstead_render::handoff_event(event.id, event.at, &markdown)
-                }
-                // The counts and the subject, and not the diff: the diff is in
-                // the repository, and what fetches it is the pane that shows it.
-                store::Event::Commit(commit) => verkstead_render::commit_event(
-                    event.id,
-                    event.at,
-                    verkstead_render::CommitSummary {
-                        sha: commit.sha,
-                        subject: commit.subject,
-                        files: commit.files,
-                        insertions: commit.insertions,
-                        deletions: commit.deletions,
-                    },
-                ),
-                // Whole, evidence and all, unlike the three above it. The
-                // evidence was bounded when it was gathered — see the server's
-                // `interruptions` module — and the remedies are chosen against
-                // it, so a page that had to fetch it separately could draw the
-                // buttons before it could say what they were for.
-                store::Event::Interruption(interruption) => {
-                    verkstead_render::interruption_event(event.id, event.at, stopped(*interruption))
-                }
+                        summary.lines,
+                        summary.latest,
+                        writing == Some(event.id),
+                    ),
+                    // The table of what was asked against what was decided, and no
+                    // more: the whole document is what the details pane fetches,
+                    // from the endpoint one Set has always been read through.
+                    //
+                    // The Event's own stamp is what the Liveness verdict is aged
+                    // against. It is the Set's creation time — both are written in
+                    // the one transaction that puts a Set on a Timeline.
+                    store::Event::QuestionSet(asked) => {
+                        let standing =
+                            standing(&state, asked.set_id, asked.settlement, &event.at, now);
+
+                        verkstead_render::question_set_event(
+                            event.id,
+                            event.at,
+                            asked.set_id,
+                            &asked.set,
+                            standing,
+                        )
+                    }
+                    // One of three words, like a move — and drawn as a line for the
+                    // same reason.
+                    store::Event::Directed(direction) => {
+                        verkstead_render::directed_event(event.id, event.at, direction)
+                    }
+                    // Rendered like the Brief, and inline like it: a document to
+                    // read, with nothing of it a details pane would add.
+                    store::Event::Handoff(markdown) => {
+                        verkstead_render::handoff_event(event.id, event.at, &markdown)
+                    }
+                    // The counts and the subject, and not the diff: the diff is in
+                    // the repository, and what fetches it is the pane that shows it.
+                    store::Event::Commit(commit) => verkstead_render::commit_event(
+                        event.id,
+                        event.at,
+                        verkstead_render::CommitSummary {
+                            sha: commit.sha,
+                            subject: commit.subject,
+                            files: commit.files,
+                            insertions: commit.insertions,
+                            deletions: commit.deletions,
+                        },
+                    ),
+                    // Whole, evidence and all, unlike the three above it. The
+                    // evidence was bounded when it was gathered — see the server's
+                    // `interruptions` module — and the remedies are chosen against
+                    // it, so a page that had to fetch it separately could draw the
+                    // buttons before it could say what they were for.
+                    store::Event::Interruption(interruption) => {
+                        verkstead_render::interruption_event(
+                            event.id,
+                            event.at,
+                            stopped(*interruption),
+                        )
+                    }
+                    // The one kind that is not in the list: it is drawn pinned
+                    // above the Timeline instead. Dropped by name rather than by
+                    // a catch-all, so a kind added later has to be decided about
+                    // rather than silently disappearing.
+                    store::Event::PullRequest(_) => return None,
+                })
             })
             .collect(),
     };
@@ -684,6 +726,85 @@ async fn commit_diff(
     };
 
     Json(verkstead_render::commit_diff(&patch)).into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
+/// request the finish step opened: its commit list and its comments.
+///
+/// Its own request rather than a field on the Conversation, as a transcript and
+/// a diff are — and more so than either, because reading it is asking GitHub
+/// through the host's `gh`. A Timeline that carried this would make an API call
+/// every time an open page heard the world moved.
+///
+/// A `gh` that will not answer is refused with the reason it gave, which is the
+/// one thing the human can act on: what the pane then shows is "there is no `gh`
+/// on this machine's PATH" rather than a spinner.
+async fn pull_request(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Two ids out of a URL a human may have typed, read as permissively as every
+    // other pair here.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_pull_request();
+    };
+
+    // Which PR, and which repository to ask about it in. Both come off the
+    // Conversation's own record: the Event says which pull request, and an Event
+    // id belonging to another Conversation names nothing here.
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return no_such_pull_request(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the pull request could not be read");
+        }
+    };
+
+    let timeline = match store::timeline(&state.pool, id).await {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Timeline failed");
+            return unavailable("the pull request could not be read");
+        }
+    };
+
+    let opened = timeline.into_iter().find_map(|on| match on.event {
+        store::Event::PullRequest(opened) if on.id == event => Some(opened),
+        _ => None,
+    });
+
+    let Some(opened) = opened else {
+        return no_such_pull_request();
+    };
+
+    let gh = state.github.clone();
+    let repo = conversation.repo.path;
+
+    let asked =
+        tokio::task::spawn_blocking(move || crate::github::details(&gh, &repo, opened.number))
+            .await;
+
+    match asked {
+        Ok(Ok(details)) => Json(details).into_response(),
+        // GitHub could not be asked, or would not say. Refused with `gh`'s own
+        // reason rather than a bare failure: every one of those reasons is
+        // something different for the human to go and do.
+        Ok(Err(trouble)) => {
+            tracing::warn!(
+                conversation_id = id,
+                event_id = event,
+                why = trouble.why(),
+                "a pull request could not be read through the host gh",
+            );
+
+            refused(StatusCode::BAD_GATEWAY, ApiError::new(trouble.why()))
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "asking gh about a pull request failed");
+            unavailable("the pull request could not be read")
+        }
+    }
 }
 
 /// `POST /api/ui/conversations/{id}/brief` — save what the human has written.
@@ -1102,6 +1223,15 @@ fn no_such_commit() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such commit on that Conversation"),
+    )
+}
+
+/// And no such pull request — either the Conversation has no such Event, or the
+/// Event is not one. Worded without either id for the transcript's reason.
+fn no_such_pull_request() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such pull request on that Conversation"),
     )
 }
 

@@ -1595,12 +1595,10 @@ Where the counter lives and what a refused request is told.
 
 /// The task list a view is carrying, of whatever is pinned to it.
 fn pinned(view: &ConversationView) -> Option<&verkstead_render::TaskListEvent> {
-    view.pinned
-        .iter()
-        .map(|event| match event {
-            PinnedEvent::TaskList(list) => list,
-        })
-        .next()
+    view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::TaskList(list) => Some(list),
+        _ => None,
+    })
 }
 
 /// A Conversation whose worktree holds a backlog shows it, and shows it pinned

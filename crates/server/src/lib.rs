@@ -14,6 +14,12 @@ use verkstead_store::{Settlements, Waits};
 
 mod commits;
 mod conversations;
+/// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
+///
+/// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
+/// product's business rather than an endpoint's, and standing a router up is
+/// choosing which `gh` it runs.
+pub mod github;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///
@@ -52,11 +58,16 @@ mod updates;
 mod viewer;
 mod watched;
 mod worktrees;
+mod wrapping;
 
 /// How this server runs a Conversation's agents. Public for the reason the
 /// sandbox is: what a session is launched as is the product's business rather
 /// than an endpoint's, and standing a router up is choosing it.
 pub use sessions::Agents;
+
+/// And how it reaches GitHub, which is the same kind of choice one step out: the
+/// host's `gh`, or something standing where it goes.
+pub use github::Gh;
 
 /// How fast the backlog is worked, which is part of the same choice — see
 /// [`Agents::at_pace`].
@@ -118,6 +129,10 @@ pub(crate) struct AppState {
     sessions: sessions::Sessions,
     updates: updates::Updates,
     watched: WatchedPaths,
+
+    /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
+    /// reusing whatever auth the machine already has.
+    github: Gh,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now — which is
     /// not a Watched Path and is not meant to be: the Watched Paths bound what
@@ -247,6 +262,7 @@ pub fn router(pool: SqlitePool) -> Router {
         WatchedPaths::none(),
         nowhere(),
         sessions::Sessions::none(),
+        Gh::on_path(),
     )
 }
 
@@ -263,17 +279,23 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathB
         watched,
         state_dir,
         sessions::Sessions::none(),
+        Gh::on_path(),
     )
 }
 
-/// And the same again, running its sessions under `agents` — which is what the
-/// served router does, and what a test asking whether a session's output reaches
-/// the Timeline has to stand up for itself.
+/// And the same again, running its sessions under `agents` and reaching GitHub
+/// through `gh` — which is what the served router does, and what a test asking
+/// whether a session's output reaches the Timeline has to stand up for itself.
+///
+/// The `gh` is a parameter for the reason the agent inside `agents` is one: what
+/// a finish step leaves behind is a pull request on GitHub, and asking the real
+/// one would be a test that needed a network and an account.
 pub fn router_running_sessions(
     pool: SqlitePool,
     watched: WatchedPaths,
     state_dir: PathBuf,
     agents: Agents,
+    gh: Gh,
 ) -> Router {
     routed(
         pool,
@@ -281,6 +303,7 @@ pub fn router_running_sessions(
         watched,
         state_dir,
         sessions::Sessions::under(agents),
+        gh,
     )
 }
 
@@ -308,6 +331,7 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         WatchedPaths::none(),
         nowhere(),
         sessions::Sessions::none(),
+        Gh::on_path(),
     )
 }
 
@@ -317,6 +341,7 @@ fn routed(
     watched: WatchedPaths,
     state_dir: PathBuf,
     sessions: sessions::Sessions,
+    github: Gh,
 ) -> Router {
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
@@ -345,6 +370,7 @@ fn routed(
             sessions,
             updates,
             watched,
+            github,
             state_dir,
         })
 }
@@ -369,6 +395,7 @@ pub fn router_with_ui(
     watched: WatchedPaths,
     state_dir: PathBuf,
     agents: Agents,
+    gh: Gh,
 ) -> Router {
     routed(
         pool,
@@ -376,6 +403,7 @@ pub fn router_with_ui(
         watched,
         state_dir,
         sessions::Sessions::under(agents),
+        gh,
     )
     .fallback(viewer::serve::<viewer::Built>)
 }
@@ -456,6 +484,9 @@ pub async fn run(config: Config) -> Result<()> {
                 skills,
                 handoffs,
             ),
+            // Whatever `gh` this machine has, logged in as whoever it is logged
+            // in as: Verkstead keeps no token of its own.
+            Gh::on_path(),
         ),
     )
     .await

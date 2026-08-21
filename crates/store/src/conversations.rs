@@ -85,7 +85,7 @@ pub enum Lifecycle {
 impl Lifecycle {
     /// The word the column holds. Lowercase and spelled out, so the table reads
     /// as something rather than as a number nobody can look up.
-    fn stored(self) -> &'static str {
+    pub(crate) fn stored(self) -> &'static str {
         match self {
             Self::Draft => "draft",
             Self::Grilling => "grilling",
@@ -100,7 +100,7 @@ impl Lifecycle {
     /// The state a stored word names. A word this does not know is a database
     /// written by a Verkstead this one does not understand, which is worth
     /// saying rather than guessing past.
-    fn read(word: &str) -> Result<Self> {
+    pub(crate) fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "draft" => Self::Draft,
             "grilling" => Self::Grilling,
@@ -189,6 +189,12 @@ pub struct ConversationRow {
 /// row is written.
 const QUESTION_SET: &str = "question-set";
 
+/// And the word it holds for the pull request the finish step opened. A
+/// constant for the same kind of reason, one module along: the row it hangs off
+/// is written by [`super::pull_requests`], and the kind is wanted there without
+/// an Event to hand.
+const PULL_REQUEST: &str = "pull-request";
+
 /// One entry in a Conversation's Timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineEvent {
@@ -263,6 +269,15 @@ pub enum Event {
     /// neither place — see [`super::commits`] — because the repository has it.
     Commit(super::Commit),
 
+    /// The pull request the finish step opened, as the host's `gh` found it —
+    /// see [`super::pull_requests`].
+    ///
+    /// Its body is not in the `body` column either, for the commit's reason:
+    /// what a PR is, here, is a row of separate facts. What it is *not* is the
+    /// commit list and the comments — those move for as long as the PR is open,
+    /// and are fetched when somebody looks.
+    PullRequest(super::PullRequest),
+
     /// A run that stopped: something Verkstead noticed and cannot resolve
     /// itself, with the evidence it gathered and whatever the human did about
     /// it — see [`super::interruptions`].
@@ -308,6 +323,7 @@ impl Event {
             Self::Directed(_) => "directed",
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
+            Self::PullRequest(_) => PULL_REQUEST,
             Self::Interruption(_) => super::interruptions::INTERRUPTION,
         }
     }
@@ -329,6 +345,8 @@ impl Event {
             // in `commits`.
             Self::Commit(_) => "",
             // Nothing either, and for the commit's reason.
+            Self::PullRequest(_) => "",
+            // Nothing either, and for the commit's reason.
             Self::Interruption(_) => "",
         }
     }
@@ -346,6 +364,7 @@ impl Event {
         summary: Option<super::Summary>,
         set: Option<SetOnTimeline>,
         commit: Option<super::Commit>,
+        pull_request: Option<super::PullRequest>,
         interruption: Option<super::Interruption>,
     ) -> Result<Self> {
         Ok(match kind {
@@ -361,6 +380,10 @@ impl Event {
             "handoff" => Self::Handoff(body),
             "commit" => Self::Commit(
                 commit.ok_or_else(|| anyhow!("a Commit Event has no commit beside it"))?,
+            ),
+            PULL_REQUEST => Self::PullRequest(
+                pull_request
+                    .ok_or_else(|| anyhow!("a pull request Event has no pull request beside it"))?,
             ),
             super::interruptions::INTERRUPTION => {
                 Self::Interruption(Box::new(interruption.ok_or_else(|| {
@@ -904,6 +927,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // second query that nearly always comes back with nothing.
     let mut interruptions = super::interruptions::on_timeline(pool, conversation_id).await?;
 
+    // And the pull request, for the same arithmetic and a cheaper read still:
+    // there is one per Conversation, and until the finish step has run there is
+    // none.
+    let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
+
     rows.into_iter()
         .map(|row| {
             let (
@@ -961,11 +989,20 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
             // Taken out rather than looked up, because each belongs to exactly
             // one Event and the Events are walked once.
             let interruption = interruptions.remove(&id);
+            let pull_request = pull_requests.remove(&id);
 
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body, summary, set, commit, interruption)?,
+                event: Event::read(
+                    &kind,
+                    body,
+                    summary,
+                    set,
+                    commit,
+                    pull_request,
+                    interruption,
+                )?,
             })
         })
         .collect()
@@ -1494,7 +1531,15 @@ pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Resul
 }
 
 /// Put a move on a Conversation's Timeline.
-async fn moved(tx: &mut sqlx::SqliteConnection, id: i64, state: Lifecycle) -> Result<()> {
+///
+/// Shared with [`super::pull_requests`], which moves a Conversation into
+/// Wrapping in the same transaction that records what it is wrapping up: a move
+/// is a move whichever module has the reason for it.
+pub(crate) async fn moved(
+    tx: &mut sqlx::SqliteConnection,
+    id: i64,
+    state: Lifecycle,
+) -> Result<()> {
     let event = Event::Moved(state);
 
     sqlx::query(

@@ -532,7 +532,7 @@ cells: Array<string>, };
  * to flip it with. A tagged kind for the reason [`TimelineEvent`] is one: what
  * gets drawn turns on which kind it is.
  */
-export type PinnedEvent = { "TaskList": TaskListEvent };
+export type PinnedEvent = { "TaskList": TaskListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
  * Which Profile a Conversation is choosing for one of its two roles.
@@ -608,6 +608,93 @@ direction: Direction,
  * Why, rendered and sanitized by the server on the way out.
  */
 rationale_html: string, };
+
+/**
+ * One comment on a pull request: who said it, when, and what they said.
+ *
+ * The body arrives rendered, like everything else an outsider wrote — a comment
+ * is markdown, and it is markdown from the public internet, so it is sanitized
+ * on this side of the wire rather than put in a page raw.
+ */
+export type PullRequestComment = { 
+/**
+ * The login of whoever left it. Empty where the account has gone, which is
+ * a comment to draw rather than a reason to refuse the pane.
+ */
+author: string, 
+/**
+ * When it was made, RFC 3339, as GitHub stamped it.
+ */
+at: string, html: string, };
+
+/**
+ * One commit of a pull request: what it is, and what it was called.
+ *
+ * Not a [`CommitEvent`]: that is a commit Verkstead watched land on the branch
+ * and put on the Timeline, with counts of what it moved and a diff behind it.
+ * This is a line of a list GitHub keeps, and the two can differ — a branch that
+ * was rebased after the PR opened has commits on the PR that are on no
+ * Timeline.
+ */
+export type PullRequestCommit = { 
+/**
+ * The full hash, as everything on this wire carries one: the page shortens
+ * it for reading.
+ */
+sha: string, 
+/**
+ * The first line of the commit message.
+ */
+subject: string, };
+
+/**
+ * What is on a pull request now: the commits it carries, and what has been said
+ * about it.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * commit's diff is one — and for a further reason of its own: reading this is
+ * asking GitHub, over the network, through the host's `gh`. A Timeline that
+ * carried it would make an API call every time an open page heard the world
+ * moved.
+ *
+ * Fetched rather than remembered, in the same spirit the task list is read off
+ * the Worktree: a PR is being worked on while the human is looking at it.
+ */
+export type PullRequestDetails = { 
+/**
+ * Oldest first, as GitHub lists them, which is the order they landed.
+ */
+commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
+
+/**
+ * The pull request as the Timeline shows it: what it is called and what number
+ * it answers to, with a way out to GitHub itself.
+ *
+ * An id and a stamp, unlike the task list beside it, because this one *is* on
+ * the record: the finish step opened a pull request at a moment worth keeping,
+ * and the Conversation moved into Wrapping on the strength of it. What is not
+ * on the record is what the PR holds — see [`PullRequestDetails`], which the
+ * details pane fetches when somebody opens this.
+ */
+export type PullRequestEvent = { id: number, 
+/**
+ * When it reached the Timeline, RFC 3339 — which is when Verkstead found
+ * it rather than when GitHub opened it, the two being a finish step apart.
+ */
+at: string, 
+/**
+ * The number GitHub gave it, which is what everybody calls it by.
+ */
+number: number, 
+/**
+ * Its title, which is the feature name the finish step gave it.
+ */
+title: string, 
+/**
+ * The whole URL, because merging is the human's act and this is the way to
+ * where they do it.
+ */
+url: string, };
 
 /**
  * The public half of the server's VAPID keypair, base64url-encoded from the

@@ -370,6 +370,10 @@ pub enum PinnedEvent {
     /// The backlog the Conversation's Worktree holds, and how far through it the
     /// work has got.
     TaskList(TaskListEvent),
+
+    /// The pull request the finish step opened, which is what the work is being
+    /// wrapped up on.
+    PullRequest(PullRequestEvent),
 }
 
 /// The backlog as the Timeline shows it: what the work is called, and every
@@ -408,6 +412,90 @@ pub struct TaskEntry {
     /// `.tasks/`. That is the done-signal the task runner turns on, and a
     /// checkbox is how an entry is written rather than what says it is done.
     pub done: bool,
+}
+
+/// The pull request as the Timeline shows it: what it is called and what number
+/// it answers to, with a way out to GitHub itself.
+///
+/// An id and a stamp, unlike the task list beside it, because this one *is* on
+/// the record: the finish step opened a pull request at a moment worth keeping,
+/// and the Conversation moved into Wrapping on the strength of it. What is not
+/// on the record is what the PR holds — see [`PullRequestDetails`], which the
+/// details pane fetches when somebody opens this.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestEvent {
+    pub id: i64,
+
+    /// When it reached the Timeline, RFC 3339 — which is when Verkstead found
+    /// it rather than when GitHub opened it, the two being a finish step apart.
+    pub at: String,
+
+    /// The number GitHub gave it, which is what everybody calls it by.
+    pub number: i64,
+
+    /// Its title, which is the feature name the finish step gave it.
+    pub title: String,
+
+    /// The whole URL, because merging is the human's act and this is the way to
+    /// where they do it.
+    pub url: String,
+}
+
+/// What is on a pull request now: the commits it carries, and what has been said
+/// about it.
+///
+/// Its own request rather than a field on the Conversation, for the reason a
+/// commit's diff is one — and for a further reason of its own: reading this is
+/// asking GitHub, over the network, through the host's `gh`. A Timeline that
+/// carried it would make an API call every time an open page heard the world
+/// moved.
+///
+/// Fetched rather than remembered, in the same spirit the task list is read off
+/// the Worktree: a PR is being worked on while the human is looking at it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestDetails {
+    /// Oldest first, as GitHub lists them, which is the order they landed.
+    pub commits: Vec<PullRequestCommit>,
+
+    pub comments: Vec<PullRequestComment>,
+}
+
+/// One commit of a pull request: what it is, and what it was called.
+///
+/// Not a [`CommitEvent`]: that is a commit Verkstead watched land on the branch
+/// and put on the Timeline, with counts of what it moved and a diff behind it.
+/// This is a line of a list GitHub keeps, and the two can differ — a branch that
+/// was rebased after the PR opened has commits on the PR that are on no
+/// Timeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestCommit {
+    /// The full hash, as everything on this wire carries one: the page shortens
+    /// it for reading.
+    pub sha: String,
+
+    /// The first line of the commit message.
+    pub subject: String,
+}
+
+/// One comment on a pull request: who said it, when, and what they said.
+///
+/// The body arrives rendered, like everything else an outsider wrote — a comment
+/// is markdown, and it is markdown from the public internet, so it is sanitized
+/// on this side of the wire rather than put in a page raw.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PullRequestComment {
+    /// The login of whoever left it. Empty where the account has gone, which is
+    /// a comment to draw rather than a reason to refuse the pane.
+    pub author: String,
+
+    /// When it was made, RFC 3339, as GitHub stamped it.
+    pub at: String,
+
+    pub html: String,
 }
 
 /// A commit as the Timeline shows it: what it was called, and how much of the
@@ -845,6 +933,63 @@ pub fn commit_diff(patch: &str) -> CommitDiff {
 /// rest for the reason a move is: one place knows how a Timeline is made.
 pub fn task_list_event(feature: String, tasks: Vec<TaskEntry>) -> PinnedEvent {
     PinnedEvent::TaskList(TaskListEvent { feature, tasks })
+}
+
+/// A pull request as the Event that gets pinned. Nothing to render — a PR is a
+/// number, a title and a URL — and here beside the rest for the reason a move
+/// is: one place knows how a Timeline is made.
+pub fn pull_request_event(id: i64, at: String, opened: PullRequestSummary) -> PinnedEvent {
+    PinnedEvent::PullRequest(PullRequestEvent {
+        id,
+        at,
+        number: opened.number,
+        title: opened.title,
+        url: opened.url,
+    })
+}
+
+/// What the caller of [`pull_request_event`] hands over: the pull request as the
+/// store holds it.
+///
+/// Its own type rather than the store's, because this crate does not depend on
+/// the store — and rather than three parameters, two of which are strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestSummary {
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+}
+
+/// What a pull request holds, as the details pane receives it: the commit list
+/// as it stands, and every comment rendered from the markdown it was written in.
+///
+/// The comments are the only part with anything to render, and they are the part
+/// that most needs it: a PR comment is markdown written by whoever can reach the
+/// repository, so it is sanitized here rather than in a browser.
+pub fn pull_request_details(
+    commits: Vec<PullRequestCommit>,
+    comments: Vec<Comment>,
+) -> PullRequestDetails {
+    PullRequestDetails {
+        commits,
+        comments: comments
+            .into_iter()
+            .map(|comment| PullRequestComment {
+                author: comment.author,
+                at: comment.at,
+                html: crate::markdown::to_html(&comment.markdown),
+            })
+            .collect(),
+    }
+}
+
+/// What the caller of [`pull_request_details`] hands over for each comment: what
+/// GitHub said about it, with the body still as its author wrote it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comment {
+    pub author: String,
+    pub at: String,
+    pub markdown: String,
 }
 
 /// A run that stopped, as an Event. Nothing to render — the evidence is four

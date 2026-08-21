@@ -25,6 +25,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ProfileEntry,
+  PullRequestDetails,
   RemedySettled,
   RepoEntry,
   SetView,
@@ -46,6 +47,7 @@ import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
+import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
@@ -2061,5 +2063,178 @@ describe("an interruption's evidence", () => {
     expect(pane.closest(".details-pane")!.textContent).toContain(
       "The whole transcript is the session's own event",
     );
+  });
+});
+
+/// The sixth shape the middle pane draws: a conversation whose backlog is
+/// worked through, with the pull request the finish step opened pinned where
+/// the task list was.
+const WRAPPING = wrapping as ConversationView;
+
+/// The pull request itself, off that payload.
+const OPENED = (() => {
+  const pinned = WRAPPING.pinned[0];
+  if (!pinned || !("PullRequest" in pinned)) {
+    throw new Error("the fixture should carry a pinned pull request");
+  }
+  return pinned.PullRequest;
+})();
+
+/// What is on it, which the details pane fetches from the server, which asks
+/// GitHub through the host's `gh`.
+const CARRIED: PullRequestDetails = {
+  commits: [
+    {
+      sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8",
+      subject: "chore: finish rate-limiting",
+    },
+    {
+      sha: "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
+      subject: "feat: count the requests",
+    },
+  ],
+  comments: [
+    {
+      author: "tobico",
+      at: "2026-08-21T09:00:00.000Z",
+      html: "<p>The counter wants a <strong>test</strong>.</p>",
+    },
+  ],
+};
+
+/// Where the pane fetches it from.
+const WHAT_IS_ON_IT = `/api/ui/conversations/${WRAPPING.id}/pull-request/${OPENED.id}`;
+
+/// The workbench with that conversation open and its pull request to hand.
+function theWrapping(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${WRAPPING.id}`,
+      json({ ...WRAPPING, ...over }),
+    ),
+    whenever(WHAT_IS_ON_IT, json(CARRIED)),
+    ...answers,
+  );
+}
+
+describe("the pinned pull request", () => {
+  it("says what it is called and what number it answers to", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, ".pinned .pull-request");
+
+    expect(opened.textContent).toContain("Pull request");
+    expect(opened.querySelector(".number")!.textContent).toBe(
+      `#${OPENED.number}`,
+    );
+    expect(opened.querySelector(".open-pull-request")!.textContent).toBe(
+      OPENED.title,
+    );
+  });
+
+  /// Merging is the human's act and it happens over there, so getting there is
+  /// a link rather than anything this page's panes have to answer for.
+  it("links out to GitHub itself", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const out = await drawn<HTMLAnchorElement>(
+      container,
+      ".pinned .pull-request .out",
+    );
+
+    expect(out.href).toBe(OPENED.url);
+  });
+
+  /// Pinned is a thing an event is: it is drawn outside the record, and the
+  /// move into wrapping is what says on the record that it arrived.
+  it("is drawn above the record rather than in it", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned .pull-request");
+
+    expect(pinned.closest(".timeline")).toBeNull();
+    expect(container.querySelector(".timeline .pull-request")).toBeNull();
+
+    const moves = [...container.querySelectorAll(".timeline .moved")].map(
+      (line) => line.textContent,
+    );
+    expect(moves.at(-1)).toBe("Moved to wrapping up");
+  });
+
+  it("shows what is on it in the details pane, fetched rather than remembered", async () => {
+    const fetching = theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, ".pinned .pull-request");
+    fireEvent.click(opened.querySelector(".open-pull-request")!);
+
+    const commits = await drawn(container, ".details-pane .pr-commits");
+
+    expect(
+      [...commits.querySelectorAll(".commits li")].map((row) => [
+        row.querySelector(".sha")!.textContent,
+        row.querySelector(".subject")!.textContent,
+      ]),
+    ).toEqual(CARRIED.commits.map((it) => [it.sha.slice(0, 7), it.subject]));
+
+    const comments = await drawn(container, ".details-pane .pr-comments");
+
+    expect(comments.querySelector(".author")!.textContent).toBe(
+      CARRIED.comments[0]!.author,
+    );
+    // Put in the page as it arrived: a comment is markdown from the public
+    // internet, and the server is what rendered and sanitized it.
+    expect(comments.querySelector(".markdown")!.innerHTML).toBe(
+      CARRIED.comments[0]!.html,
+    );
+
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
+  });
+
+  /// Every way `gh` cannot answer is a different afternoon for the human, so
+  /// the pane says the server's own wording rather than "could not load".
+  it("shows the server's wording when gh cannot answer", async () => {
+    theWrapping(
+      {},
+      whenever(WHAT_IS_ON_IT, () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error:
+                "this machine's `gh` is not logged in, so Verkstead cannot ask GitHub anything",
+            }),
+            { status: 502, headers: { "content-type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const opened = await drawn(container, ".pinned .pull-request");
+    fireEvent.click(opened.querySelector(".open-pull-request")!);
+
+    const error = await drawn(container, ".details-pane .error");
+
+    expect(error.textContent).toContain("is not logged in");
+  });
+
+  /// Nothing is fetched until somebody opens it: reading this is an API call,
+  /// and the conversation is read again every ten seconds.
+  it("asks GitHub nothing until it is opened", async () => {
+    const fetching = theWrapping();
+    mount(`/conversations/${WRAPPING.id}`);
+
+    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
   });
 });

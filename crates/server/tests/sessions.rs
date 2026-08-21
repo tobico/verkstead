@@ -27,13 +27,13 @@ use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
     DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent, ProfileSaved,
-    Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent, TimelineEvent,
-    Transcript,
+    PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent,
+    TimelineEvent, Transcript,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, Pace, WatchedPaths, open_database, router_running_sessions};
+use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
 
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
@@ -238,16 +238,60 @@ const BRISKLY: Pace = Pace {
     grace: Duration::from_millis(300),
 };
 
+/// What stands where the host's `gh` goes: a branch with a pull request on it,
+/// and nothing said on it yet.
+///
+/// A script rather than the real thing, for the reason the agent is one: what
+/// these ask is what Verkstead does with the answer, and asking GitHub itself
+/// would be a test that needed a network, an account and a pull request.
+///
+/// It tells the two questions apart by the fields being asked for, because that
+/// is what tells them apart on the command line.
+const PULL_REQUEST: &str = r#"
+case "$5" in
+*commits*)
+    printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}]}'
+    ;;
+*)
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    ;;
+esac
+"#;
+
+/// And a `gh` that answers for a branch nothing was opened on, in the words the
+/// real one uses.
+const NO_PULL_REQUEST: &str = r#"
+printf 'no pull requests found for branch "%s"\n' "$3" >&2
+exit 1
+"#;
+
+/// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
+/// program's own name, so what Verkstead passes lands in `$1` onwards.
+fn gh_stub(script: &str) -> Gh {
+    Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        script.to_owned(),
+        "gh".to_owned(),
+    ])
+}
+
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
-    grilling_spilling(tempfile::tempdir().unwrap(), stub).await
+    grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
+}
+
+/// The same, with something else where `gh` goes — for the tests about what
+/// Verkstead does when GitHub cannot be asked.
+async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
+    grilling_spilling(tempfile::tempdir().unwrap(), stub, gh).await
 }
 
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
-async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
+async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -281,6 +325,7 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
         WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
         state.path().to_owned(),
         agents,
+        gh_stub(gh),
     );
 
     let repo = repository(watched.path().join("verkstead"));
@@ -392,9 +437,18 @@ fn interruptions(view: &ConversationView) -> Vec<&InterruptionEvent> {
 
 /// The backlog pinned to a Conversation, where its Worktree holds one.
 fn backlog(view: &ConversationView) -> Option<&TaskListEvent> {
-    match view.pinned.first()? {
+    view.pinned.iter().find_map(|pinned| match pinned {
         PinnedEvent::TaskList(list) => Some(list),
-    }
+        _ => None,
+    })
+}
+
+/// And the pull request pinned beside it, once the finish step has opened one.
+fn pull_request(view: &ConversationView) -> Option<&PullRequestEvent> {
+    view.pinned.iter().find_map(|pinned| match pinned {
+        PinnedEvent::PullRequest(opened) => Some(opened),
+        _ => None,
+    })
 }
 
 /// The handoff on a Timeline, once the grilling has handed one over.
@@ -666,6 +720,7 @@ async fn a_transcript_survives_the_server_restarting() {
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             Handoffs::under(fixture.state.path()),
         ),
+        gh_stub(PULL_REQUEST),
     );
 
     let view: ConversationView =
@@ -1133,6 +1188,160 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
 }
 
+/// One task and then the finish, which is the shortest whole backlog there is —
+/// and the one the wrap-up tests below drive to its end.
+///
+/// The finish step here does what the bundled fork tells a session to do:
+/// commits the removal of `TODO.md`, and pushes and opens a pull request through
+/// its own `gh`. There is no remote to push to in these fixtures, so the stub
+/// says it and stops there — what Verkstead does next is ask the *host's* `gh`,
+/// which is the half under test.
+const A_BACKLOG_OF_ONE: &str = r#"
+case "$1" in
+claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+*)
+    if [ ! -d .tasks ]; then
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+        printf '# 01\n' > .tasks/01-count.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan rate-limiting tasks'
+    else
+        next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+        if [ -n "$next" ]; then
+            printf 'a limiter\n' >> limiter.md
+            rm ".tasks/$next"
+            git add -A
+            git commit --quiet -m "feat: count the requests"
+        else
+            git rm --quiet .tasks/TODO.md
+            git commit --quiet -m 'chore: finish rate-limiting'
+            printf 'pushed, and the pull request is open\n'
+        fi
+    fi
+    sleep 300
+    ;;
+esac
+"#;
+
+/// Take a Conversation from the direction chooser to a worked-through backlog,
+/// with nothing pressed on the way: the whole point of the run is that nobody is
+/// asked anything between the direction and the pull request.
+async fn worked_to_empty(fixture: &Grilling) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// The whole of what a finished backlog leaves behind: a pull request open on
+/// the branch, the Conversation wrapping it up, and the move on the Timeline —
+/// with nothing having asked for approval at any point.
+#[tokio::test]
+async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wrapping() {
+    let fixture = grilling(A_BACKLOG_OF_ONE).await;
+
+    worked_to_empty(&fixture).await;
+
+    let opened = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(opened.number, 41);
+    assert_eq!(opened.title, "Rate limiting");
+    assert_eq!(opened.url, "https://github.com/tobico/verkstead/pull/41");
+
+    let view = fixture.view().await;
+
+    // The move is on the record like every other, and it is the last thing to
+    // have happened.
+    assert_eq!(
+        view.timeline.iter().rev().find_map(|event| match event {
+            TimelineEvent::Moved(moved) => Some(moved.state),
+            _ => None,
+        }),
+        Some(Lifecycle::Wrapping),
+    );
+
+    // Nothing waited on anybody: the only Set on the Timeline is the proposal
+    // that ended the grilling, and nothing is blocked.
+    assert_eq!(sets(&view).len(), 1);
+    assert!(view.blocked_on.is_none());
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing stopped: {:?}",
+        interruptions(&view),
+    );
+
+    // And what is on the PR is fetched when the pane opens it, through the same
+    // host `gh` — never written down.
+    let carried: verkstead_render::PullRequestDetails = get(
+        &fixture.app,
+        &format!(
+            "/api/ui/conversations/{}/pull-request/{}",
+            fixture.id, opened.id
+        ),
+    )
+    .await;
+
+    assert_eq!(carried.commits.len(), 1);
+    assert_eq!(carried.commits[0].subject, "feat: count the requests");
+    assert_eq!(carried.comments.len(), 1);
+    assert!(carried.comments[0].html.contains("<strong>good</strong>"));
+}
+
+/// And what happens when `gh` cannot answer — no `gh`, no login, or a branch
+/// nothing was opened on. The Conversation stays where it is with the reason on
+/// its Timeline, rather than becoming a Wrapping with no pull request under it.
+#[tokio::test]
+async fn a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_is() {
+    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("pull request"),
+        "the step is named as what it was: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("no pull request"),
+        "and the reason is `gh`'s, in words: {stopped:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "the work is where it was, because nothing about it got any further",
+    );
+    assert!(pull_request(&view).is_none(), "and nothing is pinned");
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what an Interruption is for",
+    );
+}
+
 /// A breakdown asks its quiz the way every session asks anything: an ordinary
 /// Set, with the session idling until the Answers come back. Nothing about it
 /// ends or redirects the Conversation — the direction was settled before this
@@ -1318,6 +1527,7 @@ async fn aborting_ends_the_session_before_the_worktree_goes() {
             "#,
             ticks = quoted(&ticks),
         ),
+        PULL_REQUEST,
     )
     .await;
 

@@ -23,6 +23,7 @@ import type {
   ProfileEdit,
   ProfileEntry,
   ProfileSaved,
+  PullRequestDetails,
   PushKey,
   Registered,
   Remedy,
@@ -137,6 +138,22 @@ export function loadCommitDiff(
   event: number,
 ): Promise<CommitDiff> {
   return get<CommitDiff>(`/api/ui/conversations/${id}/commit/${event}`);
+}
+
+/// What is on the pull request the finish step opened: its commit list and its
+/// comments.
+///
+/// Fetched by the pane that shows it for a stronger version of the diff's
+/// reason: the server reads this by asking GitHub through the host's `gh`, so a
+/// conversation that carried it would make an API call every ten seconds. A
+/// server that cannot ask refuses with the reason, which is what the pane shows.
+export function loadPullRequest(
+  id: number,
+  event: number,
+): Promise<PullRequestDetails> {
+  return get<PullRequestDetails>(
+    `/api/ui/conversations/${id}/pull-request/${event}`,
+  );
 }
 
 /// Start a Conversation against a registered Repo.

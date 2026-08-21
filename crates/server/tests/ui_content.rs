@@ -1597,6 +1597,81 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And a sixth, whose backlog is worked through: the finish step pushed and
+    // opened a pull request, Verkstead found it through the host's `gh`, and the
+    // Conversation moved into Wrapping on the strength of it. The PR is pinned
+    // where the task list was — its worktree has no `.tasks/` left, because the
+    // finish commit took it away.
+    //
+    // Recorded rather than found, exactly as the commits above are recorded
+    // rather than watched for: what a pull request does to a Conversation is
+    // this file's subject, and whether `gh` can find one is `src/github.rs`'s.
+    let wrapping = store::start_conversation(&pool, repos[0].id, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, wrapping, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, wrapping, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        wrapping,
+        "# Rate limiting\n\n\
+         The API has none, so one account can exhaust it for everybody.\n",
+    )
+    .await
+    .unwrap();
+    store::start_grilling(
+        &pool,
+        wrapping,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+    )
+    .await
+    .unwrap();
+    store::move_to_direction(&pool, wrapping).await.unwrap();
+    store::choose_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, wrapping).await.unwrap();
+
+    store::record_commit(
+        &pool,
+        wrapping,
+        &store::Commit {
+            sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8".to_owned(),
+            subject: "chore: finish rate-limiting".to_owned(),
+            files: 1,
+            insertions: 0,
+            deletions: 24,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    store::record_pull_request(
+        &pool,
+        wrapping,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    write(
+        "conversation-wrapping.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{wrapping}")).await,
+        )),
+    );
+
     // What the details pane fetches when that Conversation's output Event is
     // opened. Nothing to pin: a transcript is bytes a session printed.
     write(
@@ -1698,6 +1773,17 @@ fn pin_timeline(json: &str) -> String {
             .and_then(|standing| standing.get_mut("Answered"))
         {
             answered["submitted_at"] = "2026-08-03T09:07:11.000Z".into();
+        }
+    }
+
+    // And the one pinned Event that carries a stamp of its own: the pull
+    // request is on the record, unlike the task list beside it, so it is
+    // stamped like everything else on it.
+    for pinned in payload["pinned"].as_array_mut().unwrap() {
+        let (_, body) = pinned.as_object_mut().unwrap().iter_mut().next().unwrap();
+
+        if body.get("at").is_some() {
+            body["at"] = "2026-08-03T09:07:11.000Z".into();
         }
     }
 

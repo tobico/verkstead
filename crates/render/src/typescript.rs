@@ -20,9 +20,9 @@ use crate::{
     Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
     CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
     DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey, Registered, Registration,
-    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
-    Transcript, Unsubscribe, UpdateNotice,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
+    Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -89,6 +89,11 @@ fn the_viewers_types_are_written_from_these() {
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
     CommitDiff::export_all(&config).unwrap();
+
+    // And what the finish step opened. The PR itself rides on the Conversation
+    // as a pinned Event — a number, a title and a URL; what is *on* it is its
+    // own payload, because reading that is asking GitHub over the network.
+    PullRequestDetails::export_all(&config).unwrap();
 
     // What the human does about a run that stopped. The Interruption itself
     // rides on the Timeline whole, evidence and all — it is the one Event with
