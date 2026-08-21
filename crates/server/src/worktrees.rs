@@ -85,6 +85,37 @@ pub(crate) fn branch_exists(repo: &Path, branch: &str) -> bool {
     .is_some()
 }
 
+/// Whether `repo` has a branch by this name, with a read that could not be made
+/// counting as one that is.
+///
+/// The same question [`branch_exists`] answers, asked where the answer decides
+/// whether an agent is let loose on a branch. Git saying nothing at all is not
+/// git saying the name is free, and taking a name somebody else's work is on is
+/// the one way of being wrong here that pressing the button again cannot undo —
+/// so a reading that failed reads as taken.
+///
+/// Which is the whole reason this is not [`branch_exists`]: that one asks
+/// `show-ref`, which exits non-zero both for a ref that is not there and for a
+/// repository it could not read. `for-each-ref` comes back with nothing to say
+/// in the first case and does not come back at all in the second, and the
+/// difference between those two is the difference this turns on.
+pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "--end-of-options",
+            &format!("refs/heads/{branch}"),
+        ],
+    );
+
+    match listed {
+        Some(refs) => !refs.trim().is_empty(),
+        None => true,
+    }
+}
+
 /// The commit `named` resolves to in `repo`, in full, or `None` if nothing there
 /// answers to it.
 ///
@@ -269,5 +300,50 @@ mod tests {
         let path = worktree_path(Path::new("/state"), 7, "///", "...");
 
         assert_eq!(path, Path::new("/state/worktrees/unnamed-unnamed"));
+    }
+
+    /// A repository with the branch, without it, and a directory that is not a
+    /// repository at all — which is the reading that failed, and the one this
+    /// answers differently from [`branch_exists`].
+    #[test]
+    fn a_branch_reading_that_failed_counts_as_a_branch_that_is_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+
+        run(repo, &["init", "--initial-branch", "main"]);
+        run(repo, &["config", "user.email", "test@verkstead.invalid"]);
+        run(repo, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(repo.join("README.md"), "# a repository\n").unwrap();
+        run(repo, &["add", "-A"]);
+        run(repo, &["commit", "-m", "chore: something to branch from"]);
+
+        assert!(!branch_taken(repo, "wrap-up"), "nothing is on it");
+
+        run(repo, &["branch", "wrap-up"]);
+
+        assert!(branch_taken(repo, "wrap-up"), "and now something is");
+
+        // Git says nothing at all here, which is not git saying the name is
+        // free: what is on the other side of this answer is making a branch and
+        // letting an agent loose on it.
+        let nowhere = tempfile::tempdir().unwrap();
+
+        assert!(branch_taken(nowhere.path(), "wrap-up"));
+        assert!(
+            !branch_exists(nowhere.path(), "wrap-up"),
+            "which is the whole difference between the two readings",
+        );
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
     }
 }

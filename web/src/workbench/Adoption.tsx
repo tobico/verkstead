@@ -18,10 +18,41 @@
 //! sidebar shows until then is that invented name.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { type JSX, Show } from "solid-js";
+import { createSignal, type JSX, Show } from "solid-js";
 
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
+
+/// Each way of being refused an adoption, in the words of what to go and do
+/// about it.
+///
+/// One line each rather than a single "cannot adopt", because the server names
+/// them separately for exactly this: a profile to choose, a box somebody
+/// ticked, a branch somebody is on and a worktree git would not make are four
+/// different jobs, and only the human can tell which they are looking at.
+export const ADOPT_REFUSAL: Record<Adopted, string> = {
+  Adopted: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "This conversation has already been adopted.",
+  NotAdopting:
+    "This conversation is adopting nothing, so it has no roadmap to take a stage from.",
+  NoGrillingProfile: "Choose a grilling profile first, in the details pane.",
+  NoImplementationProfile:
+    "Choose an implementation profile first, in the details pane.",
+  ProfileBroken:
+    "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
+  NoBaseCommit: "The repo has nothing to branch from any more.",
+  NoRoadmap: "There is no roadmap by that name at the base commit.",
+  RoadmapComplete:
+    "Every stage of that roadmap is ticked off, so there is nothing left to start.",
+  NoBrief:
+    "The next stage names a brief that is not there at the base commit, which is the roadmap's own to fix.",
+  StageInFlight:
+    "The next stage is marked as in progress on a branch that still exists, so somebody is already on it.",
+  BranchExists:
+    "The stage's own branch already exists, and Verkstead did not make it.",
+  WorktreeRefused: "Git would not make the worktree. The server log says why.",
+};
 
 export function Adoption(props: {
   conversation: ConversationView;
@@ -29,15 +60,20 @@ export function Adoption(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
+  const [refused, setRefused] = createSignal<Adopted | null>(null);
+
   const adopt = useMutation(() => ({
     mutationFn: () => adoptRoadmap(props.conversation.id),
-    onSuccess: (_outcome: Adopted) => {
+    onSuccess: (outcome: Adopted) => {
       // Whatever it came back with, the page is read again: what adopting did
       // is a conversation that has moved, and what refused it is a repository
       // that has moved — and reading it again is the correction either way.
+      setRefused(outcome === "Adopted" ? null : outcome);
+
       void queries.invalidateQueries({ queryKey: ["conversation"] });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
       void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+      void queries.invalidateQueries({ queryKey: ["profiles"] });
     },
   }));
 
@@ -94,6 +130,9 @@ export function Adoption(props: {
           profiles have to be chosen first.
         </p>
 
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{ADOPT_REFUSAL[outcome()]}</p>}
+        </Show>
         <Show when={adopt.isError}>
           <p class="error">
             The stage could not be adopted: {adopt.error?.message}

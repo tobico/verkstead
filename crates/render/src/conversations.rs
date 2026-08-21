@@ -1396,14 +1396,45 @@ pub enum Adopted {
     /// Brief and a grilling. There is no roadmap here to take a stage from.
     NotAdopting,
 
-    /// The roadmap has no stage to start at the base commit: it has finished, it
-    /// is not there, its next brief cannot be read, or somebody is on it
-    /// already.
-    NoStage,
+    /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
+    /// rather than run under: every stage after it inherits both Profiles from
+    /// its predecessor, and a Conversation that is reopened is grilled.
+    NoGrillingProfile,
+
+    /// And none is chosen for the implementation, which is what the stage's own
+    /// work runs under.
+    NoImplementationProfile,
+
+    /// A chosen Profile's pair is not where it was left, so there is no account
+    /// to run the session under.
+    ProfileBroken,
 
     /// Nothing in the repository answers to what the stage would branch from —
     /// an overridden commit that has gone, or a default branch that has.
     NoBaseCommit,
+
+    /// No roadmap by that name is readable at the base commit, or what is there
+    /// plans nothing.
+    NoRoadmap,
+
+    /// Every stage of it is ticked. The roadmap finished — between the notice
+    /// being drawn and the button being pressed, if it had a stage a moment
+    /// ago.
+    RoadmapComplete,
+
+    /// The next stage names a brief that cannot be read at the base commit. The
+    /// roadmap's own to fix: starting the stage after it instead would be
+    /// Verkstead deciding to skip work.
+    NoBrief,
+
+    /// The next stage is annotated with a branch that still exists, so somebody
+    /// or something is already on it.
+    StageInFlight,
+
+    /// The stage's own slug branch is already there. Verkstead did not make it
+    /// for this, so it will not take it over — and a branch git would not answer
+    /// about counts as one that is there.
+    BranchExists,
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.

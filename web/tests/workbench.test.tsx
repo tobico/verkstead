@@ -36,6 +36,7 @@ import type {
   Transcript,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
+import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
@@ -600,6 +601,38 @@ describe("the adoption page", () => {
         askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`),
       ).toBeGreaterThan(before),
     );
+  });
+
+  /// A press that was refused says which refusal it was. Every one of them is
+  /// something different to go and do — a profile to choose, a box somebody
+  /// ticked, a branch somebody is on — so a single "cannot adopt" would leave
+  /// the human guessing which.
+  it("says which refusal a press came back with", async () => {
+    for (const outcome of [
+      "NoImplementationProfile",
+      "RoadmapComplete",
+      "StageInFlight",
+      "BranchExists",
+    ] satisfies Adopted[]) {
+      theAdoption(
+        whenever(
+          `/api/ui/conversations/${ADOPTING.id}/adopt`,
+          json(outcome satisfies Adopted),
+          "POST",
+        ),
+      );
+      const { container, unmount } = mount(`/conversations/${ADOPTING.id}`);
+
+      fireEvent.click(await drawn(container, ".adoption .adopt"));
+
+      await waitFor(() =>
+        expect(container.querySelector(".adoption .error")!.textContent).toBe(
+          ADOPT_REFUSAL[outcome],
+        ),
+      );
+
+      unmount();
+    }
   });
 });
 

@@ -419,6 +419,53 @@ pub(crate) struct Abandoned {
     pub(crate) stage: Stage,
 }
 
+/// What a roadmap has to start at a commit: the stage, or which of the ways it
+/// has none.
+///
+/// Drawing a notice only wants the stage — see [`Startable::stage`], which is
+/// what both readings of the abandoned rule are filtered by. The answers are
+/// kept apart for the human who pressed Adopt, because each of them is
+/// something different for them to go and do: a roadmap that has finished, a
+/// brief nobody wrote and a stage somebody else is on are three jobs and not
+/// one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Startable {
+    /// There is a stage to start, and nothing is on it.
+    Stage(Box<Abandoned>),
+
+    /// No roadmap by that name is readable at this commit, or what is there
+    /// plans nothing — which is a directory rather than a roadmap.
+    NoRoadmap,
+
+    /// Every box is ticked. The roadmap finished, and its directory stays where
+    /// it is as the record of what it was.
+    Complete,
+
+    /// The next stage's annotation names a branch that is still there, so
+    /// somebody or something is on it.
+    InFlight,
+
+    /// The next stage names a brief that cannot be read at this commit — or
+    /// names none at all.
+    NoBrief,
+
+    /// The stage's own slug branch is taken in the Repo, which is a stage
+    /// already under way whatever the boxes say.
+    BranchTaken,
+}
+
+impl Startable {
+    /// The stage where there is one, which is the whole of what a list or a
+    /// page needs: what is drawn is what can be adopted, and everything else is
+    /// nothing to say.
+    pub(crate) fn stage(self) -> Option<Abandoned> {
+        match self {
+            Startable::Stage(abandoned) => Some(*abandoned),
+            _ => None,
+        }
+    }
+}
+
 /// The registered Repos holding abandoned roadmaps, one notice each.
 ///
 /// Nothing is stored. The list is read from the repositories every time it is
@@ -476,7 +523,7 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
 fn abandoned_at(repo: &Path, commit: &str) -> Vec<Abandoned> {
     names(repo, commit)
         .into_iter()
-        .filter_map(|name| startable(repo, commit, &name))
+        .filter_map(|name| startable(repo, commit, &name).stage())
         .collect()
 }
 
@@ -525,8 +572,8 @@ fn indexed(path: &str) -> Option<&str> {
     (!name.is_empty() && rest == INDEX).then_some(name)
 }
 
-/// The roadmap `name` at `commit`, where its next stage is startable now — or
-/// `None`, which is every other way a roadmap can be.
+/// What the roadmap `name` at `commit` has to start, or which of the ways it
+/// has nothing.
 ///
 /// The four clauses of the abandoned rule, cheapest first: what the index says,
 /// then who the annotation names, then whether the brief is there, then what git
@@ -535,31 +582,45 @@ fn indexed(path: &str) -> Option<&str> {
 /// Asked at the default branch's tip for the notice, and at a Conversation's
 /// base commit for the page that adopts and for the press itself — the same
 /// rule each time, so what the human is offered is what pressing would start.
+/// The notice and the page keep only the stage; the press is what says which
+/// clause refused it, because the press is the one of the three with a human
+/// waiting on an answer.
 ///
 /// Which stage is never in question. It is the lowest-numbered unchecked one:
 /// the roadmap's order is the roadmap's own and its stages are strictly
 /// sequential. And there is no Conversation of this reading's own to skip, so
 /// the branch-skipping [`ours`] does for the settling path has no part in it —
 /// a roadmap read here belongs to nobody yet.
-pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandoned> {
-    let index = at(repo, commit, &format!("{ROADMAPS}/{name}/{INDEX}"))?;
+///
+/// Both branch readings are the fail-safe [`worktrees::branch_taken`] rather
+/// than [`worktrees::branch_exists`]: what each of them stands in front of is
+/// making a branch and letting an agent loose on it, so git failing to answer
+/// is answered as *taken*.
+pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
+    let Some(index) = at(repo, commit, &format!("{ROADMAPS}/{name}/{INDEX}")) else {
+        return Startable::NoRoadmap;
+    };
 
     let mut entries = index.lines().filter_map(checklist::entry).peekable();
 
     // A directory under `docs/roadmaps/` whose index plans nothing is not a
     // roadmap at all, exactly as it is not one to pin.
-    entries.peek()?;
+    if entries.peek().is_none() {
+        return Startable::NoRoadmap;
+    }
 
     // Clause 1: a stage left to do. Every box ticked is a roadmap that
     // finished, and its directory stays where it is as the record of what it
     // was.
-    let entry = entries.find(|entry| !entry.checked)?;
+    let Some(entry) = entries.find(|entry| !entry.checked) else {
+        return Startable::Complete;
+    };
 
     // Clause 3: nobody on it. The annotation is prose a human may have
     // rewritten, so the branch inside the backticks is the fact — and one whose
     // branch is gone is a note about an attempt that was abandoned too.
-    if annotating(entry.after).is_some_and(|branch| worktrees::branch_exists(repo, branch)) {
-        return None;
+    if annotating(entry.after).is_some_and(|branch| worktrees::branch_taken(repo, branch)) {
+        return Startable::InFlight;
     }
 
     // Clause 2: something to start it from. An entry pointing at a file nobody
@@ -567,11 +628,14 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandon
     // starting the stage after it instead would be Verkstead deciding to skip
     // work.
     if entry.link.is_empty() {
-        return None;
+        return Startable::NoBrief;
     }
 
     let brief_path = format!("{ROADMAPS}/{name}/{}", entry.link);
-    let brief = at(repo, commit, &brief_path)?;
+
+    let Some(brief) = at(repo, commit, &brief_path) else {
+        return Startable::NoBrief;
+    };
 
     let stage = Stage {
         roadmap: name.to_owned(),
@@ -585,14 +649,14 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandon
     // in flight under Verkstead out of the list — its branch is in this git
     // directory from the moment the stage started, long before the plan commit
     // that ticks its box reaches the default branch.
-    if worktrees::branch_exists(repo, &stage.branch()) {
-        return None;
+    if worktrees::branch_taken(repo, &stage.branch()) {
+        return Startable::BranchTaken;
     }
 
-    Some(Abandoned {
+    Startable::Stage(Box::new(Abandoned {
         title: checklist::heading(&index),
         stage,
-    })
+    }))
 }
 
 /// What an adopting Conversation's page says about the roadmap it was started
@@ -623,7 +687,7 @@ pub(crate) async fn adopting(
         let commit = base.unwrap_or(repo.default_branch);
 
         let found = worktrees::resolve(&repo.path, &commit)
-            .and_then(|commit| startable(&repo.path, &commit, &roadmap));
+            .and_then(|commit| startable(&repo.path, &commit, &roadmap).stage());
 
         let Some(abandoned) = found else {
             return AdoptionView {
@@ -783,6 +847,13 @@ Turns this askance clone into Verkstead.
         /// The abandoned roadmaps this repository holds there.
         fn abandoned(&self) -> Vec<Abandoned> {
             abandoned_at(self.path(), &self.tip())
+        }
+
+        /// And what one roadmap of it comes back as, which is the same reading
+        /// with its refusals kept: what a notice throws away, the press says
+        /// out loud.
+        fn startable(&self, name: &str) -> Startable {
+            startable(self.path(), &self.tip(), name)
         }
 
         /// A branch of its own and nothing on it — which is what a stage in
@@ -1345,6 +1416,78 @@ Turns this askance clone into Verkstead.
             repo.abandoned().is_empty(),
             "`implementation` is taken, so stage 03 is under way somewhere",
         );
+    }
+
+    /// The same four clauses, each answered by its own name — which is what the
+    /// Adopt press hands the human, one job apiece rather than one shrug.
+    #[test]
+    fn a_roadmap_with_nothing_to_start_says_which_clause_refused_it() {
+        let repo = Repo::with(&[
+            ("mvp", MVP),
+            (
+                "finished",
+                "# Finished roadmap\n\n- [x] 01: Done — [brief](01-done.md)\n",
+            ),
+            ("empty", "# Empty roadmap\n\nNothing staged yet.\n"),
+            (
+                "in-flight",
+                "# In-flight roadmap\n\n\
+                 - [ ] 01: Packaging — [brief](01-packaging.md) *(in progress: `packaging`)*\n",
+            ),
+            ("unlinked", "# Unlinked roadmap\n\n- [ ] 01: Nowhere\n"),
+        ]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.brief("finished", "01-done.md", "# 01. Done\n");
+        repo.brief("in-flight", "01-packaging.md", "# 01. Packaging\n");
+        repo.commit();
+        repo.branch("packaging");
+
+        let startable = repo.startable("mvp");
+
+        assert_eq!(
+            startable
+                .clone()
+                .stage()
+                .expect("stage 03 is there")
+                .stage
+                .label,
+            "03",
+        );
+
+        assert_eq!(
+            repo.startable("public-release"),
+            Startable::NoRoadmap,
+            "no roadmap by that name is at this commit",
+        );
+        assert_eq!(
+            repo.startable("empty"),
+            Startable::NoRoadmap,
+            "and an index that plans nothing is a directory rather than a roadmap",
+        );
+        assert_eq!(repo.startable("finished"), Startable::Complete);
+        assert_eq!(
+            repo.startable("in-flight"),
+            Startable::InFlight,
+            "`packaging` is there, so somebody is on stage 01",
+        );
+        assert_eq!(
+            repo.startable("unlinked"),
+            Startable::NoBrief,
+            "an entry that links to nothing has nothing to start from",
+        );
+
+        // Clause 2 the other way round: an entry that links to a brief nobody
+        // wrote, which is the roadmap's own to fix.
+        std::fs::remove_file(repo.path().join(ROADMAPS).join("in-flight/01-packaging.md")).unwrap();
+        run(repo.path(), &["branch", "-D", "packaging"]);
+        repo.commit();
+
+        assert_eq!(repo.startable("in-flight"), Startable::NoBrief);
+
+        // And clause 4, which is the one the roadmap says nothing about at all.
+        repo.branch("implementation");
+
+        assert_eq!(repo.startable("mvp"), Startable::BranchTaken);
     }
 
     /// Which is what keeps a stage currently mid-flight under Verkstead out of

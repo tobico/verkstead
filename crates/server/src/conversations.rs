@@ -30,6 +30,7 @@ use crate::AppState;
 use crate::handoffs::Handoffs;
 use crate::repos::git;
 use crate::skills;
+use crate::stages::Startable;
 use crate::store;
 use crate::worktrees;
 
@@ -496,7 +497,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
-        return Ok(refusal);
+        return Ok(refusal.grilling());
     }
 
     // Kept rather than only judged: it is what the session about to start is
@@ -601,10 +602,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 /// there is a human at the workbench, so what stops it is answered to the button
 /// by name rather than said as a notice to nobody.
 ///
+/// **Every refusal is named, and they are checked cheap-first**, which is
+/// [`start_grilling`]'s order and for its reason: each of them is something
+/// different for the human to go and do, and the record's own state and its
+/// Profiles are answered before anything that costs a git call. Nothing is
+/// created and nothing is checked out for any of them.
+///
 /// **The stage is read again, here, at whatever the base resolves to.** What the
 /// page showed is a reading of a moment ago, and a roadmap is a document in a
 /// repository that anybody may have moved since — ticked the last box, taken the
-/// branch, started the stage by hand.
+/// branch, started the stage by hand. Which is why *the roadmap has finished* is
+/// among the refusals at all.
 ///
 /// **Then git, and then the store**, which is the order [`start_grilling`] does
 /// the same job in and for the same reason: a row saying a stage is under way
@@ -619,6 +627,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 /// carried on by the path that was already there.
 pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let pool = &state.pool;
+    let watched = &state.watched;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
         return Ok(Adopted::NoSuchConversation);
@@ -634,6 +643,22 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     let Some(roadmap) = conversation.adopting.clone() else {
         return Ok(Adopted::NotAdopting);
     };
+
+    // Both Profiles, before anything that costs a git call — the cheap answers
+    // first, which is the order [`start_grilling`] checks the same pair in. Read
+    // as rows rather than judged off the ids, because a Profile whose pair has
+    // gone is not one to run a session under and the id alone cannot say so.
+    //
+    // Both, rather than only the one the work runs under: a stage inherits both
+    // from its predecessor, so what this one is adopted with is what every stage
+    // after it starts with.
+    let grilling = crate::profiles::entry(watched, conversation.grilling_profile.clone()).await?;
+    let implementation =
+        crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
+
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
+        return Ok(refusal.adopting());
+    }
 
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
@@ -656,9 +681,18 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 return Err(Adopted::NoBaseCommit);
             };
 
+            // The same rule the notice was drawn by and the page was drawn by,
+            // asked here at the base commit — and asked again, rather than
+            // taken from either, because a roadmap is a document anybody may
+            // have moved since. Which clause refused it is the answer to the
+            // button: each of them is a different thing to go and do about it.
             match crate::stages::startable(&repo, &commit, &roadmap) {
-                Some(abandoned) => Ok((commit, abandoned.stage)),
-                None => Err(Adopted::NoStage),
+                Startable::Stage(abandoned) => Ok((commit, abandoned.stage)),
+                Startable::NoRoadmap => Err(Adopted::NoRoadmap),
+                Startable::Complete => Err(Adopted::RoadmapComplete),
+                Startable::InFlight => Err(Adopted::StageInFlight),
+                Startable::NoBrief => Err(Adopted::NoBrief),
+                Startable::BranchTaken => Err(Adopted::BranchExists),
             }
         }
     })
@@ -803,22 +837,56 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
 /// the other way round: that one says whether to offer the button, this one says
 /// what was wrong when it was pressed. Each is named separately, because
 /// choosing a Profile and mending a broken one are different jobs.
+///
+/// The rule rather than either button's answer, because both buttons ask it:
+/// starting a grilling and adopting a stage each want a pair of Profiles fixed
+/// before they will do anything, and each says so in its own words — see
+/// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
     grilling: Option<&ProfileEntry>,
     implementation: Option<&ProfileEntry>,
-) -> Option<GrillingStarted> {
+) -> Option<Unready> {
     let Some(grilling) = grilling else {
-        return Some(GrillingStarted::NoGrillingProfile);
+        return Some(Unready::NoGrillingProfile);
     };
 
     let Some(implementation) = implementation else {
-        return Some(GrillingStarted::NoImplementationProfile);
+        return Some(Unready::NoImplementationProfile);
     };
 
     [grilling, implementation]
         .into_iter()
         .any(|profile| profile.broken.is_some())
-        .then_some(GrillingStarted::ProfileBroken)
+        .then_some(Unready::ProfileBroken)
+}
+
+/// What is wrong with a Conversation's pair of Profiles, before it is put in
+/// the words of whichever press asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unready {
+    NoGrillingProfile,
+    NoImplementationProfile,
+    ProfileBroken,
+}
+
+impl Unready {
+    /// Said to the press that starts a grilling.
+    fn grilling(self) -> GrillingStarted {
+        match self {
+            Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
+            Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
+            Unready::ProfileBroken => GrillingStarted::ProfileBroken,
+        }
+    }
+
+    /// And to the press that adopts a stage.
+    fn adopting(self) -> Adopted {
+        match self {
+            Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
+            Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
+            Unready::ProfileBroken => Adopted::ProfileBroken,
+        }
+    }
 }
 
 /// The Brief off a Conversation's Timeline.

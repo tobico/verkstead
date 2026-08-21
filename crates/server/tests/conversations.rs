@@ -2040,3 +2040,288 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
     assert_eq!(view.branch, "implementation");
     assert_eq!(view.base_commit.as_deref(), Some(before.as_str()));
 }
+
+/// The `mvp` roadmap with every box ticked, which is what the stage after the
+/// last one leaves behind.
+const ALL_DONE: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md)
+- [x] 02: Grilling — [brief](02-grilling.md)
+- [x] 03: Implementation — [brief](03-implementation.md)
+- [x] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// And with stage 03 marked as somebody's, in the words `/next-stage`
+/// annotates one with.
+const TAKEN_AT_THREE: &str = "\
+# MVP roadmap
+
+Turns this askance clone into Verkstead.
+
+## Stages
+
+- [x] 01: Workbench — [brief](01-workbench.md)
+- [x] 02: Grilling — [brief](02-grilling.md)
+- [ ] 03: Implementation — [brief](03-implementation.md) *(in progress: `someone-elses`)*
+- [ ] 04: Wrap-up — [brief](04-wrap-up.md)
+";
+
+/// What a refused press has to leave behind: a Conversation that has not moved,
+/// nothing checked out, and no branch where the stage's would have gone.
+async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
+    let view = opened(app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(
+        worktrees(repo).len() == 1,
+        "only the repository itself is checked out anywhere",
+    );
+    assert!(
+        git(repo, &["branch", "--list", "implementation"])
+            .trim()
+            .is_empty(),
+        "and the stage's own branch was never made",
+    );
+    assert_eq!(
+        brief(&view).markdown,
+        "",
+        "and the stage brief was never taken as this Conversation's Brief",
+    );
+}
+
+/// Both Profiles are fixed before adopting, exactly as they are before
+/// grilling: the implementation one is what the stage's work runs under, and
+/// the grilling one is carried because every stage after it inherits both.
+#[tokio::test]
+async fn adopting_is_refused_by_name_when_a_profile_is_unchosen() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = adopting(&app, repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoGrillingProfile);
+    nothing_adopted(&app, id, &repo).await;
+
+    choose(
+        &app,
+        id,
+        "grilling",
+        profile(&app, watched.path(), "fable").await,
+    )
+    .await;
+
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NoImplementationProfile
+    );
+    nothing_adopted(&app, id, &repo).await;
+
+    choose(
+        &app,
+        id,
+        "implementation",
+        profile(&app, watched.path(), "opus").await,
+    )
+    .await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+}
+
+/// A Profile whose pair has gone is no account to run a session under, which is
+/// a different job from choosing one.
+#[tokio::test]
+async fn adopting_is_refused_when_a_chosen_profiles_pair_has_gone() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    std::fs::remove_dir_all(watched.path().join("fable")).unwrap();
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::ProfileBroken);
+    nothing_adopted(&app, id, &repo).await;
+}
+
+/// A Conversation that began with a Brief and a grilling has no roadmap to take
+/// a stage from, and one that has been adopted already has been started once.
+#[tokio::test]
+async fn only_a_drafting_adopting_conversation_can_be_adopted() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let ordinary = started(&app, repo_id).await;
+
+    assert_eq!(
+        press_adopt(&app, ordinary).await,
+        Adopted::NotAdopting,
+        "and it is answered before the Profiles are, which it has none of",
+    );
+    nothing_adopted(&app, ordinary, &repo).await;
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NotDrafting,
+        "two branches and two worktrees for one stage is what adopting twice would mean",
+    );
+
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// A commit that resolved when the human fixed it can be gone by the time the
+/// button is pressed, which is exactly why it is asked again.
+#[tokio::test]
+async fn adopting_is_refused_when_the_base_commit_no_longer_resolves() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    // A commit that exists to be recorded and then is reachable from nothing, so
+    // that expiring the reflog and pruning takes it away for good.
+    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
+    git(&repo, &["add", "second.md"]);
+    git(&repo, &["commit", "-m", "second"]);
+    let doomed = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    assert_eq!(base(&app, id, Some(&doomed)).await, BaseRecorded::Recorded);
+
+    git(&repo, &["reset", "--hard", "HEAD~1"]);
+    git(&repo, &["reflog", "expire", "--expire=now", "--all"]);
+    git(&repo, &["gc", "--prune=now", "--quiet"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoBaseCommit);
+    nothing_adopted(&app, id, &repo).await;
+}
+
+/// The three ways a stage can stop being startable between the notice being
+/// drawn and the button being pressed, each its own thing to go and do about
+/// it: somebody ticked the last box, somebody moved the brief, somebody took
+/// the stage.
+#[tokio::test]
+async fn adopting_is_refused_by_name_for_each_way_the_stage_has_gone() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    // Somebody finished the roadmap by hand while the page stood open.
+    roadmap(&repo, ALL_DONE, &[]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::RoadmapComplete);
+    nothing_adopted(&app, id, &repo).await;
+
+    // Or moved the brief the next stage names, which is the roadmap's own to
+    // fix: starting the stage after it would be Verkstead deciding to skip work.
+    roadmap(&repo, OPEN_AT_THREE, &[]);
+    std::fs::remove_file(repo.join("docs/roadmaps/mvp/03-implementation.md")).unwrap();
+    roadmap(&repo, OPEN_AT_THREE, &[]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoBrief);
+    nothing_adopted(&app, id, &repo).await;
+
+    // Or started it themselves and said so, with the branch to prove it — the
+    // annotation is prose, and the branch inside its backticks is the fact.
+    roadmap(&repo, TAKEN_AT_THREE, &["03-implementation.md"]);
+    git(&repo, &["branch", "someone-elses"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::StageInFlight);
+    nothing_adopted(&app, id, &repo).await;
+
+    // And a note left over from an attempt that was abandoned too stops
+    // nothing: the branch is the fact, and it is not there.
+    git(&repo, &["branch", "-D", "someone-elses"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+}
+
+/// Verkstead did not make the branch, so it will not take it over: what is on
+/// it is somebody's work, whatever the roadmap's boxes say.
+#[tokio::test]
+async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    git(&repo, &["branch", "implementation"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/implementation"]).trim(),
+        git(&repo, &["rev-parse", "HEAD"]).trim(),
+        "and the branch that was there is where it was",
+    );
+}
+
+/// A roadmap the base commit knows nothing about is not a roadmap that
+/// finished, and saying so would send the human looking at the wrong document.
+#[tokio::test]
+async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "public-release").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoRoadmap);
+    nothing_adopted(&app, id, &repo).await;
+}
+
+/// Cheap-first, and provably so: a Conversation with no Profiles, against a
+/// roadmap that has finished and whose branch is taken besides, is answered
+/// about its Profiles. Everything git is paid for is asked after the record's
+/// own state and the pair of accounts it would run under.
+#[tokio::test]
+async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(&repo, ALL_DONE, &["03-implementation.md"]);
+    git(&repo, &["branch", "implementation"]);
+
+    let id = adopting(&app, repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoGrillingProfile);
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Draft,
+        "and nothing about the roadmap was read to find that out",
+    );
+}
