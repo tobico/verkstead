@@ -6,6 +6,7 @@
 //! the whole point of generating them is that there is only ever one.
 
 import type {
+  AbandonedRepo,
   ApiError,
   Archived,
   BaseRecorded,
@@ -98,6 +99,16 @@ export function listRepos(): Promise<RepoEntry[]> {
 /// the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// The registered Repos holding roadmaps nothing is driving.
+///
+/// Read again every time the sidebar is, because the server reads it again
+/// every time it is asked: the boxes and the branches are the repositories'
+/// own answer, and a roadmap somebody has picked up since simply stops being
+/// on the list.
+export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
+  return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
 }
 
 /// The Conversations in the sidebar, newest first.

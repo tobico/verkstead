@@ -1,5 +1,6 @@
-//! The roadmaps a Conversation's Worktree holds, read back as pinned
-//! stage-list Events.
+//! The roadmaps Verkstead reads: a Conversation's Worktree, pinned as
+//! stage-list Events, and a registered Repo's, read at a commit for the ones
+//! nothing is driving.
 //!
 //! Nothing here is stored, for the reason nothing about a backlog is — see
 //! [`crate::tasks`]. `docs/roadmaps/` is the repository's: written by the
@@ -20,14 +21,25 @@
 //! came off: the session that wrote a roadmap wrote it here, and a stage that
 //! ticks itself off ticks it here. Nothing is stored for it, so it cannot come
 //! to disagree with the branch it is read off.
+//!
+//! ## The other reading
+//!
+//! [`abandoned`] and what hangs off it read a **Repo** instead, at a commit,
+//! with no Worktree anywhere in it. That is what adoption needs: a roadmap the
+//! old tools or a human wrote is committed on the default branch and was
+//! touched by no branch Verkstead knows, so the reading above sees nothing of
+//! it. The entries, the stage and the branch-slug rule are the same ones; only
+//! the way the bytes are fetched differs — `ls-tree` and `show` against the
+//! Repo's own git directory rather than files off a checkout.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use verkstead_render::{PinnedEvent, StageEntry};
+use verkstead_render::{AbandonedRepo, AbandonedRoadmap, PinnedEvent, StageEntry};
 
 use crate::checklist;
 use crate::repos::git;
+use crate::{store, worktrees};
 
 /// Where a repository's roadmaps live inside its Worktree, as `/to-roadmap`
 /// writes them and `/next-stage` reads them.
@@ -385,6 +397,223 @@ fn name(directory: &Path) -> String {
         .into_owned()
 }
 
+/// A roadmap in a registered Repo that nothing is driving, with the stage
+/// adopting it would start.
+///
+/// **Abandoned** is the workbench's word for it, and the whole of what it means
+/// is *there is a stage startable right now and nothing is on it* — see
+/// [`startable`] for the four clauses. A roadmap that has finished, one whose
+/// next stage somebody is already working, and one whose next brief is missing
+/// are all not abandoned, and none of them is a state to draw: what the human
+/// can do something about is the only thing worth saying.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Abandoned {
+    /// What the roadmap calls itself in its heading, or empty where it has
+    /// none.
+    pub(crate) title: String,
+
+    /// The stage adopting it would start — the lowest-numbered unchecked one,
+    /// its brief already read.
+    pub(crate) stage: Stage,
+}
+
+/// The registered Repos holding abandoned roadmaps, one notice each.
+///
+/// Nothing is stored. The list is read from the repositories every time it is
+/// drawn, the way the pinned stage lists are and for the same reason: the
+/// repository has already answered for its own roadmaps, and a list Verkstead
+/// kept would be a second opinion about one — wrong from the moment somebody
+/// ticked a box.
+///
+/// Off the runtime's threads, and one blocking task for all of them rather than
+/// one apiece. There are as many Repos as the human registered by hand and each
+/// is a handful of short git reads against a local directory, so what this costs
+/// is one borrowed thread.
+pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
+    let read =
+        tokio::task::spawn_blocking(move || repos.iter().filter_map(notice).collect::<Vec<_>>())
+            .await;
+
+    read.unwrap_or_else(|error| {
+        tracing::error!(error = ?error, "reading the registered Repos' roadmaps failed");
+        Vec::new()
+    })
+}
+
+/// One Repo's notice, or `None` where it has nothing to adopt.
+///
+/// Read at the default branch's tip, which is the repository as everyone
+/// working on it sees it. A repository with no branch that resolves has nothing
+/// to read and nothing to say — the same shrug the pinned lists make.
+fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
+    let commit = worktrees::resolve(&repo.path, &repo.default_branch)?;
+
+    let roadmaps: Vec<AbandonedRoadmap> = abandoned_at(&repo.path, &commit)
+        .into_iter()
+        .map(|abandoned| AbandonedRoadmap {
+            name: abandoned.stage.roadmap,
+            title: abandoned.title,
+            stage: abandoned.stage.label,
+            stage_title: abandoned.stage.title,
+        })
+        .collect();
+
+    (!roadmaps.is_empty()).then(|| AbandonedRepo {
+        repo_id: repo.id,
+        repo: repo.name.clone(),
+        roadmaps,
+    })
+}
+
+/// The abandoned roadmaps `repo` holds at `commit`, in the order their
+/// directories are named.
+///
+/// The whole of the abandoned rule, applied to every roadmap there: a
+/// repository keeps the finished ones and may well be mid-flight on another, so
+/// most of what is here on any given day comes back as nothing.
+fn abandoned_at(repo: &Path, commit: &str) -> Vec<Abandoned> {
+    names(repo, commit)
+        .into_iter()
+        .filter_map(|name| startable(repo, commit, &name))
+        .collect()
+}
+
+/// Which roadmaps `repo` holds at `commit`, by directory name.
+///
+/// The tree rather than the filesystem, which is the whole difference between
+/// this reading and the Worktree one above: adoption is about a Repo nothing is
+/// checked out of, so what is there is git's to say and not a directory's.
+///
+/// Sorted, so a list drawn twice cannot be drawn in two orders.
+fn names(repo: &Path, commit: &str) -> BTreeSet<String> {
+    let listed = git(
+        repo,
+        &[
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "--end-of-options",
+            commit,
+            // `--` rather than `--end-of-options` again: what follows is a
+            // pathspec, which is git's own name for a path.
+            "--",
+            ROADMAPS,
+        ],
+    );
+
+    listed
+        .iter()
+        .flat_map(|said| said.lines())
+        .filter_map(indexed)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The roadmap a listed path is the index of — `mvp` of
+/// `docs/roadmaps/mvp/ROADMAP.md` — or `None` where it is not one.
+///
+/// The index directly inside the roadmap's own directory, rather than any file
+/// under it: a `ROADMAP.md` further down is a document somebody filed there, and
+/// the roadmap is the directory `/next-stage` is pointed at.
+fn indexed(path: &str) -> Option<&str> {
+    let inside = path.trim().strip_prefix(ROADMAPS)?.strip_prefix('/')?;
+
+    let (name, rest) = inside.split_once('/')?;
+
+    (!name.is_empty() && rest == INDEX).then_some(name)
+}
+
+/// The roadmap `name` at `commit`, where its next stage is startable now — or
+/// `None`, which is every other way a roadmap can be.
+///
+/// The four clauses of the abandoned rule, cheapest first: what the index says,
+/// then who the annotation names, then whether the brief is there, then what git
+/// has for branches.
+///
+/// Which stage is never in question. It is the lowest-numbered unchecked one:
+/// the roadmap's order is the roadmap's own and its stages are strictly
+/// sequential. And there is no Conversation of this reading's own to skip, so
+/// the branch-skipping [`ours`] does for the settling path has no part in it —
+/// a roadmap read here belongs to nobody yet.
+fn startable(repo: &Path, commit: &str, name: &str) -> Option<Abandoned> {
+    let index = at(repo, commit, &format!("{ROADMAPS}/{name}/{INDEX}"))?;
+
+    let mut entries = index.lines().filter_map(checklist::entry).peekable();
+
+    // A directory under `docs/roadmaps/` whose index plans nothing is not a
+    // roadmap at all, exactly as it is not one to pin.
+    entries.peek()?;
+
+    // Clause 1: a stage left to do. Every box ticked is a roadmap that
+    // finished, and its directory stays where it is as the record of what it
+    // was.
+    let entry = entries.find(|entry| !entry.checked)?;
+
+    // Clause 3: nobody on it. The annotation is prose a human may have
+    // rewritten, so the branch inside the backticks is the fact — and one whose
+    // branch is gone is a note about an attempt that was abandoned too.
+    if annotating(entry.after).is_some_and(|branch| worktrees::branch_exists(repo, branch)) {
+        return None;
+    }
+
+    // Clause 2: something to start it from. An entry pointing at a file nobody
+    // wrote is the human's to fix, and nothing is offered until they have —
+    // starting the stage after it instead would be Verkstead deciding to skip
+    // work.
+    if entry.link.is_empty() {
+        return None;
+    }
+
+    let brief_path = format!("{ROADMAPS}/{name}/{}", entry.link);
+    let brief = at(repo, commit, &brief_path)?;
+
+    let stage = Stage {
+        roadmap: name.to_owned(),
+        label: entry.label.to_owned(),
+        title: entry.title.to_owned(),
+        brief_path,
+        brief,
+    };
+
+    // Clause 4: its branch is free. Which is also what keeps a stage already
+    // in flight under Verkstead out of the list — its branch is in this git
+    // directory from the moment the stage started, long before the plan commit
+    // that ticks its box reaches the default branch.
+    if worktrees::branch_exists(repo, &stage.branch()) {
+        return None;
+    }
+
+    Some(Abandoned {
+        title: checklist::heading(&index),
+        stage,
+    })
+}
+
+/// What `path` holds at `commit`, or `None` where nothing is there to read.
+///
+/// Asked of git rather than of a directory, because there is no directory: the
+/// Repo's own checkout is whatever the human left in it, which is neither the
+/// default branch's tip nor any of Verkstead's business.
+fn at(repo: &Path, commit: &str, path: &str) -> Option<String> {
+    git(
+        repo,
+        &["show", "--end-of-options", &format!("{commit}:{path}")],
+    )
+}
+
+/// The branch a roadmap's in-progress annotation names, where it names one.
+///
+/// What is inside the backticks — `*(in progress: `wrap-up`)*` — which is how
+/// `/next-stage` writes one. Read off the backticks rather than off the words
+/// around them, for the reason [`ours`] is: the words are prose and the branch
+/// name is the fact.
+fn annotating(after: &str) -> Option<&str> {
+    let (_, rest) = after.split_once('`')?;
+    let (branch, _) = rest.split_once('`')?;
+
+    (!branch.is_empty()).then_some(branch)
+}
+
 #[cfg(test)]
 mod tests {
     use std::process::{Command, Stdio};
@@ -475,6 +704,37 @@ Turns this askance clone into Verkstead.
         fn commit(&self) {
             run(self.path(), &["add", "-A"]);
             run(self.path(), &["commit", "-m", "docs: the roadmap"]);
+        }
+
+        /// The default branch's tip, which is where the abandoned reading looks
+        /// and the only commit it ever reads.
+        fn tip(&self) -> String {
+            run(self.path(), &["rev-parse", "main"]).trim().to_owned()
+        }
+
+        /// The abandoned roadmaps this repository holds there.
+        fn abandoned(&self) -> Vec<Abandoned> {
+            abandoned_at(self.path(), &self.tip())
+        }
+
+        /// A branch of its own and nothing on it — which is what a stage in
+        /// flight leaves in the Repo's git directory, and what a stale
+        /// annotation's branch is not.
+        fn branch(&self, name: &str) {
+            run(self.path(), &["branch", "--end-of-options", name]);
+        }
+
+        /// Commit what is written on a branch of its own, and leave the default
+        /// branch where it was.
+        ///
+        /// A stage's plan commit: the tick and the annotation ride on the
+        /// stage's own branch, and reach the default branch only when its pull
+        /// request merges.
+        fn commit_on(&self, branch: &str, message: &str) {
+            run(self.path(), &["checkout", "-q", "-b", branch]);
+            run(self.path(), &["add", "-A"]);
+            run(self.path(), &["commit", "-m", message]);
+            run(self.path(), &["checkout", "-q", "main"]);
         }
 
         /// The stage lists this worktree comes back with, which every test here
@@ -862,6 +1122,304 @@ Turns this askance clone into Verkstead.
         );
 
         assert!(!stacks(repo.path()));
+    }
+
+    /// A roadmap that already exists, with something left to do and nobody on
+    /// it: the whole of what adoption is for, and the shape of the notice.
+    #[test]
+    fn a_roadmap_with_a_startable_next_stage_is_abandoned() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        let abandoned = repo.abandoned();
+
+        assert_eq!(abandoned.len(), 1);
+        assert_eq!(abandoned[0].title, "MVP roadmap");
+        assert_eq!(abandoned[0].stage.roadmap, "mvp");
+        assert_eq!(
+            abandoned[0].stage.label, "03",
+            "the lowest-numbered unchecked stage, which is the roadmap's own order",
+        );
+        assert_eq!(abandoned[0].stage.title, "Implementation");
+        assert_eq!(
+            abandoned[0].stage.brief_path,
+            "docs/roadmaps/mvp/03-implementation.md",
+        );
+        assert_eq!(abandoned[0].stage.brief, "# 03. Implementation\n");
+        assert_eq!(
+            abandoned[0].stage.branch(),
+            "implementation",
+            "adopting it takes the stage's own slug, as the unattended start does",
+        );
+    }
+
+    /// Read at the commit and not off the checkout: a roadmap somebody is
+    /// part-way through writing is not one there is anything to adopt.
+    #[test]
+    fn a_roadmap_that_is_only_written_is_not_abandoned() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        assert!(repo.abandoned().is_empty(), "nothing is committed");
+
+        repo.commit();
+
+        assert_eq!(repo.abandoned().len(), 1, "and now it is");
+    }
+
+    /// Clause 1. A roadmap that finished is not abandoned — it is done, and its
+    /// directory stays where it is as the record of what it was.
+    #[test]
+    fn a_roadmap_with_every_box_ticked_is_not_abandoned() {
+        let repo = Repo::with(&[(
+            "mvp",
+            "# MVP roadmap\n\n- [x] 01: Workbench — [brief](01-workbench.md)\n",
+        )]);
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+
+        assert!(repo.abandoned().is_empty());
+    }
+
+    /// And neither is a directory whose index plans nothing, which is not a
+    /// roadmap at all.
+    #[test]
+    fn an_index_with_no_stages_in_it_is_not_a_roadmap_to_adopt() {
+        let repo = Repo::with(&[("mvp", "# MVP roadmap\n\nNothing staged yet.\n")]);
+
+        assert!(repo.abandoned().is_empty());
+    }
+
+    /// Clause 2. An entry pointing at a file nobody wrote is the human's to
+    /// fix. Offering it would be offering to start a Conversation with no Brief.
+    #[test]
+    fn a_roadmap_whose_next_brief_is_missing_is_not_abandoned() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+
+        assert!(
+            repo.abandoned().is_empty(),
+            "there is no 03-implementation.md at that commit",
+        );
+
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        assert_eq!(repo.abandoned().len(), 1);
+    }
+
+    /// Clause 3. The annotation is prose a human may have rewritten, so the
+    /// branch in the backticks is the fact — and the fact is whether it is
+    /// there.
+    #[test]
+    fn an_annotation_naming_a_branch_that_still_exists_stops_adoption() {
+        let repo = Repo::with(&[(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `someone-elses`)*\n",
+        )]);
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+        repo.branch("someone-elses");
+
+        assert!(
+            repo.abandoned().is_empty(),
+            "somebody is on `someone-elses`, so stage 02 is not there to take",
+        );
+    }
+
+    /// And a note left over from an attempt that was itself abandoned does not
+    /// stop it: the branch is the fact, and it is not there.
+    #[test]
+    fn an_annotation_whose_branch_is_gone_does_not_stop_adoption() {
+        let repo = Repo::with(&[(
+            "mvp",
+            "# MVP roadmap\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [ ] 02: Grilling — [brief](02-grilling.md) *(in progress: `long-gone`)*\n",
+        )]);
+        repo.brief("mvp", "02-grilling.md", "# 02. Grilling\n");
+        repo.commit();
+
+        let abandoned = repo.abandoned();
+
+        assert_eq!(abandoned.len(), 1);
+        assert_eq!(abandoned[0].stage.label, "02");
+    }
+
+    /// Clause 4. A branch by the stage's own name is a stage somebody — or some
+    /// earlier run — has started already, whatever the roadmap's boxes say. The
+    /// same rule the unattended start refuses by, applied before anything is
+    /// offered.
+    #[test]
+    fn a_stage_whose_slug_branch_is_taken_is_not_abandoned() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        assert_eq!(repo.abandoned().len(), 1, "nothing is on it yet");
+
+        repo.branch("implementation");
+
+        assert!(
+            repo.abandoned().is_empty(),
+            "`implementation` is taken, so stage 03 is under way somewhere",
+        );
+    }
+
+    /// Which is what keeps a stage currently mid-flight under Verkstead out of
+    /// the list. Its plan commit ticks the box and annotates the entry, and both
+    /// ride on the stage's own branch until its pull request merges — so the
+    /// default-tip read sees a roadmap that still has stage 03 open, and the
+    /// branch is the only thing saying otherwise.
+    #[test]
+    fn a_plan_commit_that_has_not_reached_the_default_branch_is_invisible() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        // The stage starts: a branch at its own slug, and a plan commit on it
+        // ticking the box and saying whose it is.
+        repo.write(
+            "mvp",
+            &MVP.replace(
+                "- [ ] 03: Implementation — [brief](03-implementation.md)",
+                "- [x] 03: Implementation — [brief](03-implementation.md) \
+                 *(in progress: `implementation`)*",
+            ),
+        );
+        repo.commit_on("implementation", "chore: plan the implementation stage");
+
+        assert_eq!(
+            at(repo.path(), &repo.tip(), "docs/roadmaps/mvp/ROADMAP.md",),
+            Some(MVP.to_owned()),
+            "the default branch has none of the plan commit",
+        );
+        assert!(
+            repo.abandoned().is_empty(),
+            "and the branch is what says the stage is already under way",
+        );
+
+        // The branch goes and nothing is running it, which is exactly the state
+        // adoption is for.
+        run(repo.path(), &["branch", "-D", "implementation"]);
+
+        assert_eq!(repo.abandoned().len(), 1);
+    }
+
+    /// One notice per Repo, with its roadmaps inside — and none at all for a
+    /// Repo with nothing to adopt.
+    #[test]
+    fn a_repos_notice_carries_its_roadmaps_and_nothing_else() {
+        let repo = Repo::with(&[
+            ("mvp", MVP),
+            (
+                "public-release",
+                "# Public release roadmap\n\n- [ ] 01: Packaging — [brief](01-packaging.md)\n",
+            ),
+            (
+                "finished",
+                "# Finished roadmap\n\n- [x] 01: Done — [brief](01-done.md)\n",
+            ),
+        ]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.brief("public-release", "01-packaging.md", "# 01. Packaging\n");
+        repo.brief("finished", "01-done.md", "# 01. Done\n");
+        repo.commit();
+
+        let notice = notice(&store::Repo {
+            id: 7,
+            path: repo.path().to_owned(),
+            name: "verkstead".to_owned(),
+            default_branch: "main".to_owned(),
+        })
+        .expect("two of its roadmaps have a stage to start");
+
+        assert_eq!(notice.repo_id, 7);
+        assert_eq!(notice.repo, "verkstead");
+        assert_eq!(
+            notice
+                .roadmaps
+                .iter()
+                .map(|roadmap| (
+                    roadmap.name.as_str(),
+                    roadmap.title.as_str(),
+                    roadmap.stage.as_str(),
+                    roadmap.stage_title.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("mvp", "MVP roadmap", "03", "Implementation"),
+                (
+                    "public-release",
+                    "Public release roadmap",
+                    "01",
+                    "Packaging",
+                ),
+            ],
+            "the finished one is not among them",
+        );
+    }
+
+    #[test]
+    fn a_repo_with_nothing_to_adopt_has_no_notice() {
+        let repo = Repo::with(&[(
+            "mvp",
+            "# MVP roadmap\n\n- [x] 01: Workbench — [brief](01-workbench.md)\n",
+        )]);
+
+        assert_eq!(
+            notice(&store::Repo {
+                id: 1,
+                path: repo.path().to_owned(),
+                name: "verkstead".to_owned(),
+                default_branch: "main".to_owned(),
+            }),
+            None,
+        );
+    }
+
+    /// A Repo whose default branch resolves to nothing has nothing to read, and
+    /// says nothing rather than failing the list.
+    #[test]
+    fn a_repo_with_no_such_default_branch_says_nothing() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        assert_eq!(
+            notice(&store::Repo {
+                id: 1,
+                path: repo.path().to_owned(),
+                name: "verkstead".to_owned(),
+                default_branch: "trunk".to_owned(),
+            }),
+            None,
+        );
+    }
+
+    #[test]
+    fn a_listed_path_names_the_roadmap_it_indexes() {
+        assert_eq!(indexed("docs/roadmaps/mvp/ROADMAP.md"), Some("mvp"));
+        assert_eq!(indexed("docs/roadmaps/mvp/01-workbench.md"), None);
+        assert_eq!(indexed("docs/roadmaps/mvp/old/ROADMAP.md"), None);
+        assert_eq!(indexed("docs/roadmaps/ROADMAP.md"), None);
+        assert_eq!(indexed("docs/design/verkstead.md"), None);
+    }
+
+    #[test]
+    fn an_annotation_names_whatever_is_in_its_backticks() {
+        assert_eq!(annotating("*(in progress: `wrap-up`)*"), Some("wrap-up"));
+        assert_eq!(
+            annotating("*(started on `feature/x` last week)*"),
+            Some("feature/x")
+        );
+        assert_eq!(annotating(""), None);
+        assert_eq!(annotating("*(in progress)*"), None);
+        assert_eq!(annotating("*(in progress: `unclosed)*"), None);
+        assert_eq!(annotating("*(in progress: ``)*"), None);
     }
 
     #[test]

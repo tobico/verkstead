@@ -17,12 +17,12 @@
 use ts_rs::TS;
 
 use crate::{
-    Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
-    CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
-    DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
-    Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
+    AbandonedRepo, Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, CommitDiff, ConversationAborted, ConversationEntry, ConversationView,
+    DirectionChoice, DirectionChosen, GrillingStarted, NewConversation, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started,
+    Submitted, Subscribed, Subscription, Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -56,6 +56,10 @@ fn the_viewers_types_are_written_from_these() {
     // own request shape and its own named outcome, because each of them is a
     // different sentence to put in front of the human.
     ConversationEntry::export_all(&config).unwrap();
+
+    // And what is offered beside the sidebar: the Repos holding roadmaps
+    // nothing is driving, which writes the roadmap inside it.
+    AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
     Started::export_all(&config).unwrap();

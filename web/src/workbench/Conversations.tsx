@@ -10,6 +10,11 @@
 //! what it does have the branch is the short line the human chose — and the one
 //! they can change while it is still drafting.
 //!
+//! Under that box are the roadmaps nothing is driving, one notice per Repo —
+//! see [`Abandoned`]. Read there because that is what they are about: work
+//! somebody staged before Verkstead was driving anything, with a stage waiting
+//! to be started.
+//!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are a line at the
 //! bottom of it rather than a page of their own to find.
@@ -18,7 +23,12 @@ import { A } from "@solidjs/router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { listConversations, listRepos, startConversation } from "../api/client";
+import {
+  listAbandonedRoadmaps,
+  listConversations,
+  listRepos,
+  startConversation,
+} from "../api/client";
 import type { ConversationEntry, Started } from "../api/types";
 
 export function Conversations(props: {
@@ -118,6 +128,8 @@ export function Conversations(props: {
         </Match>
       </Switch>
 
+      <Abandoned />
+
       <Switch>
         <Match when={conversations.isPending}>
           <p class="empty">Loading…</p>
@@ -160,6 +172,53 @@ export function Conversations(props: {
         </A>
       </nav>
     </>
+  );
+}
+
+/// The Repos holding roadmaps nothing is driving, one notice each.
+///
+/// Under the new-conversation box because that is what it is: another way to
+/// start work, on a roadmap somebody wrote before Verkstead was driving
+/// anything. What each one names is the roadmap and the stage that would be
+/// started, which is the whole of the decision.
+///
+/// There is no way to dismiss one, now or later. The repository is the source
+/// of truth for its own roadmaps everywhere else, so a notice that is true and
+/// unwanted is silenced in the repository — tick the box, or annotate the
+/// stage. A dismissal Verkstead stored would be a second opinion about a
+/// roadmap the repository says has work left.
+function Abandoned(): JSX.Element {
+  const abandoned = useQuery(() => ({
+    queryKey: ["abandoned-roadmaps"],
+    queryFn: listAbandonedRoadmaps,
+  }));
+
+  return (
+    <Show when={abandoned.data?.length}>
+      <div class="abandoned">
+        <For each={abandoned.data}>
+          {(repo) => (
+            <section class="abandoned-notice">
+              <p>
+                <code>{repo.repo}</code> holds roadmaps nothing is driving.
+              </p>
+              <ul>
+                <For each={repo.roadmaps}>
+                  {(roadmap) => (
+                    <li>
+                      <code>{roadmap.name}</code>
+                      <span class="stage">
+                        next is stage {roadmap.stage}: {roadmap.stage_title}
+                      </span>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </section>
+          )}
+        </For>
+      </div>
+    </Show>
   );
 }
 

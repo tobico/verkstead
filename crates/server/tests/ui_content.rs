@@ -1171,6 +1171,86 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     }
     write("repos.json", &get(&app, "/api/ui/repos").await);
 
+    // The abandoned roadmaps: what a registered Repo holds that nothing is
+    // driving, drawn as a notice under the new-conversation box.
+    //
+    // This one has to be a real *repository*, and one with real commits on its
+    // default branch: the whole reading is `ls-tree` and `show` against a Repo's
+    // own git directory, and there is no worktree anywhere in it. Nothing in the
+    // payload is a path, so there is nothing here to pin afterwards.
+    let (_dir, pool, app) = empty_app().await;
+
+    let repo = _dir.path().join("repos/verkstead");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--initial-branch", "main"]);
+    git(&repo, &["config", "user.email", "test@verkstead.invalid"]);
+    git(&repo, &["config", "user.name", "Verkstead Test"]);
+
+    // Two roadmaps written by something that was not this Verkstead — which is
+    // what adoption is for — each with a stage left and a brief to start it
+    // from. And a third that finished, which is not abandoned and says nothing.
+    for (name, index, briefs) in [
+        (
+            "mvp",
+            "# MVP roadmap\n\n\
+             Turns the clone into the platform it was designed as.\n\n\
+             ## Stages\n\n\
+             - [x] 01: Workbench — [brief](01-workbench.md)\n\
+             - [x] 02: Grilling — [brief](02-grilling.md)\n\
+             - [x] 03: Implementation — [brief](03-implementation.md)\n\
+             - [ ] 04: Wrap-up — [brief](04-wrap-up.md)\n",
+            "04-wrap-up.md",
+        ),
+        (
+            "public-release",
+            "# Public release roadmap\n\n\
+             What has to be true before anybody else installs this.\n\n\
+             ## Stages\n\n\
+             - [ ] 01: Packaging — [brief](01-packaging.md)\n\
+             - [ ] 02: Documentation — [brief](02-documentation.md)\n",
+            "01-packaging.md",
+        ),
+        (
+            "askance-parity",
+            "# Askance parity roadmap\n\n\
+             Everything the clone was taken for, and all of it done.\n\n\
+             ## Stages\n\n\
+             - [x] 01: The asking half — [brief](01-asking.md)\n",
+            "01-asking.md",
+        ),
+    ] {
+        let directory = repo.join("docs/roadmaps").join(name);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("ROADMAP.md"), index).unwrap();
+        std::fs::write(directory.join(briefs), "# a stage brief\n").unwrap();
+    }
+
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-m", "docs: the roadmaps as they stand"]);
+
+    store::register_repo(&pool, &repo, "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // And a second registration with no repository behind it, which is what a
+    // Repo with nothing to say looks like: no notice at all rather than an empty
+    // one.
+    store::register_repo(
+        &pool,
+        std::path::Path::new("/srv/repos/askance"),
+        "askance",
+        "trunk",
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    write(
+        "abandoned-roadmaps.json",
+        &get(&app, "/api/ui/abandoned-roadmaps").await,
+    );
+
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
     // a branch named, and the base commit overridden, which is the whole of what
     // a drafting Conversation carries. Put in through the store for the reason

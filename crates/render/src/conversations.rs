@@ -57,6 +57,54 @@ pub struct ConversationEntry {
     pub state: Lifecycle,
 }
 
+/// One Repo's notice under the new-conversation box: the roadmaps in it that
+/// nothing is driving.
+///
+/// One notice per Repo with its roadmaps inside, rather than one per roadmap —
+/// what the human reads first is which repository has work left lying about,
+/// and a repository with three of them is one thing to look at rather than
+/// three.
+///
+/// Nothing here is stored. Every field is read off the repository at the moment
+/// the list is drawn, which is why a roadmap somebody has since picked up
+/// simply stops appearing rather than having to be taken off anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AbandonedRepo {
+    /// Which Repo, by the id a Conversation is started against.
+    pub repo_id: i64,
+
+    /// And what it is called, which is what the notice says.
+    pub repo: String,
+
+    /// The roadmaps in it with a stage that could be started now. Never empty:
+    /// a Repo with nothing to adopt has no notice at all.
+    pub roadmaps: Vec<AbandonedRoadmap>,
+}
+
+/// One abandoned roadmap, named with the stage that would be adopted.
+///
+/// The stage is the lowest-numbered unchecked one, which is the roadmap's own
+/// order rather than anybody's choice — see the abandoned rule in the server's
+/// `stages` module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AbandonedRoadmap {
+    /// Its directory name under `docs/roadmaps/` — `mvp`. The roadmap's
+    /// identity, here as everywhere else.
+    pub name: String,
+
+    /// What the roadmap calls itself in its heading, or empty where it has
+    /// none. Prose about itself, riding along beside the name.
+    pub title: String,
+
+    /// The next stage's number as the roadmap writes it — `04`.
+    pub stage: String,
+
+    /// And what that stage is called.
+    pub stage_title: String,
+}
+
 /// One Conversation, whole: what it is attached to, what the human has settled
 /// about it, and everything that has happened to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

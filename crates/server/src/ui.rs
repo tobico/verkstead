@@ -51,6 +51,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
         )
+        // The roadmaps in the registered Repos that nothing is driving, drawn
+        // as a notice under the new-conversation box. Beside the Conversations
+        // rather than under a Repo, because that is where it is read: what it
+        // offers is another way to start work.
+        .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
         .route("/api/ui/conversations/{id}", get(conversation))
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`transcript`].
@@ -334,6 +339,29 @@ async fn register_repo(
             unavailable("the Repo could not be registered")
         }
     }
+}
+
+/// `GET /api/ui/abandoned-roadmaps` — the registered Repos holding roadmaps
+/// nothing is driving, one notice each.
+///
+/// Read from the repositories every time it is asked for, like the pinned task
+/// and stage lists: the boxes and the branches are the repository's own answer
+/// about its roadmaps, and a list Verkstead kept would be a second opinion that
+/// went wrong the moment somebody ticked a box.
+///
+/// A Repo that cannot be read contributes nothing rather than failing the list.
+/// What this decides is whether to draw a notice, and a git that was briefly
+/// busy is no reason to say a roadmap has been abandoned.
+async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    Json(crate::stages::abandoned(repos).await).into_response()
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.

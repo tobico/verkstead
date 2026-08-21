@@ -18,6 +18,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AbandonedRepo,
   AgentOutputEvent,
   CommitDiff,
   ConversationAborted,
@@ -36,6 +37,7 @@ import type {
 import stylesheet from "../src/main.css?raw";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
+import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import direction from "./fixtures/conversation-direction.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
@@ -57,6 +59,7 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
 const REPOS = repos as RepoEntry[];
+const ABANDONED = abandoned as AbandonedRepo[];
 const PROFILES = profiles as ProfileEntry[];
 
 /// The one the fixture opens, which is the second row of the sidebar.
@@ -130,6 +133,7 @@ function theWorkbench(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
+    whenever("/api/ui/abandoned-roadmaps", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,
   );
@@ -301,6 +305,81 @@ describe("starting a conversation", () => {
       expect(sent(fetching, "/api/ui/conversations")).toEqual({
         repo_id: REPOS[0]!.id,
       }),
+    );
+  });
+});
+
+describe("the abandoned roadmaps notice", () => {
+  /// The whole of it: one notice per Repo, its roadmaps inside, each named with
+  /// the stage that would be started.
+  it("names the repo, its roadmaps and the stage each one is up to", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount();
+
+    const notices = await waitFor(() => {
+      const drawn = container.querySelectorAll(".abandoned-notice");
+      expect(drawn.length).toBe(ABANDONED.length);
+      return drawn;
+    });
+
+    const notice = notices[0]!;
+    expect(notice.textContent).toContain(ABANDONED[0]!.repo);
+
+    const roadmaps = notice.querySelectorAll("li");
+    expect(roadmaps.length).toBe(ABANDONED[0]!.roadmaps.length);
+
+    for (const [n, roadmap] of ABANDONED[0]!.roadmaps.entries()) {
+      const said = roadmaps[n]!.textContent!;
+      expect(said).toContain(roadmap.name);
+      expect(said).toContain(roadmap.stage);
+      expect(said).toContain(roadmap.stage_title);
+    }
+  });
+
+  /// Under the box that starts a conversation, which is what it is an
+  /// alternative to — and above the conversations themselves, which are the work
+  /// already under way.
+  it("is drawn under the new conversation box", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount();
+
+    const notice = await drawn(container, ".abandoned");
+    const box = container.querySelector(".start-conversation")!;
+
+    expect(box.compareDocumentPosition(notice)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  /// Nothing to adopt is nothing to say. A Repo whose roadmaps are all
+  /// complete, mid-flight or broken contributes no notice at all, and a
+  /// workbench with none draws no heading over an empty list.
+  it("says nothing when there is nothing to adopt", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    expect(container.querySelector(".abandoned")).toBeNull();
+  });
+
+  /// Read again with everything else the page is showing, because the server
+  /// reads it off the repositories every time it is asked: a roadmap somebody
+  /// has since picked up stops being on the list, and the notice goes with it.
+  it("is read again when the page looks again", async () => {
+    const fetching = theWorkbench(
+      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
+    );
+    const { container } = mount();
+    await drawn(container, ".abandoned-notice");
+
+    const before = askedFor(fetching, "/api/ui/abandoned-roadmaps");
+    readAgain();
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/abandoned-roadmaps")).toBeGreaterThan(
+        before,
+      ),
     );
   });
 });
