@@ -92,7 +92,9 @@ _Avoid_: description, prompt, spec, issue body
 **Timeline**:
 A Conversation's ordered record of what has happened to it, and the middle pane
 of the workbench. Everything Verkstead and its agents do lands here as an
-Event; nothing happens off it.
+Event; nothing happens off it. It records the work rather than the watching:
+looking at a session's Screen, and even a Hold, leaves no Event — the badge
+says so while it matters, and the record keeps what was built.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
@@ -112,6 +114,40 @@ Notice is a decision already taken. It is what running unattended owes the
 human: a decision made while nobody was watching is one they have to be able to
 read afterwards.
 _Avoid_: log line, info event, message, alert
+
+**Transcript**:
+The session's own record of its conversation — the agent's prose, its tool
+use, its reasoning, and what was put to it — kept word for word as the agent's
+backend wrote it, and rendered readable in the details pane. What summaries
+and Interruption evidence draw from, falling back to the Capture when a
+session left none.
+_Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
+record), transcript-as-bytes (that is the Capture)
+
+**Capture**:
+The terminal bytes of a session, kept byte for byte, escapes and all — how it
+looked rather than what it said. What quiet-detection listens to, what the
+Screen replays, and the record of last resort for a session that left no
+Transcript.
+_Avoid_: transcript (that is the readable record), raw output, tape
+
+**Screen**:
+The live terminal view of a running session, held by Verkstead and shown in
+the workbench — one screen however many devices watch it, sized by whoever
+resized last. A session that has ended shows its Screen as it last stood,
+read-only. Watching one commits the human to nothing.
+_Avoid_: terminal, console, attach view, pane
+
+**Hold**:
+The human at a live session's keyboard. Begins with the first keystroke typed
+into a Screen and ends only by being handed back — never by a timeout or a
+dropped connection, because the machine resuming over a half-finished
+intervention is worse than a stalled run. While it lasts Verkstead keeps
+recording but ends nothing and advances nothing, and the Conversation carries
+*blocked on you*; on hand-back the ordinary end-of-session rules judge
+whatever the human left. Distinct from the *Take over manually* Remedy, which
+is Verkstead stepping aside for good.
+_Avoid_: takeover (the Remedy's word), pause, manual mode, lock
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
