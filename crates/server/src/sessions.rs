@@ -138,17 +138,37 @@ impl Agents {
         Agents { pace, ..self }
     }
 
-    /// What a session for `profile` on `prompt` runs.
+    /// What a session for `profile` on `prompt`, named `session`, runs.
     ///
     /// The model is the Profile's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
-    /// half of what an Agent Profile *is*. The prompt goes last, which is where
-    /// an interactive claude takes the thing it is to start on.
-    fn argv(&self, profile: &store::Profile, prompt: &str) -> Vec<String> {
+    /// half of what an Agent Profile *is*. The prompt follows it as the one
+    /// positional argument, which is where an interactive claude takes the thing
+    /// it is to start on.
+    ///
+    /// The name comes after the prompt rather than before it, and claude reads
+    /// its options on either side of the positional one. What is on the other
+    /// side of that choice is everything that already reads this line: an agent
+    /// is run as its model and then its Brief, and a flag pushed in between the
+    /// two would move the Brief under every stub agent the test suite stands
+    /// where claude goes. Options added here go on the end, so nothing that was
+    /// already there moves.
+    ///
+    /// `None` is a session Verkstead could not name — see [`session_name`] —
+    /// and the flag is then left off entirely rather than passed empty: an agent
+    /// told to run under no name at all would refuse to start, where one not
+    /// told anything picks its own.
+    fn argv(&self, profile: &store::Profile, prompt: &str, session: Option<&str>) -> Vec<String> {
         let mut argv = self.agent.clone();
         argv.push("--model".to_owned());
         argv.push(profile.model.clone());
         argv.push(prompt.to_owned());
+
+        if let Some(session) = session {
+            argv.push("--session-id".to_owned());
+            argv.push(session.to_owned());
+        }
+
         argv
     }
 }
@@ -423,7 +443,11 @@ impl Sessions {
             return Ok(None);
         };
 
-        let argv = agents.argv(profile, prompt);
+        // Decided here rather than read back off the agent afterwards, which is
+        // the whole of why the log it writes can be found at all — see
+        // [`session_name`].
+        let session = session_name();
+        let argv = agents.argv(profile, prompt, session.as_deref());
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -475,7 +499,7 @@ impl Sessions {
             }
         };
 
-        let event_id = store::start_capture(pool, conversation_id).await?;
+        let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
 
         let (stop, stopping) = oneshot::channel();
 
@@ -646,6 +670,46 @@ impl Sessions {
             running.remove(&conversation_id);
         }
     }
+}
+
+/// A name for a session about to be started: a version 4 UUID, which is what
+/// claude will take as a session id and nothing else is.
+///
+/// Verkstead picks it rather than reading back whatever the agent chose, because
+/// what the name is *for* is finding the log the agent keeps of its own
+/// conversation — see [`store::session_id`]. The alternative is working out the
+/// name the backend would have picked, which is somebody else's private
+/// algorithm and free to change under us; a name we chose ourselves cannot.
+///
+/// Sixteen bytes from the operating system's own generator and nothing around
+/// it, for the reason a prefilled branch name is picked the same way: there is
+/// no distribution to sample and no sequence to reproduce here either.
+///
+/// `None` where the generator would not answer, which is a machine in a state
+/// nothing here can improve. The session then runs unnamed and picks its own id,
+/// its Timeline Event records no name, and what it said is read back off the
+/// Capture — the same as for every agent that keeps no log at all.
+fn session_name() -> Option<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).ok()?;
+
+    // Version 4 in the high nibble of the seventh byte and the variant in the
+    // top bits of the ninth, which is the difference between sixteen random
+    // bytes and a UUID something else will accept as one.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let mut name = String::with_capacity(36);
+
+    for (at, byte) in bytes.iter().enumerate() {
+        if matches!(at, 4 | 6 | 8 | 10) {
+            name.push('-');
+        }
+
+        name.push_str(&format!("{byte:02x}"));
+    }
+
+    Some(name)
 }
 
 /// `argv` as a session: run inside `sandbox`, on a pseudo-terminal of its own.
@@ -889,12 +953,15 @@ mod tests {
     }
 
     /// The prompt is what the grilling starts from, and an interactive claude
-    /// takes what it is to start on as its last argument.
+    /// takes what it is to start on as a positional argument.
     #[test]
     fn a_session_runs_the_profiles_model_on_the_prompt() {
         let state = tempfile::tempdir().unwrap();
-        let argv =
-            agents(vec!["claude".to_owned()], state.path()).argv(&profile(), "# Rate limiting\n");
+        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+            &profile(),
+            "# Rate limiting\n",
+            None,
+        );
 
         assert_eq!(
             argv,
@@ -905,6 +972,62 @@ mod tests {
                 "# Rate limiting\n".to_owned(),
             ]
         );
+    }
+
+    /// And a named session says so on the same line, after the prompt — see
+    /// [`Agents::argv`] for why the end is where it goes.
+    #[test]
+    fn a_named_session_is_run_under_the_name_it_was_given() {
+        let state = tempfile::tempdir().unwrap();
+        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+            &profile(),
+            "# Rate limiting\n",
+            Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "claude".to_owned(),
+                "--model".to_owned(),
+                "claude-fable-5".to_owned(),
+                "# Rate limiting\n".to_owned(),
+                "--session-id".to_owned(),
+                "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),
+            ]
+        );
+    }
+
+    /// A name claude will take as a session id, which is a version 4 UUID and
+    /// nothing else — a malformed one is refused, and the session never starts.
+    #[test]
+    fn a_session_is_named_something_claude_will_accept() {
+        let mut seen = std::collections::HashSet::new();
+
+        for _ in 0..64 {
+            let name = session_name().expect("this machine has a random generator");
+
+            let groups: Vec<&str> = name.split('-').collect();
+            assert_eq!(
+                groups.iter().map(|group| group.len()).collect::<Vec<_>>(),
+                vec![8, 4, 4, 4, 12],
+                "{name:?} is not shaped like a UUID"
+            );
+            assert!(
+                name.chars().all(|c| c == '-' || c.is_ascii_hexdigit()),
+                "{name:?} has something in it that is not a hex digit"
+            );
+            assert!(
+                groups[2].starts_with('4'),
+                "{name:?} does not say it is a version 4 UUID"
+            );
+            assert!(
+                ['8', '9', 'a', 'b'].contains(&groups[3].chars().next().unwrap()),
+                "{name:?} does not say which variant of UUID it is"
+            );
+
+            assert!(seen.insert(name.clone()), "{name:?} was handed out twice");
+        }
     }
 
     /// Everything about a Brief that a shell would otherwise read as its own —

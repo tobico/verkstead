@@ -820,6 +820,64 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
 }
 
+/// Verkstead names a session before it starts it, so that the log the agent
+/// keeps of its own conversation is a lookup rather than a guess.
+///
+/// Three things have to be true together, and separately they prove nothing: the
+/// name reaches the agent, the same name is written down beside the session's
+/// Event, and a file named for it inside the sandbox lands under the Agent
+/// Profile's own directory on the host — which is where the log will be looked
+/// for. The stub writes that file where claude writes its session log, because
+/// what could actually be wrong here is Verkstead's end of it.
+#[tokio::test]
+async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        printf 'named=%s\n' "$name"
+
+        mkdir -p "$HOME/.claude/projects/stub"
+        printf '' > "$HOME/.claude/projects/stub/$name.jsonl"
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let name = verkstead_store::session_id(&pool, event)
+        .await
+        .unwrap()
+        .expect("Verkstead should have written down what it named the session");
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(&format!("named={name}\n")),
+        "the session should have been run under the name Verkstead recorded for it: {said:?}"
+    );
+
+    let log = fixture
+        ._watched
+        .path()
+        .join("grilling/.claude/projects/stub")
+        .join(format!("{name}.jsonl"));
+
+    assert!(
+        log.is_file(),
+        "a log named for the session should land under the grilling Profile's own \
+         directory, at {}",
+        log.display()
+    );
+}
+
 /// A grilling session runs for an hour. A Timeline that said nothing until it
 /// finished would be a Timeline nobody could watch.
 #[tokio::test]

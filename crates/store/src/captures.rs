@@ -75,7 +75,16 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// start regardless: a session's output is a thing that is happening, and an
 /// Event that appeared only once it was over would be a Timeline nobody could
 /// watch.
-pub async fn start_capture(pool: &SqlitePool, conversation_id: i64) -> Result<i64> {
+///
+/// `session_id` is what the session about to print here was named — see
+/// [`crate::session_id`] — and it is written in the same transaction, so an
+/// Event and the name of the session writing into it arrive together. `None`
+/// where the session has no name to record.
+pub async fn start_capture(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    session_id: Option<&str>,
+) -> Result<i64> {
     let mut tx = pool.begin().await.context("starting a Capture")?;
 
     let (event_id,): (i64,) = sqlx::query_as(
@@ -94,6 +103,10 @@ pub async fn start_capture(pool: &SqlitePool, conversation_id: i64) -> Result<i6
         .execute(&mut *tx)
         .await
         .with_context(|| format!("opening the Capture of Event {event_id}"))?;
+
+    if let Some(session_id) = session_id {
+        super::session_names::name_session(&mut tx, event_id, session_id).await?;
+    }
 
     tx.commit().await.context("starting a Capture")?;
 

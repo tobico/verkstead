@@ -1302,7 +1302,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It reads as a session that has stopped: the fixture is a payload rather
     // than a moment, and a running one would be a page drawing a spinner over
     // something that has not moved since 2026.
-    let capture = store::start_capture(&pool, grilling).await.unwrap();
+    let capture = store::start_capture(&pool, grilling, None).await.unwrap();
     store::append_capture(
         &pool,
         capture,
