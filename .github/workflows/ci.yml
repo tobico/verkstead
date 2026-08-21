@@ -69,14 +69,24 @@ jobs:
         run: |
           echo "host /bin:    $(ls -ld /bin)"
           echo "host /bin/sh: $(ls -l /bin/sh)"
+          echo "host /lib:    $(ls -ld /lib)"
+          echo "host /lib64:  $(ls -ld /lib64)"
+          echo "loader:       $(file -L /usr/bin/dash | tr -s ' ')"
+          ldd /usr/bin/dash || true
+
+          echo "--- SYSTEM as it stands (no /lib) ---"
           bwrap --unshare-all --share-net \
-            --ro-bind /nix /nix \
-            --ro-bind /usr /usr \
-            --ro-bind /bin /bin \
-            --ro-bind /lib64 /lib64 \
-            --ro-bind /etc /etc \
+            --ro-bind /nix /nix --ro-bind /usr /usr --ro-bind /bin /bin \
+            --ro-bind /lib64 /lib64 --ro-bind /etc /etc \
             --proc /proc --dev /dev --tmpfs /tmp \
-            /bin/sh -c 'echo "inside: $(ls -l /bin/sh)"'
+            /bin/sh -c 'echo "inside: ok"' || echo "FAILED without /lib"
+
+          echo "--- with /lib added ---"
+          bwrap --unshare-all --share-net \
+            --ro-bind /nix /nix --ro-bind /usr /usr --ro-bind /bin /bin \
+            --ro-bind /lib /lib --ro-bind /lib64 /lib64 --ro-bind /etc /etc \
+            --proc /proc --dev /dev --tmpfs /tmp \
+            /bin/sh -c 'echo "inside: ok"' || echo "FAILED with /lib"
 
       # Formatting and lints first: both are cheap and both fail on the kind of
       # thing that is quicker to read than a test failure.
