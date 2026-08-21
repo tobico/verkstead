@@ -42,6 +42,7 @@ import type {
   Direction,
   DirectionChosen,
   GrillingStarted,
+  HandoffEvent,
   Lifecycle,
   MovedEvent,
   QuestionSetEvent,
@@ -159,6 +160,9 @@ export function Timeline(props: {
                 <Match when={"Directed" in event && event.Directed}>
                   {(directed) => <Directed directed={directed()} />}
                 </Match>
+                <Match when={"Handoff" in event && event.Handoff}>
+                  {(handoff) => <Handoff handoff={handoff()} />}
+                </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
                     <AgentOutput
@@ -211,6 +215,27 @@ function Directed(props: { directed: DirectedEvent }): JSX.Element {
     <p class="directed" classList={{ [props.directed.direction]: true }}>
       Chose to {DIRECTION[props.directed.direction].toLowerCase()}
     </p>
+  );
+}
+
+/// The handoff the grilling wrote on its way out.
+///
+/// A card and not a line, because it is a document: what the grilling settled,
+/// written down for the session that builds it — and the human reads the same
+/// copy the implementation is primed with, which is the whole point of it
+/// landing here rather than being passed along out of sight.
+///
+/// Read-only, unlike the Brief beside it. It is the agent's account of a
+/// conversation that is over, and a document the human could edit afterwards
+/// would be a record of something that never happened.
+function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
+  return (
+    <article class="handoff">
+      <div class="event-head">
+        <h2>Handoff</h2>
+      </div>
+      <div class="markdown" innerHTML={props.handoff.html} />
+    </article>
   );
 }
 
@@ -422,7 +447,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 const DIRECTIONS: { direction: Direction; note: string; ready: boolean }[] = [
   {
     direction: "inline",
-    note: "One fresh session under the implementation profile, primed with a handoff document.",
+    note: "One fresh session under the implementation profile, primed with the handoff. Starts as soon as you choose it.",
     ready: true,
   },
   {
@@ -525,9 +550,11 @@ function DirectionChooser(props: { conversation: ConversationView }): JSX.Elemen
           </For>
         </ul>
 
-        {/* What was chosen, said where it was chosen. Nothing runs off it yet:
-            the stages that execute each direction are what make it do
-            something, and saying so is better than a button that looks broken. */}
+        {/* What was chosen, said where it was chosen — which is only ever a
+            task list by the time this is read: choosing inline starts the work,
+            and a conversation that has started is past this chooser and no
+            longer drawing it. Saying that nothing has run yet is better than a
+            button that looks broken. */}
         <Show when={props.conversation.direction}>
           {(direction) => (
             <p class="note chosen-note">

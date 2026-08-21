@@ -52,7 +52,7 @@ pub(crate) async fn submit_response(
 
     match store::submit_response(&state.pool, &state.settlements, id, &response).await {
         Ok(Submission::Accepted(taken)) => {
-            crate::conversations::said_of_a_proposal(id, taken.proposed);
+            crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
 
             // The acceptance and nothing about the move: what a waiting agent
             // came for is that its Set is answered, and the Conversation moving

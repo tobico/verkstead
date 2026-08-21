@@ -1418,15 +1418,44 @@ describe("choosing a direction", () => {
     );
   });
 
+  // A task list, because it is the only direction that can still be sitting in
+  // this chooser: choosing inline starts the work, which takes the conversation
+  // past the state the chooser is drawn in at all.
   it("says what was chosen, and that nothing runs off it yet", async () => {
-    theDirecting({ direction: "inline" });
+    theDirecting({ direction: "task-list" });
     const { container } = mount(`/conversations/${DIRECTING.id}`);
 
     const note = await drawn(container, ".direction-chooser .chosen-note");
 
-    expect(note.textContent).toContain("implement inline");
+    expect(note.textContent).toContain("break into a task list");
     expect(note.textContent).toContain("Nothing runs off this yet");
     expect(container.querySelector(".directions .chosen")).toBeTruthy();
+  });
+
+  it("says that inline starts as soon as it is chosen", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const directions = await drawn(container, ".directions");
+    const inline = directions.querySelectorAll("li")[0]!;
+
+    expect(inline.textContent).toContain("Starts as soon as you choose it");
+  });
+
+  it("draws the handoff the grilling wrote as the document it is", async () => {
+    theDirecting();
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const handoff = await drawn(container, ".timeline-event > .handoff");
+
+    expect(handoff.querySelector("h2")?.textContent).toBe("Handoff");
+    expect(handoff.querySelector(".markdown")?.innerHTML).toContain(
+      "<h1>Pausing on a usage limit</h1>",
+    );
+
+    // Nothing to press and nothing to edit: it is the agent's account of a
+    // conversation that is over.
+    expect(handoff.querySelector("button")).toBeNull();
   });
 
   it("says in words why a direction was refused", async () => {

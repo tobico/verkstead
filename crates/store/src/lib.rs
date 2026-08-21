@@ -33,10 +33,11 @@ mod waits;
 
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
-    Lifecycle, SetOnTimeline, TimelineEvent, abort_conversation, ask, asked_from, choose_direction,
-    conversations, load_conversation, move_to_direction, rename_branch, save_brief, set_asked_from,
-    set_base_commit, set_grilling_profile, set_implementation_profile, set_state,
-    start_conversation, start_grilling, timeline,
+    Implementing, Lifecycle, SetOnTimeline, TimelineEvent, abort_conversation, ask, asked_from,
+    choose_direction, conversations, load_conversation, move_to_direction, record_handoff,
+    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
+    set_implementation_profile, set_state, start_conversation, start_grilling, start_implementing,
+    timeline,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,

@@ -20,6 +20,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -59,6 +60,10 @@ struct Grilling {
     /// The bundled skills, installed where the server installs them: under the
     /// State Directory, at startup.
     skills: Skills,
+
+    /// And where the handoff documents go, which is a root under the same
+    /// directory — one directory per Conversation, made as its sandbox is built.
+    handoffs: Handoffs,
 }
 
 impl Grilling {
@@ -77,6 +82,7 @@ impl Grilling {
             self.home(),
             &Reachable::at(listening),
             &self.skills,
+            &self.handoffs,
             extra,
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
@@ -227,6 +233,7 @@ async fn grilling() -> Grilling {
         .expect("the Conversation is there");
 
     let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let handoffs = Handoffs::under(state.path());
 
     Grilling {
         watched,
@@ -238,6 +245,7 @@ async fn grilling() -> Grilling {
         profile,
         pool,
         skills,
+        handoffs,
     }
 }
 
@@ -347,7 +355,7 @@ fn on_the_host(program: &str) -> PathBuf {
 }
 
 #[tokio::test]
-async fn the_worktree_and_the_repos_git_directory_are_the_two_writable_things() {
+async fn the_worktree_the_git_directory_and_the_handoff_directory_are_what_can_be_written() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
@@ -357,6 +365,7 @@ async fn the_worktree_and_the_repos_git_directory_are_the_two_writable_things() 
             r#"
             dir {worktree} worktree
             dir {git_dir} git-dir
+            dir /tmp/verkstead handoff
             "#,
             worktree = quoted(fixture.worktree()),
             git_dir = quoted(&fixture.repo.join(".git")),
@@ -367,6 +376,42 @@ async fn the_worktree_and_the_repos_git_directory_are_the_two_writable_things() 
     assert_eq!(
         reported["git-dir"], "write",
         "the objects and refs a commit is written into are the Repo's, not the worktree's"
+    );
+    assert_eq!(
+        reported["handoff"], "write",
+        "and the Conversation's own directory, which is the one writable place git will never see"
+    );
+}
+
+/// The handoff directory is a bind and not part of the tmpfs `/tmp` is
+/// otherwise made of — which is the whole of what makes it useful: a document
+/// written in there has to be one Verkstead can read once the session is gone.
+#[tokio::test]
+async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gone() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        printf '# What we settled\n' > /tmp/verkstead/handoff.md
+        say wrote yes
+        "#,
+    );
+
+    assert_eq!(reported["wrote"], "yes");
+
+    let outside = fixture
+        .handoffs
+        .directory(fixture.conversation.id)
+        .expect("the directory the sandbox bound")
+        .join("handoff.md");
+
+    assert_eq!(
+        std::fs::read_to_string(&outside).ok().as_deref(),
+        Some("# What we settled\n"),
+        "nothing written inside reached {}",
+        outside.display()
     );
 }
 

@@ -20,9 +20,34 @@ understanding.
 ## How the grilling ends
 
 You end it, not them. There is no button anywhere that stops a grilling: once
-you and the human have reached that shared understanding, the last thing you do
-is put **one final Question Set that proposes wrapping up**, and answering it is
-what moves the work on to being built.
+you and the human have reached that shared understanding, the closing move is
+**the handoff document, and then one final Question Set that proposes wrapping
+up**. Answering that Set is what moves the work on to being built.
+
+### The handoff document
+
+Whoever builds this is not you. The work runs under a different account and
+model, in a fresh session that has none of this conversation — so everything you
+learned grilling has to be written down first, or it is gone.
+
+**Write it to `/tmp/verkstead/handoff.md`, before you put the closing Set.**
+That path is outside the checkout on purpose: it is Verkstead's document rather
+than the project's, so it never reaches a commit. Verkstead takes it from there,
+puts it on the Timeline for the human, and primes the implementation session
+with it.
+
+Markdown, and as long as it needs to be. Write it for a competent agent who has
+read the Brief and nothing else:
+
+- **What is being built**, and what it is for.
+- **Every decision the grilling settled**, with the reasoning that settled it —
+  including the options you rejected and why, so they are not reopened.
+- **What was deliberately left open**, and who decides it when it comes up.
+- **Where in the codebase it lands**: the files, the patterns to follow, the
+  tests that cover it.
+- **What would count as done.**
+
+### The closing Set
 
 That Set is an ordinary Set with one thing added — a `proposal` block naming the
 direction you recommend and why:
@@ -90,6 +115,10 @@ Read it and decide for yourself what it calls for:
 
 Do not treat a refusal as a reason to stop, and never put the same proposal
 again unchanged: they said no to that one.
+
+**Rewrite the handoff before you propose again.** Whatever came out of the round
+that followed the refusal is part of what was settled, and the handoff standing
+where it is would hand over the understanding you had before they disagreed.
 
 ## How the questions reach them
 

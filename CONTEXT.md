@@ -45,18 +45,19 @@ things.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
 **State Directory**:
-The one directory Verkstead keeps what it makes in — the Worktrees, and
-whatever later stages need to put somewhere. Beside the database by default,
+The one directory Verkstead keeps what it makes in — the Worktrees, the
+installed Skills, the handoff directories, and whatever later stages need to put
+somewhere. Beside the database by default,
 because that is the directory a packaged unit is already given to write. Not a
 Watched Path and not the same kind of thing: a Watched Path bounds what the
 human may point Verkstead at, and this is Verkstead's own.
 _Avoid_: data dir, work dir, scratch space, cache
 
 **Sandbox**:
-What a session runs inside: its Conversation's Worktree and the Repo's git
-directory writable, the Agent Profile's pair at `~/.claude` and
-`~/.claude.json`, the system and the Skills read-only, and nothing else of the
-machine at all
+What a session runs inside: its Conversation's Worktree, the Repo's git
+directory and the Conversation's handoff directory writable, the Agent
+Profile's pair at `~/.claude` and `~/.claude.json`, the system and the Skills
+read-only, and nothing else of the machine at all
 — not even the checkout the Worktree was made from. The filesystem is the
 boundary and the network is not: inside, it is the host's own, whole and
 unfiltered, because what stops a session doing harm is that there is nothing
@@ -72,8 +73,8 @@ widening a boundary is the installer's to do.
 _Avoid_: sandbox settings, mounts, extra paths
 
 **Skill**:
-One of the workflows Verkstead runs its sessions by — grilling now, the
-implementation and wrap-up ones as the stages that need them arrive. Verkstead's
+One of the workflows Verkstead runs its sessions by — grilling and implementing
+now, the rest as the stages that need them arrive. Verkstead's
 own: shipped inside the binary, installed under the State Directory at startup
 and mounted read-only over `~/.claude/skills`, so a session's behaviour is the
 product's rather than whatever the machine or the account happens to keep. A
@@ -94,8 +95,8 @@ Event; nothing happens off it.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
-One entry in a Timeline — a Brief, agent output, a Question Set, a commit, a
-task list, a stage list, a PR, an interruption. Each shows a summary in the
+One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
+commit, a task list, a stage list, a PR, an interruption. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
@@ -123,8 +124,16 @@ up. One of the three and never a mixture: the choice is which pipeline runs the
 work, and a Conversation that had picked two would be two pieces of work. It is
 also the state that choosing happens in, which is the same word on purpose:
 Direction is where the Conversation is and the Direction is what comes out of
-it. Choosing does not start anything — the work beginning is a move of its own —
-so a Conversation stays in Direction with its Direction settled.
+it.
+
+Choosing is one press, and what follows from it is the pipeline it named
+starting. The choice and the start stay separate things on the record — the
+Direction is an Event and the work beginning is a move — but there is no second
+button between them: the human has decided, and a Conversation sitting on a
+settled Direction with nothing running would be waiting for nobody. **Inline**
+starts as it is chosen. **Task list** has nothing to start yet, so a
+Conversation that picked one stays in Direction until the stage that runs one
+lands.
 _Avoid_: mode, strategy, plan, execution path
 
 **Proposal**:
@@ -146,6 +155,26 @@ Proposal settles that the work is understood, not which Direction it takes, and
 the human may pick any of the three.
 _Avoid_: wrap-up request, handover, recommendation (that is the part, not the
 whole), final question
+
+**Handoff**:
+The document a grilling session writes before it proposes: everything it
+settled with the human, written down for whoever builds the work. The other
+half of the closing move, and the reason an inline implementation can be a
+fresh session at all — the two run under different Profiles, and a session
+cannot change the account it is running as, so what the grilling knows is
+written down or it is gone.
+
+Verkstead's document rather than the project's, so it is written outside the
+Worktree — in a directory of the Conversation's own under the State Directory,
+bound into every one of its Sandboxes. A handoff in the checkout would be a file
+the next `git add -A` swept into the human's repository, and instructing an
+agent not to commit something is worth less than the file not being there.
+
+Taken onto the Timeline as an Event when the proposal is accepted, and taken
+rather than copied: the Timeline holds the only one from then on. One per
+grilling round — a proposal sent back leaves it where it is, to be rewritten
+before the next one.
+_Avoid_: handover document, context dump, summary, notes
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles

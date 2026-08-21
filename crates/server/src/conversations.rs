@@ -24,6 +24,7 @@ use verkstead_render::{
 use verkstead_schema::Direction;
 
 use crate::AppState;
+use crate::handoffs::Handoffs;
 use crate::repos::git;
 use crate::skills;
 use crate::store;
@@ -44,49 +45,132 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
     )
 }
 
-/// Say what answering a Question Set did to the Conversation it was asked from.
+/// Finish what answering a Question Set started, and say what it did to the
+/// Conversation it was asked from.
 ///
 /// The store hands back what happened and says nothing about it — see
 /// [`store::Taken`] — so this is where a proposal settled becomes a line in the
 /// log. Three of the four outcomes are unremarkable and one cannot happen, which
 /// is exactly why it is worth saying when it does.
-pub(crate) fn said_of_a_proposal(set_id: i64, proposed: Option<store::Proposed>) {
+///
+/// An accepted proposal is also the moment the grilling is over, and two things
+/// follow from that. The session that proposed is ended: it has its Response,
+/// there is nothing left for it to do, and what comes next runs in the same
+/// worktree under a different account. And its handoff is taken onto the
+/// Timeline, because the directory it was written in is Verkstead's own scratch
+/// space and the Timeline is where a Conversation's documents live.
+///
+/// Neither is refused for: by the time this runs the Response is stored and the
+/// Conversation has moved. What a session that would not end or a handoff that
+/// could not be read leaves behind is something to see in the log — and, when
+/// the stage that draws them lands, an Interruption.
+pub(crate) async fn settle_a_proposal(
+    state: &AppState,
+    set_id: i64,
+    proposed: Option<store::Proposed>,
+) {
     use store::{Directing, Proposed};
 
     match proposed {
         // The ordinary Set, carrying no proposal at all — which is nearly every
         // Set a grilling asks.
-        None => {}
-        Some(Proposed::SentBack) => tracing::info!(
-            set_id,
-            "a wrap-up proposal was not accepted; the grilling carries on with the Response"
-        ),
+        None => return,
+        Some(Proposed::SentBack) => {
+            tracing::info!(
+                set_id,
+                "a wrap-up proposal was not accepted; the grilling carries on with the Response"
+            );
+            return;
+        }
         Some(Proposed::Accepted(Directing::Moved)) => tracing::info!(
             set_id,
             "a wrap-up proposal was accepted; the Conversation is choosing a direction"
         ),
-        Some(Proposed::Accepted(Directing::NotGrilling)) => tracing::debug!(
-            set_id,
-            "a wrap-up proposal was accepted for a Conversation that had already left grilling"
-        ),
-        Some(Proposed::Accepted(Directing::NoSuchConversation)) => tracing::error!(
-            set_id,
-            "a wrap-up proposal names a Conversation that is not there, so nothing moved"
-        ),
+        Some(Proposed::Accepted(Directing::NotGrilling)) => {
+            tracing::debug!(
+                set_id,
+                "a wrap-up proposal was accepted for a Conversation that had already left grilling"
+            );
+            return;
+        }
+        Some(Proposed::Accepted(Directing::NoSuchConversation)) => {
+            tracing::error!(
+                set_id,
+                "a wrap-up proposal names a Conversation that is not there, so nothing moved"
+            );
+            return;
+        }
+    }
+
+    // Which Conversation the grilling was of. Read back rather than passed in:
+    // one of the two endpoints that take a Response knows and the other does
+    // not, and a Set is on exactly one Timeline either way.
+    let conversation_id = match store::asked_from(&state.pool, set_id).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            tracing::error!(set_id, "an accepted proposal is on no Timeline");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading which Conversation a proposal was asked from failed");
+            return;
+        }
+    };
+
+    state.sessions.end(conversation_id).await;
+
+    if let Err(error) = take_handoff(state, conversation_id).await {
+        tracing::error!(error = ?error, conversation_id, "the handoff could not be put on the Timeline");
     }
 }
 
-/// Record how the human chose to have the work built.
+/// Take the handoff document the grilling wrote and put it on the Timeline.
 ///
-/// The Conversation stays in Direction: this settles *how* the work gets done,
-/// and starting to do it is the next stage's move to make.
+/// Taken after the session has ended, so that what is read is a finished
+/// document rather than one still being written. A grilling that never wrote one
+/// leaves nothing to take, which is a thing to note and not a failure — see
+/// [`crate::handoffs::Handoffs::take`].
+async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
+    let handoffs = Handoffs::under(&state.state_dir);
+
+    let written = tokio::task::spawn_blocking(move || handoffs.take(conversation_id)).await?;
+
+    let Some(written) = written else {
+        tracing::warn!(
+            conversation_id,
+            "a grilling ended without writing a handoff, so what follows has the Brief alone"
+        );
+        return Ok(());
+    };
+
+    if !store::record_handoff(&state.pool, conversation_id, &written).await? {
+        tracing::error!(
+            conversation_id,
+            "a handoff was written for a Conversation that is not there"
+        );
+    }
+
+    Ok(())
+}
+
+/// Record how the human chose to have the work built, and set it building.
 ///
-/// Roadmap is refused here rather than only greyed out in the chooser. The page's
-/// disabled button is a courtesy, exactly as a form's branch-name check is: the
-/// stage that runs a staged roadmap has not landed, so there is nothing behind
-/// the choice whatever reached this endpoint.
+/// The choice is recorded first and on its own, because it is a different thing
+/// from the work starting: the Timeline gets the choice as an Event and then the
+/// move that follows from it, and a Conversation whose direction is settled but
+/// whose session would not start still says which way it was headed.
+///
+/// Only inline starts anything yet. A task list is a `.tasks/` directory to
+/// write before there is a session per task to run, and a staged roadmap is
+/// refused outright — the page's disabled button is a courtesy, exactly as a
+/// form's branch-name check is, and the stage that runs one has not landed.
+///
+/// Choosing on a Conversation that is not in Direction is refused by the store,
+/// which is what makes *implement inline* impossible from anywhere else: the
+/// choice and the start are one press, so neither half of it happens without the
+/// other.
 pub(crate) async fn choose_direction(
-    pool: &SqlitePool,
+    state: &AppState,
     id: i64,
     direction: Direction,
 ) -> Result<DirectionChosen> {
@@ -94,11 +178,103 @@ pub(crate) async fn choose_direction(
         return Ok(DirectionChosen::RoadmapNotYet);
     }
 
-    Ok(match store::choose_direction(pool, id, direction).await? {
-        store::Directed::Chosen => DirectionChosen::Chosen,
-        store::Directed::NoSuchConversation => DirectionChosen::NoSuchConversation,
-        store::Directed::NotChoosing => DirectionChosen::NotChoosing,
-    })
+    match store::choose_direction(&state.pool, id, direction).await? {
+        store::Directed::NoSuchConversation => return Ok(DirectionChosen::NoSuchConversation),
+        store::Directed::NotChoosing => return Ok(DirectionChosen::NotChoosing),
+        store::Directed::Chosen => {}
+    }
+
+    if direction == Direction::Inline {
+        implement_inline(state, id).await?;
+    }
+
+    Ok(DirectionChosen::Chosen)
+}
+
+/// Set the work being built inline: the Conversation moves to Implementing, and
+/// a fresh session under its implementation Profile starts in its worktree.
+///
+/// A fresh session rather than the grilling one carrying on, because the two run
+/// under Profiles the Conversation fixed separately and a session cannot change
+/// the account it is running as. What the grilling knew reaches it as the
+/// handoff — see [`crate::skills::implementing`].
+///
+/// The move is recorded before the session is started, exactly as starting a
+/// grilling records the worktree before launching one, and it is read the same
+/// way: a Conversation that is implementing with nothing implementing it is a
+/// thing to look at and start again, where one that had launched an agent nothing
+/// recorded would be an agent nobody could see or stop. So a session that will
+/// not start is logged rather than raised — the choice stands, and what it leaves
+/// behind is an Interruption once the stage that draws them lands.
+async fn implement_inline(state: &AppState, id: i64) -> Result<()> {
+    let pool = &state.pool;
+
+    match store::start_implementing(pool, id).await? {
+        store::Implementing::Started => {}
+        // Something moved the Conversation between the choice and this — a
+        // second press from another device, or an abort mid-decision.
+        store::Implementing::NotChoosing => {
+            tracing::info!(
+                conversation_id = id,
+                "the Conversation left Direction before the implementation could start"
+            );
+            return Ok(());
+        }
+        store::Implementing::NoSuchConversation => {
+            tracing::error!(
+                conversation_id = id,
+                "there is no Conversation to implement"
+            );
+            return Ok(());
+        }
+    }
+
+    // Read back rather than assembled from what was just recorded, for the reason
+    // starting a grilling reads it back: where an agent is about to be let loose
+    // is the one thing that must not be guessed at.
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        tracing::error!(
+            conversation_id = id,
+            "there is no Conversation to implement"
+        );
+        return Ok(());
+    };
+
+    // Both Profiles are settled before grilling starts, so a missing one here is
+    // one deleted since: the Conversation has moved and there is no account to
+    // run the work as.
+    let Some(profile) = conversation.implementation_profile.clone() else {
+        tracing::error!(
+            conversation_id = id,
+            "the implementation Profile is gone, so no session was started"
+        );
+        return Ok(());
+    };
+
+    // The grilling session ended when its proposal was accepted. Ended again
+    // here because this is where it matters rather than where it happened: one
+    // worktree holds one agent, and two would be two agents editing each other's
+    // files.
+    state.sessions.end(id).await;
+
+    let brief = brief(pool, id).await?;
+    let handoff = handoff(pool, id).await?;
+
+    if let Err(error) = state
+        .sessions
+        .start(
+            pool,
+            &state.nudges,
+            &conversation,
+            &profile,
+            &skills::implementing(&brief, handoff.as_deref()),
+        )
+        .await
+    {
+        tracing::error!(error = ?error, conversation_id = id, "an implementation session could not be started");
+    }
+
+    Ok(())
 }
 
 /// Save what the human has written into the Brief.
@@ -359,6 +535,13 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
         }
     }
 
+    // And the directory beside it, with whatever the sessions put there. It is
+    // given back for the reason the worktree is: it is somewhere a Conversation
+    // was given to work, and the Conversation has stopped. Whatever it held that
+    // was worth keeping is on the Timeline already.
+    let handoffs = Handoffs::under(&state.state_dir);
+    tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
+
     Ok(match store::abort_conversation(pool, id).await? {
         store::Aborting::Aborted => ConversationAborted::Aborted,
         store::Aborting::AlreadyAborted => ConversationAborted::AlreadyAborted,
@@ -404,6 +587,22 @@ async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
             _ => None,
         })
         .unwrap_or_default())
+}
+
+/// The handoff off a Conversation's Timeline, where a grilling has written one.
+///
+/// The last of them rather than the first, which is the other way round from the
+/// Brief: a Conversation gets one handoff per grilling round, and the one that
+/// hands over is the one the grilling that just ended wrote.
+async fn handoff(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    Ok(store::timeline(pool, id)
+        .await?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.event {
+            store::Event::Handoff(markdown) => Some(markdown),
+            _ => None,
+        }))
 }
 
 /// A Conversation's worktree as the viewer receives it: where it is, and whether

@@ -12,9 +12,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Directed, Directing, Event, Lifecycle, Proposed, Settlements, Submission, ask,
-    choose_direction, load_conversation, move_to_direction, open_database, register_repo,
-    save_brief, start_conversation, start_grilling, submit_response, timeline,
+    Directed, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
+    choose_direction, load_conversation, move_to_direction, open_database, record_handoff,
+    register_repo, save_brief, start_conversation, start_grilling, start_implementing,
+    submit_response, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -152,6 +153,19 @@ async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
         .iter()
         .filter_map(|event| match event.event {
             Event::Moved(state) => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
+/// And the handoffs a grilling has handed over, in order.
+async fn handoffs(pool: &SqlitePool, id: i64) -> Vec<String> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Handoff(markdown) => Some(markdown),
             _ => None,
         })
         .collect()
@@ -490,6 +504,105 @@ async fn there_is_no_conversation_to_direct() {
             .await
             .unwrap(),
         Directed::NoSuchConversation,
+    );
+}
+
+#[tokio::test]
+async fn starting_the_implementation_moves_the_conversation_and_says_so() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+    move_to_direction(&pool, id).await.unwrap();
+    choose_direction(&pool, id, Direction::Inline)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        start_implementing(&pool, id).await.unwrap(),
+        Implementing::Started
+    );
+
+    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+    assert_eq!(
+        moves(&pool, id).await,
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the choice is an Event of its own and the work starting is a move",
+    );
+}
+
+/// Choosing is what starts the work, so a Conversation that is not choosing has
+/// nothing to start — including one already implementing, which is a second
+/// press.
+#[tokio::test]
+async fn there_is_nothing_to_implement_where_nothing_is_being_chosen() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        start_implementing(&pool, id).await.unwrap(),
+        Implementing::NotChoosing,
+    );
+    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
+
+    move_to_direction(&pool, id).await.unwrap();
+    start_implementing(&pool, id).await.unwrap();
+
+    assert_eq!(
+        start_implementing(&pool, id).await.unwrap(),
+        Implementing::NotChoosing,
+    );
+    assert_eq!(
+        moves(&pool, id).await,
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the second press records nothing",
+    );
+
+    assert_eq!(
+        start_implementing(&pool, 404).await.unwrap(),
+        Implementing::NoSuchConversation,
+    );
+}
+
+#[tokio::test]
+async fn a_handoff_lands_on_the_timeline_as_the_document_it_is() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert!(
+        record_handoff(&pool, id, "# What we settled\n")
+            .await
+            .unwrap()
+    );
+
+    assert_eq!(handoffs(&pool, id).await, ["# What we settled\n"]);
+
+    // A reopened round grills again, and its handoff is a second Event rather
+    // than a rewrite of the first: nothing leaves a Timeline.
+    record_handoff(&pool, id, "# What we settled, again\n")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        handoffs(&pool, id).await,
+        ["# What we settled\n", "# What we settled, again\n"],
+    );
+}
+
+#[tokio::test]
+async fn there_is_no_conversation_to_hand_over_from() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert!(
+        !record_handoff(&pool, 404, "# What we settled\n")
+            .await
+            .unwrap()
     );
 }
 

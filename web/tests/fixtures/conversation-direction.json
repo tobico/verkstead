@@ -84,6 +84,13 @@
         "id": 11,
         "state": "Direction"
       }
+    },
+    {
+      "Handoff": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>Pausing on a usage limit</h1>\n<p>The detector reads the account's own error rather than guessing from a\nfailure, because every other failure looks the same from outside.</p>\n<h2>Left open</h2>\n<p>Whether a resumed session starts over or carries on — decide it when the\nresume path is written.</p>\n",
+        "id": 12
+      }
     }
   ],
   "worktree": {

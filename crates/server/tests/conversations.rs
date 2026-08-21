@@ -1152,6 +1152,33 @@ fn directions(view: &ConversationView) -> Vec<verkstead_schema::Direction> {
         .collect()
 }
 
+/// Write a handoff where a grilling session would have written one: inside the
+/// Conversation's own directory under the State Directory, which is bound into
+/// its sandbox at `/tmp/verkstead`.
+///
+/// Written from out here because there is no session in these tests to write it
+/// — what they ask is what Verkstead does with the document, not how it came to
+/// be there. Hands back where it went, for the tests that ask whether it is still
+/// there afterwards.
+fn handoff_written(state: &Path, id: i64, markdown: &str) -> PathBuf {
+    let directory = state.join("handoffs").join(id.to_string());
+    std::fs::create_dir_all(&directory).unwrap();
+
+    let path = directory.join("handoff.md");
+    std::fs::write(&path, markdown).unwrap();
+
+    path
+}
+
+/// The handoff on a Conversation's Timeline, where a grilling has handed one
+/// over.
+fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
+    view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::Handoff(handoff) => Some(handoff),
+        _ => None,
+    })
+}
+
 /// A Conversation that is grilling for real: branch, worktree and all.
 async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
     let id = ready(app, watched, repo_id).await;
@@ -1198,6 +1225,103 @@ async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
     );
 }
 
+/// The other half of the closing move: the document the grilling wrote before it
+/// proposed. Verkstead takes it as the proposal is accepted, and from then on the
+/// Timeline holds it — which is what the human reads and what the implementation
+/// session is primed with.
+#[tokio::test]
+async fn the_handoff_the_grilling_wrote_reaches_the_timeline_when_the_proposal_is_accepted() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let written = handoff_written(
+        dir.path(),
+        id,
+        "# What we settled\n\nAn in-process counter.\n",
+    );
+
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    let view = opened(&app, id).await;
+    let handoff = handoff(&view).expect("the handoff is on the Timeline");
+
+    assert!(
+        handoff.html.contains("in-process counter"),
+        "the handoff arrives rendered, like every other piece of agent markdown: {}",
+        handoff.html
+    );
+
+    assert!(
+        !written.exists(),
+        "the document is taken rather than copied: the Timeline holds the only one now",
+    );
+}
+
+/// The handoff is written outside the checkout on purpose. What proves it is git
+/// having nothing to say about the worktree afterwards — an agent that later runs
+/// `git add -A` is the whole reason the file is not in there.
+#[tokio::test]
+async fn a_handoff_never_lands_in_the_repository() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    handoff_written(dir.path(), id, "# What we settled\n");
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.expect("a grilling Conversation has one").path);
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "the worktree is untouched by a handoff being written",
+    );
+
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and by it being taken",
+    );
+}
+
+/// A grilling that skipped half its closing move still hands the work over: the
+/// Conversation moves, and what follows is primed with the Brief alone.
+#[tokio::test]
+async fn a_grilling_that_wrote_no_handoff_still_hands_over() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Direction);
+    assert_eq!(handoff(&view), None);
+}
+
+/// A proposal the human sent back is not the grilling ending, so the handoff
+/// stays where it is: the session is still holding the thread and will rewrite it
+/// before it proposes again.
+#[tokio::test]
+async fn a_proposal_sent_back_leaves_the_handoff_where_it_was_written() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let written = handoff_written(dir.path(), id, "# What we settled\n");
+    let set = ask(&app, id, PROPOSING).await;
+
+    answered(
+        &app,
+        set,
+        serde_json::json!({ "label": "Q9", "selected": 2 }),
+    )
+    .await;
+
+    assert!(written.exists(), "nothing was taken");
+    assert_eq!(handoff(&opened(&app, id).await), None);
+}
+
 #[tokio::test]
 async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
@@ -1217,7 +1341,30 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
 }
 
 #[tokio::test]
-async fn choosing_a_direction_records_it_and_leaves_the_conversation_choosing() {
+async fn choosing_a_task_list_records_it_and_leaves_the_conversation_choosing() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    assert_eq!(direct(&app, id, "task-list").await, DirectionChosen::Chosen);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.direction, Some(verkstead_schema::Direction::TaskList));
+    assert_eq!(directions(&view), [verkstead_schema::Direction::TaskList]);
+    assert_eq!(
+        view.state,
+        Lifecycle::Direction,
+        "a task list is a `.tasks/` directory to write before anything runs a task",
+    );
+}
+
+/// Inline is the one direction that runs off the press, so the Conversation
+/// leaves Direction the moment it is chosen. The session itself is another
+/// matter — this router has no way to run one, which is exactly why the move and
+/// the launch are separate things.
+#[tokio::test]
+async fn choosing_inline_sets_the_conversation_implementing() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
     answer(&app, ask(&app, id, PROPOSING).await).await;
@@ -1228,10 +1375,37 @@ async fn choosing_a_direction_records_it_and_leaves_the_conversation_choosing() 
 
     assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
     assert_eq!(directions(&view), [verkstead_schema::Direction::Inline]);
+    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
-        view.state,
-        Lifecycle::Direction,
-        "what was settled is how the work gets built, not that it has started",
+        moves(&view),
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the choice is an Event of its own and the work starting is a move",
+    );
+}
+
+/// The work has started, so there is no longer a choice here to make — however
+/// the second press arrived.
+#[tokio::test]
+async fn choosing_inline_again_once_the_work_has_started_is_refused() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    assert_eq!(direct(&app, id, "inline").await, DirectionChosen::Chosen);
+    assert_eq!(
+        direct(&app, id, "inline").await,
+        DirectionChosen::NotChoosing
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        directions(&view),
+        [verkstead_schema::Direction::Inline],
+        "the refused press records nothing",
     );
 }
 

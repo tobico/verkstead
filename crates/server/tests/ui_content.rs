@@ -1401,6 +1401,25 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await;
 
+    // And the other half of that closing move: the document the grilling wrote
+    // before it proposed, which Verkstead takes onto the Timeline as the
+    // proposal is accepted. Recorded here for the reason the worktree is
+    // recorded rather than made — where the file came from is
+    // `tests/conversations.rs`'s subject, and what the Timeline does with it is
+    // this one's.
+    store::record_handoff(
+        &pool,
+        directing,
+        "# Pausing on a usage limit\n\n\
+         The detector reads the account's own error rather than guessing from a\n\
+         failure, because every other failure looks the same from outside.\n\n\
+         ## Left open\n\n\
+         Whether a resumed session starts over or carries on — decide it when the\n\
+         resume path is written.\n",
+    )
+    .await
+    .unwrap();
+
     write(
         "conversations.json",
         &get(&app, "/api/ui/conversations").await,

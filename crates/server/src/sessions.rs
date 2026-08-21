@@ -35,6 +35,7 @@ use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::skills::Skills;
@@ -55,18 +56,20 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
 /// extra binds Sandbox Configuration asks for, the skills every sandbox is
-/// given, and what an agent is on the command line.
+/// given, where a Conversation's handoff directory is made, and what an agent is
+/// on the command line.
 ///
-/// Resolved once at startup and shared by every session, because each of the
-/// five is a fact about the machine rather than about any one Conversation —
-/// including the address, which is scoped to a Conversation only as a session is
-/// started.
+/// Resolved once at startup and shared by every session, because each of them is
+/// a fact about the machine rather than about any one Conversation — including
+/// the address and the handoff root, which are scoped to a Conversation only as
+/// a session is started.
 #[derive(Debug, Clone)]
 pub struct Agents {
     home: Home,
     reachable: Reachable,
     config: SandboxConfig,
     skills: Skills,
+    handoffs: Handoffs,
 
     /// What a Profile's agent is run as, before its model and its prompt.
     ///
@@ -82,8 +85,21 @@ pub struct Agents {
 
 impl Agents {
     /// The real thing: claude, under whichever account the Profile names.
-    pub fn new(home: Home, reachable: Reachable, config: SandboxConfig, skills: Skills) -> Agents {
-        Agents::running(vec!["claude".to_owned()], home, reachable, config, skills)
+    pub fn new(
+        home: Home,
+        reachable: Reachable,
+        config: SandboxConfig,
+        skills: Skills,
+        handoffs: Handoffs,
+    ) -> Agents {
+        Agents::running(
+            vec!["claude".to_owned()],
+            home,
+            reachable,
+            config,
+            skills,
+            handoffs,
+        )
     }
 
     /// The same, with something else where claude goes — see [`Agents::agent`].
@@ -93,12 +109,14 @@ impl Agents {
         reachable: Reachable,
         config: SandboxConfig,
         skills: Skills,
+        handoffs: Handoffs,
     ) -> Agents {
         Agents {
             home,
             reachable,
             config,
             skills,
+            handoffs,
             agent,
         }
     }
@@ -217,6 +235,7 @@ impl Sessions {
             let home = agents.home.clone();
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
+            let handoffs = agents.handoffs.clone();
             let extra = agents.config.binds_for(&conversation.repo.name);
 
             move || {
@@ -226,6 +245,7 @@ impl Sessions {
                     home,
                     &reachable,
                     &skills,
+                    &handoffs,
                     extra,
                 )?;
                 let worktree = conversation.worktree.clone()?;
@@ -538,6 +558,7 @@ mod tests {
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             Skills::installed(state).expect("this binary carries skills"),
+            Handoffs::under(state),
         )
     }
 

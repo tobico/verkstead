@@ -242,10 +242,18 @@ pub enum Event {
     /// The human chose how the work gets built, and this is what they chose.
     ///
     /// Not a [`Self::Moved`], though it lands beside one: the move into Direction
-    /// says the choosing has begun, and this says how it came out. A Conversation
-    /// stays in Direction after it — what leaves is the implementation starting,
-    /// which is a move of its own.
+    /// says the choosing has begun, and this says how it came out. What leaves
+    /// Direction is the implementation starting, which is a move of its own.
     Directed(Direction),
+
+    /// The handoff document the grilling session wrote on its way out.
+    ///
+    /// Markdown in the `body` column like the Brief, because that is what it is:
+    /// a document the human reads and the implementation session is primed with.
+    /// It is written outside the Worktree and taken onto the Timeline when the
+    /// proposal is accepted — see `crate::handoffs` in the server — so the copy
+    /// here is the only one that lasts.
+    Handoff(String),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -279,6 +287,7 @@ impl Event {
             Self::AgentOutput(_) => "agent-output",
             Self::QuestionSet(_) => QUESTION_SET,
             Self::Directed(_) => "directed",
+            Self::Handoff(_) => "handoff",
         }
     }
 
@@ -294,6 +303,7 @@ impl Event {
             // `question_sets` already.
             Self::QuestionSet(_) => "",
             Self::Directed(direction) => direction_stored(*direction),
+            Self::Handoff(markdown) => markdown,
         }
     }
 
@@ -320,6 +330,7 @@ impl Event {
                 set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
             )),
             "directed" => Self::Directed(direction_read(&body)?),
+            "handoff" => Self::Handoff(body),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -411,6 +422,24 @@ pub enum Directed {
     /// It is not in Direction, so there is nothing here to choose. Either the
     /// grilling has not proposed wrapping up yet, or the work is past the point
     /// where the choice was the human's.
+    NotChoosing,
+}
+
+/// What became of starting the work being built.
+///
+/// The mirror of [`Grilling`] one state along: the same two refusals, named for
+/// the state they are refused out of. A Conversation is set implementing by its
+/// direction being chosen, so there is no way to reach this from anywhere but
+/// Direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Implementing {
+    /// Recorded: the state and the move on the Timeline.
+    Started,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is not in Direction, so there is no choice here to act on.
     NotChoosing,
 }
 
@@ -1316,6 +1345,75 @@ pub async fn choose_direction(
     tx.commit().await.context("choosing a direction")?;
 
     Ok(Directed::Chosen)
+}
+
+/// Record that the work is being built: the Conversation is out of Direction and
+/// implementing, and the move is on its Timeline.
+///
+/// Refused for anything but Direction, which is where choosing happens and the
+/// only place a direction can be acted on. That refusal is what makes *implement
+/// inline on a Conversation that is not choosing* impossible however the request
+/// arrived.
+///
+/// One transaction, as every move is: a Conversation that says Implementing
+/// always has the move on its Timeline to say when it got there.
+pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementing> {
+    let mut tx = pool.begin().await.context("starting the implementation")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Implementing::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Direction {
+        return Ok(Implementing::NotChoosing);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Implementing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} to implementing"))?;
+
+    moved(&mut tx, id, Lifecycle::Implementing).await?;
+
+    tx.commit().await.context("starting the implementation")?;
+
+    Ok(Implementing::Started)
+}
+
+/// Put the handoff document the grilling wrote on a Conversation's Timeline.
+///
+/// `false` means there is no such Conversation, by the same insert-from-select
+/// every other Event is written with: a handoff attributed to a Conversation
+/// that is not there would be a document on nobody's Timeline.
+///
+/// Written whole, every time it is called. A Conversation gets one of these per
+/// grilling round rather than one ever — a reopened round grills again, and its
+/// handoff is a second Event beside the first rather than a rewrite of it.
+pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
+    let event = Event::Handoff(markdown.to_owned());
+
+    let written = sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
+         FROM conversations WHERE id = ?",
+    )
+    .bind(event.kind())
+    .bind(event.body())
+    .bind(id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("putting the handoff of Conversation {id} on its Timeline"))?
+    .rows_affected();
+
+    Ok(written > 0)
 }
 
 /// Put a move on a Conversation's Timeline.

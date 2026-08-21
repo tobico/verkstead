@@ -25,9 +25,11 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentOutputEvent, BriefSaved, ConversationAborted, ConversationView, GrillingStarted,
-    Lifecycle, ProfileSaved, Registered, Started, TimelineEvent, Transcript,
+    AgentOutputEvent, BriefSaved, ConversationAborted, ConversationView, DirectionChosen,
+    GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, Submitted, TimelineEvent,
+    Transcript,
 };
+use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, WatchedPaths, open_database, router_running_sessions};
@@ -116,7 +118,71 @@ impl Grilling {
         )
         .await
     }
+
+    /// Put a Question Set to the human the way the session inside would, and
+    /// hand back its id.
+    ///
+    /// Over the agent API rather than through the stub, because what these ask
+    /// is what happens once a Set is answered — the stub's job is to be a
+    /// session, not to be a CLI.
+    async fn ask(&self, yaml: &str) -> i64 {
+        let (status, body) = fetch(
+            &self.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!("/conversations/{}/api/v1/sets", self.id))
+                .header(header::CONTENT_TYPE, "application/yaml")
+                .body(Body::from(yaml.to_owned()))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
+
+        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
+        created.id
+    }
+
+    /// Answer it the way the human does, from the browser.
+    async fn answer(&self, set_id: i64) -> Submitted {
+        post(
+            &self.app,
+            &format!("/api/ui/sets/{set_id}/response"),
+            &serde_json::json!({ "answers": [{ "label": "Q9", "selected": 1 }] }),
+        )
+        .await
+    }
+
+    /// And choose how the work gets built.
+    async fn direct(&self, direction: &str) -> DirectionChosen {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/direction", self.id),
+            &serde_json::json!({ "direction": direction }),
+        )
+        .await
+    }
 }
+
+/// A closing Set: the proposal that ends a grilling, and the Option that means
+/// go ahead.
+const PROPOSING: &str = r#"
+title: Ready to build the rate limiter
+questions:
+  - label: Q9
+    text: Ready to build it this way?
+    options:
+      - n: 1
+        text: Yes, go ahead
+        recommended: true
+      - n: 2
+        text: Not yet — more to work through
+proposal:
+  direction: inline
+  accepted_by: Q9.1
+  rationale: |
+    One change, in one file.
+"#;
 
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
@@ -152,6 +218,7 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
+        Handoffs::under(state.path()),
     );
 
     let app = router_running_sessions(
@@ -219,8 +286,25 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
 
 /// The one agent-output Event on a Timeline, where there is one yet.
 fn output(view: &ConversationView) -> Option<&AgentOutputEvent> {
+    outputs(view).into_iter().next()
+}
+
+/// All of them, in order — a Conversation has one per session it has run, and
+/// the inline direction is where it gets its second.
+fn outputs(view: &ConversationView) -> Vec<&AgentOutputEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::AgentOutput(output) => Some(output),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The handoff on a Timeline, once the grilling has handed one over.
+fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
     view.timeline.iter().find_map(|event| match event {
-        TimelineEvent::AgentOutput(output) => Some(output),
+        TimelineEvent::Handoff(handoff) => Some(handoff),
         _ => None,
     })
 }
@@ -484,6 +568,7 @@ async fn a_transcript_survives_the_server_restarting() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            Handoffs::under(fixture.state.path()),
         ),
     );
 
@@ -506,6 +591,115 @@ async fn a_transcript_survives_the_server_restarting() {
     )
     .await;
     assert_eq!(read_back.text, said);
+}
+
+/// The inline direction end to end: the grilling writes a handoff where the
+/// skill says, the human accepts its proposal, and choosing *implement inline*
+/// runs a fresh session under the *other* Profile — primed with the handoff, and
+/// committing without anything to wait on.
+///
+/// One stub for both sessions, telling them apart by the model it was run on,
+/// because that is the fact under all of it: the two run as different accounts,
+/// which is why the grilling cannot simply carry on and why the handoff has to
+/// exist at all.
+#[tokio::test]
+async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            printf 'a limiter\n' > limiter.md
+            git add limiter.md
+            git commit --quiet -m 'feat: rate limiting'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    // The grilling has done its half: the handoff is written, and what follows
+    // is the human answering.
+    let grilling_output = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    let view = fixture.view().await;
+    assert_eq!(view.state, Lifecycle::Direction);
+    assert!(
+        handoff(&view).is_some_and(|handoff| handoff.html.contains("in-process counter")),
+        "the handoff is taken onto the Timeline as the proposal is accepted",
+    );
+    assert!(
+        outputs(&view).iter().all(|output| !output.running),
+        "the grilling ended with its proposal: it has its Response and nothing left to do",
+    );
+
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    // The second session, which is a different Event: the first is the grilling,
+    // and it ended when its proposal was accepted.
+    let implementing = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilling_output && !output.running)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.transcript(implementing).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5"),
+        "the work runs under the implementation Profile, not the one that grilled: {said:?}"
+    );
+    assert!(
+        said.contains("~/.claude/skills/implementing/SKILL.md"),
+        "and inside the bundled implementation skill: {said:?}"
+    );
+    assert!(
+        said.contains("An in-process counter."),
+        "primed with the handoff the grilling wrote: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF),
+        "and with the Brief the work started from: {said:?}"
+    );
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Implementing,
+        "the Conversation is building the work",
+    );
+
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("feat: rate limiting"),
+        "the session commits its work with nothing to ask and nobody to ask",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and the handoff is not in there to be swept into it",
+    );
 }
 
 /// The one ordering that matters when a Conversation is stopped: the agent is

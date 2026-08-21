@@ -13,6 +13,13 @@ use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
 mod conversations;
+/// Where a Conversation's handoff document is written, and how it reaches the
+/// Timeline.
+///
+/// Public for the reason the sandbox is: the directory is part of the surface a
+/// session runs on — every sandbox binds one — so standing a router up that runs
+/// sessions means saying where they live.
+pub mod handoffs;
 mod nudge;
 mod profiles;
 mod push;
@@ -404,6 +411,11 @@ pub async fn run(config: Config) -> Result<()> {
     let skills = skills::Skills::installed(&state_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And where a Conversation's handoff document is written, which is a root
+    // under the same directory: each Conversation's own is made as its first
+    // session starts.
+    let handoffs = handoffs::Handoffs::under(&state_dir);
+
     let pool = open_database(&config.database).await?;
 
     let listener = tokio::net::TcpListener::bind(config.listen)
@@ -429,7 +441,13 @@ pub async fn run(config: Config) -> Result<()> {
             config.releases(),
             watched,
             state_dir,
-            Agents::new(home, sandbox::Reachable::at(config.listen), binds, skills),
+            Agents::new(
+                home,
+                sandbox::Reachable::at(config.listen),
+                binds,
+                skills,
+                handoffs,
+            ),
         ),
     )
     .await

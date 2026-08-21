@@ -46,6 +46,9 @@ pub(crate) const INSIDE_HOME: &str = ".claude/skills";
 /// name this could spell out.
 const GRILLING: &str = "~/.claude/skills/grilling/SKILL.md";
 
+/// The implementation skill's, the same way.
+const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -132,6 +135,35 @@ pub(crate) fn grilling(brief: &str) -> String {
     )
 }
 
+/// What an inline implementation session is started on: the two documents it is
+/// building from, under the line that sends the agent into the implementation
+/// skill.
+///
+/// Both documents, because they are different things. The Brief is the human's
+/// own statement of the work and it is short; the handoff is what a whole
+/// grilling settled about it, written by the session that did the grilling. A
+/// session given only the second would be building from a summary of the first.
+///
+/// A grilling that ended without writing one leaves `None`, and the session is
+/// primed with the Brief alone. Not a refusal: the work is still described, and
+/// an implementation that never started because a document was missing would be
+/// a Conversation stuck with nothing to press.
+pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
+    let mut prompt = format!(
+        "Read {IMPLEMENTING} and build the work described below, the way it says. \
+         Nothing else in this session tells you how to reach me.\n\n\
+         # The Brief this started from\n\n{brief}\n"
+    );
+
+    if let Some(handoff) = handoff {
+        prompt.push_str(&format!(
+            "\n# What the grilling settled, in its own words\n\n{handoff}\n"
+        ));
+    }
+
+    prompt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +237,78 @@ mod tests {
         assert!(
             prompt.ends_with("# Rate limiting\n\nThe API has none.\n"),
             "and the Brief is what follows, whole: {prompt:?}"
+        );
+    }
+
+    /// The handoff is the whole reason an inline implementation is a fresh
+    /// session, so the skill that ends a grilling has to say where it goes —
+    /// and it is the path the sandbox mounts, not one an agent may improvise.
+    #[test]
+    fn the_grilling_skill_says_where_the_handoff_is_written() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains(crate::handoffs::HANDOFF_INSIDE),
+            "the skill has to name the path Verkstead reads the handoff back from"
+        );
+        assert!(
+            grilling.contains("handoff"),
+            "and call it what the Timeline and the workbench call it"
+        );
+    }
+
+    /// No gate anywhere in the implementation: the agent commits on its own,
+    /// and feedback consolidates when the branch is reviewed as a whole.
+    #[test]
+    fn the_implementation_skill_says_to_commit_without_asking() {
+        let implementing = skill("implementing/SKILL.md");
+
+        assert!(
+            implementing.contains("Commit"),
+            "committing is what an implementation session is for"
+        );
+        assert!(
+            implementing.contains("Nothing waits on approval"),
+            "and there is no gate in front of it: {implementing}"
+        );
+        assert!(
+            implementing.contains("verkstead ask"),
+            "the one way to the human, for the questions the handoff did not settle"
+        );
+    }
+
+    /// A session is put inside the skill by its prompt, and primed with the two
+    /// documents the work is described by.
+    #[test]
+    fn an_implementation_session_is_started_on_the_brief_and_the_handoff() {
+        let prompt = implementing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+        );
+
+        assert!(
+            prompt.contains(IMPLEMENTING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
+        );
+        assert!(
+            prompt.find("The API has none.") < prompt.find("In-process counter."),
+            "the Brief comes first: it is what the handoff is about"
+        );
+    }
+
+    /// A grilling that skipped half its closing move still leaves work to do.
+    #[test]
+    fn an_implementation_without_a_handoff_is_started_on_the_brief_alone() {
+        let prompt = implementing("# Rate limiting\n\nThe API has none.\n", None);
+
+        assert!(prompt.contains("The API has none."));
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "nothing is said about a document that was never written: {prompt:?}"
         );
     }
 

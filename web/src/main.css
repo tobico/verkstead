@@ -821,6 +821,13 @@ main:has(.workbench) {
   max-width: var(--measure);
 }
 
+/* The handoff is the same kind of card, and prose for the same reason — what the
+   grilling settled, written out for whoever builds it. Nothing to press: it is
+   the agent's account of a conversation that is over. */
+.handoff > .markdown {
+  max-width: var(--measure);
+}
+
 /* What a conversation is, beside what has happened to it: the repo it is
    attached to, and where it has got to. Read rather than changed — a
    conversation is attached to a repo when it is started. */

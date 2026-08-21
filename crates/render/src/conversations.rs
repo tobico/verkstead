@@ -211,6 +211,30 @@ pub enum TimelineEvent {
     /// them: the move into Direction says the choosing began, and this says how
     /// it came out.
     Directed(DirectedEvent),
+
+    /// The handoff the grilling wrote on its way out, rendered inline like the
+    /// Brief — and for the same reason: it is a document to read, and there is
+    /// nothing of it a details pane would show that the Timeline does not.
+    Handoff(HandoffEvent),
+}
+
+/// The handoff document as the page receives it.
+///
+/// HTML alone, unlike the Brief, which travels as its source as well: the Brief
+/// is the one document on this wire the human edits, and this one nobody does.
+/// It is the agent's account of what was settled, fixed at the moment the
+/// grilling ended.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct HandoffEvent {
+    pub id: i64,
+
+    /// When it reached the Timeline, RFC 3339.
+    pub at: String,
+
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// agent markdown on this wire is.
+    pub html: String,
 }
 
 /// The direction the human chose, as the page receives it.
@@ -524,6 +548,17 @@ pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
         at,
         html: crate::markdown::to_html(&markdown),
         markdown,
+    })
+}
+
+/// The handoff as an Event, rendered on the way — the same rendering the Brief
+/// gets, because it is the same kind of thing: markdown somebody wrote for
+/// somebody else to read.
+pub fn handoff_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
+    TimelineEvent::Handoff(HandoffEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(markdown),
     })
 }
 

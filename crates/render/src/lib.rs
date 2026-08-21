@@ -31,10 +31,10 @@ pub use answering::{Archived, Submitted};
 pub use conversations::{
     AgentOutputEvent, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefEvent, BriefSaved, ConversationAborted, ConversationEntry, ConversationView,
-    DirectedEvent, DirectionChoice, DirectionChosen, GrillingStarted, Lifecycle, MovedEvent,
-    NewConversation, ProposalView, QuestionSetEvent, SetRow, Started, TimelineEvent, Transcript,
-    Worktree, agent_output_event, brief_event, directed_event, moved_event, proposal_view,
-    question_set_event,
+    DirectedEvent, DirectionChoice, DirectionChosen, GrillingStarted, HandoffEvent, Lifecycle,
+    MovedEvent, NewConversation, ProposalView, QuestionSetEvent, SetRow, Started, TimelineEvent,
+    Transcript, Worktree, agent_output_event, brief_event, directed_event, handoff_event,
+    moved_event, proposal_view, question_set_event,
 };
 pub use profiles::{
     AgentType, Broken, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,

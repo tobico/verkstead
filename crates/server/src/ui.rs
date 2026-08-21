@@ -223,7 +223,7 @@ async fn submit_response(
 
     Json(match submission {
         store::Submission::Accepted(taken) => {
-            crate::conversations::said_of_a_proposal(id, taken.proposed);
+            crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
             Submitted::Accepted
         }
         store::Submission::AlreadyAnswered => Submitted::AlreadyAnswered,
@@ -523,6 +523,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 store::Event::Directed(direction) => {
                     verkstead_render::directed_event(event.id, event.at, direction)
                 }
+                // Rendered like the Brief, and inline like it: a document to
+                // read, with nothing of it a details pane would add.
+                store::Event::Handoff(markdown) => {
+                    verkstead_render::handoff_event(event.id, event.at, &markdown)
+                }
             })
             .collect(),
     };
@@ -642,11 +647,13 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
     }
 }
 
-/// `POST /api/ui/conversations/{id}/direction` — how the work gets built.
+/// `POST /api/ui/conversations/{id}/direction` — how the work gets built, and
+/// the work starting.
 ///
-/// The Conversation stays in Direction: this settles *how*, and starting is the
-/// next stage's move. Roadmap is refused here as well as greyed out in the
-/// chooser — see [`crate::conversations::choose_direction`].
+/// One press for both, because there is no second decision in between: choosing
+/// inline sets a session going under the implementation Profile. Roadmap is
+/// refused here as well as greyed out in the chooser — see
+/// [`crate::conversations::choose_direction`].
 async fn choose_direction(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -656,7 +663,7 @@ async fn choose_direction(
         return Json(DirectionChosen::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::choose_direction(&state.pool, id, choice.direction).await {
+    match crate::conversations::choose_direction(&state, id, choice.direction).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "choosing a direction failed");

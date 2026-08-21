@@ -321,6 +321,25 @@ export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing" | 
 export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
+ * The handoff document as the page receives it.
+ *
+ * HTML alone, unlike the Brief, which travels as its source as well: the Brief
+ * is the one document on this wire the human edits, and this one nobody does.
+ * It is the agent's account of what was settled, fixed at the moment the
+ * grilling ended.
+ */
+export type HandoffEvent = { id: number, 
+/**
+ * When it reached the Timeline, RFC 3339.
+ */
+at: string, 
+/**
+ * Rendered and sanitized by the server on the way out, as every piece of
+ * agent markdown on this wire is.
+ */
+html: string, };
+
+/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -694,7 +713,7 @@ export type Subscription = { endpoint: string, p256dh: string, auth: string, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

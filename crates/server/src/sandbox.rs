@@ -29,6 +29,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::handoffs::{self, Handoffs};
 use crate::skills::{self, Skills};
 use crate::store;
 
@@ -299,6 +300,17 @@ pub struct Sandbox {
     /// rather than the account's, and why they are read-only.
     skills: PathBuf,
 
+    /// The Conversation's own directory outside the worktree, read-write, at
+    /// [`handoffs::INSIDE`].
+    ///
+    /// Where the handoff document is written, and the one writable place a
+    /// session has that git will never see — see [`crate::handoffs`]. Every
+    /// session of the Conversation gets it, not only the grilling one that
+    /// writes the handoff: it is somewhere to put what is Verkstead's rather
+    /// than the project's, and which session is doing that does not change what
+    /// the surface is.
+    handoff_dir: PathBuf,
+
     home: Home,
 
     /// Where the session inside reaches Verkstead: this Conversation's own base
@@ -320,19 +332,23 @@ impl Sandbox {
     ///
     /// `None` where the Conversation has nowhere to run yet — no worktree, or
     /// one git will not own — which is every Conversation before grilling starts
-    /// and every one that has been aborted.
+    /// and every one that has been aborted. Its handoff directory is made here
+    /// where it is not already there, and failing to make one is the same
+    /// answer: a bind with nothing behind it is a sandbox that will not start.
     ///
-    /// Git is asked here, so this blocks.
+    /// Git is asked here and the filesystem is written to, so this blocks.
     pub fn for_conversation(
         conversation: &store::Conversation,
         profile: &store::Profile,
         home: Home,
         reachable: &Reachable,
         skills: &Skills,
+        handoffs: &Handoffs,
         extra: Vec<PathBuf>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
         let git_dir = crate::worktrees::common_git_dir(&worktree)?;
+        let handoff_dir = handoffs.directory(conversation.id)?;
 
         Some(Sandbox {
             worktree,
@@ -340,6 +356,7 @@ impl Sandbox {
             claude_dir: profile.claude_dir.clone(),
             config_file: profile.config_file.clone(),
             skills: skills.path().to_owned(),
+            handoff_dir,
             home,
             server: reachable.asking_from(conversation.id),
             extra,
@@ -397,6 +414,14 @@ impl Sandbox {
             .arg("--bind")
             .arg(&self.config_file)
             .arg(self.home.path.join(".claude.json"));
+
+        // After `/tmp` is made, and inside it: the tmpfs above would otherwise
+        // land over this and leave the session writing its handoff into memory
+        // nothing outside will ever read.
+        bwrap
+            .arg("--bind")
+            .arg(&self.handoff_dir)
+            .arg(handoffs::INSIDE);
 
         // After the Profile's directory, and inside it: a bind is applied in the
         // order it is given, so this one lands over whatever `~/.claude/skills`
