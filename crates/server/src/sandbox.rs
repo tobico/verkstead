@@ -44,10 +44,21 @@ use crate::store;
 /// One that is not there is skipped rather than refused: `/lib64` is an x86
 /// fact, and a machine without `/run/current-system` is one that is not NixOS,
 /// which is a thing to notice elsewhere than in a mount table.
-const SYSTEM: [&str; 6] = [
+///
+/// `/lib` and `/lib64` are both here because a shell off NixOS needs both and
+/// says so in a way that reads as something else entirely: Ubuntu's `/bin/sh` is
+/// `dash`, whose interpreter is under `/lib64` but whose `libc.so.6` is under
+/// `/lib`, and `execvp` reports a library it cannot find as `No such file or
+/// directory` — naming the binary rather than the library. On a merged-`/usr`
+/// distribution neither is a widening: both are symlinks into `/usr`, which is
+/// bound above, so this reaches the same files by their other name. It is on
+/// NixOS that they are nothing, which is why their absence went unnoticed —
+/// there, `/nix` is the whole answer.
+const SYSTEM: [&str; 7] = [
     "/nix",
     "/usr",
     "/bin",
+    "/lib",
     "/lib64",
     "/etc",
     "/run/current-system",
