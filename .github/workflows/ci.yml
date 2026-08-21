@@ -40,16 +40,22 @@ jobs:
       # is no way to ask that of anything but the tool itself. The runner image
       # does not carry it.
       #
-      # Installed from apt rather than fetched, because the package is what
-      # makes it *usable* as well as present: Ubuntu 24.04 denies unprivileged
-      # user namespaces by default, which is exactly what the sandbox's
-      # `--unshare-all` asks for, and the package ships the AppArmor profile
-      # granting bwrap the exception.
+      # Present is not enough: Ubuntu 24.04 denies unprivileged user namespaces
+      # through AppArmor, which is exactly what the sandbox's `--unshare-all`
+      # asks for, and an installed bwrap fails at `setting up uid map` without
+      # the restriction lifted. The runner is a throwaway VM whose only job is
+      # this suite, so the sysctl goes off rather than a profile being written
+      # for one binary.
+      #
+      # The last line is the check: it makes a namespace and prints from inside
+      # one, so a runner image that changes this under us fails here, in a line,
+      # rather than as nine test failures further down.
       - name: Install bubblewrap
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
-          bwrap --version
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --unshare-all --ro-bind / / /bin/echo "bwrap works"
 
       # For the dev-shell autodetection alone: it decides whether to wrap a
       # session's command in `nix develop` by evaluating a flake attribute, so
