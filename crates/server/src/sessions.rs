@@ -181,18 +181,76 @@ pub(crate) struct Session {
     /// How long it has been printing nothing.
     pub(crate) quiet: Quiet,
 
-    /// Word that it is over, however it ended.
+    /// Word that it is over, and how it ended.
     ///
-    /// Nothing is ever sent: what says the session is over is the relay letting
-    /// go of the other end, which is the last thing a relay does. A driver that
-    /// waited on a message would be waiting on somebody remembering to send one.
-    ended: oneshot::Receiver<()>,
+    /// Sent as the last thing a relay does, and read through the *closing* of
+    /// this rather than through the message arriving: a relay that panicked
+    /// would drop its end without sending, and a driver waiting on a message
+    /// would then wait on a session that had already gone. So the channel
+    /// closing is what says *over* — and the value it carries, where there is
+    /// one, is what says how.
+    ended: oneshot::Receiver<Ended>,
+}
+
+/// How a session ended, as whoever was driving it hears.
+///
+/// The distinction the Interruptions turn on: [`Ended::Stopped`] is a session
+/// Verkstead put an end to because its step had landed, and every other variant
+/// is a session that stopped without being asked to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Ended {
+    /// Ran to the end and exited cleanly. Which is not the same as *did the
+    /// work*: an interactive agent that decides there is nothing to do exits
+    /// zero, and what says the step landed is the Worktree.
+    Well,
+
+    /// Exited badly, said as what happened to it — "exited with status 1".
+    Badly(String),
+
+    /// Verkstead ended it: its step had landed and it had gone quiet, or the
+    /// human aborted the Conversation out from under it.
+    Stopped,
+
+    /// It is over and nothing can say how — the relay itself failed, or could not
+    /// reap the process. Read as badly, because a session nothing can account for
+    /// is not one to carry on from.
+    Unknown,
+}
+
+impl Ended {
+    /// The sentence an Interruption's evidence records, or `None` where the
+    /// session ended the way it was meant to.
+    ///
+    /// One place decides what each way of ending is *called*, so the words the
+    /// human reads on the Timeline and the words the log used are the same
+    /// words.
+    pub(crate) fn badly(&self) -> Option<String> {
+        match self {
+            Self::Stopped | Self::Well => None,
+            Self::Badly(status) => Some(format!("the session {status}")),
+            Self::Unknown => Some("the session ended and nothing could say how".to_owned()),
+        }
+    }
+
+    /// Whether Verkstead is what ended it.
+    ///
+    /// The one way of ending that is never an Interruption, whatever the Worktree
+    /// then says. Everything else a driver sees is a session that stopped without
+    /// being asked to, and the human is owed the choice about it; this is the
+    /// human having already made one — they aborted the Conversation — or the
+    /// step having landed. Raising an Interruption about it would be asking them
+    /// what to do about the thing they just did.
+    pub(crate) fn on_purpose(&self) -> bool {
+        matches!(self, Self::Stopped)
+    }
 }
 
 impl Session {
-    /// Wait until the session is over.
-    pub(crate) async fn ended(&mut self) {
-        let _ = (&mut self.ended).await;
+    /// Wait until the session is over, and say how it ended.
+    pub(crate) async fn ended(&mut self) -> Ended {
+        // A relay that dropped its end without sending is a relay that panicked,
+        // and a session nothing can account for is exactly [`Ended::Unknown`].
+        (&mut self.ended).await.unwrap_or(Ended::Unknown)
     }
 }
 
@@ -400,11 +458,6 @@ impl Sessions {
                 let quiet = quiet.clone();
 
                 async move {
-                    // Held for as long as the relay runs and dropped with it,
-                    // which is what tells whoever is driving that the session is
-                    // over — see [`Session::ended`].
-                    let _over = over;
-
                     // A Conversation with no base commit has never started
                     // grilling, and a session is running in it — so this is a
                     // record that has been got at rather than a Conversation
@@ -435,7 +488,7 @@ impl Sessions {
                         }
                     };
 
-                    relay(&pool, &nudges, event_id, &mut child, &quiet, stopping).await;
+                    let ended = relay(&pool, &nudges, event_id, &mut child, &quiet, stopping).await;
 
                     // The session is over, so the branch is finished moving.
                     // Waited on rather than only asked to stop, because what it
@@ -455,6 +508,18 @@ impl Sessions {
                     // ended.
                     sessions.forget(conversation_id, event_id);
                     nudges.announce();
+
+                    // Last of all, for the reason the drop it replaced was last:
+                    // whoever is driving acts on this — it raises Interruptions
+                    // and launches the next step — and everything above has to
+                    // have happened by then. Chief among them the final sweep of
+                    // the branch, because a session's last act is usually a
+                    // commit and a driver told *over* before it landed would be
+                    // reading a Conversation that had not finished happening.
+                    //
+                    // A send that fails is a driver that has gone, which is every
+                    // session nothing is following.
+                    let _ = over.send(ended);
                 }
             });
 
@@ -580,6 +645,9 @@ fn shell_command(argv: &[String]) -> String {
 /// `quiet` is put back to now on everything read rather than on everything
 /// written down: what it is measuring is whether the session is still talking,
 /// and a redraw the summariser throws away is a session talking.
+///
+/// What comes back is how it ended, which is what whoever is driving decides
+/// between carrying on and raising an Interruption by.
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
@@ -587,12 +655,12 @@ async fn relay(
     child: &mut Child,
     quiet: &Quiet,
     mut stopping: oneshot::Receiver<()>,
-) {
+) -> Ended {
     let mut output = match child.stdout.take() {
         Some(output) => output,
         None => {
             tracing::error!(event_id, "a session was started without an output to read");
-            return;
+            return Ended::Unknown;
         }
     };
 
@@ -650,11 +718,28 @@ async fn relay(
     pending.push_str(&reading.finish());
     flush(pool, nudges, event_id, &mut pending, &reading).await;
 
-    match child.wait().await {
-        Ok(status) if status.success() || ending => {}
-        Ok(status) => tracing::warn!(event_id, %status, "a session ended badly"),
-        Err(error) => tracing::error!(error = ?error, event_id, "a session could not be reaped"),
-    }
+    // `ending` first, because a session Verkstead killed exits by a signal and
+    // that is not a session that went wrong: it is the step having landed.
+    let ended = match child.wait().await {
+        Ok(_) if ending => Ended::Stopped,
+        Ok(status) if status.success() => Ended::Well,
+        Ok(status) => {
+            tracing::warn!(event_id, %status, "a session ended badly");
+
+            // Worded here rather than by whoever reads it, because this is where
+            // the two ways of ending badly are still told apart: a status is a
+            // number the agent chose, and no status at all is a process something
+            // else killed.
+            Ended::Badly(match status.code() {
+                Some(code) => format!("exited with status {code}"),
+                None => format!("was killed — {status}"),
+            })
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, event_id, "a session could not be reaped");
+            Ended::Unknown
+        }
+    };
 
     if let Some(complaints) = complaints
         && let Ok(said) = complaints.await
@@ -666,6 +751,8 @@ async fn relay(
             "a session's own plumbing"
         );
     }
+
+    ended
 }
 
 /// Put what has been printed since last time in the store, and tell whoever is

@@ -21,6 +21,7 @@ mod conversations;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+mod interruptions;
 mod nudge;
 mod profiles;
 mod push;

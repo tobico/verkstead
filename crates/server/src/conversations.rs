@@ -62,8 +62,10 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
 ///
 /// Neither is refused for: by the time this runs the Response is stored and the
 /// Conversation has moved. What a session that would not end or a handoff that
-/// could not be read leaves behind is something to see in the log — and, when
-/// the stage that draws them lands, an Interruption.
+/// could not be read leaves behind is something to see in the log, and no more
+/// than that. An Interruption is raised about a session that ran and went wrong
+/// — see [`crate::interruptions`] — and neither of these is one: the grilling is
+/// over either way, and what follows it starts from the Brief.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -209,8 +211,11 @@ pub(crate) async fn choose_direction(
 /// way: a Conversation that is implementing with nothing implementing it is a
 /// thing to look at and start again, where one that had launched an agent nothing
 /// recorded would be an agent nobody could see or stop. So a session that will
-/// not start is logged rather than raised — the choice stands, and what it leaves
-/// behind is an Interruption once the stage that draws them lands.
+/// not start is logged rather than raised — the choice stands, and the chooser
+/// says where it was chosen that nothing started off it. Not an Interruption:
+/// those are raised about a session that ran and went wrong, and this is one
+/// that never ran, with nothing to gather as evidence and nothing the human has
+/// to decide between.
 ///
 /// A task list is where this stops being one session's business. The session
 /// just started writes the backlog and then idles, as an interactive session
@@ -290,8 +295,25 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         }
     };
 
-    if let (Direction::TaskList, Some(session)) = (direction, started) {
-        tokio::spawn(crate::runner::follow(state.clone(), id, session));
+    // Both directions are followed, and the two drivers differ in what they are
+    // watching for rather than in whether anybody is watching. A backlog's run is
+    // a session per step, each one seen out and the next launched; an inline run
+    // is one session, and what says it did anything is what it committed. Either
+    // way a session that ends without landing its work stops the run at an
+    // Interruption rather than leaving a Conversation that says it is
+    // implementing with nothing implementing it.
+    match (direction, started) {
+        (Direction::TaskList, Some(session)) => {
+            tokio::spawn(crate::runner::follow(state.clone(), id, session));
+        }
+        (Direction::Inline, Some(session)) => {
+            tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
+        }
+        // A session that would not start is logged above. There is nothing to
+        // follow, and the chooser says so where it was chosen — see the viewer's
+        // `chosen-note`.
+        (_, None) => {}
+        (Direction::Roadmap, _) => unreachable!("a staged roadmap was refused above"),
     }
 
     Ok(())
@@ -399,9 +421,11 @@ pub(crate) async fn set_base_commit(
 /// Conversation that is grilling with nothing grilling it is a thing to look at
 /// and start again, and one that had launched an agent nothing had recorded
 /// would be an agent nobody could see or stop. It is also the one part of this
-/// that failing does not refuse — the branch is made, the Brief is frozen, and
-/// what a session that would not start leaves behind is an Interruption, which
-/// is a later stage's Event.
+/// that failing does not refuse — the branch is made, the Brief is frozen, and a
+/// session that would not start is logged, leaving a Conversation that is
+/// grilling with a Timeline that says so and no session on it. Not an
+/// Interruption either: a grilling is attended, and those are for the unattended
+/// runs a human is not watching.
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,

@@ -26,9 +26,12 @@
 //! period, and anything it prints in the meantime puts the whole grace back on
 //! the clock. A session that keeps talking is never killed blind.
 //!
-//! Nothing here handles a session that crashes or hangs: a step whose session
-//! ends without landing it stops the run where it is, and what becomes of that
-//! is the Interruption stage's.
+//! A step whose session ends without landing it stops the run where it is, and
+//! what it stops at is an Interruption: the evidence goes on the Timeline and the
+//! human picks a remedy — see [`crate::interruptions`]. The run does not go round
+//! again while one is open, which is checked here as well as enforced by the
+//! store's index, because the check the runner makes is the one that decides
+//! whether to spend an account on a step nobody has looked at yet.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -112,6 +115,39 @@ impl Step {
             Step::Nothing => None,
         }
     }
+
+    /// The step as an Interruption records it — which is what a retry launches
+    /// again.
+    ///
+    /// Which task it was is not part of it, and need not be: a retry runs the
+    /// fork that reads `.tasks/` and takes the lowest number left, which is the
+    /// same answer the run was already working from.
+    ///
+    /// [`Step::Nothing`] is not a step a session was launched for, so it can
+    /// never be one an Interruption is raised about — it is the answer that ends
+    /// the run rather than one that runs anything.
+    fn stored(&self) -> Option<store::Step> {
+        match self {
+            Step::Planning => Some(store::Step::Planning),
+            Step::Task(_) => Some(store::Step::Task),
+            Step::Finish => Some(store::Step::Finish),
+            Step::Nothing => None,
+        }
+    }
+
+    /// What the step was, in the words the Timeline draws.
+    ///
+    /// The sentence rather than the word above it: the two are read by different
+    /// readers, and a human looking at a stopped run wants to know *which* task
+    /// rather than that it was a task.
+    fn what(&self) -> String {
+        match self {
+            Step::Planning => "breaking the work down into a backlog".to_owned(),
+            Step::Task(file) => format!("the task in {}", file.display()),
+            Step::Finish => "finishing the feature".to_owned(),
+            Step::Nothing => "nothing".to_owned(),
+        }
+    }
 }
 
 /// The backlog's list, as a path inside a Worktree.
@@ -132,9 +168,71 @@ fn todo() -> PathBuf {
 /// Conversation that has gone, or a step whose session ended without landing it.
 /// Idle rather than looping — a runner that relaunched a session for a step
 /// nothing had moved would be a machine spending an account on the same failure
-/// over and over, with nobody watching.
+/// over and over, with nobody watching. What it leaves behind for the human is an
+/// Interruption, which is where the run picks up again if they retry.
+///
 pub(crate) async fn follow(state: AppState, conversation_id: i64, planning: Session) {
-    if !see_out(&state, conversation_id, Step::Planning, planning).await {
+    work(state, conversation_id, Step::Planning, planning).await
+}
+
+/// Run a step again because the human asked for it, and go on working the
+/// backlog from there.
+///
+/// The step is decided and the session launched *here* rather than by whoever
+/// took the remedy, and that is the whole reason this exists: which step a
+/// session is for has to be settled before the session is started. A driver that
+/// launched first and read `.tasks/` afterwards would be racing the agent it had
+/// just let loose — a breakdown that commits quickly would have its own backlog
+/// read back as the step it was working.
+///
+/// `note` is what the human wrote alongside the retry, which reaches the agent as
+/// part of its prompt — see [`skills::retrying`].
+pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::Step, note: String) {
+    let Some(working_in) = worktree(&state, conversation_id).await else {
+        return;
+    };
+
+    // What to run again, and what watching it means. A retried planning step is
+    // the breakdown over again; a retried task or finish is whatever `.tasks/`
+    // now has left, which is the same answer the fork the session runs will come
+    // to. Inline is not a backlog step at all and is followed on its own.
+    let (step, prompt) = match step {
+        store::Step::Planning => (Step::Planning, Prompt::BreakingDown),
+        store::Step::Task | store::Step::Finish => match decide(&working_in).await {
+            Step::Nothing => {
+                tracing::info!(
+                    conversation_id,
+                    "the backlog the retried step belonged to has gone, so nothing was launched"
+                );
+                return;
+            }
+            step => (step, Prompt::NextTask),
+        },
+        store::Step::Inline => {
+            let Some(session) = launch(&state, conversation_id, Prompt::Implementing, &note).await
+            else {
+                return;
+            };
+
+            return follow_inline(state, conversation_id, session).await;
+        }
+    };
+
+    tracing::info!(conversation_id, step = ?step, "a retried step is starting in a fresh session");
+
+    let Some(session) = launch(&state, conversation_id, prompt, &note).await else {
+        return;
+    };
+
+    work(state, conversation_id, step, session).await
+}
+
+/// Work a backlog from `first` to empty.
+///
+/// `first` is the step the session it is handed is running, decided before that
+/// session was started — see [`retry`] for why that ordering is the whole of it.
+async fn work(state: AppState, conversation_id: i64, first: Step, session: Session) {
+    if !see_out(&state, conversation_id, first, session).await {
         return;
     }
 
@@ -153,9 +251,18 @@ pub(crate) async fn follow(state: AppState, conversation_id: i64, planning: Sess
             return;
         }
 
+        // Asked before anything is launched, because that is what *the run does
+        // not advance past an Interruption* means: the store's index makes two
+        // open ones impossible, and this makes the second session impossible. A
+        // run whose step landed while an older Interruption was still open would
+        // otherwise carry on with the human still being asked about it.
+        if stopped(&state, conversation_id).await {
+            return;
+        }
+
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(session) = launch(&state, conversation_id).await else {
+        let Some(session) = launch(&state, conversation_id, Prompt::NextTask, "").await else {
             return;
         };
 
@@ -165,16 +272,150 @@ pub(crate) async fn follow(state: AppState, conversation_id: i64, planning: Sess
     }
 }
 
+/// See an inline implementation session out, and stop the run at an Interruption
+/// if it ends having landed nothing.
+///
+/// The whole of the work in one session, so there is no next step to launch and
+/// nothing to poll a Worktree for: what says an inline session did anything is
+/// what it committed, which the branch watcher is putting on the Timeline while
+/// it runs.
+///
+/// Landing is measured against what was already there rather than against zero,
+/// which is what makes a retry answerable: a first attempt that committed twice
+/// and then died leaves two commits behind, and a retry that commits nothing has
+/// still landed nothing.
+pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, mut session: Session) {
+    let event_id = session.event_id;
+
+    // Taken before the waiting starts, so it is a count of what the run had
+    // landed before this session rather than including what it goes on to do.
+    let already = match store::recorded_commits(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded.len(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
+            return;
+        }
+    };
+
+    let ended = session.ended().await;
+
+    // Verkstead ended it, which for an inline run means the human aborted the
+    // Conversation: nothing was left to land because they stopped it. Answered
+    // before the branch is read, since an aborted run has committed nothing and
+    // would otherwise read as a session that did nothing.
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the inline run was stopped from outside, so nothing is asked about it"
+        );
+        return;
+    }
+
+    // Read after the session is over, which is after its relay has waited out the
+    // final sweep of the branch: a session's last act is usually a commit, and it
+    // lands a poll after the process that made it has gone.
+    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded.len() > already,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what an inline session committed failed");
+            return;
+        }
+    };
+
+    let how = match (ended.badly(), landed) {
+        // Ended well and committed something, which is an inline implementation
+        // done. What becomes of the work from here is the wrap-up phase's.
+        (None, true) => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "an inline session has landed its work"
+            );
+            return;
+        }
+        // Exited cleanly having committed nothing at all. An interactive agent
+        // that decides there is nothing to do exits zero, so this is exactly the
+        // case a status could not have caught.
+        (None, false) => "the session ended without committing anything".to_owned(),
+        // Ended badly, whether or not it got some of the way: the human is owed
+        // the choice either way, and what it committed is on the Timeline above
+        // the Interruption for them to read.
+        (Some(badly), _) => badly,
+    };
+
+    stop(
+        &state,
+        conversation_id,
+        store::Step::Inline,
+        "implementing the work inline",
+        &how,
+        event_id,
+    )
+    .await;
+}
+
+/// Whether an Interruption is already holding this run up.
+///
+/// A store that will not answer reads as *stopped*, which is the right way round
+/// for the one thing this decides: what is on the other side of it is launching
+/// an agent, and a runner that could not tell whether the human was still being
+/// asked something should wait rather than spend an account guessing.
+async fn stopped(state: &AppState, conversation_id: i64) -> bool {
+    match store::open_interruption(&state.pool, conversation_id).await {
+        Ok(Some(event_id)) => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the run is blocked on the human, so nothing was launched"
+            );
+            true
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a run was blocked failed");
+            true
+        }
+    }
+}
+
+/// Stop the run: put what went wrong on the Timeline for the human to answer.
+///
+/// Nothing is refused for. By the time this runs the session is gone and the step
+/// has not landed, and an Interruption that could not be raised is a run stopped
+/// with nothing saying so — which is a thing to see in the log, and the same
+/// thing either way: the runner returns.
+async fn stop(
+    state: &AppState,
+    conversation_id: i64,
+    step: store::Step,
+    what: &str,
+    how: &str,
+    writing: i64,
+) {
+    if let Err(error) =
+        crate::interruptions::raise(state, conversation_id, step, what, how, Some(writing)).await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "a run stopped and the Interruption saying so could not be raised"
+        );
+    }
+}
+
 /// See one step's session out: end it once the step has landed and the session
 /// has gone quiet, and say whether the step landed at all.
 ///
 /// `false` is a session that is over with its step not done. That is a crash, a
 /// hang given up on, or an agent that stopped short — which of them is not
 /// something to guess at here, and none of them is a reason to launch the same
-/// step again. The run stops, and what the human is shown is the Interruption
-/// stage's to draw.
+/// step again on its own. The run stops at an Interruption, and it is the human
+/// who decides whether the step gets another run.
 async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session: Session) -> bool {
-    let Some(landing) = step.landing() else {
+    let event_id = session.event_id;
+
+    let (Some(landing), Some(stored)) = (step.landing(), step.stored()) else {
         return false;
     };
 
@@ -188,37 +429,63 @@ async fn see_out(state: &AppState, conversation_id: i64, step: Step, mut session
     let quiet = session.quiet.clone();
     let pace = state.sessions.pace();
 
-    let landed = tokio::select! {
-        _ = session.ended() => false,
-        _ = landed_and_quiet(&worktree, &landing, &quiet, pace) => true,
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        _ = landed_and_quiet(&worktree, &landing, &quiet, pace) => None,
     };
 
-    if landed {
+    let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
-            event_id = session.event_id,
+            event_id,
             step = ?step,
             "a step has landed and its session has gone quiet, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
         return true;
-    }
+    };
 
     // The session is over. It may have landed its step as its last act and
     // exited before a poll caught it, which is the ordinary shape of a session
     // that finishes rather than idles — so the Worktree is asked once more
-    // before this is read as a run that has stopped.
+    // before this is read as a run that has stopped. Asked whichever way the
+    // session ended: a step that landed is landed, and an agent that did the
+    // work and then fell over on its way out has not left the human anything to
+    // decide about.
     if check(&worktree, &landing).await {
         return true;
     }
 
+    // Verkstead ended it, which here means the human aborted the Conversation
+    // out from under the run: the worktree has gone, so the step reads as not
+    // landed whatever it did. There is nothing to ask them about — they have
+    // just answered.
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            step = ?step,
+            "the run was stopped from outside, so the backlog stops here without asking",
+        );
+        return false;
+    }
+
     tracing::warn!(
         conversation_id,
-        event_id = session.event_id,
+        event_id,
         step = ?step,
         "a session ended without finishing its step, so the backlog stops here",
     );
+
+    // How it ended, where the ending itself was the problem; otherwise the step
+    // not landing is, which is the case no exit status could have shown — an
+    // interactive agent that decides there is nothing to do exits zero.
+    let how = ended
+        .badly()
+        .unwrap_or_else(|| "the session ended without finishing the step".to_owned());
+
+    stop(state, conversation_id, stored, &step.what(), &how, event_id).await;
 
     false
 }
@@ -349,6 +616,26 @@ fn next_step(worktree: &Path) -> Step {
     Step::Nothing
 }
 
+/// Which skill a session is being started inside.
+///
+/// Not the same question as which step it is running. The runner decides the
+/// step in order to know what to watch for, and the skill is what the session is
+/// *told* — a task and the finish that follows the last of them are two steps
+/// and one skill, because which of them it is, is read off `.tasks/` by the fork
+/// rather than handed to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Prompt {
+    /// Verkstead's fork of to-tasks, which writes the backlog.
+    BreakingDown,
+
+    /// Its fork of next-task, which every session of a backlog runs — the task
+    /// sessions and the finish one alike.
+    NextTask,
+
+    /// The implementation skill, which is the whole of an inline run.
+    Implementing,
+}
+
 /// Start a fresh session on the next step, under the Conversation's
 /// implementation Profile.
 ///
@@ -357,10 +644,18 @@ fn next_step(worktree: &Path) -> Step {
 /// to watch for, not to hand it over — a runner that named the file would be a
 /// second opinion about a question the skill is already asking.
 ///
+/// `note` is what the human wrote when they asked for a step to be tried again,
+/// and is empty for every session a run launches of its own accord.
+///
 /// The Conversation is read back every time rather than held across the run: a
 /// backlog takes hours, and where an agent is about to be let loose is the one
 /// thing that must not be guessed at.
-async fn launch(state: &AppState, conversation_id: i64) -> Option<Session> {
+async fn launch(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    note: &str,
+) -> Option<Session> {
     let conversation = match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => conversation,
         Ok(None) => {
@@ -382,12 +677,28 @@ async fn launch(state: &AppState, conversation_id: i64) -> Option<Session> {
     };
 
     let prompt = match crate::conversations::documents(&state.pool, conversation_id).await {
-        Ok((brief, handoff)) => skills::next_task(&brief, handoff.as_deref()),
+        Ok((brief, handoff)) => {
+            let handoff = handoff.as_deref();
+
+            let prompt = match inside {
+                Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
+                Prompt::NextTask => skills::next_task(&brief, handoff),
+                Prompt::Implementing => skills::implementing(&brief, handoff),
+            };
+
+            skills::retrying(&prompt, note)
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what the work is failed");
             return None;
         }
     };
+
+    // One Worktree holds one agent. Every session a run launches of its own
+    // accord follows one this has already ended, but a retry follows one that
+    // died — and a register still holding a relay that has not finished unwinding
+    // would be two agents editing each other's files.
+    state.sessions.end(conversation_id).await;
 
     match state
         .sessions

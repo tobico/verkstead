@@ -198,6 +198,38 @@ fn plain(line: &str) -> String {
     plain.trim().to_owned()
 }
 
+/// The last `lines` of a transcript that said anything, tidied of the terminal's
+/// own control sequences.
+///
+/// What an Interruption keeps as evidence. The tail and not the whole, because
+/// the whole is on the Timeline already as the session's own Event and this is
+/// meant to be readable on a phone — and tidied for the same reason the one-line
+/// summary is, a wall of cursor moves being a record of a display rather than of
+/// what was said.
+///
+/// A line that redrew itself comes out as its last state, exactly as [`plain`]
+/// leaves it: what a reader would have seen on the terminal is what a session
+/// said.
+pub(crate) fn tail(transcript: &str, lines: usize) -> String {
+    let mut said: Vec<&str> = transcript.split('\n').collect();
+
+    // A transcript ends with the newline of its last line, so the split leaves an
+    // empty piece behind that is not a line the session printed.
+    if said.last().is_some_and(|last| last.is_empty()) {
+        said.pop();
+    }
+
+    let tidied: Vec<String> = said
+        .iter()
+        .rev()
+        .map(|line| plain(line))
+        .filter(|line| !line.is_empty())
+        .take(lines)
+        .collect();
+
+    tidied.into_iter().rev().collect::<Vec<String>>().join("\n")
+}
+
 /// Step over the escape sequence that has just begun, leaving the reading on
 /// whatever follows it.
 ///

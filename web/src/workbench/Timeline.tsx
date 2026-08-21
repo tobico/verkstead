@@ -55,6 +55,7 @@ import type {
   QuestionSetEvent,
   TaskListEvent,
 } from "../api/types";
+import { Interruption } from "./Interruption";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -154,6 +155,25 @@ export function Timeline(props: {
           ← Conversations
         </button>
         <h1>{props.conversation.branch}</h1>
+        {/* What the work has stopped on, said where the conversation is named
+            rather than only down in the list: a timeline is long by the time a
+            run gets far enough to stop, and a badge the human had to go hunting
+            behind would not be one. It points at the event that stopped it,
+            which is what makes it worth pressing. */}
+        <Show when={props.conversation.blocked_on}>
+          {(event) => (
+            <button
+              type="button"
+              class="blocked"
+              onClick={() => {
+                props.select(event());
+                props.details();
+              }}
+            >
+              Blocked on you
+            </button>
+          )}
+        </Show>
         <Actions conversation={props.conversation} />
         <button type="button" class="pane-forward" onClick={props.details}>
           Details →
@@ -212,6 +232,19 @@ export function Timeline(props: {
                       selected={props.selected === commit().id}
                       open={() => {
                         props.select(commit().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"Interruption" in event && event.Interruption}>
+                  {(stopped) => (
+                    <Interruption
+                      conversation={props.conversation}
+                      stopped={stopped()}
+                      selected={props.selected === stopped().id}
+                      open={() => {
+                        props.select(stopped().id);
                         props.details();
                       }}
                     />

@@ -25,6 +25,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ProfileEntry,
+  RemedySettled,
   RepoEntry,
   SetView,
   Submitted,
@@ -37,6 +38,7 @@ import { askedFor, json, serving, whenever } from "./serving";
 import conversation from "./fixtures/conversation.json" with { type: "json" };
 import direction from "./fixtures/conversation-direction.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
+import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -1800,5 +1802,264 @@ describe("the pinned task list", () => {
 
     expect(container.querySelector(".pinned")).toBeNull();
     expect(container.querySelector(".task-list")).toBeNull();
+  });
+});
+
+/// A conversation whose run has stopped, and the interruption it stopped at.
+const STOPPED = interrupted as ConversationView;
+
+const HALTED = (() => {
+  const event = STOPPED.timeline.find((entry) => "Interruption" in entry);
+  if (!event || !("Interruption" in event)) {
+    throw new Error("the fixture should carry an interruption");
+  }
+  return event.Interruption;
+})();
+
+/// The workbench with that conversation open.
+function theStopped(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${STOPPED.id}`,
+      json({ ...STOPPED, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+/// Where the human answers a run that stopped.
+const REMEDY_PATH = `/api/ui/conversations/${STOPPED.id}/interruption/${HALTED.id}`;
+
+describe("an interruption on the timeline", () => {
+  it("says which step failed and how it ended", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    expect(stopped.querySelector(".what")!.textContent).toBe(HALTED.what);
+    expect(stopped.querySelector(".how")!.textContent).toBe(HALTED.how);
+  });
+
+  /// The three remedies are on the event itself. Roadrunner asked this over
+  /// askance because nobody was at its terminal; here the timeline is where the
+  /// human looks, so the question is put where they are already looking.
+  it("offers all three remedies on the event", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    expect(
+      [...stopped.querySelectorAll(".remedy")].map((it) => it.textContent),
+    ).toEqual(["Retry", "Take over manually", "Abort the run"]);
+  });
+
+  /// Nothing any of the three does touches the repo, and the human is told so
+  /// before they choose rather than after.
+  it("says the repo is left as the session left it", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    expect(stopped.textContent).toContain(
+      "the repo is left exactly as the session left it",
+    );
+  });
+
+  it("sends the remedy with whatever was written alongside it", async () => {
+    const fetching = theStopped(
+      {},
+      whenever(REMEDY_PATH, json("Settled" satisfies RemedySettled), "POST"),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    const note = stopped.querySelector("textarea")!;
+    fireEvent.input(note, {
+      target: { value: "try again but leave the migration alone" },
+    });
+
+    const retry = [...stopped.querySelectorAll(".remedy")].find(
+      (it) => it.textContent === "Retry",
+    )!;
+    fireEvent.click(retry);
+
+    await waitFor(() =>
+      expect(sent(fetching, REMEDY_PATH)).toEqual({
+        remedy: "Retry",
+        note: "try again but leave the migration alone",
+      }),
+    );
+
+    // And nothing is said about a remedy that worked: the event reading back
+    // settled is what says it.
+    expect(stopped.querySelector(".error")).toBeNull();
+  });
+
+  /// The record is what a timeline is: a run that was retried and stopped again
+  /// has both stops on it, each saying what was decided.
+  it("shows what was chosen once it has been settled, and stops asking", async () => {
+    theStopped({
+      blocked_on: null,
+      timeline: STOPPED.timeline.map((entry) =>
+        "Interruption" in entry
+          ? {
+              Interruption: {
+                ...entry.Interruption,
+                settled: {
+                  remedy: "TakeOver" as const,
+                  note: "I'll finish this one myself",
+                  at: "2026-08-03T10:14:02.000Z",
+                },
+              },
+            }
+          : entry,
+      ),
+    });
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    expect(stopped.querySelector(".settled")!.textContent).toContain(
+      "Take over manually",
+    );
+    expect(stopped.querySelector(".settled .note")!.textContent).toBe(
+      "I'll finish this one myself",
+    );
+    expect(stopped.querySelector(".remedies")).toBeNull();
+    expect(stopped.classList.contains("open")).toBe(false);
+  });
+
+  /// Answered from another device, or by a second press. Not an error, and said
+  /// in words rather than retried.
+  it("says so when it was already answered", async () => {
+    theStopped(
+      {},
+      whenever(
+        REMEDY_PATH,
+        json("AlreadySettled" satisfies RemedySettled),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+
+    fireEvent.click(stopped.querySelector(".remedy")!);
+
+    await waitFor(() =>
+      expect(stopped.querySelector(".error")!.textContent).toContain(
+        "The first choice stands",
+      ),
+    );
+  });
+});
+
+describe("a conversation blocked on the human", () => {
+  it("says so where the conversation is named", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const badge = await drawn(container, ".pane-head .blocked");
+
+    expect(badge.textContent).toBe("Blocked on you");
+  });
+
+  /// A timeline is long by the time a run gets far enough to stop, so the badge
+  /// goes to the event that stopped it rather than leaving the human to hunt.
+  it("opens the event it is blocked on", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const badge = await drawn<HTMLButtonElement>(container, ".blocked");
+    fireEvent.click(badge);
+
+    const evidence = await drawn(container, ".details-pane .evidence");
+    expect(evidence).toBeTruthy();
+    expect(frame(container).dataset.pane).toBe("details");
+  });
+
+  it("draws no badge where nothing is stopping the work", async () => {
+    expect(OPEN.blocked_on).toBeNull();
+
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".blocked")).toBeNull();
+  });
+});
+
+describe("an interruption's evidence", () => {
+  /// It rides on the event rather than being fetched, unlike a transcript or a
+  /// diff: it is what the remedies are chosen against, and a pane that had to
+  /// fetch it could draw the buttons before it could say what they were for.
+  it("shows the worktree and the session's last words without another request", async () => {
+    const fetching = theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+    fireEvent.click(stopped.querySelector(".open-event")!);
+
+    const pane = await drawn(container, ".details-pane .interruption-summary");
+    expect(pane.textContent).toContain(HALTED.what);
+
+    const status = await drawn(container, ".details-pane .git-status");
+    expect(status.textContent).toBe(HALTED.git_status);
+
+    const tail = await drawn(container, ".details-pane .tail");
+    expect(tail.textContent).toBe(HALTED.tail);
+
+    // Nothing was asked for it: every request the page made is a list or the
+    // conversation itself.
+    expect(
+      fetching.mock.calls.map(([asked]) => String(asked)),
+    ).not.toContain(`${REMEDY_PATH}`);
+    expect(
+      fetching.mock.calls
+        .map(([asked]) => String(asked))
+        .filter((path) => path.includes("/interruption")),
+    ).toEqual([]);
+  });
+
+  /// Neither `git status` nor a terminal's last words are markdown, and the
+  /// columns are the whole of what makes a status readable.
+  it("draws both preformatted", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+    fireEvent.click(stopped.querySelector(".open-event")!);
+
+    const status = await drawn(container, ".details-pane .git-status");
+    expect(status.tagName).toBe("PRE");
+
+    const tail = await drawn(container, ".details-pane .tail");
+    expect(tail.tagName).toBe("PRE");
+  });
+
+  /// Read at the moment the run stopped and kept, because both move on — a
+  /// worktree is a directory the human also has.
+  it("says the whole transcript is elsewhere", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+    fireEvent.click(stopped.querySelector(".open-event")!);
+
+    const pane = await drawn(container, ".details-pane .evidence");
+    expect(pane.closest(".details-pane")!.textContent).toContain(
+      "The whole transcript is the session's own event",
+    );
   });
 });

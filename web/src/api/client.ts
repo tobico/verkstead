@@ -25,6 +25,8 @@ import type {
   ProfileSaved,
   PushKey,
   Registered,
+  Remedy,
+  RemedySettled,
   RepoEntry,
   Response as Decided,
   SetView,
@@ -196,6 +198,29 @@ export function chooseDirection(
   return post<DirectionChosen>(`/api/ui/conversations/${id}/direction`, {
     direction,
   });
+}
+
+/// Say what to do about a run that stopped: run the step again, take it on
+/// manually, or end the run.
+///
+/// One press for the choice and the doing, as choosing a direction is. The note
+/// is what a retried session is told alongside — "try again but leave the
+/// migration alone" — and is sent for the other two as well: a human who wrote
+/// why they were taking over has said something worth keeping on the record.
+///
+/// In every case the repo is left as the session left it. None of the three
+/// reverts, resets or stashes anything, which is what makes taking over a remedy
+/// at all.
+export function settleInterruption(
+  id: number,
+  event: number,
+  remedy: Remedy,
+  note: string,
+): Promise<RemedySettled> {
+  return post<RemedySettled>(
+    `/api/ui/conversations/${id}/interruption/${event}`,
+    { remedy, note },
+  );
 }
 
 /// The Agent Profiles a session can be run under, by name.

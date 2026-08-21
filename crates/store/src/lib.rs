@@ -26,6 +26,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 
 mod commits;
 mod conversations;
+mod interruptions;
 mod profiles;
 mod push;
 mod repos;
@@ -40,6 +41,10 @@ pub use conversations::{
     rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
     set_implementation_profile, set_state, start_conversation, start_grilling, start_implementing,
     timeline,
+};
+pub use interruptions::{
+    Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
+    record_interruption, settle_interruption,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -387,6 +392,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // reason — and off the Conversations too, which is what makes one commit
     // per Conversation a rule the database keeps.
     commits::apply_schema(pool).await?;
+
+    // And where a run stopped, which hangs off the Timelines for the same reason
+    // again — and off the Conversations too, which is what makes *one open
+    // Interruption per Conversation* a rule the database keeps.
+    interruptions::apply_schema(pool).await?;
 
     Ok(())
 }

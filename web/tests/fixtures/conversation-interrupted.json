@@ -1,6 +1,6 @@
 {
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
-  "blocked_on": null,
+  "blocked_on": 21,
   "branch": "task-runner",
   "direction": "task-list",
   "grilling_profile": {
@@ -106,6 +106,17 @@
         "insertions": 132,
         "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
         "subject": "chore: plan the task-runner tasks"
+      }
+    },
+    {
+      "Interruption": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "git_status": "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n",
+        "how": "the session exited with status 1",
+        "id": 21,
+        "settled": null,
+        "tail": "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error",
+        "what": "the task in .tasks/03-commit-events.md"
       }
     }
   ],

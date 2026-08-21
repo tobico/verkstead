@@ -315,6 +315,20 @@ proposal: ProposalView | null,
  */
 direction: Direction | null, 
 /**
+ * Which Event the Conversation is blocked on, or `null` where nothing is
+ * stopping it.
+ *
+ * What the *blocked on you* badge is drawn from. The Event id and not a
+ * flag, so that a header saying the work has stopped can point at the thing
+ * that stopped it — a Timeline is long by the time a run gets far enough to
+ * stop, and *blocked on you* with nowhere to go would be a badge the human
+ * had to go hunting behind.
+ *
+ * *Blocked on you* is a badge on an active state and never a state of its
+ * own, which is why this sits beside `state` rather than in it.
+ */
+blocked_on: number | null, 
+/**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, 
@@ -400,6 +414,45 @@ at: string,
  * agent markdown on this wire is.
  */
 html: string, };
+
+/**
+ * A run that stopped, as the Timeline shows it: what went wrong, what the
+ * evidence was, and how the human settled it.
+ *
+ * The evidence is a reading of a Worktree and a session at the moment they went
+ * wrong, taken then and kept — both move on, and a git status read when the page
+ * looked would be a status of whatever happened next.
+ */
+export type InterruptionEvent = { id: number, 
+/**
+ * When the run stopped, RFC 3339.
+ */
+at: string, 
+/**
+ * Which step failed, in words — "task 03 of the backlog".
+ */
+what: string, 
+/**
+ * How it ended: the exit status, or that it ended without landing anything.
+ */
+how: string, 
+/**
+ * What git made of the Worktree, as `git status` said it. Empty where the
+ * repository would not answer, or where there was nothing pending.
+ */
+git_status: string, 
+/**
+ * The tail of what the session printed, with the terminal's own control
+ * sequences taken out. The tail and not the transcript: what went wrong is
+ * at the end, and the whole of it is on the Timeline already as the session's
+ * own Event. Empty where it printed nothing at all.
+ */
+tail: string, 
+/**
+ * How the human settled it, or `null` while it is still open — which is the
+ * state the run is stopped in, and what the remedies are drawn for.
+ */
+settled: RemedyTaken | null, };
 
 /**
  * Where a Conversation has got to.
@@ -647,6 +700,48 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
+ * One of the three things the human can do about an Interruption.
+ *
+ * Roadrunner's remedies and roadrunner's meanings. In every case the repository
+ * is left as the session left it: none of the three reverts, resets or stashes
+ * anything.
+ */
+export type Remedy = "Retry" | "TakeOver" | "Abort";
+
+/**
+ * The remedy the human is choosing, and what they want said alongside it.
+ */
+export type RemedyChoice = { remedy: Remedy, 
+/**
+ * What to tell the fresh session, for a retry. Carried for the other two as
+ * well and recorded either way: a human who wrote why they were taking over
+ * has said something worth keeping on the record, even though nothing reads
+ * it back to an agent.
+ */
+note: string, };
+
+/**
+ * What became of choosing one.
+ */
+export type RemedySettled = "Settled" | "NoSuchInterruption" | "AlreadySettled";
+
+/**
+ * How an Interruption was settled: which remedy, whatever the human wrote
+ * alongside it, and when.
+ */
+export type RemedyTaken = { remedy: Remedy, 
+/**
+ * What the human wrote alongside the choice — "try again but leave the
+ * migration alone". Empty where they wrote nothing, which is the ordinary
+ * case for the two remedies that launch nothing.
+ */
+note: string, 
+/**
+ * When they chose, RFC 3339.
+ */
+at: string, };
+
+/**
  * One row of the Repo list.
  *
  * The path is the resolved one the server recorded rather than whatever was
@@ -826,7 +921,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent };
 
 /**
  * One session's transcript, whole, as the details pane receives it.

@@ -262,6 +262,17 @@ pub enum Event {
     /// five separate facts, and a row of them is a row of them. The diff is in
     /// neither place — see [`super::commits`] — because the repository has it.
     Commit(super::Commit),
+
+    /// A run that stopped: something Verkstead noticed and cannot resolve
+    /// itself, with the evidence it gathered and whatever the human did about
+    /// it — see [`super::interruptions`].
+    ///
+    /// Its body is not in the `body` column either, for the commit's reason:
+    /// what an Interruption is, is a row of separate facts. Boxed, as a Question
+    /// Set is: it carries a git status and the tail of a session's output, and
+    /// an enum every Brief and every move was as large as would cost a
+    /// Timeline's worth of memory to hold the one kind that needs it.
+    Interruption(Box<super::Interruption>),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -297,6 +308,7 @@ impl Event {
             Self::Directed(_) => "directed",
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
+            Self::Interruption(_) => super::interruptions::INTERRUPTION,
         }
     }
 
@@ -316,6 +328,8 @@ impl Event {
             // Nothing, for the transcript's reason: what a commit is, is a row
             // in `commits`.
             Self::Commit(_) => "",
+            // Nothing either, and for the commit's reason.
+            Self::Interruption(_) => "",
         }
     }
 
@@ -332,6 +346,7 @@ impl Event {
         summary: Option<super::Summary>,
         set: Option<SetOnTimeline>,
         commit: Option<super::Commit>,
+        interruption: Option<super::Interruption>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -347,6 +362,11 @@ impl Event {
             "commit" => Self::Commit(
                 commit.ok_or_else(|| anyhow!("a Commit Event has no commit beside it"))?,
             ),
+            super::interruptions::INTERRUPTION => {
+                Self::Interruption(Box::new(interruption.ok_or_else(|| {
+                    anyhow!("an Interruption Event has no evidence beside it")
+                })?))
+            }
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -876,6 +896,14 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     .await
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
+    // The one kind that is not joined into the query above, and the reason is
+    // arithmetic rather than judgement: a row of it is eight columns, the query
+    // is already at the sixteen a tuple can be read back as, and there is no
+    // seventeenth position to put them in. Its own read is cheap where the join
+    // would not have been — an Interruption is the rare Event, so this is a
+    // second query that nearly always comes back with nothing.
+    let mut interruptions = super::interruptions::on_timeline(pool, conversation_id).await?;
+
     rows.into_iter()
         .map(|row| {
             let (
@@ -930,10 +958,14 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 })
                 .transpose()?;
 
+            // Taken out rather than looked up, because each belongs to exactly
+            // one Event and the Events are walked once.
+            let interruption = interruptions.remove(&id);
+
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body, summary, set, commit)?,
+                event: Event::read(&kind, body, summary, set, commit, interruption)?,
             })
         })
         .collect()

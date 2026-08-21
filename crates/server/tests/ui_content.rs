@@ -1564,6 +1564,39 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And the same Conversation with its run stopped, which is the one shape a
+    // viewer test cannot reach any other way: an Interruption is raised by a
+    // session dying, and there are no sessions here. Recorded after the fixture
+    // above is written, so the two are the same backlog before and after it went
+    // wrong.
+    store::record_interruption(
+        &pool,
+        tasked,
+        &store::Evidence {
+            step: store::Step::Task,
+            what: "the task in .tasks/03-commit-events.md".to_owned(),
+            how: "the session exited with status 1".to_owned(),
+            git_status: "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n"
+                .to_owned(),
+            tail: "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\n\
+                   error: could not compile `verkstead-store` (lib) due to 1 previous error"
+                .to_owned(),
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    write(
+        "conversation-interrupted.json",
+        &pin_worktree(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
+            )),
+            "/var/lib/verkstead/worktrees/verkstead-task-runner",
+        ),
+    );
+
     // What the details pane fetches when that Conversation's output Event is
     // opened. Nothing to pin: a transcript is bytes a session printed.
     write(

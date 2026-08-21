@@ -30,6 +30,14 @@
   --removed-wash: #fbeceb;
   --hunk: #f2ede6;
 
+  /* A run that has stopped. Its own name rather than borrowing the Diff's
+     `--removed`, because it means something else — nothing was deleted, the work
+     is waiting on you — and the two would drift apart the moment either was
+     tuned. The same value for now, and it has to clear 4.5:1 both ways round:
+     it is text on the card at 6.0:1, and the *blocked on you* badge is `--paper`
+     on it at 5.6:1. */
+  --stopped: #b3382c;
+
   --tok-comment: #8d857a;
   --tok-string: #4a7a4f;
   --tok-constant: #8a5a2b;
@@ -59,6 +67,11 @@
     --removed: #e0857a;
     --removed-wash: #2d1f1d;
     --hunk: #26241f;
+
+    /* The light-mode red is far too dark to read on this paper, so this is the
+       same hue lifted: 6.2:1 as text on the card, and 6.9:1 the other way round
+       under the badge. */
+    --stopped: #e0857a;
 
     --tok-comment: #8b8378;
     --tok-string: #9dc493;
@@ -1334,6 +1347,169 @@ main:has(.workbench) {
 .commit-summary .subject {
   margin: 0;
   font-weight: 600;
+}
+
+/* A run that stopped. A card and not a button, unlike the three events above it:
+   this one has something to press *inside* it, so the way into the details pane
+   is a control of its own rather than the whole card. */
+.timeline-event > .interruption.selected {
+  border-color: var(--accent);
+}
+
+/* One nobody has answered is the other thing on a timeline that is asking for
+   something, so it is marked the way a waiting question set is — in the colour
+   that means stopped rather than the one that means happening. */
+.timeline-event > .interruption.open {
+  border-color: var(--stopped);
+  box-shadow: inset 0.2rem 0 0 var(--stopped);
+}
+
+.interruption .event-head {
+  justify-content: flex-start;
+}
+
+/* Not `.live`, which is the accent and means something is happening here. This
+   means the opposite: nothing is happening, and it is waiting on you. */
+.interruption .event-head .live {
+  color: var(--stopped);
+}
+
+/* The way into the evidence, on the other end of the heading line. Worded rather
+   than drawn as a chevron: what it opens is a thing with a name. */
+.interruption .open-event {
+  margin-left: auto;
+  padding: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* Which step failed, and how it ended. The first reads as the heading of the
+   thing that went wrong; the second is the machine's own account of it. */
+.interruption .what,
+.interruption-summary .what {
+  margin: 0;
+  font-weight: 600;
+}
+
+.interruption .how,
+.interruption-summary .how {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* What was decided, once it has been. The remedies go and this stays: a run that
+   was retried and stopped again has both stops on the record, each saying what
+   was chosen. */
+.interruption .settled {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+.interruption .settled .note {
+  display: block;
+  margin-top: 0.15rem;
+  font-weight: 400;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The three remedies, and what the human wants said alongside. The field is
+   above the buttons because it is written first: what it says goes with
+   whichever of them is then pressed. */
+.remedies {
+  margin-top: 1rem;
+}
+
+.remedies > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.remedies .remedy-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.remedies .remedy {
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Ending the run is the one of the three that cannot be taken back, so it does
+   not look like the other two. */
+.remedies .Abort .remedy {
+  color: var(--stopped);
+  border-color: var(--stopped);
+}
+
+.remedies .note {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The one thing true of all three, said once under them rather than three times
+   over. */
+.remedies .left-as-it-is {
+  margin-top: 1rem;
+}
+
+/* The evidence, in the details pane: what git made of the worktree, and the tail
+   of what the session said. Preformatted, because neither is markdown and the
+   columns are the whole of what makes a status readable — and scrolled sideways
+   rather than wrapped, for the same reason. */
+.interruption-summary {
+  margin: 0 0 1rem;
+}
+
+.evidence {
+  margin-bottom: 1.5rem;
+}
+
+.evidence .git-status,
+.evidence .tail {
+  margin: 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: var(--code-wash);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.evidence .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* What the conversation has stopped on, said where the conversation is named. A
+   button rather than a badge, because it goes to the event that stopped it — a
+   timeline is long by the time a run gets far enough to stop. */
+.blocked {
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--paper);
+  background: var(--stopped);
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
 }
 
 /* One session's output, opened: what the terminal was sent, as it was sent.

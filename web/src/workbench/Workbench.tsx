@@ -27,12 +27,14 @@ import type {
   AgentOutputEvent,
   CommitEvent,
   ConversationView,
+  InterruptionEvent,
   QuestionSetEvent,
 } from "../api/types";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Details } from "./Details";
+import { Evidence } from "./Interruption";
 import { Output } from "./Output";
 import { Timeline } from "./Timeline";
 
@@ -51,15 +53,21 @@ export type Pane = "conversations" | "timeline" | "details";
 type Opened =
   | { output: AgentOutputEvent }
   | { asked: QuestionSetEvent }
-  | { commit: CommitEvent };
+  | { commit: CommitEvent }
+  | { stopped: InterruptionEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
-function which(open: Opened): AgentOutputEvent | QuestionSetEvent | CommitEvent {
+function which(
+  open: Opened,
+): AgentOutputEvent | QuestionSetEvent | CommitEvent | InterruptionEvent {
   if ("output" in open) {
     return open.output;
   }
-  return "asked" in open ? open.asked : open.commit;
+  if ("asked" in open) {
+    return open.asked;
+  }
+  return "commit" in open ? open.commit : open.stopped;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
@@ -74,6 +82,10 @@ function setIn(open: Opened): QuestionSetEvent | undefined {
 
 function commitIn(open: Opened): CommitEvent | undefined {
   return "commit" in open ? open.commit : undefined;
+}
+
+function stoppedIn(open: Opened): InterruptionEvent | undefined {
+  return "stopped" in open ? open.stopped : undefined;
 }
 
 export function Workbench(): JSX.Element {
@@ -108,10 +120,11 @@ export function Workbench(): JSX.Element {
   /// self to show. An id whose Event has gone shows the Conversation instead,
   /// which is what the pane says when nothing is open.
   ///
-  /// Three kinds have one: a session's output, whose full self is its
+  /// Four kinds have one: a session's output, whose full self is its
   /// transcript; a Question Set, whose full self is the document it was asked
-  /// as; and a commit, whose full self is its diff. The kind travels with it,
-  /// because it is what decides which pane is drawn.
+  /// as; a commit, whose full self is its diff; and an interruption, whose full
+  /// self is the evidence it was raised with. The kind travels with it, because
+  /// it is what decides which pane is drawn.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = event();
 
@@ -125,6 +138,9 @@ export function Workbench(): JSX.Element {
         }
         if ("Commit" in entry) {
           return { commit: entry.Commit };
+        }
+        if ("Interruption" in entry) {
+          return { stopped: entry.Interruption };
         }
         return undefined;
       })
@@ -226,6 +242,15 @@ export function Workbench(): JSX.Element {
                       <Commit
                         conversation={conversation()}
                         commit={commit()}
+                        back={() => setPane("timeline")}
+                        close={() => setEvent(null)}
+                      />
+                    )}
+                  </Match>
+                  <Match when={stoppedIn(open())}>
+                    {(stopped) => (
+                      <Evidence
+                        stopped={stopped()}
                         back={() => setPane("timeline")}
                         close={() => setEvent(null)}
                       />

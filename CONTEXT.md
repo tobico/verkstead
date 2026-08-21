@@ -180,10 +180,12 @@ _Avoid_: handover document, context dump, summary, notes
 
 **Step**:
 One piece of unattended work a session is launched for and ended after: a task
-of a Conversation's backlog, or the finish that follows the last of them. What is
-next is read from the Repo and nowhere else — the lowest-numbered task file left
-in `.tasks/`, or `TODO.md` on its own — so the Steps are the backlog's, and
-Verkstead keeps no list of its own to disagree with it.
+of a Conversation's backlog, the breakdown that writes that backlog, the finish
+that follows the last task, or an inline implementation, which is the whole of
+the work in one Step. What is next is read from the Repo and nowhere else — the
+lowest-numbered task file left in `.tasks/`, or `TODO.md` on its own — so the
+Steps are the backlog's, and Verkstead keeps no list of its own to disagree with
+it.
 
 A Step is **done** when the file it turns on has gone from the Worktree *and* the
 commit removing it has landed. A session reports through the repository, being an
@@ -196,6 +198,31 @@ output arriving puts the whole grace back on the clock. A session that keeps
 talking is never ended. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
 _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
+
+**Interruption**:
+Something Verkstead detected about an unattended run and cannot resolve itself: a
+session that exited badly, or one that ended having landed nothing. It is an
+Event on the Timeline like any other, and what makes it different is that it is
+**open** — the run does not advance past one, and its Conversation carries
+*blocked on you* until a Remedy is chosen. At most one is open per Conversation.
+
+It carries the **evidence**, which is what makes the choice answerable without
+opening a terminal: which Step failed, how it ended, what git made of the
+Worktree, and the tail of what the session last said. All four are read at the
+moment the run stopped and kept, because all four move on.
+_Avoid_: error, failure, crash, incident, alert
+
+**Remedy**:
+One of the three things the human can do about an Interruption. **Retry** runs
+the Step again in a fresh session, told whatever they wrote alongside — so "try
+again but leave that one alone" reaches the agent that can act on it. **Take over
+manually** stops Verkstead driving, so the human can take the Step on themselves.
+**Abort** ends the run.
+
+In every case the repository is left exactly as the session left it: no Remedy
+reverts, resets or stashes anything, which is what makes taking over one at all.
+Aborting from here therefore keeps the Worktree, unlike aborting a Conversation.
+_Avoid_: action, resolution, fix, recovery option
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles

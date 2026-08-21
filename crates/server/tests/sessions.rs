@@ -26,8 +26,9 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
-    DirectionChosen, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, Started,
-    Submitted, TaskListEvent, TimelineEvent, Transcript,
+    DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent, ProfileSaved,
+    Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent, TimelineEvent,
+    Transcript,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -170,6 +171,22 @@ impl Grilling {
             &serde_json::json!({ "direction": direction }),
         )
         .await
+    }
+
+    /// Answer a run that stopped, the way the human does from the Timeline.
+    async fn settle(&self, event: i64, remedy: &str, note: &str) -> RemedySettled {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/interruption/{event}", self.id),
+            &serde_json::json!({ "remedy": remedy, "note": note }),
+        )
+        .await
+    }
+
+    /// Wait until a run has stopped, and hand back what it stopped at.
+    async fn stopped(&self) -> InterruptionEvent {
+        self.until(|view| interruptions(view).last().map(|it| (*it).clone()))
+            .await
     }
 }
 
@@ -357,6 +374,17 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::QuestionSet(asked) => Some(asked),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Interruptions on a Timeline, in the order the runs stopped.
+fn interruptions(view: &ConversationView) -> Vec<&InterruptionEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Interruption(stopped) => Some(stopped),
             _ => None,
         })
         .collect()
@@ -1327,4 +1355,491 @@ async fn aborting_ends_the_session_before_the_worktree_goes() {
             .running,
         "an aborted Conversation has no session running"
     );
+}
+
+/// A run that stops: an implementation session that goes wrong, and everything
+/// the human is handed to decide with.
+///
+/// The whole reason Interruptions exist is that nobody is at the terminal.
+/// Verkstead launches the sessions but does not drive them, so a session that
+/// falls over is a run that has quietly stopped — and what this asks is whether
+/// stopping is *legible*: the Timeline says which step failed, how it ended, what
+/// git makes of the worktree and what the session last said, and the Conversation
+/// says it is blocked on the human.
+///
+/// The stub exits 1 after saying something worth reading back, which is a crash
+/// as far as anything outside it can tell.
+#[tokio::test]
+async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'half a limiter\n' > limiter.md
+            printf 'error: unresolved import crate::window\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "implementing the work inline",
+        "which step failed",
+    );
+    assert_eq!(
+        stopped.how, "the session exited with status 1",
+        "and how it ended, which is the thing a status can say",
+    );
+    assert!(
+        stopped.git_status.contains("limiter.md"),
+        "what git makes of the worktree, which is where the half-done work is: {:?}",
+        stopped.git_status,
+    );
+    assert!(
+        stopped
+            .tail
+            .contains("error: unresolved import crate::window"),
+        "and the tail of what the session last said: {:?}",
+        stopped.tail,
+    );
+    assert!(
+        !stopped.tail.contains('\u{1b}'),
+        "tidied of the terminal's own control sequences: {:?}",
+        stopped.tail,
+    );
+    assert_eq!(
+        stopped.settled, None,
+        "nobody has answered it, which is what stops the run",
+    );
+
+    let view = fixture.view().await;
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "the Conversation is blocked on the human, and says which Event it is blocked on",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "blocked on you is a badge on an active state, never a state of its own",
+    );
+
+    assert!(
+        worktree.join("limiter.md").exists(),
+        "and the repo is left exactly as the session left it",
+    );
+}
+
+/// Retry: the step runs again in a fresh session, told whatever the human wrote
+/// alongside.
+///
+/// The note is the whole point of the remedy taking one — "try again but leave
+/// that one alone" is only worth writing if it reaches the agent that can act on
+/// it — so what this reads back is the retried session's own prompt.
+#[tokio::test]
+async fn retrying_runs_the_step_again_in_a_session_told_what_the_human_wrote() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ -f RETRIED ]; then
+                printf 'prompt was: %s\n' "$2"
+                printf 'a limiter\n' > limiter.md
+                git add limiter.md
+                git commit --quiet -m 'feat: rate limiting'
+                printf 'committed\n'
+                sleep 300
+            else
+                printf 'first go\n' > RETRIED
+                exit 1
+            fi
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    let stopped = fixture.stopped().await;
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture
+            .settle(stopped.id, "Retry", "leave the migration alone")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    // A fresh session rather than the old one carrying on, because the old one
+    // is gone — that is what an Interruption is.
+    let retried = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == retried && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.transcript(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("leave the migration alone"),
+        "what the human wrote reaches the agent that can act on it: {printed:?}",
+    );
+    assert!(
+        printed.contains("~/.claude/skills/implementing/SKILL.md"),
+        "and it is the same step, run again: {printed:?}",
+    );
+    assert!(
+        printed.contains(BRIEF),
+        "still primed with the documents the work is described by: {printed:?}",
+    );
+
+    let settled = fixture
+        .view()
+        .await
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Interruption(it) if it.id == stopped.id => it.settled.clone(),
+            _ => None,
+        })
+        .expect("the Interruption is settled");
+
+    assert_eq!(settled.remedy, Remedy::Retry);
+    assert_eq!(settled.note, "leave the migration alone");
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and nothing is blocked on the human any more",
+    );
+}
+
+/// The other two remedies, which launch nothing.
+///
+/// *Take over manually* stops Verkstead driving and leaves the Conversation where
+/// it is, because the human is about to work in that worktree themselves. *Abort*
+/// ends the run. Both leave the repository exactly as the session left it —
+/// which is what makes the first of them a remedy at all, and is why aborting
+/// here is not the same thing as aborting a Conversation from its menu.
+#[tokio::test]
+async fn taking_over_and_aborting_both_leave_the_repo_as_the_session_left_it() {
+    for (remedy, expected) in [
+        ("TakeOver", Lifecycle::Implementing),
+        ("Abort", Lifecycle::Aborted),
+    ] {
+        let fixture = grilling(
+            r#"
+            case "$1" in
+            claude-grilling-5)
+                printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+                printf 'the handoff is written\n'
+                sleep 300
+                ;;
+            *)
+                printf 'half a limiter\n' > limiter.md
+                exit 3
+                ;;
+            esac
+            "#,
+        )
+        .await;
+
+        fixture
+            .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+            .await;
+
+        let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+        let set = fixture.ask(PROPOSING).await;
+        assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+        assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+        let stopped = fixture.stopped().await;
+        let sessions = outputs(&fixture.view().await).len();
+
+        assert_eq!(
+            fixture.settle(stopped.id, remedy, "").await,
+            RemedySettled::Settled
+        );
+
+        let view = fixture.view().await;
+
+        assert_eq!(
+            view.state, expected,
+            "{remedy} leaves the Conversation here"
+        );
+        assert_eq!(
+            view.blocked_on, None,
+            "{remedy} closes the Interruption, so nothing is waiting on the human",
+        );
+
+        assert!(
+            worktree.join("limiter.md").exists(),
+            "{remedy} leaves the repo as the session left it: none of the three \
+             reverts, resets or stashes anything",
+        );
+        assert!(
+            worktree.exists(),
+            "{remedy} keeps the worktree, unlike aborting a Conversation from its menu — \
+             the human is being handed the wreckage on purpose",
+        );
+
+        // Long enough for a runner that was going to launch something to have
+        // done it.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert_eq!(
+            outputs(&fixture.view().await).len(),
+            sessions,
+            "{remedy} launches nothing: Verkstead has stopped driving",
+        );
+    }
+}
+
+/// The second press of a button is the first choice arriving again, not a new
+/// decision — the human answers from whichever device is to hand.
+#[tokio::test]
+async fn a_remedy_pressed_twice_is_the_first_choice_arriving_again() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'grilling\n'
+            sleep 300
+            ;;
+        *)
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        fixture.settle(stopped.id, "TakeOver", "").await,
+        RemedySettled::Settled,
+    );
+    assert_eq!(
+        fixture.settle(stopped.id, "Abort", "").await,
+        RemedySettled::AlreadySettled,
+        "and the second choice is not acted on",
+    );
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Implementing,
+        "the first choice stands",
+    );
+
+    assert_eq!(
+        fixture.settle(9999, "Retry", "").await,
+        RemedySettled::NoSuchInterruption,
+        "an Event that is not an Interruption of this Conversation names nothing",
+    );
+}
+
+/// A backlog whose task session dies: the run stops at that task rather than
+/// going round again, and the Interruption says which task it was.
+///
+/// This is the case that matters most, because a runner is a loop: one that
+/// relaunched a step nothing had moved would be a machine spending an account on
+/// the same failure over and over, with nobody watching.
+#[tokio::test]
+async fn a_backlog_stops_at_the_task_whose_session_died() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ -f .tasks/TODO.md ]; then
+                printf 'this task is beyond me\n'
+                exit 1
+            fi
+
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "the task in .tasks/01-count.md",
+        "the Interruption names the step that failed, so the human knows what to \
+         decide about",
+    );
+    assert_eq!(stopped.how, "the session exited with status 1");
+    assert!(
+        stopped.tail.contains("this task is beyond me"),
+        "with the tail of what it said on its way out: {:?}",
+        stopped.tail,
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "and the run is blocked on the human",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "the run does not advance past an Interruption",
+    );
+    assert_eq!(
+        interruptions(&fixture.view().await).len(),
+        1,
+        "and it does not stop twice over the same thing either",
+    );
+
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "the task is still there to be worked, because nothing reverted anything",
+    );
+}
+
+/// Aborting a conversation is not a run that went wrong.
+///
+/// The abort ends the session and takes the worktree away, so every signal the
+/// runner reads says the step did not land — the file is gone because the whole
+/// directory is. What tells it apart is that Verkstead is what ended the session:
+/// raising an Interruption here would be asking the human what to do about the
+/// thing they had just done.
+#[tokio::test]
+async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *) printf 'working\n'; sleep 300 ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    // Once the breakdown session is up, so there is a run to abort mid-step.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.running && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+
+    // Long enough for the driver to have noticed its session go and decided what
+    // that meant.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        interruptions(&view),
+        Vec::<&InterruptionEvent>::new(),
+        "a run the human stopped has nothing to ask them about",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and an aborted Conversation is not blocked on anybody",
+    );
+    assert_eq!(view.state, Lifecycle::Aborted);
 }

@@ -204,6 +204,29 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
+/// The same prompt, with what the human said when they asked for the step to be
+/// tried again.
+///
+/// Written under the documents rather than over them, because it is the newest
+/// thing said and the least general: the Brief and the handoff describe the work,
+/// and this describes what to do differently this time. "Try again but leave the
+/// migration alone" is only worth writing if it reaches whatever can act on it,
+/// and the prompt is the one thing a session is certain to read.
+///
+/// A retry with nothing written alongside is the prompt unchanged. The ordinary
+/// remedy is a human who has read the evidence and thinks the step is worth
+/// another run as it stands, and a heading over an empty note would be the
+/// session told that something had been said.
+pub(crate) fn retrying(prompt: &str, note: &str) -> String {
+    let note = note.trim();
+
+    if note.is_empty() {
+        return prompt.to_owned();
+    }
+
+    format!("{prompt}\n# What I said when I asked you to try this again\n\n{note}\n")
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {

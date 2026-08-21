@@ -21,8 +21,8 @@ use crate::{
     CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
     DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PushKey, Registered, Registration,
-    RepoEntry, SetView, Started, Submitted, Subscribed, Subscription, Transcript, Unsubscribe,
-    UpdateNotice,
+    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    Transcript, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -89,6 +89,13 @@ fn the_viewers_types_are_written_from_these() {
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
     CommitDiff::export_all(&config).unwrap();
+
+    // What the human does about a run that stopped. The Interruption itself
+    // rides on the Timeline whole, evidence and all — it is the one Event with
+    // nothing behind a second fetch — so this is the choice going back and how
+    // it was answered.
+    RemedyChoice::export_all(&config).unwrap();
+    RemedySettled::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.
