@@ -21,7 +21,7 @@ Roadmap stage: [04: Wrap-up](docs/roadmaps/mvp/04-wrap-up.md)
 ## Tasks
 
 - [x] 01: Host gh and the PR Event — [details](01-host-gh-and-the-pr-event.md)
-- [ ] 02: CI monitoring and fix sessions — [details](02-ci-monitoring.md)
+- [x] 02: CI monitoring and fix sessions — [details](02-ci-monitoring.md)
 - [ ] 03: The wrap-up self-review — [details](03-self-review.md)
 - [ ] 04: PR comments and settling — [details](04-comments-and-settling.md)
 - [ ] 05: Roadmap direction and the stage list — [details](05-roadmap-and-stage-list.md)

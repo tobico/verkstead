@@ -201,6 +201,156 @@ pub(crate) fn pull_request(
     })
 }
 
+/// One check GitHub is running against a pull request's head commit.
+///
+/// The name is what a human calls it by and what Verkstead counts fix attempts
+/// against — see [`store::fix_attempts`]. The link is where the run itself is,
+/// which is the one thing an Interruption about a red check cannot be answered
+/// without.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Check {
+    pub(crate) name: String,
+    pub(crate) how: Checked,
+
+    /// Where the run is, as GitHub gives it. Empty where it gave none.
+    pub(crate) link: String,
+}
+
+/// How one check is getting on.
+///
+/// Three answers rather than GitHub's dozen, because three is what wrap-up
+/// decides between: a green check settles, a red one dispatches a fix session,
+/// and one still running is nothing to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Checked {
+    /// It finished and it is green. A check that was skipped or that reported
+    /// nothing either way counts here: neither is something to fix.
+    Passed,
+
+    /// It finished and it is not green.
+    ///
+    /// Cancelled counts here, which is the one reading worth saying out loud: a
+    /// cancelled run is not passing and is not going to start passing on its
+    /// own, so reading it as *still running* would be a wrap-up that waited for
+    /// ever rather than one that eventually asks the human.
+    Failed,
+
+    /// It has not finished.
+    Running,
+}
+
+/// Every check on pull request `number`, as the host's `gh` finds them now.
+///
+/// `pr view --json statusCheckRollup` rather than `pr checks`, and the reason is
+/// the exit status: `pr checks` reports what it found by failing — one status
+/// for red and another for still-running — so a red suite would arrive here as
+/// [`Trouble`], which is what *Verkstead could not ask* means. This asks a
+/// question that has an answer.
+///
+/// A pull request with nothing running against it comes back empty, which is a
+/// repository with no CI. That is nothing to wait on rather than something
+/// missing — see [`crate::checks`], where it is read as green.
+pub(crate) fn checks(gh: &Gh, repo: &Path, number: i64) -> Result<Vec<Check>, Trouble> {
+    /// What `--json statusCheckRollup` comes back as.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Rollup {
+        #[serde(default)]
+        status_check_rollup: Vec<Reported>,
+    }
+
+    /// One entry of it, which is one of two different things.
+    ///
+    /// A `CheckRun` is an Actions job and carries a `status` and a `conclusion`;
+    /// a `StatusContext` is the older commit-status API and carries a `state`
+    /// alone. Both are read here rather than only the first, because a
+    /// repository is free to use either and a Verkstead that saw only Actions
+    /// would call a red Buildkite green.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Reported {
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        context: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        conclusion: String,
+        #[serde(default)]
+        state: String,
+        #[serde(default)]
+        details_url: String,
+        #[serde(default)]
+        target_url: String,
+    }
+
+    let said = gh.ask(
+        repo,
+        &[
+            "pr",
+            "view",
+            &number.to_string(),
+            "--json",
+            "statusCheckRollup",
+        ],
+    )?;
+
+    let rollup: Rollup = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(rollup
+        .status_check_rollup
+        .into_iter()
+        .map(|reported| Check {
+            name: match (reported.name.is_empty(), reported.context.is_empty()) {
+                // A check with neither is one GitHub declined to name, and it
+                // still has to be counted against something.
+                (true, true) => "a check GitHub did not name".to_owned(),
+                (true, false) => reported.context,
+                _ => reported.name,
+            },
+            how: read_check(&reported.status, &reported.conclusion, &reported.state),
+            link: match reported.details_url.is_empty() {
+                true => reported.target_url,
+                false => reported.details_url,
+            },
+        })
+        .collect())
+}
+
+/// How one check is getting on, out of the three words GitHub says it in.
+///
+/// `status` is the Actions job's — anything but `COMPLETED` means it is still
+/// going, whatever the conclusion column happens to hold. Then the outcome,
+/// which is the job's `conclusion` or the older API's `state` depending on which
+/// kind of thing this is; only one of the two is ever set.
+///
+/// Green is listed rather than red, which is the way round that matters: a word
+/// this does not know is read as a failure, so a GitHub that invents a new way
+/// for a check to go wrong stops a wrap-up rather than settling it.
+fn read_check(status: &str, conclusion: &str, state: &str) -> Checked {
+    if !status.is_empty() && !status.eq_ignore_ascii_case("COMPLETED") {
+        return Checked::Running;
+    }
+
+    let outcome = match conclusion.is_empty() {
+        true => state,
+        false => conclusion,
+    };
+
+    // Nothing said either way. A `StatusContext` that has been created and not
+    // reported yet, or a check run with no outcome on it at all.
+    if outcome.is_empty() || outcome.eq_ignore_ascii_case("PENDING") {
+        return Checked::Running;
+    }
+
+    match outcome.to_ascii_uppercase().as_str() {
+        "SUCCESS" | "NEUTRAL" | "SKIPPED" => Checked::Passed,
+        _ => Checked::Failed,
+    }
+}
+
 /// What is on the pull request now: the commits it carries and what has been
 /// said about it.
 ///
@@ -429,6 +579,144 @@ mod tests {
             "a comment is markdown, and it arrives rendered: {:?}",
             details.comments[0].html,
         );
+    }
+
+    /// The ordinary green suite, in the words a real `gh` answered a real pull
+    /// request of this repository with.
+    #[test]
+    fn a_green_suite_reads_back_as_every_check_passing() {
+        let (dir, gh) = stub(
+            r#"{"statusCheckRollup":[
+                {"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2",
+                 "name":"Rust","status":"COMPLETED","workflowName":"CI"},
+                {"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/3",
+                 "name":"Viewer","status":"COMPLETED","workflowName":"CI"}]}"#,
+            "",
+        );
+
+        assert_eq!(
+            checks(&gh, dir.path(), 41).unwrap(),
+            vec![
+                Check {
+                    name: "Rust".to_owned(),
+                    how: Checked::Passed,
+                    link: "https://github.com/tobico/verkstead/actions/runs/1/job/2".to_owned(),
+                },
+                Check {
+                    name: "Viewer".to_owned(),
+                    how: Checked::Passed,
+                    link: "https://github.com/tobico/verkstead/actions/runs/1/job/3".to_owned(),
+                },
+            ],
+        );
+    }
+
+    /// And the one a fix session is dispatched for: one job red beside a green
+    /// one, which is what a failing suite nearly always looks like.
+    #[test]
+    fn a_red_check_is_told_apart_from_the_green_ones_beside_it() {
+        let (dir, gh) = stub(
+            r#"{"statusCheckRollup":[
+                {"__typename":"CheckRun","conclusion":"FAILURE","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2",
+                 "name":"Rust","status":"COMPLETED"},
+                {"__typename":"CheckRun","conclusion":"SUCCESS","detailsUrl":"","name":"Viewer","status":"COMPLETED"}]}"#,
+            "",
+        );
+
+        let checks = checks(&gh, dir.path(), 41).unwrap();
+
+        assert_eq!(checks[0].how, Checked::Failed);
+        assert_eq!(checks[0].name, "Rust");
+        assert_eq!(checks[1].how, Checked::Passed);
+    }
+
+    /// A suite that has not finished is nothing to do, so *running* has to be an
+    /// answer of its own — whatever the conclusion column happens to hold while
+    /// the job is still going.
+    #[test]
+    fn a_check_that_has_not_finished_reads_as_running() {
+        let (dir, gh) = stub(
+            r#"{"statusCheckRollup":[
+                {"__typename":"CheckRun","conclusion":"","name":"Rust","status":"IN_PROGRESS"},
+                {"__typename":"CheckRun","conclusion":"","name":"Viewer","status":"QUEUED"}]}"#,
+            "",
+        );
+
+        let checks = checks(&gh, dir.path(), 41).unwrap();
+
+        assert!(
+            checks.iter().all(|check| check.how == Checked::Running),
+            "{checks:?}"
+        );
+    }
+
+    /// The older commit-status API, which a repository is free to be using: the
+    /// name is in another field and the outcome is in a third. A Verkstead that
+    /// read only Actions would call a red Buildkite green.
+    #[test]
+    fn the_older_status_api_is_read_as_well_as_actions() {
+        let (dir, gh) = stub(
+            r#"{"statusCheckRollup":[
+                {"__typename":"StatusContext","context":"ci/buildkite","state":"FAILURE",
+                 "targetUrl":"https://buildkite.example/1"},
+                {"__typename":"StatusContext","context":"ci/pending","state":"PENDING","targetUrl":""}]}"#,
+            "",
+        );
+
+        assert_eq!(
+            checks(&gh, dir.path(), 41).unwrap(),
+            vec![
+                Check {
+                    name: "ci/buildkite".to_owned(),
+                    how: Checked::Failed,
+                    link: "https://buildkite.example/1".to_owned(),
+                },
+                Check {
+                    name: "ci/pending".to_owned(),
+                    how: Checked::Running,
+                    link: String::new(),
+                },
+            ],
+        );
+    }
+
+    /// Green is the listed answer and everything else is red, which is the way
+    /// round that matters: a way for a check to go wrong that this does not know
+    /// about should stop a wrap-up rather than settle one.
+    #[test]
+    fn an_outcome_this_does_not_know_is_read_as_a_failure() {
+        for outcome in ["TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "SOMETHING_NEW"] {
+            assert_eq!(
+                read_check("COMPLETED", outcome, ""),
+                Checked::Failed,
+                "{outcome} is not a check anybody should call green",
+            );
+        }
+
+        // And the three that are green, of which two are green by not having run.
+        for outcome in ["SUCCESS", "NEUTRAL", "SKIPPED"] {
+            assert_eq!(read_check("COMPLETED", outcome, ""), Checked::Passed);
+        }
+    }
+
+    /// A pull request with nothing running against it, which is a repository
+    /// with no CI. An answer rather than a failure — what wrap-up makes of it is
+    /// its own business.
+    #[test]
+    fn a_pull_request_with_no_checks_at_all_reads_back_as_none() {
+        let (dir, gh) = stub(r#"{"statusCheckRollup":[]}"#, "");
+
+        assert!(checks(&gh, dir.path(), 41).unwrap().is_empty());
+    }
+
+    /// And the reason the checks are asked for this way at all: a `gh` that
+    /// cannot answer has to arrive as [`Trouble`], because *Verkstead could not
+    /// ask* is a third thing beside green and red.
+    #[test]
+    fn a_gh_that_cannot_answer_about_checks_says_so_rather_than_saying_green() {
+        let (dir, gh) = stub("", "gh: To use GitHub CLI, run: gh auth login");
+
+        assert_eq!(checks(&gh, dir.path(), 41), Err(Trouble::NotLoggedIn));
     }
 
     /// A PR nobody has said anything on, which is every PR the moment it opens.

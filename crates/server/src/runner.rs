@@ -60,6 +60,13 @@ pub struct Pace {
     /// How long a session must have printed nothing, its step landed, before it
     /// is ended.
     pub grace: Duration,
+
+    /// How often a wrapping Conversation's pull request is asked about.
+    ///
+    /// Here rather than beside the backlog's two because it is the same kind of
+    /// choice one phase along, and a caller standing a server up sets all of
+    /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
+    pub checks: Duration,
 }
 
 impl Default for Pace {
@@ -67,6 +74,7 @@ impl Default for Pace {
         Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
+            checks: crate::checks::ASKED_EVERY,
         }
     }
 }
@@ -230,6 +238,13 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 
             return follow_inline(state, conversation_id, session).await;
         }
+        // Not a backlog step at all: the backlog was finished before this
+        // Conversation ever had a pull request to have checks on. Retrying it is
+        // the fix sessions starting over, which is the watcher's own to do — see
+        // [`crate::checks::retried`]. Nothing is launched from here, because what
+        // to dispatch is decided by asking GitHub rather than by reading
+        // `.tasks/`.
+        store::Step::Checks => return crate::checks::retried(state, conversation_id).await,
     };
 
     tracing::info!(conversation_id, step = ?step, "a retried step is starting in a fresh session");
@@ -379,6 +394,107 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, mut ses
         event_id,
     )
     .await;
+}
+
+/// Run one fix session about `feedback`, and wait until it is over.
+///
+/// The Timeline Event it printed into, or `None` where nothing could be
+/// launched. What it committed is not returned and is not counted here: the
+/// watcher that dispatched this asks GitHub what became of it, and a fix session
+/// that pushed nothing is answered by the check still being red rather than by
+/// anything read off the branch.
+///
+/// Ended on **committed plus quiet**, the way a backlog step is ended on landed
+/// plus quiet, and for the same two reasons. A commit is the one report an agent
+/// cannot half make, so it is what says the fix is done; and work does not always
+/// stop at the commit — the push that puts it on the pull request comes after
+/// one — so the session is ended only once it has printed nothing for the grace
+/// period, with anything it prints putting the whole grace back on the clock.
+///
+/// Nothing is refused for and no Interruption is raised. A fix session that ends
+/// having done nothing is not by itself something to ask the human about: what
+/// wrap-up is watching is the check, and the human is asked once the machine has
+/// had its two goes at it — see [`crate::checks`].
+pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
+    // Taken before the session starts, so it is a count of what the branch
+    // carried before this fix rather than one that includes it.
+    let already = match store::recorded_commits(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded.len(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
+            return None;
+        }
+    };
+
+    let mut session = launch(
+        state,
+        conversation_id,
+        Prompt::Addressing(feedback.to_owned()),
+        "",
+    )
+    .await?;
+
+    let event_id = session.event_id;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        _ = committed_and_quiet(state, conversation_id, already, &quiet, pace) => None,
+    };
+
+    if ended.is_none() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "a fix session has committed and gone quiet, so it is being ended",
+        );
+
+        state.sessions.end(conversation_id).await;
+    }
+
+    Some(event_id)
+}
+
+/// Wait until the Conversation has more commits than `already` *and* the session
+/// has been quiet for the grace period.
+///
+/// The store rather than git, unlike a backlog step's landing: the branch watcher
+/// is sweeping this branch for as long as the session runs and putting what lands
+/// on the Timeline, so the Timeline is where a fresh commit shows up first — and
+/// asking it costs one small read where asking git costs a process.
+async fn committed_and_quiet(
+    state: &AppState,
+    conversation_id: i64,
+    already: usize,
+    quiet: &Quiet,
+    pace: Pace,
+) {
+    loop {
+        tokio::time::sleep(pace.poll).await;
+
+        match store::recorded_commits(&state.pool, conversation_id).await {
+            Ok(recorded) if recorded.len() > already => {}
+            // Nothing new, or a store that would not answer — which reads as
+            // nothing new for the reason a repository that will not answer reads
+            // as *not landed*: a session is ended on the strength of this.
+            Ok(_) => continue,
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading what a fix session committed failed");
+                continue;
+            }
+        }
+
+        loop {
+            let owed = pace.grace.saturating_sub(quiet.for_how_long());
+
+            if owed.is_zero() {
+                return;
+            }
+
+            tokio::time::sleep(owed).await;
+        }
+    }
 }
 
 /// Whether an Interruption is already holding this run up.
@@ -657,7 +773,7 @@ fn next_step(worktree: &Path) -> Step {
 /// *told* — a task and the finish that follows the last of them are two steps
 /// and one skill, because which of them it is, is read off `.tasks/` by the fork
 /// rather than handed to it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Prompt {
     /// Verkstead's fork of to-tasks, which writes the backlog.
     BreakingDown,
@@ -668,6 +784,14 @@ enum Prompt {
 
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
+
+    /// The addressing skill, carrying the feedback the fix session is for.
+    ///
+    /// The one prompt that has something in it, because it is the one session
+    /// launched *about* something rather than about the work as a whole: the
+    /// other three are told where the work is written down and read it for
+    /// themselves.
+    Addressing(String),
 }
 
 /// Start a fresh session on the next step, under the Conversation's
@@ -714,10 +838,11 @@ async fn launch(
         Ok((brief, handoff)) => {
             let handoff = handoff.as_deref();
 
-            let prompt = match inside {
+            let prompt = match &inside {
                 Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
+                Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
             };
 
             skills::retrying(&prompt, note)

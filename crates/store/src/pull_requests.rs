@@ -164,6 +164,26 @@ pub async fn record_pull_request(
     Ok(Wrapping::Started)
 }
 
+/// The pull request a Conversation's work is on, or `None` where it has none
+/// yet.
+///
+/// What the wrap-up watchers ask before they ask GitHub anything: the number is
+/// how a pull request is named on a command line, and a Conversation that is
+/// wrapping up has exactly one — see [`record_pull_request`], which is what
+/// makes both of those true at once.
+pub async fn pull_request(pool: &SqlitePool, conversation_id: i64) -> Result<Option<PullRequest>> {
+    let row: Option<(i64, String, String)> =
+        sqlx::query_as("SELECT number, title, url FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!("reading the pull request of Conversation {conversation_id}")
+            })?;
+
+    Ok(row.map(|(number, title, url)| PullRequest { number, title, url }))
+}
+
 /// The pull request on a Conversation's Timeline, against the Event it is.
 ///
 /// A map of at most one, read on its own rather than joined into the Timeline

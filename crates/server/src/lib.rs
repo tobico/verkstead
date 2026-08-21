@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod checks;
 mod commits;
 mod conversations;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
@@ -343,6 +344,24 @@ fn routed(
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
+    let state = AppState {
+        pool,
+        nudges: nudge::Nudges::new(),
+        settlements: Settlements::new(SETTLEMENT_BACKLOG),
+        waits: Waits::new(),
+        sessions,
+        updates,
+        watched,
+        github,
+        state_dir,
+    };
+
+    // Before anything is served, because it is about what was already happening
+    // rather than about anything a request will start: a Conversation left
+    // wrapping up by a server that stopped has a pull request GitHub has gone on
+    // building, and nobody but this is going to look at it.
+    checks::resume(&state);
+
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.
@@ -362,17 +381,7 @@ fn routed(
         // waiting on the endpoint above, and both halves have to agree about
         // which Sets a wait is being held on.
         .merge(ui::routes())
-        .with_state(AppState {
-            pool,
-            nudges: nudge::Nudges::new(),
-            settlements: Settlements::new(SETTLEMENT_BACKLOG),
-            waits: Waits::new(),
-            sessions,
-            updates,
-            watched,
-            github,
-            state_dir,
-        })
+        .with_state(state)
 }
 
 async fn health() -> &'static str {

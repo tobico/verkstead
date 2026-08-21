@@ -33,6 +33,7 @@ mod push;
 mod repos;
 mod transcripts;
 mod waits;
+mod wrap_up;
 
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
@@ -51,7 +52,7 @@ pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
 };
-pub use pull_requests::{PullRequest, Wrapping, record_pull_request};
+pub use pull_requests::{PullRequest, Wrapping, pull_request, record_pull_request};
 pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
@@ -59,6 +60,10 @@ pub use push::{
 pub use repos::{Repo, register_repo, registered_repos};
 pub use transcripts::{Summary, append_transcript, start_transcript, transcript};
 pub use waits::{WaitHeld, Waits};
+pub use wrap_up::{
+    WaitingOn, fix_attempts, forget_fix_attempts, record_fix_attempt, settle_wrap_up,
+    unsettle_wrap_up, wrap_up_settled,
+};
 
 /// A Set as the store holds it: the agent's Set plus the identity the server
 /// stamped on it.
@@ -404,6 +409,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // — and off the Conversations, which is what makes *one pull request per
     // Conversation* a rule the database keeps.
     pull_requests::apply_schema(pool).await?;
+
+    // And what wrapping that pull request up is still waiting on, which hangs
+    // off the Conversations alone: none of it is something that happened, so
+    // none of it is an Event.
+    wrap_up::apply_schema(pool).await?;
 
     Ok(())
 }

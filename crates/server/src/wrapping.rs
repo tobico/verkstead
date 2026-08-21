@@ -88,6 +88,11 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
             // The Timeline has a move on it and something new pinned above it, and
             // an open page should say so without being reloaded.
             state.nudges.announce();
+
+            // And the wrap-up itself starts here, which for now is the checks:
+            // the branch has just been pushed, so GitHub is already running them
+            // and nobody else is going to look.
+            tokio::spawn(crate::checks::watch(state.clone(), conversation_id));
         }
         // The run was stopped from outside while the finish step was landing, or
         // this is a second attempt at a finish that already moved the

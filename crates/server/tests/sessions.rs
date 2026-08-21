@@ -236,6 +236,7 @@ questions:
 const BRISKLY: Pace = Pace {
     poll: Duration::from_millis(100),
     grace: Duration::from_millis(300),
+    checks: Duration::from_millis(100),
 };
 
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
@@ -251,6 +252,58 @@ const PULL_REQUEST: &str = r#"
 case "$5" in
 *commits*)
     printf '{"commits":[{"oid":"c0ffee1","messageHeadline":"feat: count the requests"}],"comments":[{"author":{"login":"tobico"},"body":"Looks **good**.","createdAt":"2026-08-21T09:00:00Z"}]}'
+    ;;
+*)
+    printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
+    ;;
+esac
+"#;
+
+/// A `gh` whose pull request has one check on it, concluded as `how` — the word
+/// GitHub puts in a check run's `conclusion` column. Shell text rather than a
+/// literal, so a caller can hand it something that changes mid-test.
+///
+/// Everything else it answers is [`PULL_REQUEST`]'s, because a wrap-up needs the
+/// pull request found before it has any checks to ask about.
+fn gh_checking(how: &str) -> String {
+    format!(
+        r#"
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "{how}"
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
+/// The same, for a check that is red until `green` is there and passing once it
+/// is — which is how a test moves GitHub on between one poll and the next.
+fn gh_checking_until(green: &Path) -> String {
+    format!(
+        "if [ -e {green} ]; then how=SUCCESS; else how=FAILURE; fi\n{}",
+        gh_checking("$how"),
+        green = quoted(green),
+    )
+}
+
+/// And one that can find the pull request but cannot say anything about its
+/// checks — an account whose login has expired, which is the ordinary way this
+/// goes wrong on a machine nobody is sitting at.
+const CHECKS_UNASKABLE: &str = r#"
+case "$5" in
+*statusCheckRollup*)
+    printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+    exit 1
+    ;;
+*commits*)
+    printf '{"commits":[],"comments":[]}'
     ;;
 *)
     printf '{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}'
@@ -1305,6 +1358,410 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(carried.commits[0].subject, "feat: count the requests");
     assert_eq!(carried.comments.len(), 1);
     assert!(carried.comments[0].html.contains("<strong>good</strong>"));
+}
+
+/// The same backlog, plus a session that plays a fix: it writes down the prompt
+/// it was given — somewhere that outlives the worktree — and commits something,
+/// which is what a fix session reports through.
+///
+/// Told apart from the backlog's sessions by the skill its prompt names rather
+/// than by the model, because that is the fact under it: a fix session runs
+/// under the *same* implementation Profile as the tasks did and differs only in
+/// what it was sent to do.
+fn a_backlog_then_fixes(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*addressing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
+    printf 'having a go at the check\n'
+    printf 'a fix\n' >> fixes.md
+    git add -A
+    git commit --quiet -m 'fix: have a go at the failing check'
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// How many fix sessions have run, by the commits they left on the branch.
+fn fixes(view: &ConversationView) -> usize {
+    commits(view)
+        .iter()
+        .filter(|commit| commit.subject.starts_with("fix:"))
+        .count()
+}
+
+/// Whether Verkstead has recorded this Conversation's checks as green.
+///
+/// Read out of the store rather than off the Timeline, because that is where it
+/// is: settling is bookkeeping about what wrap-up is still waiting on rather
+/// than something that happened, and nothing that is not an Event goes on a
+/// Timeline.
+async fn checks_settled(fixture: &Grilling) -> bool {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let settled = verkstead_server::store::wrap_up_settled(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    settled.contains(&verkstead_server::store::WaitingOn::Checks)
+}
+
+/// The ordinary way a wrap-up starts: the finish step opened a pull request and
+/// everything GitHub runs against it is green.
+///
+/// Nothing to fix, so nothing is dispatched — and the checks stop being one of
+/// the things wrap-up is waiting on.
+#[tokio::test]
+async fn a_green_suite_settles_the_checks_and_dispatches_nothing() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("SUCCESS"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(Instant::now() < deadline, "the checks never settled");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Long enough for many more polls of a suite that has nothing wrong with it.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(fixes(&view), 0, "a green check is nothing to fix");
+    assert!(
+        !written.exists(),
+        "and no session was put inside the addressing skill: {:?}",
+        std::fs::read_to_string(&written).ok(),
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing stopped: {:?}",
+        interruptions(&view),
+    );
+    assert!(checks_settled(&fixture).await, "and they are still green");
+}
+
+/// The whole of what a red check costs: two fix sessions, and then the human.
+///
+/// The first failure dispatches one fix session inside the bundled addressing
+/// skill, under the implementation Profile, given the check as its feedback. It
+/// commits, the check is still red, and it gets one more. After that Verkstead
+/// stops asking the machine: an Interruption carries which check failed and what
+/// the last session said, and nothing further is dispatched for it.
+#[tokio::test]
+async fn a_check_two_fix_sessions_could_not_fix_stops_and_asks_the_human() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    // Which step it was, and what makes the choice answerable from a phone:
+    // which check is red, where its run is, and what the last fix session said.
+    assert!(
+        stopped.what.contains("checks"),
+        "the step is named as what it was: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("Rust") && stopped.how.contains("/actions/runs/1/job/2"),
+        "and the reason names the check and its run: {stopped:?}",
+    );
+    assert!(
+        stopped.tail.contains("having a go at the check"),
+        "with the tail of what the last fix session said: {stopped:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what an Interruption is for",
+    );
+    assert!(
+        !checks_settled(&fixture).await,
+        "and a red suite settles nothing",
+    );
+
+    // Two goes at it and no more — this is the count that *two attempts, then
+    // ask* is about.
+    assert_eq!(fixes(&view), 2, "the machine had two goes at the check");
+
+    // Each of them inside the bundled addressing skill, told which check was red
+    // and where to go and read the real failure.
+    let told = std::fs::read_to_string(&written).expect("both fix sessions wrote their prompt");
+    let prompts: Vec<&str> = told
+        .split("=====")
+        .filter(|it| !it.trim().is_empty())
+        .collect();
+
+    assert_eq!(prompts.len(), 2, "one prompt per fix session: {told}");
+    for prompt in &prompts {
+        assert!(
+            prompt.contains("addressing/SKILL.md"),
+            "the session is put inside the bundled skill: {prompt}",
+        );
+        assert!(
+            prompt.contains("model=claude-implementation-5"),
+            "under the implementation Profile, as every session that writes code is: \
+             {prompt}",
+        );
+        assert!(
+            prompt.contains("Rust") && prompt.contains("/actions/runs/1/job/2"),
+            "and told which check is failing, and where: {prompt}",
+        );
+        assert!(
+            prompt.contains("The API has none."),
+            "under the Brief the work started from: {prompt}",
+        );
+    }
+
+    // Long enough for many more polls, had anything still been dispatching.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        fixes(&view),
+        2,
+        "the run does not go round again while the human is being asked",
+    );
+    assert_eq!(
+        interruptions(&view).len(),
+        1,
+        "and it is asked once: {:?}",
+        interruptions(&view),
+    );
+}
+
+/// And the remedy that means *have another go*: the human has read which check
+/// failed, done whatever they were going to do about it, and asked for the
+/// machine to try again.
+///
+/// Retrying a checks Interruption is the fix sessions starting over from no
+/// attempts spent, which is what makes it answerable at all — a count left
+/// standing would raise the same Interruption on the next poll without
+/// dispatching anything.
+#[tokio::test]
+async fn retrying_a_red_check_watches_it_again_from_no_attempts_spent() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+    let green = prompts.path().join("green");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking_until(&green),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(fixes(&fixture.view().await), 2, "the two goes it had");
+
+    // Whatever the human went off and did about it, done: the check GitHub is
+    // running is green from the next poll onwards.
+    std::fs::write(&green, "").unwrap();
+
+    assert_eq!(
+        fixture.settle(stopped.id, "Retry", "").await,
+        RemedySettled::Settled,
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the retry never looked at the checks again",
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        fixes(&view),
+        2,
+        "and nothing was dispatched at a check that had gone green on its own",
+    );
+    assert!(view.blocked_on.is_none(), "nothing is waiting on the human");
+}
+
+/// A `gh` that can find the pull request and cannot say anything about its
+/// checks. Verkstead does not know how they are, so it concludes nothing: it
+/// neither settles them nor dispatches a fix session at a failure it has not
+/// seen.
+#[tokio::test]
+async fn checks_gh_cannot_answer_about_leave_the_wrap_up_waiting() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture =
+        grilling_spilling(prompts, &a_backlog_then_fixes(&written), CHECKS_UNASKABLE).await;
+
+    worked_to_empty(&fixture).await;
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    // Long enough for many polls, every one of them unable to ask.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "not knowing is not the same as green",
+    );
+    assert_eq!(fixes(&view), 0, "and it is not the same as red either");
+    assert!(!written.exists(), "so no fix session was dispatched");
+    assert!(
+        interruptions(&view).is_empty(),
+        "and nothing was raised about it: a login to renew is not a run that stopped — {:?}",
+        interruptions(&view),
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "the Conversation goes on wrapping up, which is what waiting looks like",
+    );
+}
+
+/// The checks are asked about for as long as the Conversation is wrapping up and
+/// no longer.
+///
+/// The other half of *while it is Wrapping*, and the half nothing else here
+/// would catch: a poller that went on asking GitHub about a Conversation that
+/// had stopped would be a `gh` call every half minute, for ever, about work
+/// nobody is doing.
+#[tokio::test]
+async fn the_checks_stop_being_asked_about_once_the_conversation_leaves_wrapping() {
+    let spill = tempfile::tempdir().unwrap();
+    let asked = spill.path().join("asked");
+    let written = spill.path().join("fix-prompts");
+
+    // A `gh` that keeps a mark per question about the checks, so a test can see
+    // whether anything is still asking.
+    let counting = format!(
+        "case \"$5\" in *statusCheckRollup*) printf 'x' >> {asked} ;; esac\n{}",
+        gh_checking("SUCCESS"),
+        asked = quoted(&asked),
+    );
+
+    let fixture = grilling_spilling(spill, &a_backlog_then_fixes(&written), &counting).await;
+
+    worked_to_empty(&fixture).await;
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the checks were never asked about"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+
+    // One more poll's worth, so that a watcher part way through a question has
+    // finished asking it before the count is taken.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let when_stopped = std::fs::metadata(&asked).map(|it| it.len()).unwrap();
+
+    // Long enough for many more polls, had anything still been polling.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        std::fs::metadata(&asked).map(|it| it.len()).unwrap(),
+        when_stopped,
+        "GitHub was still being asked about a Conversation that had stopped",
+    );
+}
+
+/// A pull request goes on being built while Verkstead is down, so a server that
+/// comes back up watches again what it was left watching.
+///
+/// The first server cannot ask about the checks at all, so it settles nothing
+/// however long it runs; the second asks the same question of a `gh` that
+/// answers. What settles them is therefore the restart having resumed the
+/// watching, and nothing else.
+#[tokio::test]
+async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture =
+        grilling_spilling(prompts, &a_backlog_then_fixes(&written), CHECKS_UNASKABLE).await;
+
+    worked_to_empty(&fixture).await;
+    fixture
+        .until(|view| (view.state == Lifecycle::Wrapping).then_some(()))
+        .await;
+
+    assert!(
+        !checks_settled(&fixture).await,
+        "the first server never got an answer, which is what makes this prove anything",
+    );
+
+    let _restarted = router_running_sessions(
+        open_database(&fixture.database).await.unwrap(),
+        WatchedPaths::none(),
+        fixture.state.path().to_owned(),
+        Agents::running(
+            vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
+            Home {
+                path: PathBuf::from("/nonexistent"),
+                gh_config: PathBuf::from("/nonexistent/.config/gh"),
+            },
+            Reachable::at(LISTENING),
+            SandboxConfig::default(),
+            Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            Handoffs::under(fixture.state.path()),
+        )
+        .at_pace(BRISKLY),
+        gh_stub(&gh_checking("SUCCESS")),
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !checks_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the restarted server never looked at the checks it was left with",
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 /// And what happens when `gh` cannot answer — no `gh`, no login, or a branch

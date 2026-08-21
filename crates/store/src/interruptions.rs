@@ -45,6 +45,14 @@ pub enum Step {
 
     /// An inline implementation, which is the whole of the work in one session.
     Inline,
+
+    /// Getting a wrapping Conversation's pull request green again.
+    ///
+    /// Not a step of a backlog at all — the backlog is finished by the time one
+    /// of these is raised. What a retry means here is *have another go at the
+    /// red checks*, which is the fix sessions starting over from no attempts
+    /// spent.
+    Checks,
 }
 
 impl Step {
@@ -56,6 +64,7 @@ impl Step {
             Self::Task => "task",
             Self::Finish => "finish",
             Self::Inline => "inline",
+            Self::Checks => "checks",
         }
     }
 
@@ -68,6 +77,7 @@ impl Step {
             "task" => Self::Task,
             "finish" => Self::Finish,
             "inline" => Self::Inline,
+            "checks" => Self::Checks,
             other => bail!("an Interruption names the unknown step {other:?}"),
         })
     }

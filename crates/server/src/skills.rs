@@ -58,6 +58,10 @@ const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
 /// is, is read off `.tasks/` rather than told.
 const NEXT_TASK: &str = "~/.claude/skills/next-task/SKILL.md";
 
+/// And the addressing skill's, which every fix session of a wrap-up runs
+/// inside — whichever of the three kinds of feedback dispatched it.
+const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -201,6 +205,35 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
         ),
         brief,
         handoff,
+    )
+}
+
+/// What a fix session is started on: the feedback to address, under the two
+/// documents the work was built from and the line that sends the agent into the
+/// addressing skill.
+///
+/// One function for all three callers — a failed check, a review finding, an
+/// unaddressed pull request comment — because they are one job: somebody has
+/// said that work already pushed is not right yet, and what differs is the
+/// feedback rather than anything about how to take it. Three prompts saying the
+/// same thing in three places is three things to keep true.
+///
+/// The feedback goes *last*, under the documents rather than over them, for the
+/// reason a retry note does: it is the newest thing said and the least general.
+/// The documents say what the work is; this says what is wrong with it.
+pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> String {
+    let prompt = on_the_documents(
+        &format!(
+            "Read {ADDRESSING} and address the feedback at the end of this prompt, the way it \
+             says."
+        ),
+        brief,
+        handoff,
+    );
+
+    format!(
+        "{prompt}\n# The feedback to address\n\n{}\n",
+        feedback.trim()
     )
 }
 
@@ -510,6 +543,91 @@ mod tests {
         assert!(
             next_task.contains("verkstead guide") && next_task.contains("verkstead ask"),
             "the one way to the human, for what the task file cannot settle: {next_task}"
+        );
+    }
+
+    /// One skill for three callers is the whole reason it is one skill, so it
+    /// has to name all three: a failed check, a review finding and a comment on
+    /// the pull request are one job, and three skills saying it would be three
+    /// things to keep true.
+    #[test]
+    fn the_addressing_skill_is_written_for_all_three_kinds_of_feedback() {
+        let addressing = skill("addressing/SKILL.md");
+
+        for named in ["check that failed", "finding from the review", "comment"] {
+            assert!(
+                addressing.contains(named),
+                "the skill should say it serves a {named}: {addressing}"
+            );
+        }
+    }
+
+    /// What a fix session has to leave behind, and the one way it differs from
+    /// every other session here: the branch is already on a pull request, so a
+    /// fix that stays local is one nothing re-runs and nobody sees.
+    #[test]
+    fn the_addressing_skill_says_to_commit_and_push_without_asking() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("git commit") && addressing.contains("git push"),
+            "the commit is the fix and the push is what puts it on the pull request: \
+             {addressing}"
+        );
+        assert!(
+            addressing.contains("Nothing waits on approval"),
+            "and there is no gate in front of either, as there is in front of none: {addressing}"
+        );
+        assert!(
+            !addressing.contains("gh pr create"),
+            "the pull request already exists, and a second one would be a fix nobody \
+             asked for: {addressing}"
+        );
+        assert!(
+            addressing.contains("verkstead guide") && addressing.contains("verkstead ask"),
+            "the one way to the human, for feedback the codebase cannot settle: {addressing}"
+        );
+    }
+
+    /// The scope is the feedback and nothing beside it, which is what makes a
+    /// fix reviewable against the thing that was asked for.
+    #[test]
+    fn the_addressing_skill_keeps_the_fix_to_the_feedback() {
+        let addressing = skill("addressing/SKILL.md");
+
+        assert!(
+            addressing.contains("Keep to the feedback"),
+            "anything else it notices is somebody else's piece of feedback: {addressing}"
+        );
+        assert!(
+            addressing.contains("Fix the cause"),
+            "and the cause rather than the symptom: {addressing}"
+        );
+    }
+
+    /// A fix session is put inside the skill the same way every other is, and
+    /// primed with the documents *and* the feedback — which is the one thing
+    /// only this kind of session is told.
+    #[test]
+    fn a_fix_session_is_started_on_the_documents_with_the_feedback_last() {
+        let prompt = addressing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            "The Rust check is failing.",
+        );
+
+        assert!(
+            prompt.contains(ADDRESSING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("The Rust check is failing."),
+            "and the feedback comes last: it is the newest thing said and the least \
+             general — {prompt:?}"
         );
     }
 
