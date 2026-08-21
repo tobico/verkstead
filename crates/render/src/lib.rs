@@ -35,10 +35,11 @@ pub use conversations::{
     GrillingStarted, HandoffEvent, InterruptionEvent, Lifecycle, MovedEvent, NewConversation,
     PinnedEvent, ProposalView, PullRequestComment, PullRequestCommit, PullRequestDetails,
     PullRequestEvent, PullRequestSummary, QuestionSetEvent, Remedy, RemedyChoice, RemedySettled,
-    RemedyTaken, SetRow, Started, Stopped, TaskEntry, TaskListEvent, TimelineEvent, Transcript,
-    Worktree, agent_output_event, brief_event, commit_diff, commit_event, directed_event,
-    handoff_event, interruption_event, moved_event, proposal_view, pull_request_details,
-    pull_request_event, question_set_event, task_list_event,
+    RemedyTaken, SetRow, StageEntry, StageListEvent, Started, Stopped, TaskEntry, TaskListEvent,
+    TimelineEvent, Transcript, Worktree, agent_output_event, brief_event, commit_diff,
+    commit_event, directed_event, handoff_event, interruption_event, moved_event, proposal_view,
+    pull_request_details, pull_request_event, question_set_event, stage_list_event,
+    task_list_event,
 };
 pub use profiles::{
     AgentType, Broken, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,

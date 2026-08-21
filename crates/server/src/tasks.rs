@@ -14,11 +14,17 @@
 //! finishing a task is what deletes one. So a checkbox is how an entry is
 //! written rather than what says it is done: what says that is the file being
 //! gone, which is the done-signal the whole task runner turns on.
+//!
+//! Which is the one place a backlog and a roadmap differ in the reading — see
+//! [`crate::stages`], which reads the same lines off `ROADMAP.md` and does take
+//! the box at its word.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use verkstead_render::{PinnedEvent, TaskEntry};
+
+use crate::checklist;
 
 /// Where a Conversation's backlog lives inside its Worktree.
 pub(crate) const BACKLOG: &str = ".tasks";
@@ -26,17 +32,8 @@ pub(crate) const BACKLOG: &str = ".tasks";
 /// The list itself, inside that directory.
 pub(crate) const TODO: &str = "TODO.md";
 
-/// How an entry can be written: to do, done, and done by whoever holds the shift
-/// key.
-///
-/// Which of them a line carries decides nothing — see the module docs — but a
-/// line has to carry one of them to be an entry at all, because that is what a
-/// checkbox list is.
-const MARKS: [&str; 3] = ["- [ ] ", "- [x] ", "- [X] "];
-
-/// Everything pinned to a Conversation's Timeline, which is its backlog and
-/// nothing else yet — the stage list and the PR arrive with the stages that
-/// produce them.
+/// The backlog pinned to a Conversation's Timeline, where its Worktree holds
+/// one.
 ///
 /// Empty where a Conversation has no Worktree, where the Worktree has no
 /// `.tasks/`, or where what is there is not a list this can read. All three are
@@ -86,13 +83,15 @@ fn backlog(worktree: &Path) -> Option<PinnedEvent> {
 
     let outstanding = outstanding(&backlog);
 
+    // The box says nothing here: what says a task is done is its file being
+    // gone — see the module docs.
     let tasks: Vec<TaskEntry> = list
         .lines()
-        .filter_map(entry)
-        .map(|(number, label, title)| TaskEntry {
-            number: label.to_owned(),
-            title: title.to_owned(),
-            done: !outstanding.contains(&number),
+        .filter_map(checklist::entry)
+        .map(|entry| TaskEntry {
+            number: entry.label.to_owned(),
+            title: entry.title.to_owned(),
+            done: !outstanding.contains(&entry.number),
         })
         .collect();
 
@@ -100,60 +99,10 @@ fn backlog(worktree: &Path) -> Option<PinnedEvent> {
         return None;
     }
 
-    Some(verkstead_render::task_list_event(feature(&list), tasks))
-}
-
-/// What the backlog is called: the first heading of `TODO.md`, which is the
-/// feature name the breaking-down session picked.
-///
-/// Empty where there is no heading. The Timeline says what the Event is either
-/// way — this is the name of the work, not the name of the list.
-fn feature(list: &str) -> String {
-    list.lines()
-        .find_map(|line| line.trim().strip_prefix("# "))
-        .unwrap_or_default()
-        .trim()
-        .to_owned()
-}
-
-/// One entry of the checkbox list: the number it answers to, that number as the
-/// list writes it, and what it is called.
-///
-/// Both spellings of the number, because they are wanted for different things:
-/// the value is what a task file is matched by, and `01` is what the human
-/// reads. Zero-padding is the list's own, and a Timeline that renumbered the
-/// backlog would be showing its own list rather than the repository's.
-///
-/// Anything else in the file — the description above the list, a heading, a
-/// checkbox that is not a numbered task — is not an entry and comes back
-/// `None`.
-fn entry(line: &str) -> Option<(u32, &str, &str)> {
-    let line = line.trim();
-    let rest = MARKS.iter().find_map(|mark| line.strip_prefix(mark))?;
-
-    let (label, title) = rest.split_once(':')?;
-    let label = label.trim();
-
-    if label.is_empty() || !label.chars().all(|c| c.is_ascii_digit()) {
-        return None;
-    }
-
-    Some((label.parse().ok()?, label, titled(title)))
-}
-
-/// An entry's title, without the link to the task file it details.
-///
-/// The link is how the list points at the file, and a title reading `Commit
-/// Timeline Events — [details](03-commit-events.md)` would be a line nobody
-/// wrote. The dash before it goes too, because it was punctuation joining the
-/// two rather than part of either.
-fn titled(title: &str) -> &str {
-    let title = match title.split_once("[details](") {
-        Some((title, _)) => title,
-        None => title,
-    };
-
-    title.trim().trim_end_matches(['—', '–', '-']).trim()
+    Some(verkstead_render::task_list_event(
+        checklist::heading(&list),
+        tasks,
+    ))
 }
 
 /// The numbers of the task files still in the backlog directory.
@@ -334,16 +283,6 @@ Takes a Conversation from finished grilling to implemented work.
 
         assert_eq!(list.feature, "");
         assert_eq!(list.tasks.len(), 1);
-    }
-
-    #[test]
-    fn a_title_carrying_no_link_is_taken_as_it_stands() {
-        assert_eq!(
-            titled(" A task — with a dash in it"),
-            "A task — with a dash in it"
-        );
-        assert_eq!(titled(" A task — [details](01-a-task.md)"), "A task");
-        assert_eq!(titled(" A task"), "A task");
     }
 
     #[test]

@@ -46,6 +46,10 @@ pub enum Step {
     /// An inline implementation, which is the whole of the work in one session.
     Inline,
 
+    /// Writing the roadmap, which is the whole of a roadmap Conversation's own
+    /// work in one session: the stages are Conversations of their own.
+    Roadmap,
+
     /// Getting a wrapping Conversation's pull request green again.
     ///
     /// Not a step of a backlog at all — the backlog is finished by the time one
@@ -72,6 +76,7 @@ impl Step {
             Self::Task => "task",
             Self::Finish => "finish",
             Self::Inline => "inline",
+            Self::Roadmap => "roadmap",
             Self::Checks => "checks",
             Self::Review => "review",
         }
@@ -86,6 +91,7 @@ impl Step {
             "task" => Self::Task,
             "finish" => Self::Finish,
             "inline" => Self::Inline,
+            "roadmap" => Self::Roadmap,
             "checks" => Self::Checks,
             "review" => Self::Review,
             other => bail!("an Interruption names the unknown step {other:?}"),

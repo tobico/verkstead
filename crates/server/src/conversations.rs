@@ -162,12 +162,11 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 /// move that follows from it, and a Conversation whose direction is settled but
 /// whose session would not start still says which way it was headed.
 ///
-/// Two of the three start something. Inline starts a session that builds the
-/// work; a task list starts one that breaks it into `.tasks/` first, and the
-/// sessions that work through that backlog follow from what it commits. A staged
-/// roadmap is refused outright — the page's disabled button is a courtesy,
-/// exactly as a form's branch-name check is, and the stage that runs one has not
-/// landed.
+/// All three start something. Inline starts a session that builds the work; a
+/// task list starts one that breaks it into `.tasks/` first, and the sessions
+/// that work through that backlog follow from what it commits; a staged roadmap
+/// starts one that writes `docs/roadmaps/` and carries the branch to a pull
+/// request, and the stages it plans become Conversations of their own.
 ///
 /// Choosing on a Conversation that is not in Direction is refused by the store,
 /// which is what makes *implement inline* impossible from anywhere else: the
@@ -178,10 +177,6 @@ pub(crate) async fn choose_direction(
     id: i64,
     direction: Direction,
 ) -> Result<DirectionChosen> {
-    if direction == Direction::Roadmap {
-        return Ok(DirectionChosen::RoadmapNotYet);
-    }
-
     match store::choose_direction(&state.pool, id, direction).await? {
         store::Directed::NoSuchConversation => return Ok(DirectionChosen::NoSuchConversation),
         store::Directed::NotChoosing => return Ok(DirectionChosen::NotChoosing),
@@ -280,7 +275,7 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     let prompt = match direction {
         Direction::Inline => skills::implementing(&brief, handoff.as_deref()),
         Direction::TaskList => skills::breaking_down(&brief, handoff.as_deref()),
-        Direction::Roadmap => unreachable!("a staged roadmap was refused above"),
+        Direction::Roadmap => skills::staging(&brief, handoff.as_deref()),
     };
 
     let started = match state
@@ -295,13 +290,14 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         }
     };
 
-    // Both directions are followed, and the two drivers differ in what they are
-    // watching for rather than in whether anybody is watching. A backlog's run is
-    // a session per step, each one seen out and the next launched; an inline run
-    // is one session, and what says it did anything is what it committed. Either
-    // way a session that ends without landing its work stops the run at an
-    // Interruption rather than leaving a Conversation that says it is
-    // implementing with nothing implementing it.
+    // All three are followed, and the drivers differ in what they are watching
+    // for rather than in whether anybody is watching. A backlog's run is a
+    // session per step, each one seen out and the next launched; an inline run is
+    // one session, and what says it did anything is what it committed; a roadmap
+    // is one session too, watched for the roadmap it writes and then carried on
+    // to the pull request it opened. Every way round, a session that ends without
+    // landing its work stops the run at an Interruption rather than leaving a
+    // Conversation that says it is implementing with nothing implementing it.
     match (direction, started) {
         (Direction::TaskList, Some(session)) => {
             tokio::spawn(crate::runner::follow(state.clone(), id, session));
@@ -309,11 +305,31 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         (Direction::Inline, Some(session)) => {
             tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
         }
+        (Direction::Roadmap, Some(session)) => {
+            // The commit the branch came off, which is what says a roadmap in the
+            // Worktree is one this branch wrote rather than one the repository
+            // already had. Recorded at grill start, so a Conversation with a
+            // Worktree has one; without it there is nothing to watch for, and the
+            // session is left running rather than followed.
+            match conversation.base_commit.clone() {
+                Some(base) => {
+                    tokio::spawn(crate::runner::follow_roadmap(
+                        state.clone(),
+                        id,
+                        base,
+                        session,
+                    ));
+                }
+                None => tracing::error!(
+                    conversation_id = id,
+                    "the Conversation has no base commit, so the roadmap session is not followed"
+                ),
+            }
+        }
         // A session that would not start is logged above. There is nothing to
         // follow, and the chooser says so where it was chosen — see the viewer's
         // `chosen-note`.
         (_, None) => {}
-        (Direction::Roadmap, _) => unreachable!("a staged roadmap was refused above"),
     }
 
     Ok(())

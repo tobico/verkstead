@@ -1,0 +1,106 @@
+{
+  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "blocked_on": null,
+  "branch": "mvp-roadmap",
+  "direction": "roadmap",
+  "grilling_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/fable/.claude",
+    "config_file": "/srv/accounts/fable/.claude.json",
+    "id": 1,
+    "model": "claude-fable-5",
+    "name": "fable"
+  },
+  "id": 7,
+  "implementation_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/opus/.claude",
+    "config_file": "/srv/accounts/opus/.claude.json",
+    "id": 2,
+    "model": "claude-opus-5",
+    "name": "opus"
+  },
+  "pinned": [
+    {
+      "StageList": {
+        "name": "mvp",
+        "stages": [
+          {
+            "done": true,
+            "number": "01",
+            "title": "Workbench"
+          },
+          {
+            "done": true,
+            "number": "02",
+            "title": "Grilling"
+          },
+          {
+            "done": false,
+            "number": "03",
+            "title": "Implementation"
+          },
+          {
+            "done": false,
+            "number": "04",
+            "title": "Wrap-up"
+          }
+        ],
+        "title": "MVP roadmap"
+      }
+    }
+  ],
+  "proposal": null,
+  "ready_to_grill": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Implementing",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>A staged roadmap</h1>\n<p>Too much for one feature, so it is cut into stages and each becomes a\nfeature of its own.</p>\n",
+        "id": 30,
+        "markdown": "# A staged roadmap\n\nToo much for one feature, so it is cut into stages and each becomes a\nfeature of its own.\n"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 31,
+        "state": "Grilling"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 32,
+        "state": "Direction"
+      }
+    },
+    {
+      "Directed": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "direction": "roadmap",
+        "id": 33
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 34,
+        "state": "Implementing"
+      }
+    }
+  ],
+  "worktree": {
+    "missing": false,
+    "path": "/var/lib/verkstead/worktrees/verkstead-mvp-roadmap"
+  }
+}

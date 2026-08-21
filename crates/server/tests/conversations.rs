@@ -1416,21 +1416,31 @@ async fn choosing_inline_again_once_the_work_has_started_is_refused() {
     );
 }
 
+/// And the third is no different from the other two now that there is something
+/// for it to start: the session it launches writes `docs/roadmaps/`, and writing
+/// the roadmap *is* this Conversation's work rather than a step in front of it.
 #[tokio::test]
-async fn a_staged_roadmap_is_refused_by_the_server_and_not_only_by_the_chooser() {
+async fn choosing_a_staged_roadmap_sets_the_conversation_implementing() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
     answer(&app, ask(&app, id, PROPOSING).await).await;
 
-    assert_eq!(
-        direct(&app, id, "roadmap").await,
-        DirectionChosen::RoadmapNotYet,
-        "the chooser's disabled button is a courtesy; the refusal is the server's",
-    );
+    assert_eq!(direct(&app, id, "roadmap").await, DirectionChosen::Chosen);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.direction, None);
-    assert_eq!(directions(&view), []);
+
+    assert_eq!(view.direction, Some(verkstead_schema::Direction::Roadmap));
+    assert_eq!(directions(&view), [verkstead_schema::Direction::Roadmap]);
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        moves(&view),
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the choice is an Event of its own and the work starting is a move",
+    );
 }
 
 #[tokio::test]

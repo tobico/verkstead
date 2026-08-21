@@ -53,6 +53,10 @@ const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
 /// task-list direction runs instead of building anything itself.
 const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
 
+/// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
+/// roadmap direction runs instead of building anything itself.
+const STAGING: &str = "~/.claude/skills/staging/SKILL.md";
+
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
@@ -185,6 +189,24 @@ pub(crate) fn breaking_down(brief: &str, handoff: Option<&str>) -> String {
     on_the_documents(
         &format!(
             "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
+        ),
+        brief,
+        handoff,
+    )
+}
+
+/// What a roadmap session is started on: the same two documents again, under
+/// the line that sends the agent into the staging fork.
+///
+/// The same documents for the reason the breakdown gets them: it is the same
+/// work, read for a different purpose again. This session is not building it and
+/// not slicing it into one feature's tasks, but deciding where the *features*
+/// fall — and a staging drawn from anything less than what the grilling settled
+/// would be a roadmap for some other piece of work.
+pub(crate) fn staging(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!(
+            "Read {STAGING} and stage the work described below into a roadmap, the way it says."
         ),
         brief,
         handoff,
@@ -473,6 +495,141 @@ mod tests {
             !breaking_down.contains("proposal:"),
             "and ordinary ones: the `proposal` block is the grilling's closing move, \
              and this runs after one was accepted"
+        );
+    }
+
+    /// What the staging produces is a `docs/roadmaps/` roadmap in the
+    /// repository, so the fork has to say what to write and where — Verkstead
+    /// reads it back off the branch and owns none of it.
+    #[test]
+    fn the_staging_skill_says_what_a_roadmap_is_made_of() {
+        let staging = skill("staging/SKILL.md");
+
+        for named in ["docs/roadmaps/", "ROADMAP.md", "NN-<slug>.md"] {
+            assert!(
+                staging.contains(named),
+                "the roadmap is files in the repository, and {named} is one of them"
+            );
+        }
+
+        assert!(
+            staging.contains("sequential"),
+            "the order is the dependency here as it is in a backlog: {staging}"
+        );
+    }
+
+    /// The formats are the repository's rather than Verkstead's: what this fork
+    /// writes is read back by whoever starts a stage, and by a human who wrote
+    /// their roadmap by hand. So the two headings the readers turn on — the
+    /// `## Stages` checkbox list and the brief's sections — have to be the ones
+    /// they already write.
+    #[test]
+    fn the_staging_skill_writes_the_formats_the_stage_readers_expect() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("## Stages") && staging.contains("- [ ] 01: <title> — [brief]("),
+            "the checkbox list is what says how far the effort has got: {staging}"
+        );
+
+        for section in [
+            "## Goal",
+            "## Decisions in force",
+            "## Proposed tasks (provisional)",
+            "## Re-verify at start",
+        ] {
+            assert!(
+                staging.contains(section),
+                "a stage brief carries {section}, because starting the stage reads it"
+            );
+        }
+    }
+
+    /// The fork drops what a workstation-driven flow assumes and Verkstead
+    /// supplies instead, and gains what only Verkstead's shape needs: the branch
+    /// is already made, nobody approves the commit, and the stages are
+    /// Conversations of their own rather than work to start here.
+    #[test]
+    fn the_staging_skill_drops_what_verkstead_already_supplies() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("The branch is\nalready made"),
+            "a session that made its own branch would leave the work off the \
+             Conversation's: {staging}"
+        );
+        assert!(
+            staging.contains("Nothing waits on approval"),
+            "and the roadmap commit has no gate in front of it, as no commit here does"
+        );
+        assert!(
+            staging.contains("Do not start stage 01"),
+            "each stage is a Conversation of its own, on a branch of its own: {staging}"
+        );
+        assert!(
+            !staging.contains("/next-stage") && !staging.contains("/to-tasks"),
+            "nobody is at a terminal to run a slash command: {staging}"
+        );
+    }
+
+    /// And it carries the branch the rest of the way, exactly as the next-task
+    /// fork's finish does: a roadmap is work like any other work, so it goes for
+    /// review like any other work. How is the target repository's own business.
+    #[test]
+    fn the_staging_skill_opens_the_pull_request_the_repositorys_own_way() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("docs/agents/git-workflow.md") && staging.contains("Finish sequence"),
+            "the process is the repository's, read out of the file that records it: {staging}"
+        );
+        assert!(
+            staging.contains("gh stack submit --auto"),
+            "a stacked branch is submitted as a stack: {staging}"
+        );
+        assert!(
+            staging.contains("gh pr create --draft"),
+            "and an unstacked one opens a draft PR of its own: {staging}"
+        );
+    }
+
+    /// The stage list is the human's decision to make, and it reaches them the
+    /// only way anything does.
+    #[test]
+    fn the_staging_skill_puts_its_stage_list_through_the_cli() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("verkstead guide") && staging.contains("verkstead ask"),
+            "the stage list is an ordinary Set, asked the way every Set is: {staging}"
+        );
+        assert!(
+            !staging.contains("proposal:"),
+            "and an ordinary one: the `proposal` block is the grilling's closing move, \
+             and this runs after one was accepted"
+        );
+    }
+
+    /// The same two documents, into the third skill. What differs is the line
+    /// above them, which is the whole of what sends a session one way or another.
+    #[test]
+    fn a_roadmap_session_is_started_on_the_same_documents_inside_the_fork() {
+        let prompt = staging(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+        );
+
+        assert!(
+            prompt.contains(STAGING),
+            "the fork is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(IMPLEMENTING) && !prompt.contains(BREAKING_DOWN),
+            "and nothing sends this session to build or slice the work instead: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
         );
     }
 

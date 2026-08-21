@@ -45,6 +45,7 @@ import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
+import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
@@ -1382,7 +1383,7 @@ describe("choosing a direction", () => {
     expect(container.querySelector(".chosen-note")).toBeNull();
   });
 
-  it("offers a staged roadmap disabled, and says it is coming later", async () => {
+  it("offers all three, every one of them pressable", async () => {
     theDirecting();
     const { container } = mount(`/conversations/${DIRECTING.id}`);
 
@@ -1393,8 +1394,6 @@ describe("choosing a direction", () => {
     ];
     const labelled = buttons.map((button) => button.textContent);
 
-    // All three, so the shape of the decision is visible — and only two of them
-    // are pressable.
     expect(labelled).toEqual([
       "Implement inline",
       "Break into a task list",
@@ -1403,11 +1402,28 @@ describe("choosing a direction", () => {
     expect(buttons.map((button) => button.disabled)).toEqual([
       false,
       false,
-      true,
+      false,
     ]);
 
+    // Each starts as soon as it is chosen: the press is the choice and the
+    // start together, and the note beside each says so.
     const roadmap = buttons[2]!.closest("li")!;
-    expect(roadmap.textContent).toContain("Arriving in a later stage");
+    expect(roadmap.textContent).toContain("docs/roadmaps/");
+    expect(roadmap.textContent).toContain("Starts as soon as you choose it");
+  });
+
+  it("sends a staged roadmap like any other direction", async () => {
+    const fetching = theDirecting({}, json("Chosen"));
+    const { container } = mount(`/conversations/${DIRECTING.id}`);
+
+    const buttons = await drawn(container, ".directions");
+    fireEvent.click(buttons.querySelectorAll(".direction")[2]!);
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${DIRECTING.id}/direction`),
+      ).toEqual({ direction: "roadmap" }),
+    );
   });
 
   it("sends the direction the human pressed", async () => {
@@ -1804,6 +1820,119 @@ describe("the pinned task list", () => {
 
     expect(container.querySelector(".pinned")).toBeNull();
     expect(container.querySelector(".task-list")).toBeNull();
+  });
+});
+
+/// The sixth shape the middle pane draws: a conversation whose direction was a
+/// staged roadmap, with `docs/roadmaps/` in its worktree read back as the
+/// pinned stage list.
+const STAGED = roadmap as ConversationView;
+
+/// The roadmap itself, off that payload.
+const ROADMAP = (() => {
+  const pinned = STAGED.pinned[0];
+  if (!pinned || !("StageList" in pinned)) {
+    throw new Error("the fixture should carry a pinned stage list");
+  }
+  return pinned.StageList;
+})();
+
+/// The workbench with that conversation open.
+function theStaged(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${STAGED.id}`,
+      json({ ...STAGED, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+describe("the pinned stage list", () => {
+  it("draws every stage of the roadmap, in the roadmap's own order", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, ".pinned .stage-list");
+
+    expect(ROADMAP.stages).toHaveLength(4);
+    expect(
+      [...list.querySelectorAll(".stages li")].map((row) => [
+        row.querySelector(".n")!.textContent,
+        row.querySelector(".what")!.textContent,
+      ]),
+    ).toEqual(ROADMAP.stages.map((stage) => [stage.number, stage.title]));
+  });
+
+  it("says which stages are checked", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, ".pinned .stage-list");
+    const rows = [...list.querySelectorAll(".stages li")];
+
+    expect(rows.map((row) => row.classList.contains("done"))).toEqual(
+      ROADMAP.stages.map((stage) => stage.done),
+    );
+
+    // In words as well as in a class, as a task's row is.
+    expect(rows.map((row) => row.querySelector(".state")!.textContent)).toEqual(
+      ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")),
+    );
+  });
+
+  it("says which roadmap it is and how far through it the effort is", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const head = await drawn(container, ".pinned .stage-list .event-head");
+
+    expect(head.textContent).toContain("Roadmap");
+    expect(head.querySelector(".feature")!.textContent).toBe(ROADMAP.title);
+    expect(head.querySelector(".progress")!.textContent).toBe("2 of 4 done");
+  });
+
+  /// Its directory is its identity, so a roadmap that wrote no heading is still
+  /// named — by the directory whoever starts a stage is pointed at.
+  it("falls back to the roadmap's directory where it wrote no heading", async () => {
+    theStaged({ pinned: [{ StageList: { ...ROADMAP, title: "" } }] });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const head = await drawn(container, ".pinned .stage-list .event-head");
+
+    expect(head.querySelector(".feature")!.textContent).toBe(ROADMAP.name);
+  });
+
+  /// Pinned beside the backlog and the pull request, and drawn the same way:
+  /// outside the record, with nothing to pin, unpin or open.
+  it("is drawn above the record and asks the human for nothing", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, ".pinned .stage-list");
+
+    expect(list.closest(".timeline")).toBeNull();
+    expect(container.querySelector(".timeline .stages")).toBeNull();
+    expect(list.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  it("draws nothing at all where the branch has written no roadmap", async () => {
+    // Every other fixture here is a conversation whose branch touched none,
+    // which is the ordinary case: the server pins nothing.
+    expect(TASKED.pinned.some((event) => "StageList" in event)).toBe(false);
+
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    await drawn(container, ".pinned .task-list");
+
+    expect(container.querySelector(".stage-list")).toBeNull();
   });
 });
 

@@ -438,6 +438,19 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // row remembering what they said would be one more thing to be wrong.
     let mut pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
 
+    // And the roadmap this branch is about, read the same way and for the same
+    // reason — `docs/roadmaps/` is the repository's too. Which of a repository's
+    // roadmaps is this one's is asked of git against the base commit: a
+    // repository keeps its finished roadmaps, and a Conversation is about the
+    // one its branch has written to. See [`crate::stages`].
+    pinned.extend(
+        crate::stages::pinned(
+            conversation.worktree.clone(),
+            conversation.base_commit.clone(),
+        )
+        .await,
+    );
+
     // And the pull request the work ended up on, which is pinned beside it. This
     // one *is* on the record — it is what moved the Conversation into Wrapping —
     // so it is read off the Timeline for the reason the Brief is: it is already

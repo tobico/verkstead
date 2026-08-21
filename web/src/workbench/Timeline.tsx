@@ -54,6 +54,7 @@ import type {
   MovedEvent,
   PullRequestEvent,
   QuestionSetEvent,
+  StageListEvent,
   TaskListEvent,
 } from "../api/types";
 import { Interruption } from "./Interruption";
@@ -112,7 +113,6 @@ export const DIRECTION_REFUSAL: Record<DirectionChosen, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotChoosing:
     "This conversation is not choosing a direction — the grilling has not proposed wrapping up, or the work is past this point.",
-  RoadmapNotYet: "Staged roadmaps are not built yet.",
 };
 
 /// What each direction is called, wherever one is named: on a button in the
@@ -281,13 +281,12 @@ export function Timeline(props: {
 /// order; each of these is the current state of something the work is against,
 /// and is worth having on screen whichever part of the record is being read.
 ///
-/// Pinning is the fixed set — a task list and the pull request, with the stage
-/// list as that stage arrives — so there is nothing to pin, nothing to unpin,
-/// and no control for either.
+/// Pinning is the fixed set — a task list, a stage list and the pull request —
+/// so there is nothing to pin, nothing to unpin, and no control for either.
 ///
 /// One of them opens: a pull request has a full self, which is what is on it
-/// right now. A task list does not — what a details pane would show of one is
-/// what is already drawn here.
+/// right now. Neither list does — what a details pane would show of one is what
+/// is already drawn here.
 function Pinned(props: {
   conversation: ConversationView;
   selected: number | null;
@@ -302,6 +301,9 @@ function Pinned(props: {
             <Switch>
               <Match when={"TaskList" in event && event.TaskList}>
                 {(tasks) => <TaskList tasks={tasks()} />}
+              </Match>
+              <Match when={"StageList" in event && event.StageList}>
+                {(stages) => <StageList stages={stages()} />}
               </Match>
               <Match when={"PullRequest" in event && event.PullRequest}>
                 {(opened) => (
@@ -386,6 +388,46 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
                   stylesheet, so a list read aloud or copied out still says
                   which tasks are finished. */}
               <span class="state">{task.done ? "done" : "to do"}</span>
+            </li>
+          )}
+        </For>
+      </ol>
+    </article>
+  );
+}
+
+/// The roadmap: every stage of it, and how far through it the effort has got.
+///
+/// Beside the task list and drawn the same way, because it is the same kind of
+/// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
+/// every time the page reads the conversation, so a stage finishing moves this
+/// without anybody pressing anything. There is nothing to open here either.
+///
+/// Which roadmap this is, is the one this branch has written to: a repository
+/// keeps its finished roadmaps, and a conversation is about the one it touched.
+function StageList(props: { stages: StageListEvent }): JSX.Element {
+  const done = () => props.stages.stages.filter((stage) => stage.done).length;
+
+  return (
+    <article class="stage-list">
+      <div class="event-head">
+        <h2>Roadmap</h2>
+        <span class="feature">{props.stages.title || props.stages.name}</span>
+        <span class="progress">
+          {done()} of {props.stages.stages.length} done
+        </span>
+      </div>
+
+      <ol class="stages">
+        <For each={props.stages.stages}>
+          {(stage) => (
+            <li classList={{ done: stage.done }}>
+              <span class="n">{stage.number}</span>
+              <span class="what">{stage.title}</span>
+              {/* The word travels with the row rather than being drawn by the
+                  stylesheet, for the reason a task's does: a list read aloud
+                  or copied out still says which stages are finished. */}
+              <span class="state">{stage.done ? "done" : "to do"}</span>
             </li>
           )}
         </For>
@@ -675,25 +717,20 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 
 /// The three ways the work can be built, in the order the design names them.
 ///
-/// Roadmap is here and not runnable: the choice exists so the shape of the
-/// decision is visible, and the stage that executes one has not landed. Drawn
-/// disabled rather than left out, because a chooser that grew a third button
-/// later would be a decision the human had never been shown.
-const DIRECTIONS: { direction: Direction; note: string; ready: boolean }[] = [
+/// All three run. Each starts as soon as it is chosen — the press is the choice
+/// and the start together — and what differs is which pipeline it sets going.
+const DIRECTIONS: { direction: Direction; note: string }[] = [
   {
     direction: "inline",
     note: "One fresh session under the implementation profile, primed with the handoff. Starts as soon as you choose it.",
-    ready: true,
   },
   {
     direction: "task-list",
     note: "Broken into .tasks/ in the worktree by a session of its own, then one fresh session per task. Starts as soon as you choose it.",
-    ready: true,
   },
   {
     direction: "roadmap",
-    note: "Staged under docs/roadmaps/, a feature per stage. Arriving in a later stage.",
-    ready: false,
+    note: "Staged under docs/roadmaps/ by a session of its own, a feature per stage. Starts as soon as you choose it.",
   },
 ];
 
@@ -770,7 +807,7 @@ function DirectionChooser(props: { conversation: ConversationView }): JSX.Elemen
                 <button
                   type="button"
                   class="direction"
-                  disabled={!offered.ready || choose.isPending}
+                  disabled={choose.isPending}
                   aria-pressed={props.conversation.direction === offered.direction}
                   onClick={() => choose.mutate(offered.direction)}
                 >

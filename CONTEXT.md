@@ -131,11 +131,11 @@ Choosing is one press, and what follows from it is the pipeline it named
 starting. The choice and the start stay separate things on the record — the
 Direction is an Event and the work beginning is a move — but there is no second
 button between them: the human has decided, and a Conversation sitting on a
-settled Direction with nothing running would be waiting for nobody. **Inline**
-and **task list** both start as they are chosen — inline on a session that builds
-the work, a task list on one that breaks it into `.tasks/` first — and the
-Conversation is Implementing either way. **Roadmap** has nothing to start yet, so
-it is refused until the stage that runs one lands.
+settled Direction with nothing running would be waiting for nobody. All three
+start as they are chosen — inline on a session that builds the work, a task list
+on one that breaks it into `.tasks/` first, a roadmap on one that stages it into
+`docs/roadmaps/` — and the Conversation is Implementing every way round, because
+writing a plan for the work is the work when it is the work that was chosen.
 _Avoid_: mode, strategy, plan, execution path
 
 **Proposal**:

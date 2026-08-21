@@ -96,6 +96,15 @@ enum Step {
     /// Finish the feature: every task is done and only `TODO.md` is left.
     Finish,
 
+    /// Write the roadmap, which is where a roadmap Conversation starts and
+    /// finishes: the stages it plans are Conversations of their own.
+    ///
+    /// Carries the commit the branch came off, because what says this step is
+    /// over is a roadmap on the branch *that was not there before* — see
+    /// [`Landing::Roadmap`]. Never what [`next_step`] answers, for the reason
+    /// [`Step::Planning`] never is: it is the step the runner is handed.
+    Staging(String),
+
     /// There is no backlog. Nothing to run, and nothing to poll for.
     Nothing,
 }
@@ -106,6 +115,12 @@ enum Step {
 enum Landing {
     Gone(PathBuf),
     Arrived(PathBuf),
+
+    /// A roadmap this branch has written, committed as it stands. The commit
+    /// the branch came off, because `docs/roadmaps/` is a directory a
+    /// repository often has already — a path arriving would read as landed
+    /// before the session had written a line.
+    Roadmap(String),
 }
 
 impl Step {
@@ -120,6 +135,8 @@ impl Step {
             Step::Task(file) => Some(Landing::Gone(file.clone())),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
             Step::Finish => Some(Landing::Gone(todo())),
+            // The roadmap commit is what puts the stages under version control.
+            Step::Staging(base) => Some(Landing::Roadmap(base.clone())),
             Step::Nothing => None,
         }
     }
@@ -139,6 +156,7 @@ impl Step {
             Step::Planning => Some(store::Step::Planning),
             Step::Task(_) => Some(store::Step::Task),
             Step::Finish => Some(store::Step::Finish),
+            Step::Staging(_) => Some(store::Step::Roadmap),
             Step::Nothing => None,
         }
     }
@@ -153,6 +171,7 @@ impl Step {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::Task(file) => format!("the task in {}", file.display()),
             Step::Finish => "finishing the feature".to_owned(),
+            Step::Staging(_) => "staging the work into a roadmap".to_owned(),
             Step::Nothing => "nothing".to_owned(),
         }
     }
@@ -237,6 +256,42 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             };
 
             return follow_inline(state, conversation_id, session).await;
+        }
+        // Nor is this one. A roadmap Conversation has one step of its own, so a
+        // retry is that step again — unless the roadmap already landed, which is
+        // the same case a retried finish has: what failed was finding the pull
+        // request it opened, and the retry is that question asked again.
+        store::Step::Roadmap => {
+            let Some(base) = base(&state, conversation_id).await else {
+                return;
+            };
+
+            let staged = {
+                let worktree = working_in.clone();
+                let base = base.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    !crate::stages::touched(&worktree, &base).is_empty()
+                })
+                .await
+                .unwrap_or(false)
+            };
+
+            if staged {
+                tracing::info!(
+                    conversation_id,
+                    "the roadmap is written, so the retry looks for the pull request again"
+                );
+
+                return crate::wrapping::opened(&state, conversation_id, None).await;
+            }
+
+            let Some(session) = launch(&state, conversation_id, Prompt::Staging, &note).await
+            else {
+                return;
+            };
+
+            return follow_roadmap(state, conversation_id, base, session).await;
         }
         // Not a backlog step at all: the backlog was finished before this
         // Conversation ever had a pull request to have checks on. Retrying it is
@@ -399,6 +454,35 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, mut ses
         event_id,
     )
     .await;
+}
+
+/// See a roadmap session out, and carry the Conversation on to wrapping the
+/// pull request it opened.
+///
+/// The whole of a roadmap Conversation's own work in one session — the stages it
+/// plans are Conversations of their own — so there is no next step to launch.
+/// What there is, is the same ending a backlog's last step has: the fork commits
+/// the roadmap and then follows the repository's own finish sequence, so the
+/// branch is pushed and on a pull request by the time the session goes quiet. A
+/// roadmap is work like any other work and goes for review like any other work.
+///
+/// `base` is the commit the branch came off, which is what says a roadmap on it
+/// is one this branch wrote — see [`Landing::Roadmap`].
+///
+/// A session that ends without writing one stops the run at an Interruption, the
+/// way every other step does, and the human's remedies mean what they always
+/// mean.
+pub(crate) async fn follow_roadmap(
+    state: AppState,
+    conversation_id: i64,
+    base: String,
+    session: Session,
+) {
+    let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
+        return;
+    };
+
+    crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
 }
 
 /// Run one fix session about `feedback`, and wait until it is over.
@@ -819,6 +903,14 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
     let (path, wanted) = match landing {
         Landing::Gone(path) => (path, false),
         Landing::Arrived(path) => (path, true),
+        // Not a path this branch was told about but one it went and wrote, so
+        // what is asked is which roadmaps it has touched — the same reading the
+        // pinned stage list is drawn by, so the list the human is watching and
+        // the step the runner is waiting on cannot disagree.
+        Landing::Roadmap(base) => {
+            return !crate::stages::touched(worktree, base).is_empty()
+                && pending(worktree, Path::new(crate::stages::ROADMAPS)) == Some(false);
+        }
     };
 
     if worktree.join(path).exists() != wanted {
@@ -905,6 +997,10 @@ enum Prompt {
     /// Verkstead's fork of to-tasks, which writes the backlog.
     BreakingDown,
 
+    /// Its fork of to-roadmap, which writes the roadmap and carries the branch
+    /// to a pull request.
+    Staging,
+
     /// Its fork of next-task, which every session of a backlog runs — the task
     /// sessions and the finish one alike.
     NextTask,
@@ -971,6 +1067,7 @@ async fn launch(
 
             let prompt = match &inside {
                 Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
+                Prompt::Staging => skills::staging(&brief, handoff),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
@@ -1014,6 +1111,35 @@ async fn worktree(state: &AppState, conversation_id: i64) -> Option<PathBuf> {
                 tracing::info!(
                     conversation_id,
                     "the Conversation has no Worktree left, so the runner stops"
+                );
+                None
+            }
+        },
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left to work in");
+            None
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to work in failed");
+            None
+        }
+    }
+}
+
+/// The commit the Conversation's branch came off, or `None` where there is none
+/// to read.
+///
+/// Written at grill start, whether or not the human overrode one, so a
+/// Conversation with a Worktree has one. What it answers here is which roadmaps
+/// on the branch are the branch's own — see [`crate::stages::touched`].
+async fn base(state: &AppState, conversation_id: i64) -> Option<String> {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => match conversation.base_commit {
+            Some(base) => Some(base),
+            None => {
+                tracing::error!(
+                    conversation_id,
+                    "the Conversation has no base commit, so what its branch wrote cannot be read"
                 );
                 None
             }
@@ -1186,6 +1312,58 @@ mod tests {
         assert!(landed(path, &landing), "written and committed");
     }
 
+    /// The same rule for the roadmap step, and the reason it cannot be a path
+    /// arriving: `docs/roadmaps/` is a directory a repository often has already,
+    /// so what says the step landed is a roadmap *this branch wrote*.
+    #[test]
+    fn a_roadmap_the_repository_already_had_is_not_this_branchs_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+
+        let roadmaps = path.join(crate::stages::ROADMAPS);
+        std::fs::create_dir_all(roadmaps.join("public-release")).unwrap();
+        std::fs::write(
+            roadmaps.join("public-release").join(crate::stages::INDEX),
+            "# Public release\n\n- [x] 01: Done\n",
+        )
+        .unwrap();
+
+        run(path, &["add", "-A"]);
+        run(
+            path,
+            &["commit", "-m", "docs: the roadmap that was already here"],
+        );
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+        let landing = Landing::Roadmap(base);
+
+        assert!(
+            !landed(path, &landing),
+            "a roadmap the branch came off is not one it wrote",
+        );
+
+        std::fs::create_dir_all(roadmaps.join("mvp")).unwrap();
+        std::fs::write(
+            roadmaps.join("mvp").join(crate::stages::INDEX),
+            "# MVP roadmap\n\n- [ ] 01: Workbench\n",
+        )
+        .unwrap();
+
+        assert!(
+            !landed(path, &landing),
+            "written, and untracked is not committed",
+        );
+
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "docs: stage the mvp roadmap"]);
+
+        assert!(landed(path, &landing), "written and committed");
+    }
+
     /// The repository being polled is one a session is committing in, and the
     /// moment a poll is most likely to land on is the moment it commits — which
     /// is exactly when `index.lock` is held.
@@ -1230,6 +1408,10 @@ mod tests {
         assert_eq!(
             Step::Task(Path::new(".tasks/01-first.md").to_owned()).landing(),
             Some(Landing::Gone(Path::new(".tasks/01-first.md").to_owned())),
+        );
+        assert_eq!(
+            Step::Staging("d41f8a3b".to_owned()).landing(),
+            Some(Landing::Roadmap("d41f8a3b".to_owned())),
         );
         assert_eq!(Step::Nothing.landing(), None);
     }

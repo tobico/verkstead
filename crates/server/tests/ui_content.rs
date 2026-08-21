@@ -1674,6 +1674,92 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
 
+    // And a seventh, whose direction was a staged roadmap: the staging session
+    // has written `docs/roadmaps/` into its worktree, and Verkstead reads it
+    // back as the pinned stage-list Event.
+    //
+    // Its worktree has to be a real *repository* rather than merely a real
+    // directory, which is where this differs from the backlog above. Which
+    // roadmap is a Conversation's is asked of git against the base commit the
+    // branch came off — a repository keeps its finished roadmaps, and a
+    // Conversation is about the one its branch wrote — so there is a real
+    // commit here and a real roadmap written over it. Both are pinned
+    // afterwards, the way every other filesystem reading here is.
+    let staged = store::start_conversation(&pool, repos[0].id, "mvp-roadmap")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, staged, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, staged, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        staged,
+        "# A staged roadmap\n\n\
+         Too much for one feature, so it is cut into stages and each becomes a\n\
+         feature of its own.\n",
+    )
+    .await
+    .unwrap();
+
+    let worktree = _dir.path().join("worktrees/verkstead-mvp-roadmap");
+    std::fs::create_dir_all(&worktree).unwrap();
+    git(&worktree, &["init", "--initial-branch", "main"]);
+    git(
+        &worktree,
+        &["config", "user.email", "test@verkstead.invalid"],
+    );
+    git(&worktree, &["config", "user.name", "Verkstead Test"]);
+
+    // What was here before the staging session, so that the roadmap it goes on
+    // to write is one the branch wrote rather than one it inherited.
+    std::fs::write(worktree.join("README.md"), "# a repository\n").unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "chore: what was here already"]);
+
+    let base = git(&worktree, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let roadmap = worktree.join("docs/roadmaps/mvp");
+    std::fs::create_dir_all(&roadmap).unwrap();
+    std::fs::write(
+        roadmap.join("ROADMAP.md"),
+        "# MVP roadmap\n\n\
+         Turns the clone into the platform it was designed as.\n\n\
+         ## Stages\n\n\
+         - [x] 01: Workbench — [brief](01-workbench.md)\n\
+         - [x] 02: Grilling — [brief](02-grilling.md)\n\
+         - [ ] 03: Implementation — [brief](03-implementation.md)\n\
+         - [ ] 04: Wrap-up — [brief](04-wrap-up.md)\n",
+    )
+    .unwrap();
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "docs: stage the mvp roadmap"]);
+
+    store::start_grilling(&pool, staged, &base, &worktree)
+        .await
+        .unwrap();
+    store::move_to_direction(&pool, staged).await.unwrap();
+    store::choose_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
+        .await
+        .unwrap();
+    store::start_implementing(&pool, staged).await.unwrap();
+
+    write(
+        "conversation-roadmap.json",
+        &pin_base(
+            &pin_worktree(
+                &pin_health(&pin_timeline(
+                    &get(&app, &format!("/api/ui/conversations/{staged}")).await,
+                )),
+                "/var/lib/verkstead/worktrees/verkstead-mvp-roadmap",
+            ),
+            "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        ),
+    );
+
     // What the details pane fetches when that Conversation's output Event is
     // opened. Nothing to pin: a transcript is bytes a session printed.
     write(
@@ -1745,6 +1831,41 @@ fn pin_worktree(json: &str, at: &str) -> String {
     payload["worktree"]["path"] = at.into();
 
     serde_json::to_string(&payload).unwrap()
+}
+
+/// Pin what a Conversation's branch came off, for the one fixture whose base
+/// commit has to be a real one.
+///
+/// A stage list is not in the store either — which roadmap is the
+/// Conversation's is asked of git against this commit — so the payload carrying
+/// one is written over a repository made fresh on every run, whose commits have
+/// a different hash each time.
+fn pin_base(json: &str, commit: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    assert!(
+        payload["base_commit"].is_string(),
+        "no base commit here to pin:\n{payload}"
+    );
+    payload["base_commit"] = commit.into();
+
+    serde_json::to_string(&payload).unwrap()
+}
+
+/// Run git in `dir` and take its stdout, for the one fixture whose worktree is a
+/// repository rather than a directory.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .expect("git should be on the PATH for these tests");
+
+    assert!(output.status.success(), "git {args:?} failed");
+
+    String::from_utf8(output.stdout).unwrap()
 }
 
 fn mend(profile: &mut serde_json::Value) {

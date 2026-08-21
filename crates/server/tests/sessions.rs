@@ -1132,6 +1132,181 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
     );
 }
 
+/// The roadmap direction end to end: the same Profile and the same worktree
+/// again, inside Verkstead's fork of to-roadmap this time — which writes a real
+/// `docs/roadmaps/<name>/` and commits it to the branch.
+///
+/// Repo files stay the source of truth here too, so what this asks of the far
+/// end is what git says, and what it asks of Verkstead is the reading it draws
+/// back off that: the roadmap the branch wrote is pinned as the stage list, with
+/// its stages in the roadmap's own order and the boxes as the roadmap wrote
+/// them.
+///
+/// The session idles after its commit, which is what a real interactive one
+/// does. So what ends it is Verkstead's own done-signal — a roadmap on the
+/// branch that was not there before, committed, and then quiet.
+#[tokio::test]
+async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            grep '^name:' "$HOME/.claude/skills/staging/SKILL.md"
+            mkdir -p docs/roadmaps/rate-limiting
+            printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+            printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+            printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+            git add docs
+            git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilling_output = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
+
+    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
+
+    let staging = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilling_output && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.transcript(staging).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5"),
+        "the staging runs under the implementation Profile, as the work it plans does: {said:?}"
+    );
+    assert!(
+        said.contains("~/.claude/skills/staging/SKILL.md"),
+        "and inside the bundled fork of to-roadmap: {said:?}"
+    );
+    assert!(
+        said.contains("name: staging"),
+        "which is really there to be read: installed under the State Directory and \
+         bound into the sandbox exactly as grilling's is: {said:?}"
+    );
+    assert!(
+        !said.contains("~/.claude/skills/breaking-down/SKILL.md")
+            && !said.contains("~/.claude/skills/implementing/SKILL.md"),
+        "which are the other two directions, and not this one: {said:?}"
+    );
+    assert!(
+        said.contains("A counter per key.") && said.contains(BRIEF),
+        "primed with both documents, exactly as the other two are: {said:?}"
+    );
+
+    // Writing the roadmap is the work starting rather than a step in front of
+    // it, and a roadmap is work like any other work: the fork carries the branch
+    // to a pull request the same way a finished backlog does, and the
+    // Conversation moves on to wrapping that up.
+    let opened = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(opened.number, 41);
+
+    assert_eq!(
+        fixture
+            .view()
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Moved(moved) => Some(moved.state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing,
+            Lifecycle::Wrapping,
+        ],
+        "through Implementing on the way, because writing the roadmap is the work",
+    );
+
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "the roadmap commit is not something the fork asks permission for",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and the roadmap is committed rather than left in the worktree",
+    );
+    assert!(
+        worktree
+            .join("docs/roadmaps/rate-limiting/ROADMAP.md")
+            .is_file()
+            && worktree
+                .join("docs/roadmaps/rate-limiting/01-counter.md")
+                .is_file(),
+        "a real roadmap: ROADMAP.md and a brief per stage beside it",
+    );
+
+    // And what Verkstead makes of it, which is the other half of the direction:
+    // the roadmap the branch wrote, read back off the Worktree and pinned.
+    let stages = fixture
+        .view()
+        .await
+        .pinned
+        .into_iter()
+        .find_map(|pinned| match pinned {
+            verkstead_render::PinnedEvent::StageList(list) => Some(list),
+            _ => None,
+        })
+        .expect("the roadmap this branch wrote is pinned as the stage list");
+
+    assert_eq!(stages.name, "rate-limiting");
+    assert_eq!(stages.title, "Rate limiting roadmap");
+    assert_eq!(
+        stages
+            .stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "Count the requests", true),
+            ("02", "Refuse the rest", false),
+        ],
+        "the roadmap's own order, numbers and titles, and the boxes as it wrote them",
+    );
+}
+
 /// The backlog working itself: once `.tasks/` is committed, Verkstead launches
 /// a fresh session for the lowest-numbered task, ends it once the task has
 /// landed, and launches the next — through to the finish step, with no gate

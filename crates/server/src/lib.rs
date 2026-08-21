@@ -12,6 +12,7 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod checklist;
 mod checks;
 mod comments;
 mod commits;
@@ -55,6 +56,7 @@ mod settling;
 /// runs on rather than an implementation detail of an endpoint, and standing a
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
+mod stages;
 mod tasks;
 mod transcript;
 mod ui;

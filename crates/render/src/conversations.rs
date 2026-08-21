@@ -176,12 +176,6 @@ pub enum DirectionChosen {
     /// either the grilling has not proposed wrapping up yet, or the work is past
     /// the point where this was the human's call.
     NotChoosing,
-
-    /// A staged roadmap is not built yet. The chooser offers it disabled so the
-    /// shape of the decision is visible, and the server refuses it for the same
-    /// reason every other refusal is the server's: a check only the page made
-    /// would not be one.
-    RoadmapNotYet,
 }
 
 /// A Conversation's worktree: where it is, and whether it is still there.
@@ -359,17 +353,20 @@ pub enum RemedySettled {
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
 ///
-/// A fixed set — a task list now, a stage list and a PR as the stages that
-/// produce them arrive — and no manual pin or unpin: what is pinned is decided
-/// by what kind of thing it is, so there is no state here to flip and no route
-/// to flip it with. A tagged kind for the reason [`TimelineEvent`] is one: what
-/// gets drawn turns on which kind it is.
+/// A fixed set — a task list, a stage list and a PR — and no manual pin or
+/// unpin: what is pinned is decided by what kind of thing it is, so there is no
+/// state here to flip and no route to flip it with. A tagged kind for the reason
+/// [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PinnedEvent {
     /// The backlog the Conversation's Worktree holds, and how far through it the
     /// work has got.
     TaskList(TaskListEvent),
+
+    /// The roadmap the Conversation's Worktree holds, and how far through its
+    /// stages the effort has got.
+    StageList(StageListEvent),
 
     /// The pull request the finish step opened, which is what the work is being
     /// wrapped up on.
@@ -411,6 +408,46 @@ pub struct TaskEntry {
     /// Whether the task is finished, which is the task file having gone from
     /// `.tasks/`. That is the done-signal the task runner turns on, and a
     /// checkbox is how an entry is written rather than what says it is done.
+    pub done: bool,
+}
+
+/// The roadmap as the Timeline shows it: what it is called, and every stage
+/// against whether it is checked.
+///
+/// No id and no stamp, for the reason the task list beside it has none: it is
+/// read out of `docs/roadmaps/` each time the Conversation is, so what it says
+/// is what the Worktree holds now rather than what it held at a moment worth
+/// stamping. Nothing opens it either — the whole of a stage list is the list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageListEvent {
+    /// The roadmap's directory under `docs/roadmaps/` — `mvp` — which is its
+    /// identity: what a stage's brief sits beside, and what whoever starts the
+    /// next stage is pointed at.
+    pub name: String,
+
+    /// `ROADMAP.md`'s own heading, which is prose the roadmap wrote about
+    /// itself. Empty where it wrote none.
+    pub title: String,
+
+    /// In the order the roadmap has them, which is the order they get worked in.
+    pub stages: Vec<StageEntry>,
+}
+
+/// One stage of a roadmap: the number it answers to, what it is called, and
+/// whether it is done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageEntry {
+    /// As the roadmap writes it, zero-padding and all — `01`.
+    pub number: String,
+
+    pub title: String,
+
+    /// Whether the stage is finished, which here *is* the checkbox: a stage's
+    /// brief stays where it is for ever, being the record of what the stage was
+    /// for, so there is no file going away to read it off. The other way round
+    /// from a task — see [`TaskEntry::done`].
     pub done: bool,
 }
 
@@ -933,6 +970,16 @@ pub fn commit_diff(patch: &str) -> CommitDiff {
 /// rest for the reason a move is: one place knows how a Timeline is made.
 pub fn task_list_event(feature: String, tasks: Vec<TaskEntry>) -> PinnedEvent {
     PinnedEvent::TaskList(TaskListEvent { feature, tasks })
+}
+
+/// A roadmap as the Event that gets pinned. Nothing to render either — a stage
+/// is a number, a title and a ticked box.
+pub fn stage_list_event(name: String, title: String, stages: Vec<StageEntry>) -> PinnedEvent {
+    PinnedEvent::StageList(StageListEvent {
+        name,
+        title,
+        stages,
+    })
 }
 
 /// A pull request as the Event that gets pinned. Nothing to render — a PR is a

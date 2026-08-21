@@ -384,7 +384,7 @@ export type DirectionChoice = { direction: Direction, };
 /**
  * What became of choosing one.
  */
-export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing" | "RoadmapNotYet";
+export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing";
 
 /**
  * What became of starting a Conversation grilling.
@@ -526,13 +526,12 @@ cells: Array<string>, };
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
- * A fixed set — a task list now, a stage list and a PR as the stages that
- * produce them arrive — and no manual pin or unpin: what is pinned is decided
- * by what kind of thing it is, so there is no state here to flip and no route
- * to flip it with. A tagged kind for the reason [`TimelineEvent`] is one: what
- * gets drawn turns on which kind it is.
+ * A fixed set — a task list, a stage list and a PR — and no manual pin or
+ * unpin: what is pinned is decided by what kind of thing it is, so there is no
+ * state here to flip and no route to flip it with. A tagged kind for the reason
+ * [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
  */
-export type PinnedEvent = { "TaskList": TaskListEvent } | { "PullRequest": PullRequestEvent };
+export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
  * Which Profile a Conversation is choosing for one of its two roles.
@@ -929,6 +928,49 @@ diagrams: boolean,
  * already up.
  */
 standing: Standing, };
+
+/**
+ * One stage of a roadmap: the number it answers to, what it is called, and
+ * whether it is done.
+ */
+export type StageEntry = { 
+/**
+ * As the roadmap writes it, zero-padding and all — `01`.
+ */
+number: string, title: string, 
+/**
+ * Whether the stage is finished, which here *is* the checkbox: a stage's
+ * brief stays where it is for ever, being the record of what the stage was
+ * for, so there is no file going away to read it off. The other way round
+ * from a task — see [`TaskEntry::done`].
+ */
+done: boolean, };
+
+/**
+ * The roadmap as the Timeline shows it: what it is called, and every stage
+ * against whether it is checked.
+ *
+ * No id and no stamp, for the reason the task list beside it has none: it is
+ * read out of `docs/roadmaps/` each time the Conversation is, so what it says
+ * is what the Worktree holds now rather than what it held at a moment worth
+ * stamping. Nothing opens it either — the whole of a stage list is the list.
+ */
+export type StageListEvent = { 
+/**
+ * The roadmap's directory under `docs/roadmaps/` — `mvp` — which is its
+ * identity: what a stage's brief sits beside, and what whoever starts the
+ * next stage is pointed at.
+ */
+name: string, 
+/**
+ * `ROADMAP.md`'s own heading, which is prose the roadmap wrote about
+ * itself. Empty where it wrote none.
+ */
+title: string, 
+/**
+ * In the order the roadmap has them, which is the order they get worked in.
+ */
+stages: Array<StageEntry>, };
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
