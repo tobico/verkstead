@@ -73,8 +73,9 @@ widening a boundary is the installer's to do.
 _Avoid_: sandbox settings, mounts, extra paths
 
 **Skill**:
-One of the workflows Verkstead runs its sessions by — grilling, implementing and
-breaking down now, the rest as the stages that need them arrive. Verkstead's
+One of the workflows Verkstead runs its sessions by — grilling, implementing,
+breaking down and working a Step now, the rest as the stages that need them
+arrive. Verkstead's
 own: shipped inside the binary, installed under the State Directory at startup
 and mounted read-only over `~/.claude/skills`, so a session's behaviour is the
 product's rather than whatever the machine or the account happens to keep. A
@@ -176,6 +177,25 @@ rather than copied: the Timeline holds the only one from then on. One per
 grilling round — a proposal sent back leaves it where it is, to be rewritten
 before the next one.
 _Avoid_: handover document, context dump, summary, notes
+
+**Step**:
+One piece of unattended work a session is launched for and ended after: a task
+of a Conversation's backlog, or the finish that follows the last of them. What is
+next is read from the Repo and nowhere else — the lowest-numbered task file left
+in `.tasks/`, or `TODO.md` on its own — so the Steps are the backlog's, and
+Verkstead keeps no list of its own to disagree with it.
+
+A Step is **done** when the file it turns on has gone from the Worktree *and* the
+commit removing it has landed. A session reports through the repository, being an
+ordinary interactive one, and a commit is the one report it cannot half make — a
+file deleted but not committed is a session still mid-Step.
+
+Its session is ended once the Step is done **and** the session has gone quiet for
+a grace period, never on done alone: work does not always stop at the commit, and
+output arriving puts the whole grace back on the clock. A session that keeps
+talking is never ended. One Step per session and one session per Step — a fresh
+context each time, which is what the backlog was broken into slices for.
+_Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles

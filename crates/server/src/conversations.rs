@@ -186,22 +186,14 @@ pub(crate) async fn choose_direction(
         store::Directed::Chosen => {}
     }
 
-    // Which skill the session runs under is the whole of the difference between
-    // the two: same Profile, same worktree, same two documents.
-    let skill: fn(&str, Option<&str>) -> String = match direction {
-        Direction::Inline => skills::implementing,
-        Direction::TaskList => skills::breaking_down,
-        Direction::Roadmap => unreachable!("a staged roadmap was refused above"),
-    };
-
-    build(state, id, skill).await?;
+    build(state, id, direction).await?;
 
     Ok(DirectionChosen::Chosen)
 }
 
 /// Set the work being built: the Conversation moves to Implementing, and a fresh
 /// session under its implementation Profile starts in its worktree, inside
-/// whichever skill `skill` primes it for.
+/// whichever skill the chosen `direction` primes it for.
 ///
 /// A fresh session rather than the grilling one carrying on, because the two run
 /// under Profiles the Conversation fixed separately and a session cannot change
@@ -219,7 +211,13 @@ pub(crate) async fn choose_direction(
 /// recorded would be an agent nobody could see or stop. So a session that will
 /// not start is logged rather than raised — the choice stands, and what it leaves
 /// behind is an Interruption once the stage that draws them lands.
-async fn build(state: &AppState, id: i64, skill: fn(&str, Option<&str>) -> String) -> Result<()> {
+///
+/// A task list is where this stops being one session's business. The session
+/// just started writes the backlog and then idles, as an interactive session
+/// does, and everything after it — a fresh session per task, ended as each one
+/// lands — is [`crate::runner`]'s. It is handed the session rather than told to
+/// go and find one: seeing that session out is the first step of the run.
+async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     let pool = &state.pool;
 
     match store::start_implementing(pool, id).await? {
@@ -270,21 +268,30 @@ async fn build(state: &AppState, id: i64, skill: fn(&str, Option<&str>) -> Strin
     // files.
     state.sessions.end(id).await;
 
-    let brief = brief(pool, id).await?;
-    let handoff = handoff(pool, id).await?;
+    let (brief, handoff) = documents(pool, id).await?;
 
-    if let Err(error) = state
+    // Which skill the session runs under is the whole of the difference between
+    // the two: same Profile, same worktree, same two documents.
+    let prompt = match direction {
+        Direction::Inline => skills::implementing(&brief, handoff.as_deref()),
+        Direction::TaskList => skills::breaking_down(&brief, handoff.as_deref()),
+        Direction::Roadmap => unreachable!("a staged roadmap was refused above"),
+    };
+
+    let started = match state
         .sessions
-        .start(
-            pool,
-            &state.nudges,
-            &conversation,
-            &profile,
-            &skill(&brief, handoff.as_deref()),
-        )
+        .start(pool, &state.nudges, &conversation, &profile, &prompt)
         .await
     {
-        tracing::error!(error = ?error, conversation_id = id, "an implementation session could not be started");
+        Ok(started) => started,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "an implementation session could not be started");
+            None
+        }
+    };
+
+    if let (Direction::TaskList, Some(session)) = (direction, started) {
+        tokio::spawn(crate::runner::follow(state.clone(), id, session));
     }
 
     Ok(())
@@ -602,20 +609,36 @@ async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
         .unwrap_or_default())
 }
 
-/// The handoff off a Conversation's Timeline, where a grilling has written one.
+/// The two documents a session that builds the work is primed with: the Brief,
+/// and the handoff where a grilling wrote one.
 ///
-/// The last of them rather than the first, which is the other way round from the
-/// Brief: a Conversation gets one handoff per grilling round, and the one that
-/// hands over is the one the grilling that just ended wrote.
-async fn handoff(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
-    Ok(store::timeline(pool, id)
-        .await?
-        .into_iter()
-        .rev()
-        .find_map(|event| match event.event {
-            store::Event::Handoff(markdown) => Some(markdown),
+/// One name and one read of the Timeline for the pair, because they are always
+/// wanted together — an inline session, a breakdown and every task session take
+/// exactly these two.
+///
+/// The Brief is found rather than taken from the front: it is the first Event,
+/// but by the time anything asks this there are moves on the Timeline after it.
+/// The handoff is the *last* of its kind rather than the first, which is the
+/// other way round for a reason: a Conversation gets one handoff per grilling
+/// round, and the one that hands over is the one the grilling that just ended
+/// wrote.
+pub(crate) async fn documents(pool: &SqlitePool, id: i64) -> Result<(String, Option<String>)> {
+    let timeline = store::timeline(pool, id).await?;
+
+    let brief = timeline
+        .iter()
+        .find_map(|event| match &event.event {
+            store::Event::Brief(markdown) => Some(markdown.clone()),
             _ => None,
-        }))
+        })
+        .unwrap_or_default();
+
+    let handoff = timeline.iter().rev().find_map(|event| match &event.event {
+        store::Event::Handoff(markdown) => Some(markdown.clone()),
+        _ => None,
+    });
+
+    Ok((brief, handoff))
 }
 
 /// A Conversation's worktree as the viewer receives it: where it is, and whether

@@ -26,13 +26,13 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, CommitDiff, CommitEvent, ConversationAborted, ConversationView,
-    DirectionChosen, GrillingStarted, Lifecycle, ProfileSaved, Registered, Started, Submitted,
-    TimelineEvent, Transcript,
+    DirectionChosen, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, Started,
+    Submitted, TaskListEvent, TimelineEvent, Transcript,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::skills::Skills;
-use verkstead_server::{Agents, WatchedPaths, open_database, router_running_sessions};
+use verkstead_server::{Agents, Pace, WatchedPaths, open_database, router_running_sessions};
 
 /// The Brief every Conversation here is started from, and what the stub agent
 /// is primed with.
@@ -209,6 +209,18 @@ questions:
         text: Split the migration out
 "#;
 
+/// How fast these run the backlog: fast enough that a test spends its time
+/// launching sessions rather than sleeping between them.
+///
+/// The pace a server keeps is [`Pace::default`] — two seconds and five. What is
+/// being asked here is whether a session is ended once its step has landed *and*
+/// it has gone quiet, and the number of seconds that takes is not part of the
+/// answer.
+const BRISKLY: Pace = Pace {
+    poll: Duration::from_millis(100),
+    grace: Duration::from_millis(300),
+};
+
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
@@ -244,7 +256,8 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str) -> Grilling {
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
         Handoffs::under(state.path()),
-    );
+    )
+    .at_pace(BRISKLY);
 
     let app = router_running_sessions(
         pool,
@@ -347,6 +360,13 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
             _ => None,
         })
         .collect()
+}
+
+/// The backlog pinned to a Conversation, where its Worktree holds one.
+fn backlog(view: &ConversationView) -> Option<&TaskListEvent> {
+    match view.pinned.first()? {
+        PinnedEvent::TaskList(list) => Some(list),
+    }
 }
 
 /// The handoff on a Timeline, once the grilling has handed one over.
@@ -862,6 +882,227 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
         fixture.view().await.branch,
         "on the branch the Conversation already made — the fork creates none",
     );
+}
+
+/// The backlog working itself: once `.tasks/` is committed, Verkstead launches
+/// a fresh session for the lowest-numbered task, ends it once the task has
+/// landed, and launches the next — through to the finish step, with no gate
+/// anywhere in it and nobody asked.
+///
+/// Every session here idles after its commit, which is what a real interactive
+/// one does: nothing exits, so what advances the run is the runner ending each
+/// session on its done-signal plus quiet. A stub that exited would prove the
+/// loop counts to four and nothing about the part that is hard.
+///
+/// The stub decides what it is by looking at `.tasks/`, exactly as the bundled
+/// fork does — no task file left means the finish step — so what this asserts is
+/// that Verkstead and the fork read the same backlog the same way.
+#[tokio::test]
+async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ ! -d .tasks ]; then
+                printf 'breaking down\n'
+                mkdir -p .tasks
+                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+                printf '# 01. Count the requests\n' > .tasks/01-count.md
+                printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+                git add .tasks
+                git commit --quiet -m 'chore: plan rate-limiting tasks'
+            else
+                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+                if [ -n "$next" ]; then
+                    printf 'working %s\n' "$next"
+                    printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
+                    number=${next%%-*}
+                    printf 'a limiter\n' >> limiter.md
+                    rm ".tasks/$next"
+                    sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+                    git add -A
+                    git commit --quiet -m "feat: $next"
+                else
+                    printf 'finishing\n'
+                    git rm --quiet .tasks/TODO.md
+                    git commit --quiet -m 'chore: finish rate-limiting'
+                fi
+            fi
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    // The breakdown lands, and the runner is watching it: nothing here presses
+    // anything again.
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 4).then(|| {
+                landed
+                    .iter()
+                    .map(|commit| commit.subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await;
+
+    assert_eq!(
+        landed,
+        vec![
+            "chore: plan rate-limiting tasks".to_owned(),
+            "feat: 01-count.md".to_owned(),
+            "feat: 02-refuse.md".to_owned(),
+            "chore: finish rate-limiting".to_owned(),
+        ],
+        "the backlog in order, then the finish step — each by a session of its own",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        5,
+        "one Event per session: the grilling, the breakdown, a task each, and the finish",
+    );
+    assert!(
+        outputs(&view).iter().all(|output| !output.running),
+        "every one of them was ended once its step landed and it had gone quiet, though \
+         each was still sitting on its `sleep`",
+    );
+
+    let worked: Vec<String> = outputs(&view)
+        .iter()
+        .map(|output| output.latest.clone())
+        .collect();
+    assert!(
+        worked.iter().any(|said| said.contains("name: next-task")),
+        "the task sessions run inside the bundled fork of next-task: {worked:?}",
+    );
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the finish step took the backlog away, which is what says the feature is done",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and left nothing uncommitted behind it",
+    );
+
+    // Long enough for many more polls of a backlog that has nothing left in it.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        5,
+        "an empty backlog leaves the runner idle rather than launching sessions at nothing",
+    );
+}
+
+/// The pinned Event is read off the Worktree rather than remembered, so the
+/// backlog the human is watching ticks along as the runner works it — without
+/// anything writing the list down twice.
+#[tokio::test]
+async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+        *)
+            if [ ! -d .tasks ]; then
+                mkdir -p .tasks
+                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+                printf '# 01\n' > .tasks/01-count.md
+                printf '# 02\n' > .tasks/02-refuse.md
+                git add .tasks
+                git commit --quiet -m 'chore: plan rate-limiting tasks'
+            else
+                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+                if [ -n "$next" ]; then
+                    rm ".tasks/$next"
+                    git add -A
+                    git commit --quiet -m "feat: $next"
+                    # Only the first task, so the list is caught half worked
+                    # through rather than empty.
+                    sleep 300
+                fi
+            fi
+            printf 'stopping\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    // The backlog as the breakdown wrote it: nothing done yet.
+    let written = fixture
+        .until(|view| backlog(view).filter(|list| list.tasks.len() == 2).cloned())
+        .await;
+
+    assert_eq!(written.feature, "Rate limiting");
+    assert_eq!(
+        written
+            .tasks
+            .iter()
+            .map(|task| (task.number.as_str(), task.done))
+            .collect::<Vec<_>>(),
+        [("01", false), ("02", false)],
+    );
+
+    // And once the runner has seen the first task out.
+    let worked = fixture
+        .until(|view| backlog(view).filter(|list| list.tasks[0].done).cloned())
+        .await;
+
+    assert_eq!(
+        worked
+            .tasks
+            .iter()
+            .map(|task| task.done)
+            .collect::<Vec<_>>(),
+        [true, false],
+        "the task whose file has gone is done, and the one still to do is not",
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
 }
 
 /// A breakdown asks its quiz the way every session asks anything: an ordinary

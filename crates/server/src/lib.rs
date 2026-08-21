@@ -27,6 +27,7 @@ mod push;
 mod reply;
 mod repos;
 mod responses;
+mod runner;
 /// What a session can reach: the bwrap surface built around one Conversation's
 /// worktree.
 ///
@@ -55,6 +56,10 @@ mod worktrees;
 /// sandbox is: what a session is launched as is the product's business rather
 /// than an endpoint's, and standing a router up is choosing it.
 pub use sessions::Agents;
+
+/// How fast the backlog is worked, which is part of the same choice — see
+/// [`Agents::at_pace`].
+pub use runner::Pace;
 
 /// The security boundary every filesystem path is decided against. Public
 /// because starting the server is choosing what it may touch, and a caller

@@ -53,6 +53,11 @@ const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
 /// task-list direction runs instead of building anything itself.
 const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
 
+/// And the fork of next-task, which every session the runner launches is put
+/// inside — the task sessions and the finish one alike, because which of them it
+/// is, is read off `.tasks/` rather than told.
+const NEXT_TASK: &str = "~/.claude/skills/next-task/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -177,7 +182,30 @@ pub(crate) fn breaking_down(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
-/// The body both are primed with, under whichever opening line names the skill.
+/// What each session of a backlog is started on: the same two documents again,
+/// under the line that sends the agent into the fork of next-task.
+///
+/// Which task is not said. The fork reads `.tasks/` and takes the lowest number
+/// left, which is what the runner reads too — Verkstead decides the step in
+/// order to know what to watch for, not to hand it over.
+///
+/// The documents rather than the task file alone, because a slice of the work is
+/// still the work: the task file says where this session stops, and the two
+/// documents say what it is a slice of. A session that had only the first would
+/// be building to a description written for somebody who had read the other two.
+pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
+    on_the_documents(
+        &format!(
+            "Read {NEXT_TASK} and work the next task of the backlog for the work described \
+             below, the way it says."
+        ),
+        brief,
+        handoff,
+    )
+}
+
+/// The body they are all primed with, under whichever opening line names the
+/// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
     let mut prompt = format!(
         "{opening} Nothing else in this session tells you how to reach me.\n\n\
@@ -363,6 +391,75 @@ mod tests {
             !breaking_down.contains("proposal:"),
             "and ordinary ones: the `proposal` block is the grilling's closing move, \
              and this runs after one was accepted"
+        );
+    }
+
+    /// One task per session is the whole reason there is a session per task, and
+    /// the fork has to say so: nothing else will. The done-signal the runner
+    /// watches is the file gone and committed, so the deletion and the commit
+    /// are the two things it cannot leave out.
+    #[test]
+    fn the_next_task_fork_works_one_task_and_commits_it() {
+        let next_task = skill("next-task/SKILL.md");
+
+        for named in [".tasks/", "TODO.md", "NN-<slug>.md"] {
+            assert!(
+                next_task.contains(named),
+                "the backlog is files in the repository, and {named} is one of them"
+            );
+        }
+
+        assert!(
+            next_task.contains("lowest-numbered"),
+            "which task is decided by the same rule the runner decides it by: {next_task}"
+        );
+        assert!(
+            next_task.contains("rm .tasks/NN-<slug>.md") && next_task.contains("git commit"),
+            "the file being gone and committed is what says the task is done: {next_task}"
+        );
+        assert!(
+            next_task.contains("Nothing waits on approval"),
+            "and there is no gate in front of that commit, as there is in front of none: \
+             {next_task}"
+        );
+    }
+
+    /// The finish step is the other half of what the fork decides, and the
+    /// runner watches it the same way: `TODO.md` gone and committed. What it
+    /// must *not* do is the part the wrap-up stage runs.
+    #[test]
+    fn the_next_task_fork_finishes_the_feature_without_opening_anything() {
+        let next_task = skill("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains("git rm .tasks/TODO.md"),
+            "taking the list away is what says the feature is finished: {next_task}"
+        );
+        assert!(
+            next_task.contains("Do not push") && next_task.contains("pull request"),
+            "pushing and opening the PR is a step of its own that Verkstead runs after this \
+             one: {next_task}"
+        );
+    }
+
+    /// The fork drops what a workstation-driven flow assumes and Verkstead
+    /// supplies instead: nobody is at a terminal to approve a commit, to clear a
+    /// context, or to be asked whether to land the feature.
+    #[test]
+    fn the_next_task_fork_drops_the_gates_verkstead_supplies() {
+        let next_task = skill("next-task/SKILL.md");
+
+        assert!(
+            !next_task.contains("/clear") && !next_task.contains("/next-task"),
+            "nobody is at a terminal to clear a context or run a slash command: {next_task}"
+        );
+        assert!(
+            !next_task.contains("OK to proceed") && !next_task.contains("Clear the context"),
+            "and none of the three gates the workstation flow stops at: {next_task}"
+        );
+        assert!(
+            next_task.contains("verkstead guide") && next_task.contains("verkstead ask"),
+            "the one way to the human, for what the task file cannot settle: {next_task}"
         );
     }
 

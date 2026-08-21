@@ -37,6 +37,7 @@ use tokio::task::JoinHandle;
 
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
+use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::skills::Skills;
 use crate::store;
@@ -81,6 +82,16 @@ pub struct Agents {
     /// and everything from the sandbox outwards is the same code the server
     /// runs.
     agent: Vec<String>,
+
+    /// How fast the runner works the backlog these sessions are launched for.
+    ///
+    /// A field for the reason [`Agents::agent`] is one: what the runner has to
+    /// prove is that a session is ended once its step has landed and it has gone
+    /// quiet, and the grace period that makes that safe is measured in seconds —
+    /// several of them, several times over, is a test that spends most of its
+    /// life asleep. The pace a server runs at is [`Pace::default`] and nothing
+    /// sets it otherwise.
+    pace: Pace,
 }
 
 impl Agents {
@@ -118,7 +129,13 @@ impl Agents {
             skills,
             handoffs,
             agent,
+            pace: Pace::default(),
         }
+    }
+
+    /// The same, working the backlog at `pace` — see [`Agents::pace`].
+    pub fn at_pace(self, pace: Pace) -> Agents {
+        Agents { pace, ..self }
     }
 
     /// What a session for `profile` on `prompt` runs.
@@ -148,6 +165,66 @@ pub(crate) struct Sessions {
     agents: Option<Arc<Agents>>,
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
+}
+
+/// A session that has been started, as whatever is driving it holds one.
+///
+/// Handed out rather than kept, because the two things a driver needs of a
+/// session are things the register cannot answer: how long it has been quiet,
+/// and when it is over. Both are about *this* session — a Conversation whose
+/// session ended and was replaced would answer both questions about the wrong
+/// one.
+pub(crate) struct Session {
+    /// The Timeline Event it is printing into.
+    pub(crate) event_id: i64,
+
+    /// How long it has been printing nothing.
+    pub(crate) quiet: Quiet,
+
+    /// Word that it is over, however it ended.
+    ///
+    /// Nothing is ever sent: what says the session is over is the relay letting
+    /// go of the other end, which is the last thing a relay does. A driver that
+    /// waited on a message would be waiting on somebody remembering to send one.
+    ended: oneshot::Receiver<()>,
+}
+
+impl Session {
+    /// Wait until the session is over.
+    pub(crate) async fn ended(&mut self) {
+        let _ = (&mut self.ended).await;
+    }
+}
+
+/// How long a session has been printing nothing.
+///
+/// Shared with the relay, which puts it back to now on everything that arrives.
+/// That is what makes a grace period safe to end a session on: a session still
+/// talking is never one to end, however long it goes on for, and the work a
+/// session does after its commit — a message, a summary, a push — runs to
+/// completion rather than being cut off mid-sentence.
+#[derive(Debug, Clone)]
+pub(crate) struct Quiet(Arc<Mutex<Instant>>);
+
+impl Quiet {
+    fn started() -> Quiet {
+        Quiet(Arc::new(Mutex::new(Instant::now())))
+    }
+
+    /// The session said something, so it has been quiet for no time at all.
+    fn spoke(&self) {
+        *self
+            .0
+            .lock()
+            .expect("a session's quiet clock is not poisoned") = Instant::now();
+    }
+
+    pub(crate) fn for_how_long(&self) -> Duration {
+        self.0
+            .lock()
+            .expect("a session's quiet clock is not poisoned")
+            .elapsed()
+    }
 }
 
 /// One running session, as whatever wants to stop it sees it.
@@ -196,14 +273,27 @@ impl Sessions {
             .map(|running| running.event_id)
     }
 
+    /// The pace the runner works a backlog at — see [`Agents::pace`].
+    ///
+    /// [`Pace::default`] where this server runs no sessions at all, which is a
+    /// pace nothing will ever keep: a server with no agents has no session to
+    /// end.
+    pub(crate) fn pace(&self) -> Pace {
+        self.agents
+            .as_ref()
+            .map(|agents| agents.pace)
+            .unwrap_or_default()
+    }
+
     /// Run `profile`'s agent on `prompt`, inside `conversation`'s sandbox, and
     /// put what it prints on the Timeline as it arrives.
     ///
-    /// Whether one was started. A server with no way to run agents starts none,
-    /// and a sandbox that cannot be built — a Conversation with no worktree, or
-    /// one git will not own — is the same answer: there is nothing here to
-    /// launch. Both are logged, because both mean a Conversation that is
-    /// grilling with nothing grilling it.
+    /// The session that was started, for whoever is driving it — see
+    /// [`Session`]. A server with no way to run agents starts none, and a
+    /// sandbox that cannot be built — a Conversation with no worktree, or one
+    /// git will not own — is the same answer: there is nothing here to launch.
+    /// Both are logged, because both mean a Conversation that is grilling with
+    /// nothing grilling it.
     ///
     /// The Timeline Event is made after the process is, so that a session that
     /// never started leaves no transcript of nothing.
@@ -214,13 +304,13 @@ impl Sessions {
         conversation: &store::Conversation,
         profile: &store::Profile,
         prompt: &str,
-    ) -> Result<bool> {
+    ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
             tracing::warn!(
                 conversation_id = conversation.id,
                 "this server has no way to run an agent, so no session was started"
             );
-            return Ok(false);
+            return Ok(None);
         };
 
         let argv = agents.argv(profile, prompt);
@@ -260,7 +350,7 @@ impl Sessions {
                 conversation_id,
                 "there is no sandbox to run a session in, so none was started"
             );
-            return Ok(false);
+            return Ok(None);
         };
 
         let mut child = match captured(&sandbox, &argv).spawn() {
@@ -271,13 +361,18 @@ impl Sessions {
                     conversation_id,
                     "a grilling session could not be started"
                 );
-                return Ok(false);
+                return Ok(None);
             }
         };
 
         let event_id = store::start_transcript(pool, conversation_id).await?;
 
         let (stop, stopping) = oneshot::channel();
+
+        // The two halves of what a driver holds a session by: the clock the
+        // relay keeps as it reads, and the word that the relay has finished.
+        let quiet = Quiet::started();
+        let (over, ended) = oneshot::channel();
 
         // What the session is about to commit, which is the other half of what
         // it leaves behind. Watched for as long as it runs and once more as it
@@ -302,8 +397,14 @@ impl Sessions {
                 let sessions = self.clone();
                 let pool = pool.clone();
                 let nudges = nudges.clone();
+                let quiet = quiet.clone();
 
                 async move {
+                    // Held for as long as the relay runs and dropped with it,
+                    // which is what tells whoever is driving that the session is
+                    // over — see [`Session::ended`].
+                    let _over = over;
+
                     // A Conversation with no base commit has never started
                     // grilling, and a session is running in it — so this is a
                     // record that has been got at rather than a Conversation
@@ -334,7 +435,7 @@ impl Sessions {
                         }
                     };
 
-                    relay(&pool, &nudges, event_id, &mut child, stopping).await;
+                    relay(&pool, &nudges, event_id, &mut child, &quiet, stopping).await;
 
                     // The session is over, so the branch is finished moving.
                     // Waited on rather than only asked to stop, because what it
@@ -374,7 +475,11 @@ impl Sessions {
 
         tracing::info!(conversation_id, event_id, "a grilling session is running");
 
-        Ok(true)
+        Ok(Some(Session {
+            event_id,
+            quiet,
+            ended,
+        }))
     }
 
     /// End a Conversation's session, and wait until it is over.
@@ -471,11 +576,16 @@ fn shell_command(argv: &[String]) -> String {
 
 /// Follow a session until it is over, putting what it prints on the Timeline as
 /// it arrives.
+///
+/// `quiet` is put back to now on everything read rather than on everything
+/// written down: what it is measuring is whether the session is still talking,
+/// and a redraw the summariser throws away is a session talking.
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
     event_id: i64,
     child: &mut Child,
+    quiet: &Quiet,
     mut stopping: oneshot::Receiver<()>,
 ) {
     let mut output = match child.stdout.take() {
@@ -511,7 +621,10 @@ async fn relay(
             read = output.read(&mut buffer) => match read {
                 // The pseudo-terminal is closed, which is the session gone.
                 Ok(0) => break,
-                Ok(taken) => pending.push_str(&reading.take(&buffer[..taken])),
+                Ok(taken) => {
+                    quiet.spoke();
+                    pending.push_str(&reading.take(&buffer[..taken]));
+                }
                 Err(error) => {
                     tracing::error!(error = ?error, event_id, "reading a session's output failed");
                     break;

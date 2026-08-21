@@ -21,10 +21,10 @@ use std::path::{Path, PathBuf};
 use verkstead_render::{PinnedEvent, TaskEntry};
 
 /// Where a Conversation's backlog lives inside its Worktree.
-const BACKLOG: &str = ".tasks";
+pub(crate) const BACKLOG: &str = ".tasks";
 
 /// The list itself, inside that directory.
-const TODO: &str = "TODO.md";
+pub(crate) const TODO: &str = "TODO.md";
 
 /// How an entry can be written: to do, done, and done by whoever holds the shift
 /// key.
@@ -178,7 +178,12 @@ fn outstanding(backlog: &Path) -> HashSet<u32> {
 ///
 /// `TODO.md` is refused by the same rule that refuses everything else: it leads
 /// with no number. Nothing here has to know it by name.
-fn numbered(name: &str) -> Option<u32> {
+///
+/// Shared with [`crate::runner`], which decides what to run next by the same
+/// reading: which task files are left is one fact about a Worktree, and a
+/// Timeline that drew one set of tasks while the runner worked through another
+/// would be two answers to one question.
+pub(crate) fn numbered(name: &str) -> Option<u32> {
     let (number, slug) = name.strip_suffix(".md")?.split_once('-')?;
 
     if slug.is_empty() || number.is_empty() || !number.chars().all(|c| c.is_ascii_digit()) {
