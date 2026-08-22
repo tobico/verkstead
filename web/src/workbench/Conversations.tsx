@@ -273,29 +273,87 @@ function Abandoned(props: { open: (id: number) => void }): JSX.Element {
   );
 }
 
+/// Which mark a card carries at its right edge, or nothing where it carries
+/// none.
+///
+/// Waiting wins, and never both: a Conversation whose session is idling on a
+/// Blocking Ask is working *and* waiting, and of the two the one the human can
+/// do something about is the ask. So the dot is what a card shows the moment
+/// there is anything to answer, and the spinner is what is left — a session
+/// getting on with it, with nothing wanted from anybody.
+function mark(entry: ConversationEntry): "waiting" | "working" | null {
+  if (entry.waiting) return "waiting";
+  if (entry.working) return "working";
+  return null;
+}
+
+/// What a row says when it is read aloud.
+///
+/// The card says where a Conversation has got to in marks rather than in words —
+/// see the row's classes and [`mark`] — and a mark is nothing to a screen
+/// reader. So the whole of it goes on the button's label instead: the branch it
+/// is named by, the Repo it is in, the state that used to be written under the
+/// name, and what the mark would have said.
+function spoken(entry: ConversationEntry): string {
+  const which = mark(entry);
+  const said =
+    which === "waiting"
+      ? `${entry.state}, waiting on you`
+      : which === "working"
+        ? `${entry.state}, a session is running`
+        : entry.state;
+
+  return `${entry.branch}, ${entry.repo}, ${said}`;
+}
+
 /// One Conversation: the branch it will be done on, the Repo it is in, and where
 /// it has got to.
 ///
 /// A button rather than a link, because the whole workbench is one page: opening
 /// a Conversation moves the panes rather than going somewhere, and the URL that
 /// follows is a record of what is open rather than a document to fetch.
+///
+/// Where it has got to is drawn rather than written: a dotted card is a draft, a
+/// dimmed one is work that has stopped, and the mark at the right edge is a
+/// session running or an answer wanted. Every other state is the ordinary card —
+/// grilling, implementing and wrapping are not told apart here, because what the
+/// sidebar is for is finding the Conversation to look at and all three are *this
+/// one is under way*.
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
   open: (id: number) => void;
 }): JSX.Element {
+  const ended = (): boolean =>
+    props.entry.state === "Done" || props.entry.state === "Aborted";
+
   return (
-    <li class="conversation-row" classList={{ selected: props.selected }}>
+    <li
+      class="conversation-row"
+      classList={{
+        selected: props.selected,
+        draft: props.entry.state === "Draft",
+        ended: ended(),
+      }}
+    >
       <button
         type="button"
         aria-current={props.selected ? "true" : undefined}
+        aria-label={spoken(props.entry)}
         onClick={() => props.open(props.entry.id)}
       >
-        <span class="title">{props.entry.branch}</span>
-        <span class="meta">
-          <span class="repo">{props.entry.repo}</span>
-          <span class="state">{props.entry.state}</span>
+        <span class="what">
+          <span class="title">{props.entry.branch}</span>
+          <span class="meta">
+            <span class="repo">{props.entry.repo}</span>
+          </span>
         </span>
+        {/* Drawn only where there is one, so a row with nothing to mark gives
+            the whole width to its name. The label above has already said what
+            it means, so there is nothing here for a screen reader to find. */}
+        <Show when={mark(props.entry)}>
+          {(which) => <span class={`mark ${which()}`} />}
+        </Show>
       </button>
     </li>
   );
