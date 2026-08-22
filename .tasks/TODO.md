@@ -17,7 +17,7 @@ Roadmap stage: [02: The Screen and the Hold](docs/roadmaps/session-output/02-scr
 
 ## Tasks
 
-- [ ] 01: Verkstead owns the terminal — [details](01-owned-terminal.md)
+- [x] 01: Verkstead owns the terminal — [details](01-owned-terminal.md)
 - [ ] 02: The Screen of a session that has ended — [details](02-ended-screen.md)
 - [ ] 03: Watching a live session — [details](03-watching-live.md)
 - [ ] 04: The Hold — [details](04-the-hold.md)

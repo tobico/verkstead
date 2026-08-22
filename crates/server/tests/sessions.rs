@@ -4,10 +4,10 @@
 //!
 //! Everything here is real except the agent. The repository is a repository,
 //! the worktree is one git made, the sandbox is bwrap and the pseudo-terminal is
-//! `script`'s — what stands in for claude is a shell script, because what these
-//! ask is whether a session's output reaches the human, and asking it of the
-//! real claude would be a test that needed an account, a network and a model's
-//! patience.
+//! Verkstead's own — what stands in for claude is a shell script, because what
+//! these ask is whether a session's output reaches the human, and asking it of
+//! the real claude would be a test that needed an account, a network and a
+//! model's patience.
 //!
 //! The stub is handed exactly what claude would be: `--model`, the Profile's
 //! model, and then the Brief. So `$1` is the model it was told to run and `$2`
@@ -931,6 +931,55 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
 }
 
+/// The terminal a session is on, asked from inside the sandbox.
+///
+/// Verkstead opens the pair and starts the sandbox on it — see
+/// [`verkstead_server::terminal`] — so all three of a session's streams are the
+/// one terminal, it is a hundred columns by thirty, and it is told what kind of
+/// terminal that is. Nothing said the last of those before, and what an agent's
+/// interface draws depends on what it thinks it has.
+///
+/// Read back with `stty`, which is a process asking the terminal underneath it
+/// rather than reading a variable something set: `COLUMNS` and `LINES` are not
+/// exported, deliberately, because a number in the environment is a copy that
+/// stops being true the moment a watcher resizes the window.
+#[tokio::test]
+async fn a_session_runs_on_a_terminal_verkstead_opened_for_it() {
+    let fixture = grilling(
+        r#"
+        printf 'term=%s\n' "$TERM"
+        printf 'size=%s\n' "$(stty size)"
+        if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+            printf 'streams=all three are the terminal\n'
+        else
+            printf 'streams=0:%s 1:%s 2:%s\n' "$(test -t 0 && echo tty)" "$(test -t 1 && echo tty)" "$(test -t 2 && echo tty)"
+        fi
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("streams=all three are the terminal\n"),
+        "a session's stdin, stdout and stderr are the one terminal, so what the \
+         sandbox complains about lands where the session printed: {said:?}"
+    );
+    assert!(
+        said.contains("size=30 100\n"),
+        "and it is a hundred columns by thirty until somebody watching says \
+         otherwise: {said:?}"
+    );
+    assert!(
+        said.contains("term=xterm-256color\n"),
+        "and it is told what kind of terminal it is on: {said:?}"
+    );
+}
+
 /// Verkstead names a session before it starts it, so that the log the agent
 /// keeps of its own conversation is a lookup rather than a guess.
 ///
@@ -1488,11 +1537,12 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
 
 /// A sandbox that will not start says why where somebody is looking.
 ///
-/// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing
-/// they say ever reaches it — so a session whose sandbox never came up prints
-/// nothing at all. Its Event would otherwise read `0 lines` with the only
-/// account of why in a log at a level nobody has turned on, which is a failure
-/// that looks exactly like an agent with nothing to say.
+/// bwrap complains on its own stderr, which is the terminal Verkstead started
+/// it on — so what it said is in the Capture of the session that failed, where
+/// it happened and among whatever else was printed. The Event would otherwise
+/// read `0 lines` with the only account of why in a log at a level nobody has
+/// turned on, which is a failure that looks exactly like an agent with nothing
+/// to say.
 ///
 /// Provoked through a configured bind, because that is the one part of a sandbox
 /// that is checked at startup and can go on to be missing: what fails here is
@@ -1552,13 +1602,9 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     let said = fixture.capture(event).await;
 
     assert!(
-        said.contains("[the sandbox, not the agent]"),
-        "the plumbing's word goes on the Capture, marked as its own rather \
-         than left to read as something the agent said: {said:?}"
-    );
-    assert!(
         said.contains(&missing.display().to_string()),
-        "and it names the bind bwrap could not make: {said:?}"
+        "the sandbox's own complaint goes on the Capture of the session that \
+         failed, naming the bind bwrap could not make: {said:?}"
     );
     assert!(
         lines > 0 && !latest.is_empty(),

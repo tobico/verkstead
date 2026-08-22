@@ -22,6 +22,13 @@ http = "1"
 # Signing the VAPID header, which the store's keypair half of the dependency
 # does not need: `ecdsa` is what turns the stored private key into a signature.
 p256 = { workspace = true, features = ["ecdsa"] }
+# The pseudo-terminal a session runs on: opening the pair, sizing it, and giving
+# the sandbox a controlling terminal — see `src/terminal.rs`. Everything it needs
+# is already in the tree under the crates that touch a file descriptor, so the
+# features are the whole of what this adds: `fs` is the one open of the end the
+# session gets, and `process` the `setsid` and `TIOCSCTTY` that make it that
+# session's own terminal.
+rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # Sending the push, and asking GitHub whether a newer Verkstead has been
 # released — between them the whole of what Verkstead says to the public
 # internet. Default
@@ -54,6 +61,9 @@ time.workspace = true
 # reading can block the runtime the server is answering requests on.
 tokio = { workspace = true, features = [
     "io-util",
+    # Not a socket here: `net` is what carries `AsyncFd`, which is how the
+    # terminal is read without a thread parked on it.
+    "net",
     "process",
     "signal",
     "sync",

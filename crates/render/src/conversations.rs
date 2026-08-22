@@ -893,12 +893,12 @@ pub struct SetRow {
 /// session said, and a Capture that had been tidied up would be a record of
 /// something else.
 ///
-/// One thing in it is not the session's word, and says so where it appears: what
-/// `script` and bwrap wrote on the pipe beside the terminal, appended once the
-/// session is over. It is empty on every session that ran, and on one that never
-/// started it is the only account of why — which makes the Capture the place
-/// for it, being where somebody looking at a session that said nothing is
-/// already looking.
+/// Not quite all of it is the agent's own word. What bwrap says when it will
+/// not start is said on the terminal Verkstead began it on, so it arrives here
+/// too, where it happened and in among whatever else was printed. On a session
+/// that never started it is the only account of why — which makes the Capture
+/// the place for it, being where somebody looking at a session that said
+/// nothing is already looking.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Capture {

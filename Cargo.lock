@@ -2871,6 +2871,7 @@ dependencies = [
  "p256",
  "reqwest",
  "rust-embed",
+ "rustix",
  "semver",
  "serde",
  "serde-saphyr",

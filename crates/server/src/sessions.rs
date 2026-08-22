@@ -4,16 +4,15 @@
 //! The technique is roadrunner's `session.ts`, and only the technique — that is
 //! TypeScript on Bun and this is Rust, so nothing is carried over but the shape
 //! and the reasons for it. The session runs on a pseudo-terminal of its own,
-//! allocated by `script --quiet --return --command … /dev/null`, because claude
-//! needs a terminal to behave like itself and `script` is already fluent in the
-//! raw modes and window-size handling this would otherwise be reimplementing.
-//! Its output is relayed, kept whole, and summarised.
+//! because claude needs a terminal to behave like itself. Verkstead opens the
+//! pair and hands the sandbox the far end as its stdin, stdout and stderr — see
+//! [`crate::terminal`] — and relays what arrives at this one, kept whole and
+//! summarised.
 //!
-//! `script` runs *inside* the sandbox rather than around it. The pseudo-terminal
-//! is then the sandbox's own — bwrap makes it one when it makes `/dev` — and
-//! what the server spawns stays one argument vector instead of a bwrap command
-//! line rendered back into a shell string for `script --command` to take apart
-//! again.
+//! One terminal and nothing beside it. The sandbox's own complaints come back
+//! among what the session printed rather than on a pipe of their own, in the
+//! order they happened, which is what a real terminal does: a sandbox that
+//! refuses to start says so in the Capture of the session that failed.
 //!
 //! The session is interactive and never `-p`: it idles when it has nothing to
 //! do, which is what a blocking ask depends on (ADR 0001 in tobico-skills).
@@ -24,13 +23,11 @@
 //! reading back a live one out of a database.
 
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use tokio::io::AsyncReadExt;
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -42,6 +39,7 @@ use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::skills::Skills;
 use crate::store;
+use crate::terminal::Terminal;
 use crate::transcript::Tail;
 
 /// How much of a session's output to take off the pseudo-terminal at once.
@@ -316,6 +314,21 @@ impl Quiet {
     }
 }
 
+/// A session that has been started, as its relay holds it.
+///
+/// The two travel together because neither is any use without the other: what
+/// the session says comes off the terminal, and what ends the session is done to
+/// the process — and the terminal has to outlive the process, because the last
+/// thing it says is said on its way out.
+struct Launched {
+    /// The terminal it was started on, which is where everything it prints
+    /// arrives.
+    terminal: Terminal,
+
+    /// The sandbox around it, which is what killing it kills.
+    child: Child,
+}
+
 /// One running session, as whatever wants to stop it sees it.
 struct Running {
     /// The Timeline Event its output is being written into.
@@ -488,7 +501,23 @@ impl Sessions {
             return Ok(None);
         };
 
-        let mut child = match captured(&sandbox, &argv).spawn() {
+        // The terminal before the session, because the session is started *on*
+        // it: a machine that will not give Verkstead a pseudo-terminal is one
+        // there is nothing to launch on, the same as a sandbox that cannot be
+        // built.
+        let mut terminal = match Terminal::open() {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    conversation_id,
+                    "a session's terminal could not be opened, so none was started"
+                );
+                return Ok(None);
+            }
+        };
+
+        let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -499,6 +528,8 @@ impl Sessions {
                 return Ok(None);
             }
         };
+
+        let mut launched = Launched { terminal, child };
 
         let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
 
@@ -571,8 +602,16 @@ impl Sessions {
                         }
                     };
 
-                    let ended =
-                        relay(&pool, &nudges, event_id, &mut child, &quiet, tail, stopping).await;
+                    let ended = relay(
+                        &pool,
+                        &nudges,
+                        event_id,
+                        &mut launched,
+                        &quiet,
+                        tail,
+                        stopping,
+                    )
+                    .await;
 
                     // The session is over, so the branch is finished moving.
                     // Waited on rather than only asked to stop, because what it
@@ -720,47 +759,19 @@ fn session_name() -> Option<String> {
     Some(name)
 }
 
-/// `argv` as a session: run inside `sandbox`, on a pseudo-terminal of its own.
+/// `argv` as a session: run inside `sandbox`, with nothing between the two.
 ///
-/// `script` takes one command line rather than an argument vector, so the
-/// vector is quoted into one — and `exec`ed, so that the shell `script` starts
-/// becomes the session rather than standing between it and whatever ends it.
+/// One argument vector all the way down, and the three streams are left to
+/// [`Terminal::spawn`] — which is the whole of what says a session runs on a
+/// terminal.
 fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
-    let line = shell_command(argv);
+    let mut command = Command::from(sandbox.command(argv));
 
-    let session: Vec<&OsStr> = vec![
-        OsStr::new("script"),
-        OsStr::new("--quiet"),
-        // The session's own exit status rather than `script`'s.
-        OsStr::new("--return"),
-        OsStr::new("--command"),
-        OsStr::new(&line),
-        // Nothing is being kept here: what `script` writes to its typescript
-        // file is a second copy of what this reads off the pipe.
-        OsStr::new("/dev/null"),
-    ];
-
-    let mut command = Command::from(sandbox.command(&session));
+    // The relay ends the session itself, and a child left behind by a panicking
+    // task is one nothing would ever reap.
+    command.kill_on_drop(true);
 
     command
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        // The relay ends the session itself, and a child left behind by a
-        // panicking task is one nothing would ever reap.
-        .kill_on_drop(true);
-
-    command
-}
-
-/// A command as the single string `script --command` takes, every word quoted.
-fn shell_command(argv: &[String]) -> String {
-    let words: Vec<String> = argv
-        .iter()
-        .map(|word| format!("'{}'", word.replace('\'', r"'\''")))
-        .collect();
-
-    format!("exec {}", words.join(" "))
 }
 
 /// Follow a session until it is over, putting what it prints on the Timeline as
@@ -783,32 +794,12 @@ async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
     event_id: i64,
-    child: &mut Child,
+    session: &mut Launched,
     quiet: &Quiet,
     mut tail: Option<Tail>,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
-    let mut output = match child.stdout.take() {
-        Some(output) => output,
-        None => {
-            tracing::error!(event_id, "a session was started without an output to read");
-            return Ended::Unknown;
-        }
-    };
-
-    // What is left on the error pipe is `script` and bwrap talking about
-    // themselves: the session's own errors come back over the pseudo-terminal
-    // with the rest of what it printed. Read, and put on the Capture once the
-    // session is over — a sandbox that refused to start says so here and nowhere
-    // else, and a Timeline reading `0 lines` with the reason in a log nobody
-    // turned up is the whole of what makes that failure hard to see.
-    let complaints = child.stderr.take().map(|mut errors| {
-        tokio::spawn(async move {
-            let mut said = String::new();
-            let _ = errors.read_to_string(&mut said).await;
-            said
-        })
-    });
+    let Launched { terminal, child } = session;
 
     let mut reading = Reading::default();
     let mut buffer = vec![0u8; CHUNK];
@@ -822,8 +813,9 @@ async fn relay(
         let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
 
         tokio::select! {
-            read = output.read(&mut buffer) => match read {
-                // The pseudo-terminal is closed, which is the session gone.
+            read = terminal.read(&mut buffer) => match read {
+                // The far end of the terminal is closed, which is the session
+                // gone.
                 Ok(0) => break,
                 Ok(taken) => {
                     quiet.spoke();
@@ -906,40 +898,7 @@ async fn relay(
         summarise(pool, nudges, event_id, &reading, tail.latest()).await;
     }
 
-    if let Some(complaints) = complaints
-        && let Ok(said) = complaints.await
-        && !said.trim().is_empty()
-    {
-        // A warning rather than a note: this pipe is silent on a session that
-        // ran, so anything on it is something that went wrong on the way in.
-        tracing::warn!(
-            event_id,
-            complaints = said.trim(),
-            "a session's own plumbing"
-        );
-
-        // Last, after everything the session printed, because that is what it
-        // is: the account of how the session came to stop saying anything.
-        let mut note = reading.take(plumbing(&said).as_bytes());
-        let latest = tail.as_ref().and_then(Tail::latest);
-        flush(pool, nudges, event_id, &mut note, &reading, latest).await;
-    }
-
     ended
-}
-
-/// The plumbing's complaint as it goes on the Capture.
-///
-/// Marked, and it is the one thing in a Capture that is not the session's own
-/// word. What a terminal was sent is the record — this arrived on the pipe
-/// beside it, from `script` and bwrap rather than from the agent, and a reader
-/// who could not tell the two apart would be reading the sandbox's failure as
-/// something the agent said about itself.
-///
-/// On its own line either way, because what it follows is whatever the session
-/// happened to leave the cursor in the middle of.
-fn plumbing(said: &str) -> String {
-    format!("\n[the sandbox, not the agent]\n{}\n", said.trim())
 }
 
 /// Put what has been printed since last time in the store, and tell whoever is
@@ -1102,34 +1061,6 @@ mod tests {
             );
 
             assert!(seen.insert(name.clone()), "{name:?} was handed out twice");
-        }
-    }
-
-    /// Everything about a Brief that a shell would otherwise read as its own —
-    /// and a Brief is markdown a human wrote, so all of it turns up sooner or
-    /// later.
-    #[test]
-    fn nothing_in_a_brief_can_get_out_of_its_quotes() {
-        for prompt in [
-            "it's a brief",
-            "$(rm -rf /)",
-            "`whoami`",
-            "a \"quoted\" thing; and another",
-            "'; echo pwned; '",
-        ] {
-            let line = shell_command(&["claude".to_owned(), prompt.to_owned()]);
-
-            let printed = std::process::Command::new("/bin/sh")
-                .arg("-c")
-                .arg(line.replace("exec 'claude'", "exec printf '%s'"))
-                .output()
-                .expect("a shell to read it back with");
-
-            assert_eq!(
-                String::from_utf8_lossy(&printed.stdout),
-                prompt,
-                "the shell read {prompt:?} as something else"
-            );
         }
     }
 }

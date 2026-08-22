@@ -60,6 +60,13 @@ mod settling;
 pub mod skills;
 mod stages;
 mod tasks;
+/// The pseudo-terminal a session runs on — Verkstead's own, rather than one
+/// `script` made inside the sandbox.
+///
+/// Public for the reason the sandbox is: what a session runs on is part of the
+/// surface it runs on rather than an implementation detail of an endpoint, and
+/// what proves a terminal is a terminal is a process running on one saying so.
+pub mod terminal;
 mod transcript;
 mod ui;
 mod updates;
