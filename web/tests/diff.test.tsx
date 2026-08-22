@@ -6,10 +6,12 @@
 //! being injected, the anchors on it and the paths beside it are the server's
 //! own answers rather than a mock's agreement with this file.
 
+import { waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
-import { reading, texts } from "./reading";
+import { mount, reading, texts } from "./reading";
+import { json, serving, whenever } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -87,6 +89,41 @@ describe("the attached Diff", () => {
     );
     first!.open = false;
     expect(first!.open, "and it takes being shut again").toBe(false);
+  });
+
+  /// A fold is DOM state and nothing else, and a Nudge re-reads an open Set —
+  /// its answers change, so it cannot be frozen the way a commit's diff can.
+  /// The Set's query reconciles each read into what is drawn instead, so a
+  /// Diff whose markup did not change is left the element it was, folds and
+  /// all — even when the read brought something else about the Set back
+  /// different, which is what a Nudge fires for.
+  it("keeps a fold the reader closed across a Nudge", async () => {
+    // The re-read comes back changed somewhere that is not the Diff, so the
+    // test can wait for the change to be drawn rather than guess when the
+    // read landed.
+    const RETITLED: SetView = { ...WAITING, title: "Rate limiting, again" };
+    let standing = WAITING;
+    serving(
+      whenever(`/api/ui/sets/${WAITING.id}`, () => json(standing)()),
+    );
+    const { container, client } = mount(String(WAITING.id));
+    await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
+
+    const first = container.querySelector<HTMLDetailsElement>(
+      "details.diff-file",
+    )!;
+    first.open = false;
+
+    standing = RETITLED;
+    await client.invalidateQueries();
+
+    // The read landed — the new title is up — and the fold is the element it
+    // was, still shut.
+    await waitFor(() =>
+      expect(container.querySelector("h1")!.textContent).toBe(RETITLED.title),
+    );
+    expect(container.querySelector("details.diff-file")).toBe(first);
+    expect(first.open).toBe(false);
   });
 
   it("shows none of its chrome on a Set that has no Diff", async () => {

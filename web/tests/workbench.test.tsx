@@ -112,6 +112,10 @@ function readAgain(): void {
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in
 /// the app.
+///
+/// The client comes back with the render: `invalidateQueries()` on it is
+/// exactly what a Nudge does to the page — see `lookAgain` in `src/nudge.ts` —
+/// so a test about one needs no fake `EventSource`.
 function mount(at = "/") {
   // No retries: a test that asked for a refusal should see it at once, rather
   // than after the three attempts a real page is right to make.
@@ -132,6 +136,7 @@ function mount(at = "/") {
       </QueryClientProvider>
     )),
     history,
+    client,
   };
 }
 
@@ -1172,7 +1177,10 @@ function theSpeaking(...answers: Parameters<typeof serving>) {
 /// fixture holds, a running session being one: a fixture is a payload rather
 /// than a moment, and one that said it was running would have a page drawing a
 /// spinner over something that has not moved since 2026.
-function theGrillingOutput(over: Partial<AgentOutputEvent>) {
+function theGrillingOutput(
+  over: Partial<AgentOutputEvent>,
+  ...answers: Parameters<typeof serving>
+) {
   const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
     "AgentOutput" in event
       ? { AgentOutput: { ...event.AgentOutput, ...over } }
@@ -1189,6 +1197,9 @@ function theGrillingOutput(over: Partial<AgentOutputEvent>) {
     ),
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    // Last, so a test can hold one of those paths to an answer of its own: a
+    // later answer for a path replaces the earlier.
+    ...answers,
   );
 }
 
@@ -1489,6 +1500,77 @@ describe("a session's output on the timeline", () => {
 
     expect(unread.open).toBe(false);
     expect(unread.querySelector("pre")!.textContent).toContain("divination");
+  });
+
+  /// The regression this shape of wire is for: a Nudge invalidates every
+  /// active query (ADR-0005), so an open pane re-reads a running session's
+  /// Transcript — and every fold in it used to snap shut with the rows the
+  /// re-read rebuilt, because a `details` keeps its open state in the DOM and
+  /// nowhere else. The turns reconcile by `id` now, so a row that did not
+  /// change is left alone, folds and all.
+  it("keeps a fold open across a Nudge, while new turns arrive beneath it", async () => {
+    // The transcript again, one turn longer: a session still talking.
+    const GROWN: TranscriptView = {
+      ...TRANSCRIPT,
+      turns: [
+        ...TRANSCRIPT.turns,
+        {
+          kind: "Prose",
+          id: TRANSCRIPT.turns.length + 1,
+          html: "<p>And the drain is the place to change it.</p>\n",
+        },
+      ],
+    };
+
+    let grown = false;
+    // Running, so the Transcript is live and read again on every Nudge —
+    // which is exactly when a fold has to hold.
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, () => json(grown ? GROWN : TRANSCRIPT)()),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    const reasoning = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.reasoning details",
+    );
+    reasoning.open = true;
+
+    grown = true;
+    await client.invalidateQueries();
+
+    // The new turn has been drawn under the fold…
+    await waitFor(() =>
+      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+        GROWN.turns.length,
+      ),
+    );
+    // …and the fold is the same element it was, still open.
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane .turn.reasoning details",
+      ),
+    ).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+  });
+
+  /// A session already over when the pane opened is over for good, so its
+  /// record is read once and never again — not even on a Nudge, whose
+  /// invalidation beats any finite staleTime.
+  it("does not read a finished session's transcript again on a Nudge", async () => {
+    const fetching = theSpeaking();
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .turn.prose");
+
+    expect(OUTPUT.running).toBe(false);
+    const before = askedFor(fetching, TRANSCRIPT_OF_IT);
+    await client.invalidateQueries();
+
+    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(before);
   });
 
   /// The Capture belongs to the pane, and what the conversation is comes
@@ -2216,6 +2298,34 @@ describe("a commit on the timeline", () => {
     expect(error.textContent).toContain(
       "there is no such commit on that Conversation",
     );
+  });
+
+  /// A commit's diff cannot change, so it is read once and never again — not
+  /// even on a Nudge, whose invalidation beats any finite staleTime. What that
+  /// buys besides the request is the per-file folds: the diff's markup is
+  /// reassigned wholesale whenever the query's data moves, and data that is
+  /// never re-read never moves.
+  it("does not read the diff again on a Nudge, so its folds hold", async () => {
+    const fetching = theCommits();
+    const { container, client } = mount(`/conversations/${DIRECTING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    const fold = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane details.diff-file",
+    );
+    fold.open = false;
+
+    const before = askedFor(fetching, DIFF_OF_IT);
+    await client.invalidateQueries();
+
+    expect(askedFor(fetching, DIFF_OF_IT)).toBe(before);
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane details.diff-file",
+      ),
+    ).toBe(fold);
+    expect(fold.open).toBe(false);
   });
 
   /// The event that is open is the one the timeline says is open, so a narrow

@@ -46,6 +46,9 @@ export function mount(id = "1") {
       </QueryClientProvider>
     )),
     history,
+    // For the tests about a Nudge: `invalidateQueries()` on this is exactly
+    // what one does to the page — see `lookAgain` in `src/nudge.ts`.
+    client,
   };
 }
 

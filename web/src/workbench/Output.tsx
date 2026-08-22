@@ -45,11 +45,33 @@ export function Output(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
+  // Whether this session was already over when the pane opened, read once as
+  // the pane is set up rather than tracked: a session over before it was
+  // opened is over for good, and one that was running stays live for as long
+  // as the pane is. Following the flip live would race the very Nudge carrying
+  // the session's last words, and losing that race would leave a Transcript
+  // quietly missing its ending.
+  const over = !props.output.running;
+
   const transcript = useQuery(() => ({
     // The Event is in the key, so opening another session's output is another
     // query rather than the same one showing the wrong session for a moment.
     queryKey: ["transcript", props.conversation.id, props.output.id],
     queryFn: () => loadTranscript(props.conversation.id, props.output.id),
+
+    // Merge each read into the turns already drawn rather than replacing them,
+    // as the Workbench does its Timeline: a Nudge re-reads this while the
+    // session runs, and without the merge every turn comes back as a new
+    // object, `For` rebuilds every row, and any fold the reader had opened
+    // snaps shut with the element it was DOM state on. Keyed by `id`, which is
+    // the turn's place in the conversation — and flat on the turn itself,
+    // because reconcile does not look inside.
+    reconcile: "id",
+
+    // A finished session's record cannot change, so it is not read again.
+    // "static" and not a finite time: a Nudge invalidates every active query,
+    // and invalidation beats any staleTime that is not this one.
+    ...(over && { staleTime: "static" as const }),
   }));
 
   /// Whether this session left a record of its own conversation.
@@ -72,6 +94,9 @@ export function Output(props: {
     // Only for the session that left no Transcript. A second request every time
     // a pane is opened would be a request for something nobody is going to read.
     enabled: transcript.data !== undefined && !spoke(),
+
+    // Frozen with the Transcript, for the same reason.
+    ...(over && { staleTime: "static" as const }),
   }));
 
   return (
@@ -143,7 +168,7 @@ export function Output(props: {
   );
 }
 
-/// One turn, drawn as whichever of the six it is.
+/// One turn, drawn as whichever of the six its `kind` says it is.
 ///
 /// Each is its own element with its own class, because the whole of what makes a
 /// Transcript readable is that a reader can tell a person's turn from a tool's
@@ -152,7 +177,7 @@ export function Output(props: {
 function Said(props: { turn: Turn }): JSX.Element {
   return (
     <Switch>
-      <Match when={"Prose" in props.turn && props.turn.Prose}>
+      <Match when={props.turn.kind === "Prose" && props.turn}>
         {(prose) => (
           <li class="turn prose">
             <div class="markdown" innerHTML={prose().html} />
@@ -160,7 +185,7 @@ function Said(props: { turn: Turn }): JSX.Element {
         )}
       </Match>
 
-      <Match when={"Reasoning" in props.turn && props.turn.Reasoning}>
+      <Match when={props.turn.kind === "Reasoning" && props.turn}>
         {(reasoning) => (
           <li class="turn reasoning">
             <details>
@@ -171,7 +196,7 @@ function Said(props: { turn: Turn }): JSX.Element {
         )}
       </Match>
 
-      <Match when={"ToolUse" in props.turn && props.turn.ToolUse}>
+      <Match when={props.turn.kind === "ToolUse" && props.turn}>
         {(call) => (
           <li class="turn tool-use">
             <details>
@@ -187,7 +212,7 @@ function Said(props: { turn: Turn }): JSX.Element {
         )}
       </Match>
 
-      <Match when={"ToolResult" in props.turn && props.turn.ToolResult}>
+      <Match when={props.turn.kind === "ToolResult" && props.turn}>
         {(answer) => (
           <li class="turn tool-result" classList={{ failed: answer().failed }}>
             <details>
@@ -198,7 +223,7 @@ function Said(props: { turn: Turn }): JSX.Element {
         )}
       </Match>
 
-      <Match when={"Put" in props.turn && props.turn.Put}>
+      <Match when={props.turn.kind === "Put" && props.turn}>
         {(put) => (
           <li class="turn put">
             <div class="markdown" innerHTML={put().html} />
@@ -209,7 +234,7 @@ function Said(props: { turn: Turn }): JSX.Element {
       {/* A line of a kind this version has never met, shown as the JSON it is
           rather than dropped: a format that has moved on should say so here
           instead of quietly emptying the pane. */}
-      <Match when={"Unread" in props.turn && props.turn.Unread}>
+      <Match when={props.turn.kind === "Unread" && props.turn}>
         {(unread) => (
           <li class="turn unread">
             <details>

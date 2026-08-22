@@ -197,8 +197,13 @@ export function Workbench(): JSX.Element {
     // the Brief being typed into above all, which is a half-written document and
     // the only copy of itself there is.
     //
-    // Keyed by `id`, which every Event carries and is the server's own identity
-    // for it.
+    // What actually matches the rows up is position, not the key named here. A
+    // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
+    // a level down where reconcile — which reads the key off the array element
+    // itself — cannot see it, and elements without the key are matched by
+    // index. That is sound for this array: Events are only ever appended, so
+    // the prefix is stable and every row keeps its identity. The Transcript's
+    // turns carry their `id` flat for exactly this reason.
     reconcile: "id",
   }));
 
