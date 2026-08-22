@@ -398,12 +398,35 @@ export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversa
  *
  * The branch is the row's name: a Conversation has no title of its own, and of
  * what it does have the branch is the short line the human chose.
+ *
+ * Where it has got to is drawn rather than worded — a spinner for a session
+ * that is running, a dot for one that wants answering, a dotted border for a
+ * draft and a dimmed card for work that has stopped. Which is why the two facts
+ * below are facts and not one collapsed verdict: the row says what is true of
+ * the Conversation, and which mark that comes out as is the one rule the viewer
+ * keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
 /**
  * What the Repo this Conversation is against is called.
  */
-repo: string, state: Lifecycle, };
+repo: string, state: Lifecycle, 
+/**
+ * Whether a session is running on this Conversation right now.
+ *
+ * The server's own registry of running processes and nothing else, so a
+ * server that restarted says no about work it is no longer doing.
+ */
+working: boolean, 
+/**
+ * Whether something about this Conversation is waiting on the human: an ask
+ * left open, a run stopped on an Interruption, or a Direction to choose.
+ *
+ * Folded from every source before it leaves, so the viewer holds no list of
+ * them. A Draft is never one of them: it is drawn as a draft, and that is
+ * the whole of what a draft has to say.
+ */
+waiting: boolean, };
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
