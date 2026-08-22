@@ -21,6 +21,7 @@ import type {
   Direction,
   DirectionChosen,
   GrillingStarted,
+  HandedBack,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -183,9 +184,9 @@ export function loadScreen(id: number, event: number): Promise<Screen> {
 /// app, and the one place the viewer is sent something rather than fetching it.
 ///
 /// A repaint on connect and what the session prints after it, with the size of
-/// the window it is being watched in going back the other way. Everything else
-/// here stays on SSE and a refetch — a terminal being drawn is the one thing
-/// neither of those is any good for.
+/// the window it is being watched in — and whatever is typed into it — going
+/// back the other way. Everything else here stays on SSE and a refetch — a
+/// terminal being drawn is the one thing neither of those is any good for.
 ///
 /// Built off the page's own origin, so the socket goes wherever the page came
 /// from: the dev server proxying `/api`, or the one binary serving both.
@@ -283,6 +284,16 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
+}
+
+/// Give a session's keyboard back, which is the one thing that ends a Hold.
+///
+/// Not the socket closing and not the tab going: Verkstead resuming over a
+/// half-finished intervention is worse than a stalled run, so ending one is a
+/// press. What the human left is then judged by the ordinary end-of-session
+/// rules, which is the server's to do and not this side's.
+export function handBack(id: number): Promise<HandedBack> {
+  return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
 }
 
 /// Say how the work gets built, once the grilling has proposed wrapping up.

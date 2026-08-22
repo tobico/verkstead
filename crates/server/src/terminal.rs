@@ -157,6 +157,47 @@ impl Terminal {
         Ok(())
     }
 
+    /// Put `keys` in at this end, where the session reads them as typing.
+    ///
+    /// The other direction of the same terminal, and the whole of what a Hold
+    /// does to one: a keystroke from a watcher is written here, and the session
+    /// cannot tell it from a human at a keyboard of its own — which is the
+    /// point, an agent that behaved differently for being driven from elsewhere
+    /// being no use to drive.
+    ///
+    /// Written to the end rather than once, because a terminal takes what fits
+    /// in its buffer and says how much that was. Nothing is echoed back from
+    /// here: what the session makes of a keystroke comes round the ordinary
+    /// way, off [`Terminal::read`], which is what keeps the Screen and the
+    /// Capture the one account of what happened.
+    pub async fn write(&self, keys: &[u8]) -> io::Result<()> {
+        let mut left = keys;
+
+        while !left.is_empty() {
+            let chunk = left;
+
+            let put = self
+                .held
+                .async_io(Interest::WRITABLE, move |held| {
+                    rustix::io::write(held.as_fd(), chunk).map_err(io::Error::from)
+                })
+                .await?;
+
+            // A terminal that has said it is writable and then taken nothing is
+            // one there is no progress to be made against.
+            if put == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "this terminal would take no more",
+                ));
+            }
+
+            left = &left[put..];
+        }
+
+        Ok(())
+    }
+
     /// Take what the session has printed, waiting until there is some.
     ///
     /// `Ok(0)` is the session gone. A terminal whose far end has closed answers

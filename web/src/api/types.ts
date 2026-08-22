@@ -491,6 +491,24 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
+ * Which of this Conversation's sessions the human has the keyboard of, or
+ * `null` where it is Verkstead's.
+ *
+ * The Hold, said as the Event of the session it was taken on: the workbench
+ * draws the hand-back control on that session's Screen, and a Hold with no
+ * session to name would be one nobody could give back.
+ *
+ * Beside `blocked_on` rather than folded into it, though a Hold sets that
+ * too. What the badge says is *the work has stopped and it is your move*,
+ * and what this says is *which move* — where an Interruption is answered
+ * with a Remedy, a Hold is answered by handing the keyboard back.
+ *
+ * Never on the Timeline, however long it lasts: the Timeline records the
+ * work rather than the watching. This is a fact about now, read off the
+ * running server every time the Conversation is.
+ */
+held: number | null, 
+/**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, 
@@ -557,6 +575,15 @@ export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing";
  * single "cannot start" would leave them guessing which.
  */
 export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
+ * What handing a Conversation's keyboard back came to.
+ *
+ * The one way a Hold ends, and it ends by being pressed: no timeout, no release
+ * on the socket dropping, because Verkstead resuming over a half-finished
+ * intervention is worse than a stalled run.
+ */
+export type HandedBack = "HandedBack" | "NotHeld";
 
 /**
  * The handoff document as the page receives it.
@@ -1377,11 +1404,11 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * One kind of thing for now, named all the same: the socket is a conversation
- * in both directions, and a message that says what it is can be joined by
- * another that says what *it* is.
+ * Two kinds of thing, each saying which it is: the socket is a conversation in
+ * both directions, and what a watcher does to a Screen is either look at it a
+ * different size or type into it.
  */
-export type Watching = { "Resized": Size };
+export type Watching = { "Resized": Size } | { "Typed": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

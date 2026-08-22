@@ -20,8 +20,8 @@ use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
     ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
-    NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    HandedBack, NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted,
+    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
     RemedyChoice, RemedySettled, RepoEntry, Screen, SetView, Shown, Started, Submitted, Subscribed,
     Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
@@ -117,6 +117,12 @@ fn the_viewers_types_are_written_from_these() {
     // what a watcher says back up it.
     Shown::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
+
+    // And the one press that ends what typing into one starts: the hand-back,
+    // which is the only way a Hold ever ends. It takes no request shape — which
+    // Conversation is in the path, and there is nothing else to say about it —
+    // so it is the outcome alone.
+    HandedBack::export_all(&config).unwrap();
 
     // And what a session committed. The summary rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff

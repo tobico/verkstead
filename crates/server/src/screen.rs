@@ -31,6 +31,13 @@
 //! Watching commits the human to nothing. Nothing here writes to the store,
 //! puts anything on a Timeline or moves a Conversation — a Screen with somebody
 //! looking at it and a Screen with nobody looking at it are the same Screen.
+//!
+//! **Typing into one commits them to everything.** Keystrokes go up the same
+//! socket and straight into the session's own terminal, and the first of them
+//! takes the Hold: from then on Verkstead records and nothing else, until the
+//! human hands the keyboard back — see [`crate::hold`]. The socket dropping
+//! does not end one, which is why nothing here releases anything on its way
+//! out.
 
 use std::sync::{Arc, Mutex};
 
@@ -204,6 +211,24 @@ impl Live {
         self.held().painted()
     }
 
+    /// The human typed `keys`: put them in at the session's own terminal.
+    ///
+    /// Straight through, and nothing of it is drawn here. What a terminal does
+    /// with a keystroke is the terminal's business — it echoes it, or it does
+    /// not, or the application on it draws something else entirely — and
+    /// whatever that is comes back off [`Live::printed`] like everything else.
+    /// A Screen that painted the typing itself would be showing a guess at what
+    /// the session was about to show.
+    ///
+    /// Nothing here touches the quiet clock either. Quiet-detection is keyed on
+    /// what the terminal prints, and what protects a human mid-typing is the
+    /// Hold suspending session-end rather than the clock — see [`crate::hold`].
+    pub(crate) async fn typed(&self, keys: &str) {
+        if let Err(error) = self.terminal.write(keys.as_bytes()).await {
+            tracing::error!(error = ?error, "what a watcher typed did not reach the session");
+        }
+    }
+
     /// A watcher's window is `size` big, so that is what the Screen is now.
     ///
     /// The latest wins for everybody, which is what one Screen means. The
@@ -351,7 +376,7 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
 
             said = socket.recv() => match said {
                 Some(Ok(Message::Text(said))) => {
-                    let Ok(Watching::Resized(size)) = serde_json::from_str(&said) else {
+                    let Ok(watching) = serde_json::from_str::<Watching>(&said) else {
                         tracing::warn!(
                             conversation_id,
                             event_id,
@@ -360,8 +385,37 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                         continue;
                     };
 
-                    if let Some(live) = state.sessions.screen(conversation_id, event_id) {
-                        live.resized(size);
+                    // Looked up again for each of them rather than held, for the
+                    // reason [`attach`] gives: the session may have ended since
+                    // the last thing this watcher said, and a keystroke has
+                    // nowhere to go once it has.
+                    let Some(live) = state.sessions.screen(conversation_id, event_id) else {
+                        continue;
+                    };
+
+                    match watching {
+                        Watching::Resized(size) => live.resized(size),
+                        Watching::Typed(keys) => {
+                            // The Hold before the keystroke, so that a session
+                            // ended between the two is one that was held when it
+                            // went rather than one nobody had taken. Taken
+                            // whatever was typed, including a bare newline: what
+                            // says the human is at the keyboard is that they
+                            // touched it.
+                            if state.sessions.hold(conversation_id, event_id) {
+                                tracing::info!(
+                                    conversation_id,
+                                    event_id,
+                                    "somebody typed into a live session, so the Hold is theirs",
+                                );
+
+                                // The badge is drawn off the Conversation, so
+                                // every open page is told to read it again.
+                                state.nudges.announce();
+                            }
+
+                            live.typed(&keys).await;
+                        }
                     }
                 }
                 // A ping is answered by the transport underneath, and a binary
@@ -370,8 +424,9 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                 Some(Ok(_)) => {}
                 // The watcher has gone, or the connection has. Either way there
                 // is nothing here to keep, and the session goes on exactly as it
-                // was — see the Hold, which is the one thing watching can leave
-                // behind and is not this.
+                // was — a Hold included: a socket that dropped mid-intervention
+                // is exactly the case where resuming would be worse than
+                // stalling, so nothing is handed back here.
                 Some(Err(_)) | None => return,
             },
         }

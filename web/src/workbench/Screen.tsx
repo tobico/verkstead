@@ -24,16 +24,29 @@
 //! grid now is — so the size is the server's answer rather than this one's
 //! guess, exactly as the contents are.
 //!
-//! Read-only, and in two ways at once. The terminal takes no input, because
-//! there is nowhere for a keystroke to go until the Hold exists; and the pane
-//! says so, because a terminal that silently swallows typing reads as broken
-//! rather than as read-only.
+//! **And so does what is typed into it.** The first keystroke takes the Hold:
+//! the human is at the keyboard, Verkstead stops ending sessions and advancing
+//! runs, and the Conversation carries *blocked on you* until the keyboard is
+//! handed back. Nothing here draws the typing — a terminal's business is what it
+//! makes of a keystroke, and what it makes of one comes back down the socket
+//! like everything else it prints.
+//!
+//! **Handing back is a press, and it is the only way out.** Not closing the
+//! pane, not closing the tab: Verkstead resuming over a half-finished
+//! intervention is worse than a stalled run. So the control sits here for as
+//! long as the Hold does — on a session that has exited as much as on one still
+//! running, because a session that exited held is exactly one still waiting to
+//! be judged.
+//!
+//! A session that has ended and is not held is read-only, and says so: a
+//! terminal that silently swallows typing reads as broken rather than as
+//! read-only.
 //!
 //! The grid and nothing above it: no scrollback here either, matching the server
 //! that decided the repaint. A reader who wants everything the session printed
 //! wants the Transcript beside this, or the Capture underneath it.
 
-import { useQuery } from "@tanstack/solid-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -48,7 +61,7 @@ import {
 
 import "@xterm/xterm/css/xterm.css";
 
-import { loadScreen, screenSocket } from "../api/client";
+import { handBack, loadScreen, screenSocket } from "../api/client";
 import type {
   AgentOutputEvent,
   ConversationView,
@@ -65,6 +78,13 @@ export function Screen(props: {
   /// Screen comes from — the socket or the fetch.
   const live = () => props.output.running;
 
+  /// Whether the human has this session's keyboard.
+  ///
+  /// The server's answer rather than this page's memory of having typed: one
+  /// Hold is one Conversation's, and a phone that took it is a Hold this laptop
+  /// has to be able to see and hand back.
+  const held = () => props.conversation.held === props.output.id;
+
   const screen = useQuery(() => ({
     // The Event is in the key for the reason it is in the Transcript's: opening
     // another session's Screen is another query rather than this one showing
@@ -77,11 +97,30 @@ export function Screen(props: {
     enabled: !live(),
   }));
 
+  const queries = useQueryClient();
+
+  /// Give the keyboard back, and read the Conversation again: the badge, this
+  /// pane and whatever else the Hold was showing are all drawn off it.
+  const handingBack = useMutation(() => ({
+    mutationFn: () => handBack(props.conversation.id),
+    onSuccess: () => {
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
   /// Where the terminal is mounted, the terminal itself, and the addon that
   /// measures how many columns fit in the pane.
   let host: HTMLDivElement | undefined;
   let terminal: Terminal | undefined;
   let fit: FitAddon | undefined;
+
+  /// Where a keystroke goes, or nothing where there is nowhere for one to go.
+  ///
+  /// Set by whatever is watching and read by the terminal's own listener, which
+  /// is attached once when the terminal is made: a listener added per repaint
+  /// would be one more copy of itself every time somebody resized a window.
+  let typed: ((keys: string) => void) | undefined;
 
   /// What went wrong, where something did. The socket's own failures rather than
   /// the query's: a session that stops being watchable while somebody is
@@ -94,7 +133,7 @@ export function Screen(props: {
   /// be told its size and the repaint is where the size comes from: the same
   /// sequences put a session's display in different places on a grid of a
   /// different width.
-  const paint = (painted: Painted) => {
+  const paint = (painted: Painted, typing: boolean) => {
     if (!host) {
       return;
     }
@@ -103,20 +142,30 @@ export function Screen(props: {
       terminal = new Terminal({
         cols: painted.columns,
         rows: painted.rows,
-        // Nothing to type into, and nothing to type into it with — see the
-        // note above.
-        disableStdin: true,
+        // A live session takes what is typed into it — see the note above, and
+        // `onData` below, which is what carries it. A session that has ended has
+        // no terminal at the other end of a keystroke.
+        disableStdin: !typing,
         // The grid and nothing above it, as the server holds it.
         scrollback: 0,
-        // The cursor is where the session left it, which is worth seeing and
-        // not worth blinking: this is a window onto a terminal, not one being
-        // typed at.
-        cursorBlink: false,
+        // The cursor is where the session left it. Blinking on the one that can
+        // be typed into and still on the one that cannot, because that is the
+        // difference a reader is being shown.
+        cursorBlink: typing,
       });
 
       fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(host);
+
+      // What a keystroke does. On the terminal rather than on the socket,
+      // because it is the terminal that turns a keypress into the bytes a
+      // session expects — an arrow key, a control character, a pasted line — and
+      // those bytes are what goes up.
+      //
+      // Nothing is drawn here for it: what the session makes of it comes back as
+      // what the session printed, which is the one account of what happened.
+      terminal.onData((keys) => typed?.(keys));
     } else {
       terminal.resize(painted.columns, painted.rows);
     }
@@ -134,7 +183,7 @@ export function Screen(props: {
     const painted = screen.data;
 
     if (painted && !live()) {
-      paint(painted);
+      paint(painted, false);
     }
   });
 
@@ -148,11 +197,23 @@ export function Screen(props: {
       screenSocket(props.conversation.id, props.output.id),
     );
 
+    // Where this pane's keystrokes go for as long as this socket is the one
+    // watching. The first of them takes the Hold, which is the server's to
+    // decide and to say: nothing here assumes it was taken.
+    typed = (keys) => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      const said: Watching = { Typed: keys };
+      socket.send(JSON.stringify(said));
+    };
+
     socket.addEventListener("message", (event: MessageEvent<string>) => {
       const shown: Shown = JSON.parse(event.data);
 
       if ("Painted" in shown) {
-        paint(shown.Painted);
+        paint(shown.Painted, true);
 
         // Measured off the back of a repaint as well as on a resize, because
         // the first repaint is what makes the terminal: until it arrives there
@@ -223,6 +284,7 @@ export function Screen(props: {
     onCleanup(() => {
       watching.disconnect();
       socket.close();
+      typed = undefined;
     });
   });
 
@@ -240,19 +302,44 @@ export function Screen(props: {
       <Match when={live() || screen.data}>
         <div class="screen">
           <div class="terminal-host" ref={host} />
+          {/* What the human may do with this Screen, said under it. A Hold
+              outranks everything else there is to say: it is the one thing here
+              that has stopped the work, and the way out of it is the press
+              beside the words. */}
           <Show
-            when={lost()}
+            when={held()}
             fallback={
-              <p class="note read-only">
-                {live()
-                  ? "Watching. Read-only: there is nowhere here to type."
-                  : "Read-only: this is what the session's terminal is showing."}
-              </p>
+              <Show
+                when={lost()}
+                fallback={
+                  <p class="note read-only">
+                    {live()
+                      ? "Watching. Type to take the keyboard — Verkstead stops until you hand it back."
+                      : "Read-only: this is what the session's terminal is showing."}
+                  </p>
+                }
+              >
+                <p class="error">
+                  The connection to this session's screen was lost.
+                </p>
+              </Show>
             }
           >
-            <p class="error">
-              The connection to this session's screen was lost.
-            </p>
+            <div class="holding">
+              <p class="note">
+                {live()
+                  ? "You have the keyboard. Verkstead is recording and nothing else."
+                  : "You have the keyboard, and the session has exited. Nothing is judged until you hand it back."}
+              </p>
+              <button
+                type="button"
+                class="hand-back"
+                disabled={handingBack.isPending}
+                onClick={() => handingBack.mutate()}
+              >
+                Hand back
+              </button>
+            </div>
           </Show>
         </div>
       </Match>

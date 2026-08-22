@@ -50,6 +50,11 @@ use crate::worktrees;
 /// read off the branch, and a Conversation whose branch has written to no roadmap
 /// quietly is not one.
 pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
+    // Starting the next stage is the largest thing this pipeline does unasked,
+    // so it asks the gate every driver asks: a Conversation whose keyboard the
+    // human has is one Verkstead advances nothing behind — see [`crate::hold`].
+    state.sessions.until_handed_back(conversation_id).await;
+
     let Some(conversation) = load(&state, conversation_id).await else {
         return;
     };
