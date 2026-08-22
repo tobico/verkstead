@@ -28,6 +28,14 @@ a way nobody notices quickly.
 - A Nudge is contentless and the reaction is always the same: invalidate all
   active queries. Typed events wait until some page wants a per-event
   reaction.
+- Because every active query is invalidated, a query whose rendering holds
+  reader state — an open `<details>` fold, a scroll position — must therefore
+  either merge each re-read into what is drawn (`reconcile`, keyed by an `id`
+  the wire carries flat on each element) or, where the payload cannot change
+  at all, opt out of re-reading with `staleTime: "static"`. A finite
+  `staleTime` is not an opt-out: invalidation beats staleness, so only
+  "static" survives a Nudge. Without one of the two, every Nudge rebuilds the
+  rendering wholesale and the reader's state goes with it.
 - The server broadcasts only durable changes — Set created, Response
   submitted, Set archived. Liveness transitions stay with the poll: the
   waiting/disconnected verdict cycles with the agent's long-poll rather than
