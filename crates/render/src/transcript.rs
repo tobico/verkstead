@@ -37,7 +37,13 @@ pub struct TranscriptView {
 }
 
 /// One thing that was said, or done, or put.
+///
+/// Flat on the wire — `{"id": 3, "kind": "Prose", "html": "…"}` — rather than
+/// wrapped in the variant's name, because the viewer reconciles turns by `id`
+/// and reconcile reads its key off the element itself: an id one level down
+/// would match nothing and fall back to matching by position, silently.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Turn {
     /// The agent's own words.
@@ -63,6 +69,10 @@ pub enum Turn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Prose {
+    /// The turn's place in the conversation, counted from 1 — what the viewer
+    /// reconciles rows by, so a fold opened on one survives a re-read.
+    pub id: u32,
+
     pub html: String,
 }
 
@@ -70,6 +80,9 @@ pub struct Prose {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Reasoning {
+    /// The turn's place in the conversation, counted from 1.
+    pub id: u32,
+
     pub html: String,
 }
 
@@ -77,6 +90,9 @@ pub struct Reasoning {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ToolUse {
+    /// The turn's place in the conversation, counted from 1.
+    pub id: u32,
+
     /// What the tool is called.
     pub name: String,
 
@@ -92,6 +108,9 @@ pub struct ToolUse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ToolResult {
+    /// The turn's place in the conversation, counted from 1.
+    pub id: u32,
+
     /// Whether the tool failed.
     pub failed: bool,
 
@@ -103,6 +122,9 @@ pub struct ToolResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Put {
+    /// The turn's place in the conversation, counted from 1.
+    pub id: u32,
+
     pub html: String,
 }
 
@@ -110,6 +132,9 @@ pub struct Put {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Unread {
+    /// The turn's place in the conversation, counted from 1.
+    pub id: u32,
+
     pub line: String,
 }
 
@@ -117,6 +142,10 @@ pub struct Unread {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct Bookkeeping {
+    /// The line's place among the bookkeeping, counted from 1 — its own count,
+    /// not the conversation's.
+    pub id: u32,
+
     /// What the log called it.
     pub kind: String,
 
@@ -218,13 +247,55 @@ pub fn transcript_view(lines: &[String]) -> TranscriptView {
     view
 }
 
+/// The id every turn is built with, and none keeps: the real one is stamped by
+/// [`TranscriptView::take`] as the view takes the turn.
+const UNPLACED: u32 = 0;
+
+impl TranscriptView {
+    /// The conversation taking one more turn, numbered as it is taken.
+    ///
+    /// The `id` is the turn's place in the conversation, and it is counted
+    /// here because the view is the one thing that knows how far that has got:
+    /// one log line can be several turns, so no count over the lines could say.
+    fn take(&mut self, mut turn: Turn) {
+        *turn.place() = self.turns.len() as u32 + 1;
+        self.turns.push(turn);
+    }
+
+    /// One more line of bookkeeping, numbered the same way — by its own count,
+    /// since it was never part of the conversation.
+    fn keep(&mut self, kind: String, line: String) {
+        self.bookkeeping.push(Bookkeeping {
+            id: self.bookkeeping.len() as u32 + 1,
+            kind,
+            line,
+        });
+    }
+}
+
+impl Turn {
+    /// Where a turn's place in the conversation is written, whichever of the
+    /// six it is.
+    fn place(&mut self) -> &mut u32 {
+        match self {
+            Turn::Prose(Prose { id, .. })
+            | Turn::Reasoning(Reasoning { id, .. })
+            | Turn::ToolUse(ToolUse { id, .. })
+            | Turn::ToolResult(ToolResult { id, .. })
+            | Turn::Put(Put { id, .. })
+            | Turn::Unread(Unread { id, .. }) => id,
+        }
+    }
+}
+
 /// One line, put wherever it belongs.
 fn read(line: &str, view: &mut TranscriptView) {
     let Ok(entry) = serde_json::from_str::<Value>(line) else {
         // Not JSON at all, which is a line torn by something or a format that
         // has stopped being JSONL. Either way it is what the session wrote, so
         // it is shown as it stands.
-        view.turns.push(Turn::Unread(Unread {
+        view.take(Turn::Unread(Unread {
+            id: UNPLACED,
             line: line.to_owned(),
         }));
         return;
@@ -233,29 +304,32 @@ fn read(line: &str, view: &mut TranscriptView) {
     match entry["type"].as_str() {
         Some("assistant") => said(&entry, view),
         Some("user") => put(&entry, view),
-        Some(kind) if BOOKKEEPING.contains(&kind) => view.bookkeeping.push(Bookkeeping {
-            kind: kind.to_owned(),
-            line: raw(&entry),
-        }),
-        _ => view.turns.push(unread(&entry)),
+        Some(kind) if BOOKKEEPING.contains(&kind) => view.keep(kind.to_owned(), raw(&entry)),
+        _ => view.take(unread(&entry)),
     }
 }
 
 /// What the agent said: its prose, its reasoning, and the tools it called.
 fn said(entry: &Value, view: &mut TranscriptView) {
     let Some(blocks) = entry["message"]["content"].as_array() else {
-        view.turns.push(unread(entry));
+        view.take(unread(entry));
         return;
     };
 
     for block in blocks {
         match block["type"].as_str() {
-            Some("text") => view.turns.extend(prose(block, "text").map(Turn::Prose)),
-            Some("thinking") => view.turns.extend(
-                prose(block, "thinking").map(|Prose { html }| Turn::Reasoning(Reasoning { html })),
-            ),
-            Some("tool_use") => view.turns.push(Turn::ToolUse(called(block))),
-            _ => view.turns.push(unread(block)),
+            Some("text") => {
+                if let Some(prose) = prose(block, "text") {
+                    view.take(Turn::Prose(prose));
+                }
+            }
+            Some("thinking") => {
+                if let Some(Prose { html, .. }) = prose(block, "thinking") {
+                    view.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+                }
+            }
+            Some("tool_use") => view.take(Turn::ToolUse(called(block))),
+            _ => view.take(unread(block)),
         }
     }
 }
@@ -269,30 +343,31 @@ fn said(entry: &Value, view: &mut TranscriptView) {
 /// voice, which is bookkeeping wearing a turn's clothes.
 fn put(entry: &Value, view: &mut TranscriptView) {
     if entry["isMeta"].as_bool().unwrap_or(false) {
-        view.bookkeeping.push(Bookkeeping {
-            kind: "user".to_owned(),
-            line: raw(entry),
-        });
+        view.keep("user".to_owned(), raw(entry));
         return;
     }
 
     match &entry["message"]["content"] {
         // A turn typed by the human arrives as the words themselves.
-        Value::String(said) => view
-            .turns
-            .extend(rendered(said).map(|html| Turn::Put(Put { html }))),
+        Value::String(said) => {
+            if let Some(html) = rendered(said) {
+                view.take(Turn::Put(Put { id: UNPLACED, html }));
+            }
+        }
         Value::Array(blocks) => {
             for block in blocks {
                 match block["type"].as_str() {
-                    Some("text") => view
-                        .turns
-                        .extend(prose(block, "text").map(|Prose { html }| Turn::Put(Put { html }))),
-                    Some("tool_result") => view.turns.push(Turn::ToolResult(answered(block))),
-                    _ => view.turns.push(unread(block)),
+                    Some("text") => {
+                        if let Some(Prose { html, .. }) = prose(block, "text") {
+                            view.take(Turn::Put(Put { id: UNPLACED, html }));
+                        }
+                    }
+                    Some("tool_result") => view.take(Turn::ToolResult(answered(block))),
+                    _ => view.take(unread(block)),
                 }
             }
         }
-        _ => view.turns.push(unread(entry)),
+        _ => view.take(unread(entry)),
     }
 }
 
@@ -303,7 +378,7 @@ fn put(entry: &Value, view: &mut TranscriptView) {
 /// collapsed row with nothing behind it. Reasoning arrives this way when the
 /// backend redacted it: a signature, and no thinking to go with it.
 fn prose(block: &Value, key: &str) -> Option<Prose> {
-    rendered(block[key].as_str().unwrap_or_default()).map(|html| Prose { html })
+    rendered(block[key].as_str().unwrap_or_default()).map(|html| Prose { id: UNPLACED, html })
 }
 
 /// The same for markdown that is already in hand.
@@ -319,6 +394,7 @@ fn called(block: &Value) -> ToolUse {
     let input = &block["input"];
 
     ToolUse {
+        id: UNPLACED,
         name: block["name"].as_str().unwrap_or_default().to_owned(),
         about: about(input),
         input: raw(input),
@@ -355,6 +431,7 @@ fn one_line(text: &str) -> String {
 /// because a picture nobody can draw here is still something that happened.
 fn answered(block: &Value) -> ToolResult {
     ToolResult {
+        id: UNPLACED,
         failed: block["is_error"].as_bool().unwrap_or(false),
         text: match &block["content"] {
             Value::String(text) => text.clone(),
@@ -374,7 +451,10 @@ fn answered(block: &Value) -> ToolResult {
 
 /// Whatever this is, shown as the JSON it is.
 fn unread(value: &Value) -> Turn {
-    Turn::Unread(Unread { line: raw(value) })
+    Turn::Unread(Unread {
+        id: UNPLACED,
+        line: raw(value),
+    })
 }
 
 /// JSON laid out to be read. Collapsed in the pane either way — but a reader
@@ -418,15 +498,19 @@ mod tests {
             view.turns,
             vec![
                 Turn::Put(Put {
+                    id: 1,
                     html: "<p>Rename the <strong>capture</strong>.</p>\n".to_owned()
                 }),
                 Turn::Reasoning(Reasoning {
+                    id: 2,
                     html: "<p>The tables are the awkward part.</p>\n".to_owned()
                 }),
                 Turn::Prose(Prose {
+                    id: 3,
                     html: "<p>I'll start with the <em>tables</em>.</p>\n".to_owned()
                 }),
                 Turn::ToolUse(ToolUse {
+                    id: 4,
                     name: "Bash".to_owned(),
                     about: "List the task files".to_owned(),
                     input: serde_json::to_string_pretty(&serde_json::json!({
@@ -436,16 +520,36 @@ mod tests {
                     .unwrap(),
                 }),
                 Turn::ToolResult(ToolResult {
+                    id: 5,
                     failed: false,
                     text: "04-render.md\n05-summaries.md".to_owned()
                 }),
                 Turn::Unread(Unread {
+                    id: 6,
                     line: serde_json::to_string_pretty(
                         &serde_json::from_str::<Value>(FIXTURE[6]).unwrap()
                     )
                     .unwrap()
                 }),
             ]
+        );
+    }
+
+    /// What the viewer reconciles on: a turn's id is its place in the
+    /// conversation, flat beside the `kind` tag rather than a level down inside
+    /// it — reconcile reads the key off the element itself, and an id it cannot
+    /// see falls back to matching by position, silently.
+    #[test]
+    fn a_turn_goes_on_the_wire_flat_with_its_place_and_kind() {
+        let view = fixture();
+
+        assert_eq!(
+            serde_json::to_value(&view.turns[2]).unwrap(),
+            serde_json::json!({
+                "kind": "Prose",
+                "id": 3,
+                "html": "<p>I'll start with the <em>tables</em>.</p>\n",
+            })
         );
     }
 
@@ -477,6 +581,7 @@ mod tests {
         assert_eq!(
             view.bookkeeping,
             vec![Bookkeeping {
+                id: 1,
                 kind: "attachment".to_owned(),
                 line: serde_json::to_string_pretty(
                     &serde_json::from_str::<Value>(FIXTURE[5]).unwrap()
@@ -516,6 +621,7 @@ mod tests {
         assert_eq!(
             view.turns,
             vec![Turn::Unread(Unread {
+                id: 1,
                 line: "{ this was never JSON".to_owned()
             })]
         );
@@ -582,6 +688,7 @@ mod tests {
         assert_eq!(
             view.turns,
             vec![Turn::ToolResult(ToolResult {
+                id: 1,
                 failed: true,
                 text: "could not read it\n[image]".to_owned(),
             })]

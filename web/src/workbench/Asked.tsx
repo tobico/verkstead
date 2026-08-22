@@ -34,6 +34,10 @@ export function Asked(props: {
     // either place puts the other right.
     queryKey: ["set", String(props.asked.set_id)],
     queryFn: () => loadSet(String(props.asked.set_id)),
+
+    // And the same merge, for the same fold: this pane draws the same Sheet,
+    // attached Diff and all — see the standalone page.
+    reconcile: "id",
   }));
 
   const head = (

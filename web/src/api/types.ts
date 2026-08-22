@@ -265,6 +265,11 @@ export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "
  */
 export type Bookkeeping = { 
 /**
+ * The line's place among the bookkeeping, counted from 1 — its own count,
+ * not the conversation's.
+ */
+id: number, 
+/**
  * What the log called it.
  */
 kind: string, 
@@ -804,7 +809,12 @@ rationale_html: string, };
 /**
  * The agent's prose, rendered.
  */
-export type Prose = { html: string, };
+export type Prose = { 
+/**
+ * The turn's place in the conversation, counted from 1 — what the viewer
+ * reconciles rows by, so a fold opened on one survives a re-read.
+ */
+id: number, html: string, };
 
 /**
  * One comment on a pull request: who said it, when, and what they said.
@@ -906,7 +916,11 @@ export type PushKey = { key: string, };
 /**
  * A turn put to the agent, rendered.
  */
-export type Put = { html: string, };
+export type Put = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, html: string, };
 
 /**
  * A Question Set as the Timeline shows it: what it was called, the table of
@@ -972,7 +986,11 @@ nav_text: string, };
 /**
  * The agent's reasoning, rendered.
  */
-export type Reasoning = { html: string, };
+export type Reasoning = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, html: string, };
 
 /**
  * What became of a registration.
@@ -1265,6 +1283,10 @@ export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | 
  */
 export type ToolResult = { 
 /**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, 
+/**
  * Whether the tool failed.
  */
 failed: boolean, 
@@ -1277,6 +1299,10 @@ text: string, };
  * A tool call, as one line plus what it was called with.
  */
 export type ToolUse = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, 
 /**
  * What the tool is called.
  */
@@ -1306,13 +1332,22 @@ bookkeeping: Array<Bookkeeping>, };
 
 /**
  * One thing that was said, or done, or put.
+ *
+ * Flat on the wire — `{"id": 3, "kind": "Prose", "html": "…"}` — rather than
+ * wrapped in the variant's name, because the viewer reconciles turns by `id`
+ * and reconcile reads its key off the element itself: an id one level down
+ * would match nothing and fall back to matching by position, silently.
  */
-export type Turn = { "Prose": Prose } | { "Reasoning": Reasoning } | { "ToolUse": ToolUse } | { "ToolResult": ToolResult } | { "Put": Put } | { "Unread": Unread };
+export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
 
 /**
  * A line nothing here knows how to draw.
  */
-export type Unread = { line: string, };
+export type Unread = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, line: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

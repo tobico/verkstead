@@ -1,43 +1,44 @@
 {
   "bookkeeping": [
     {
+      "id": 1,
       "kind": "attachment",
       "line": "{\n  \"attachment\": {\n    \"content\": \"three things still to do\",\n    \"type\": \"todos\"\n  },\n  \"type\": \"attachment\"\n}"
     }
   ],
   "turns": [
     {
-      "Put": {
-        "html": "<p>What should the queue do with a delivery that keeps failing?</p>\n"
-      }
+      "html": "<p>What should the queue do with a delivery that keeps failing?</p>\n",
+      "id": 1,
+      "kind": "Put"
     },
     {
-      "Reasoning": {
-        "html": "<p>Forty attempts is not a retry policy, it is a loop.</p>\n"
-      }
+      "html": "<p>Forty attempts is not a retry policy, it is a loop.</p>\n",
+      "id": 2,
+      "kind": "Reasoning"
     },
     {
-      "Prose": {
-        "html": "<p>Looking at how the queue is <strong>drained</strong>.</p>\n"
-      }
+      "html": "<p>Looking at how the queue is <strong>drained</strong>.</p>\n",
+      "id": 3,
+      "kind": "Prose"
     },
     {
-      "ToolUse": {
-        "about": "Find where a delivery is retried",
-        "input": "{\n  \"command\": \"rg -n 'retry' crates/server/src\",\n  \"description\": \"Find where a delivery is retried\"\n}",
-        "name": "Bash"
-      }
+      "about": "Find where a delivery is retried",
+      "id": 4,
+      "input": "{\n  \"command\": \"rg -n 'retry' crates/server/src\",\n  \"description\": \"Find where a delivery is retried\"\n}",
+      "kind": "ToolUse",
+      "name": "Bash"
     },
     {
-      "ToolResult": {
-        "failed": false,
-        "text": "crates/server/src/queue.rs:118:    retry(delivery).await;"
-      }
+      "failed": false,
+      "id": 5,
+      "kind": "ToolResult",
+      "text": "crates/server/src/queue.rs:118:    retry(delivery).await;"
     },
     {
-      "Unread": {
-        "line": "{\n  \"omen\": \"a kind from a version nobody here has met\",\n  \"type\": \"divination\"\n}"
-      }
+      "id": 6,
+      "kind": "Unread",
+      "line": "{\n  \"omen\": \"a kind from a version nobody here has met\",\n  \"type\": \"divination\"\n}"
     }
   ]
 }

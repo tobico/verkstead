@@ -1095,6 +1095,7 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
     assert_eq!(
         view.turns.first(),
         Some(&Turn::Prose(verkstead_render::Prose {
+            id: 1,
             html: "<p>Reading the <strong>brief</strong>.</p>\n".to_owned()
         })),
         "the agent's prose should arrive rendered: {:?}",

@@ -21,6 +21,16 @@ export function SetPage(): JSX.Element {
   const set = useQuery(() => ({
     queryKey: ["set", params.id],
     queryFn: () => loadSet(params.id),
+
+    // Merge each read into the Set already drawn rather than replacing it, as
+    // the workbench does its Conversation. A Set cannot be frozen — its
+    // answers change — so it is re-read on every Nudge, and this is what keeps
+    // a re-read from disturbing what the reader holds over the page: the
+    // attached Diff's markup fills an `innerHTML` that compiles to an
+    // unguarded effect over the query's data, and reassigning it would close
+    // every per-file fold. Merged, an unchanged string is left alone and the
+    // folds stand.
+    reconcile: "id",
   }));
 
   return (

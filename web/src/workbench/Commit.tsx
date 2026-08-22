@@ -35,6 +35,14 @@ export function Commit(props: {
     // rather than the same one showing the wrong diff for a moment.
     queryKey: ["commit", props.conversation.id, props.commit.id],
     queryFn: () => loadCommitDiff(props.conversation.id, props.commit.id),
+
+    // A commit's diff cannot change, so it is read once and never again.
+    // "static" and not a finite time: a Nudge invalidates every active query,
+    // and invalidation beats any staleTime that is not this one. A re-read
+    // would reassign the `innerHTML` below whether or not a byte changed —
+    // that assignment compiles to an unguarded effect over the query's data —
+    // and close every per-file fold the reader had opened with it.
+    staleTime: "static",
   }));
 
   // How this device wants diffs drawn — the same setting a question set's
