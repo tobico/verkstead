@@ -28,12 +28,14 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use avt::Vt;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
@@ -326,6 +328,23 @@ impl Grilling {
         .await
     }
 
+    /// Put a device on the human's list, the way the page does when
+    /// notifications are turned on for it.
+    async fn subscribe(&self, device: &Device) {
+        let stored: verkstead_render::Subscribed = post(
+            &self.app,
+            "/api/ui/push/subscribe",
+            &serde_json::json!({
+                "endpoint": device.endpoint,
+                "p256dh": device.p256dh(),
+                "auth": device.auth(),
+            }),
+        )
+        .await;
+
+        assert_eq!(stored, verkstead_render::Subscribed::Stored);
+    }
+
     /// Give the keyboard back, the way the press in the workbench does.
     async fn hand_back(&self) -> HandedBack {
         post(
@@ -412,6 +431,11 @@ const BRISKLY: Pace = Pace {
     poll: Duration::from_millis(100),
     grace: Duration::from_millis(300),
     checks: Duration::from_millis(100),
+    // A Hold's reminder is minutes away on a real server, and how many is not
+    // what the tests about it ask: what they ask is that it goes out once while
+    // the Hold stands and not at all once it has been handed back. A second is
+    // long enough that a hand-back has time to land inside it.
+    holding: Duration::from_secs(1),
 };
 
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
@@ -5722,4 +5746,243 @@ async fn aborting_a_conversation_ends_the_session_the_human_is_holding() {
         view.held.is_none(),
         "and nothing is left holding a Conversation that has stopped",
     );
+}
+
+/// A Hold nobody came back to tells the human's devices about it — see
+/// [`Grilling::subscribe`] for the devices, and `crates/server/src/push.rs` for
+/// what is sent.
+///
+/// One push per device and one only: it is a reminder rather than a nag, and a
+/// Hold that goes on standing has already said everything it has to say. Nothing
+/// about it reaches the Timeline, and nothing about it ends the Hold — the
+/// hand-back is still the only way back.
+#[tokio::test]
+async fn a_hold_nobody_came_back_to_tells_the_devices_once() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    let laptop = Device::new(&service, "laptop");
+    fixture.subscribe(&phone).await;
+    fixture.subscribe(&laptop).await;
+
+    let before = fixture.view().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher
+        .until(|grid| grid.contains("reading the brief"))
+        .await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+
+    let pushed = pushes(&taken, 2).await;
+
+    for device in [&phone, &laptop] {
+        let push = pushed
+            .iter()
+            .find(|push| push.device == device.name)
+            .unwrap_or_else(|| panic!("{} was not told about the Hold", device.name));
+
+        // Decrypted with the device's own keys, which is what says it was
+        // encrypted for that device rather than merely addressed to it.
+        let notice = device.read(push);
+
+        assert_eq!(
+            notice["path"],
+            format!("/conversations/{}", fixture.id),
+            "a Hold's push has to open the Conversation whose session is held",
+        );
+        assert_eq!(
+            notice["title"],
+            format!("{} is waiting for you", before.branch),
+            "and say which piece of work it is about",
+        );
+        assert_eq!(notice["project"], before.repo.name);
+    }
+
+    // Long enough for a second round to have gone out if there were one.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "one reminder per device, and no more however long the Hold stands",
+    );
+
+    let after = fixture.view().await;
+
+    assert_eq!(
+        after.held,
+        Some(event),
+        "the reminder went out and the Hold stayed: only the hand-back ends one",
+    );
+    assert_eq!(
+        after.timeline.len(),
+        before.timeline.len(),
+        "a Hold's reminder left something on the Timeline",
+    );
+}
+
+/// And a Hold handed back before the interval passes tells nobody at all.
+///
+/// The reminder is about a Hold nobody came back to, so somebody coming back is
+/// exactly the thing that makes it not worth sending.
+#[tokio::test]
+async fn handing_back_before_the_interval_tells_nobody() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let (service, taken) = push_service().await;
+    fixture.subscribe(&Device::new(&service, "phone")).await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher
+        .until(|grid| grid.contains("reading the brief"))
+        .await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+
+    // Long enough for the reminder to have gone out if the hand-back had not
+    // been the answer to it.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert!(
+        taken.lock().unwrap().is_empty(),
+        "a Hold that was handed back is not one to remind anybody about",
+    );
+}
+
+/// One push, as the push service received it.
+#[derive(Debug, Clone)]
+struct Push {
+    /// The path it was posted to, which is the device it was meant for.
+    device: String,
+    body: Vec<u8>,
+}
+
+/// A push service on a loopback port, and the pushes it has taken.
+///
+/// It takes everything it is sent. What the vendors' services answer, and what
+/// Verkstead makes of each answer, is `push_delivery.rs`'s: here the question is
+/// only whether a Hold left standing is one they hear about.
+async fn push_service() -> (String, Arc<Mutex<Vec<Push>>>) {
+    let taken: Arc<Mutex<Vec<Push>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let app = Router::new().route(
+        "/{device}",
+        axum::routing::post({
+            let taken = taken.clone();
+            move |axum::extract::Path(device): axum::extract::Path<String>,
+                  body: axum::body::Bytes| {
+                let taken = taken.clone();
+                async move {
+                    taken.lock().unwrap().push(Push {
+                        device,
+                        body: body.to_vec(),
+                    });
+                    StatusCode::CREATED
+                }
+            }
+        }),
+    );
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("a port to listen on");
+    let at = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    (format!("http://{at}"), taken)
+}
+
+/// A device as its browser would have described it, plus the private half the
+/// browser would have kept — which is what lets a test read a push back.
+struct Device {
+    name: String,
+    endpoint: String,
+    secret: p256::SecretKey,
+    auth: Vec<u8>,
+}
+
+impl Device {
+    fn new(service: &str, name: &str) -> Device {
+        // Deterministic rather than random, so a failure names the same device
+        // twice running. Sixteen bytes because that is what the auth secret is.
+        let auth: Vec<u8> = name.bytes().cycle().take(16).collect();
+
+        Device {
+            name: name.to_owned(),
+            endpoint: format!("{service}/{name}"),
+            secret: p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng),
+            auth,
+        }
+    }
+
+    /// The public half, in the encoding `PushManager.subscribe` hands back.
+    fn p256dh(&self) -> String {
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(self.secret.public_key().to_encoded_point(false).as_bytes())
+    }
+
+    fn auth(&self) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.auth)
+    }
+
+    /// Read a push meant for this device, as its service worker would.
+    fn read(&self, push: &Push) -> serde_json::Value {
+        let plain = web_push_native::decrypt(
+            push.body.clone(),
+            &self.secret,
+            &web_push_native::Auth::clone_from_slice(&self.auth),
+        )
+        .expect("a push for this device has to decrypt with this device's keys");
+
+        serde_json::from_slice(&plain).expect("the notice has to be JSON")
+    }
+}
+
+/// Wait until the push service has taken `count` pushes, then hand them over.
+async fn pushes(taken: &Arc<Mutex<Vec<Push>>>, count: usize) -> Vec<Push> {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        {
+            let pushed = taken.lock().unwrap();
+            if pushed.len() >= count {
+                return pushed.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "waited for {count} pushes and {} arrived",
+                pushed.len(),
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

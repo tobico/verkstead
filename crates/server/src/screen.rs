@@ -402,7 +402,7 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                             // whatever was typed, including a bare newline: what
                             // says the human is at the keyboard is that they
                             // touched it.
-                            if state.sessions.hold(conversation_id, event_id) {
+                            if let Some(which) = state.sessions.hold(conversation_id, event_id) {
                                 tracing::info!(
                                     conversation_id,
                                     event_id,
@@ -412,6 +412,11 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                                 // The badge is drawn off the Conversation, so
                                 // every open page is told to read it again.
                                 state.nudges.announce();
+
+                                // And if they walk away from it, their devices
+                                // hear about it — once, and only while it is
+                                // still standing.
+                                crate::push::when_it_has_stood(&state, conversation_id, which);
                             }
 
                             live.typed(&keys).await;

@@ -21,4 +21,4 @@ Roadmap stage: [02: The Screen and the Hold](docs/roadmaps/session-output/02-scr
 - [x] 02: The Screen of a session that has ended — [details](02-ended-screen.md)
 - [x] 03: Watching a live session — [details](03-watching-live.md)
 - [x] 04: The Hold — [details](04-the-hold.md)
-- [ ] 05: A Hold nobody came back to — [details](05-holding-push.md)
+- [x] 05: A Hold nobody came back to — [details](05-holding-push.md)

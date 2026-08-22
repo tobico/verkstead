@@ -34,7 +34,7 @@ use tokio::task::JoinHandle;
 
 use crate::capture::Reading;
 use crate::handoffs::Handoffs;
-use crate::hold::Holds;
+use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
@@ -476,10 +476,16 @@ impl Sessions {
 
     /// The human typed into the Screen of `event_id`'s session: take the Hold.
     ///
-    /// `true` where this keystroke is the one that took it — see
+    /// Which Hold was taken, where this keystroke is the one that took it — see
     /// [`Holds::take`], and [`crate::hold`] for what a Hold costs Verkstead.
-    pub(crate) fn hold(&self, conversation_id: i64, event_id: i64) -> bool {
+    pub(crate) fn hold(&self, conversation_id: i64, event_id: i64) -> Option<Which> {
         self.holds.take(conversation_id, event_id)
+    }
+
+    /// Whether the Hold numbered `which` is the one still in force — see
+    /// [`Holds::still_held`].
+    pub(crate) fn still_held(&self, conversation_id: i64, which: Which) -> bool {
+        self.holds.still_held(conversation_id, which)
     }
 
     /// Which of this Conversation's sessions the human has the keyboard of, or

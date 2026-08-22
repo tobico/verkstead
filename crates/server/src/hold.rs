@@ -41,16 +41,27 @@ use tokio::sync::broadcast;
 /// one message per Hold ever handed back by one human.
 const HANDING_BACK: usize = 64;
 
+/// Which Hold this is: a number that goes up with every Hold this server takes.
+///
+/// What it is for is telling one Hold from the next on the same Conversation.
+/// Anything that goes away to wait — the reminder a Hold sends the human's
+/// devices once it has stood a while — comes back to a register that may have
+/// been handed back and taken again since, and a Hold it was never about is not
+/// one for it to act on.
+pub(crate) type Which = u64;
+
 /// The Holds in force on this server, by the Conversation each is on.
 ///
 /// One per Conversation at most, because one Conversation has one session and a
 /// Hold is the keyboard of one.
 #[derive(Clone)]
 pub(crate) struct Holds {
-    /// Which Conversations are held, and the Timeline Event of the session the
-    /// keyboard was taken at — which is where the *blocked on you* badge points,
-    /// a badge with nowhere to go being one the human cannot answer.
-    held: Arc<Mutex<HashMap<i64, i64>>>,
+    /// Which Conversations are held, and what is known about each Hold.
+    held: Arc<Mutex<HashMap<i64, Held>>>,
+
+    /// How many Holds this server has taken, which is what the next one is
+    /// numbered by — see [`Which`].
+    taken: Arc<Mutex<Which>>,
 
     /// Word to whoever is waiting that a Conversation has been handed back.
     ///
@@ -60,30 +71,51 @@ pub(crate) struct Holds {
     handed_back: broadcast::Sender<i64>,
 }
 
+/// One Hold in force.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    /// The Timeline Event of the session the keyboard was taken at — which is
+    /// where the *blocked on you* badge points, a badge with nowhere to go being
+    /// one the human cannot answer.
+    event_id: i64,
+
+    /// Which Hold it is — see [`Which`].
+    which: Which,
+}
+
 impl Holds {
     /// A server with nothing held, which is every server as it starts.
     pub(crate) fn none() -> Holds {
         Holds {
             held: Arc::new(Mutex::new(HashMap::new())),
+            taken: Arc::new(Mutex::new(0)),
             handed_back: broadcast::Sender::new(HANDING_BACK),
         }
     }
 
     /// The human typed into the Screen of `event_id`'s session: take the Hold.
     ///
-    /// `true` where this is the keystroke that took it, which is what the caller
-    /// tells the open pages about — every keystroke after it lands on a Hold
-    /// that is already in force and changes nothing.
+    /// Which Hold this keystroke took, where it is the one that took it — the
+    /// answer the caller tells the open pages about, and the one the reminder
+    /// that a Hold has stood a while is sent about. Every keystroke after it
+    /// lands on a Hold already in force and changes nothing, which is `None`.
     ///
     /// A Conversation already held stays held on the session it was taken at.
     /// Nothing can reach a second one: the run does not advance past a Hold, so
     /// there is no next session for a keystroke to arrive at.
-    pub(crate) fn take(&self, conversation_id: i64, event_id: i64) -> bool {
+    pub(crate) fn take(&self, conversation_id: i64, event_id: i64) -> Option<Which> {
         match self.register().entry(conversation_id) {
-            Entry::Occupied(_) => false,
+            Entry::Occupied(_) => None,
             Entry::Vacant(vacant) => {
-                vacant.insert(event_id);
-                true
+                let mut taken = self.taken.lock().expect("the Hold count is not poisoned");
+                *taken += 1;
+
+                vacant.insert(Held {
+                    event_id,
+                    which: *taken,
+                });
+
+                Some(*taken)
             }
         }
     }
@@ -91,7 +123,21 @@ impl Holds {
     /// Which session's keyboard the human has, or `None` where this Conversation
     /// is Verkstead's again.
     pub(crate) fn holding(&self, conversation_id: i64) -> Option<i64> {
-        self.register().get(&conversation_id).copied()
+        self.register()
+            .get(&conversation_id)
+            .map(|held| held.event_id)
+    }
+
+    /// Whether the Hold numbered `which` is the one still in force.
+    ///
+    /// What anything that went away and came back asks — the reminder a Hold
+    /// sends once it has stood a while. A Conversation handed back and typed
+    /// into again in the meantime is holding a later Hold, and this Hold's
+    /// reminder is not about that one.
+    pub(crate) fn still_held(&self, conversation_id: i64, which: Which) -> bool {
+        self.register()
+            .get(&conversation_id)
+            .is_some_and(|held| held.which == which)
     }
 
     /// The human has handed the keyboard back.
@@ -154,7 +200,7 @@ impl Holds {
     }
 
     /// The register, locked.
-    fn register(&self) -> std::sync::MutexGuard<'_, HashMap<i64, i64>> {
+    fn register(&self) -> std::sync::MutexGuard<'_, HashMap<i64, Held>> {
         self.held
             .lock()
             .expect("the Holds register is not poisoned")
@@ -172,17 +218,46 @@ mod tests {
     fn the_first_keystroke_is_the_one_that_takes_the_hold() {
         let holds = Holds::none();
 
-        assert!(holds.take(7, 41), "the first keystroke takes the Hold");
-        assert!(!holds.take(7, 41), "and the second lands on one in force");
+        let which = holds
+            .take(7, 41)
+            .expect("the first keystroke takes the Hold");
+        assert_eq!(
+            holds.take(7, 41),
+            None,
+            "and the second lands on one in force",
+        );
         assert_eq!(holds.holding(7), Some(41));
         assert_eq!(holds.holding(8), None, "one Conversation, not the next");
+        assert!(holds.still_held(7, which), "and it is the Hold in force");
+    }
+
+    /// A Conversation handed back and taken again is holding a later Hold, and
+    /// what the first one left waiting is not about this one.
+    #[test]
+    fn a_hold_taken_again_is_not_the_hold_that_was_handed_back() {
+        let holds = Holds::none();
+
+        let first = holds.take(7, 41).expect("the keyboard was free");
+        holds.hand_back(7);
+        assert!(
+            !holds.still_held(7, first),
+            "a Hold that was handed back is not still in force",
+        );
+
+        let second = holds.take(7, 41).expect("and the keyboard is free again");
+        assert_ne!(first, second, "a second Hold is a Hold of its own");
+        assert!(
+            !holds.still_held(7, first),
+            "the Hold that was handed back is not the one standing now",
+        );
+        assert!(holds.still_held(7, second));
     }
 
     /// And handing back ends it, once.
     #[test]
     fn handing_back_ends_it_and_saying_so_twice_is_the_same_answer() {
         let holds = Holds::none();
-        holds.take(7, 41);
+        holds.take(7, 41).expect("the keyboard was free");
 
         assert!(holds.hand_back(7), "the keyboard goes back");
         assert_eq!(holds.holding(7), None);
@@ -207,7 +282,7 @@ mod tests {
     #[tokio::test]
     async fn the_gate_opens_when_the_keyboard_goes_back() {
         let holds = Holds::none();
-        holds.take(7, 41);
+        holds.take(7, 41).expect("the keyboard was free");
 
         let waiting = tokio::spawn({
             let holds = holds.clone();

@@ -67,6 +67,15 @@ pub struct Pace {
     /// choice one phase along, and a caller standing a server up sets all of
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
+
+    /// How long a Hold stands before the human's devices are told about it.
+    ///
+    /// A reminder rather than a deadline: nothing ends when it passes — see
+    /// [`crate::push::when_it_has_stood`] — and it is here for the reason
+    /// [`Pace::checks`] is, that a caller standing a server up sets every one of
+    /// these at once. Minutes, because the human who took the keyboard has only
+    /// just put the phone down.
+    pub holding: Duration,
 }
 
 impl Default for Pace {
@@ -75,6 +84,7 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
+            holding: crate::push::HELD_A_WHILE,
         }
     }
 }

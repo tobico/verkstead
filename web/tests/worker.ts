@@ -26,6 +26,13 @@ export interface Pane {
   /// Every message the worker has posted to this window, newest last.
   posted: unknown[];
   postMessage(message: unknown): void;
+  /// Every page the worker has sent this window to, newest last — which is what
+  /// a tapped notification does with the window it finds.
+  navigated: string[];
+  navigate(url: string): Promise<Pane>;
+  /// How many times the worker has brought this window to the front.
+  focused: number;
+  focus(): Promise<Pane>;
 }
 
 /// One notification, as the worker asked for it to be shown.
@@ -38,7 +45,9 @@ export interface Shown {
 export function worker() {
   const listeners = new Map<string, (event: never) => void>();
   const shown: Shown[] = [];
+  const closed: Shown[] = [];
   const panes: Pane[] = [];
+  const opened: Pane[] = [];
 
   const scope = {
     addEventListener: (name: string, listener: (event: never) => void) =>
@@ -56,7 +65,11 @@ export function worker() {
       // Handed the live array rather than a copy, so a window opened after the
       // worker was loaded is still one the worker finds.
       matchAll: vi.fn(() => Promise.resolve(panes)),
-      openWindow: vi.fn((url: string) => Promise.resolve(opens(url))),
+      openWindow: vi.fn((url: string) => {
+        const pane = opens(url);
+        opened.push(pane);
+        return Promise.resolve(pane);
+      }),
     },
   };
 
@@ -71,6 +84,17 @@ export function worker() {
       url,
       posted: [],
       postMessage: (message: unknown) => pane.posted.push(message),
+      navigated: [],
+      navigate: (to: string) => {
+        pane.navigated.push(to);
+        pane.url = to;
+        return Promise.resolve(pane);
+      },
+      focused: 0,
+      focus: () => {
+        pane.focused += 1;
+        return Promise.resolve(pane);
+      },
     };
     panes.push(pane);
     return pane;
@@ -102,6 +126,22 @@ export function worker() {
     await Promise.all(kept);
   }
 
+  /// The human taps a notification the worker has shown, awaited to the end of
+  /// everything the handler kept the worker alive for.
+  async function taps(notification: Shown): Promise<void> {
+    const kept: Array<Promise<unknown>> = [];
+
+    fire("notificationclick", {
+      notification: {
+        data: notification.options.data,
+        close: () => closed.push(notification),
+      },
+      waitUntil: (promise: Promise<unknown>) => kept.push(promise),
+    });
+
+    await Promise.all(kept);
+  }
+
   function fire(name: string, event: unknown): void {
     const listener = listeners.get(name);
     if (!listener) {
@@ -113,6 +153,11 @@ export function worker() {
   return {
     /// Every notification the worker has shown, in the order it showed them.
     shown,
+    /// Every notification the worker has closed, which is what tapping one does
+    /// before it opens anything.
+    closed,
+    /// Every window the worker opened for want of one already there.
+    opened,
     /// Every message the worker has posted to any open window, gathered across
     /// all of them.
     get relayed(): unknown[] {
@@ -120,5 +165,6 @@ export function worker() {
     },
     opens,
     pushes,
+    taps,
   };
 }
