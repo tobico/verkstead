@@ -37,11 +37,10 @@ view exactly as today.
   HTML; **unknown kinds render as collapsed raw JSON** — nothing hidden, so
   a format change shows itself instead of silently emptying the pane.
 - **Summaries and Interruption evidence switch to the latest assistant
-  text**, with the existing escape-stripper
-  (`crates/server/src/transcript.rs`) kept as the fallback when no
-  Transcript rows exist. That fallback is also the whole details-pane story
-  for log-less sessions — which is what keeps the stub-agent test suite
-  passing.
+  text**, with the existing escape-stripper (`crates/server/src/capture.rs`)
+  kept as the fallback when no Transcript rows exist. That fallback is also
+  the whole details-pane story for log-less sessions — which is what keeps
+  the stub-agent test suite passing.
 - Quiet-detection stays keyed on PTY output (the Capture), untouched by any
   of this.
 - TS wire types are generated from Rust via ts-rs (`web/src/api/types.ts` is
@@ -82,7 +81,7 @@ view exactly as today.
 - Spawn still happens in `Sessions::start` via `Agents::argv`
   (`crates/server/src/sessions.rs`) with `script` providing the PTY —
   stage 02 changes this, so confirm which landed first.
-- The relay's 500 ms flush and `store::append_transcript` shape are as
+- The relay's 500 ms flush and `store::append_capture` shape are as
   described in ADR 0006's context.
 - The nudge model is still invalidate-everything (ADR 0005) — the tailer
   needs no finer signal.

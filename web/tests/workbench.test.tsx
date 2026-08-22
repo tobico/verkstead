@@ -21,6 +21,7 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  Capture,
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
@@ -33,7 +34,7 @@ import type {
   SetView,
   Submitted,
   TimelineEvent,
-  Transcript,
+  TranscriptView,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
@@ -52,6 +53,7 @@ import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
+import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
@@ -1111,7 +1113,8 @@ describe("the panes on a narrow window", () => {
 /// The other shape the middle pane draws: a conversation that has been started,
 /// with a move on its timeline and a worktree to say where the work is going on.
 const GRILLING = grilling as ConversationView;
-const TRANSCRIPT = transcript as Transcript;
+const CAPTURE = capture as Capture;
+const TRANSCRIPT = transcript as TranscriptView;
 
 /// The session's output on the grilling conversation's timeline.
 const OUTPUT = (() => {
@@ -1123,17 +1126,44 @@ const OUTPUT = (() => {
 })();
 
 /// Where the details pane fetches the whole of it from.
+const CAPTURE_OF_IT = `/api/ui/conversations/${GRILLING.id}/capture/${OUTPUT.id}`;
+
+/// And where it fetches what the session was saying while it printed that.
 const TRANSCRIPT_OF_IT = `/api/ui/conversations/${GRILLING.id}/transcript/${OUTPUT.id}`;
+
+/// A session that kept no record of its own conversation, which is what the
+/// server says for every stub agent and every backend that writes no log — and
+/// what sends the pane to the Capture.
+const SAID_NOTHING: TranscriptView = { turns: [], bookkeeping: [] };
 
 /// The workbench with the grilling conversation open instead of the drafting
 /// one.
+///
+/// Its session left no Transcript, so this is the pane's fallback: the Capture,
+/// byte for byte, exactly as it was drawn before there was another record to
+/// draw. [`theSpeaking`] is the same conversation with one.
 function theGrilling(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    ...answers,
+  );
+}
+
+/// The same, with the session's own record of what it said — one of every kind
+/// of turn a log holds, which is what the fixture was written to be.
+function theSpeaking(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
     whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
     ...answers,
   );
 }
@@ -1157,7 +1187,8 @@ function theGrillingOutput(over: Partial<AgentOutputEvent>) {
       `/api/ui/conversations/${GRILLING.id}`,
       json({ ...GRILLING, timeline: altered }),
     ),
-    whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
   );
 }
 
@@ -1311,7 +1342,7 @@ describe("a session's output on the timeline", () => {
     );
     expect(output.querySelector(".latest")!.textContent).toBe(OUTPUT.latest);
 
-    // Nothing of the transcript itself: it is fetched by the pane that shows
+    // Nothing of the Capture itself: it is fetched by the pane that shows
     // it, and only once one is opened.
     expect(output.textContent).not.toContain("Reading the brief");
   });
@@ -1326,7 +1357,7 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(".live")!.textContent).toBe("running");
   });
 
-  /// A session that has ended is a conversation with a transcript, not one with
+  /// A session that has ended is a conversation with a Capture, not one with
   /// an agent in it — and the fixture is exactly that.
   it("says nothing about running when the session has ended", async () => {
     theGrilling();
@@ -1339,31 +1370,140 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(".live")).toBeNull();
   });
 
-  it("shows the whole transcript in the details pane, byte for byte", async () => {
+  /// The fallback, and the whole details-pane story for a session whose backend
+  /// keeps no log of itself: every stub agent the suite runs is one, and so is
+  /// every session that ran before Verkstead started following logs.
+  it("shows the whole capture in the details pane, byte for byte", async () => {
     const fetching = theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
 
-    const shown = await drawn(container, ".details-pane .transcript");
+    const shown = await drawn(container, ".details-pane .capture");
 
-    expect(shown.textContent).toBe(TRANSCRIPT.text);
+    expect(shown.textContent).toBe(CAPTURE.text);
+    expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// And what it shows instead wherever there is a Transcript: the conversation
+  /// the session was having, rather than the bytes it happened to draw.
+  it("shows the conversation where the session left one", async () => {
+    const fetching = theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const prose = await drawn(container, ".details-pane .turn.prose");
+
+    expect(prose.textContent).toContain("Looking at how the queue is drained");
+    // Rendered by the server and put in the page as markup, which is what puts
+    // no markdown parser on this side of the wire.
+    expect(prose.querySelector("strong")!.textContent).toBe("drained");
+    expect(container.querySelector(".details-pane .capture")).toBeNull();
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThan(0);
   });
 
-  /// The transcript belongs to the pane, and what the conversation is comes
+  /// The one a renderer keying off the line's own type gets wrong: a tool's
+  /// answer and a turn from the human arrive under the same type, and reading
+  /// a directory listing as though somebody had said it is the whole failure.
+  it("draws a turn put to it and a tool's answer as different things", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const put = await drawn(container, ".details-pane .turn.put");
+    const answered = await drawn(container, ".details-pane .turn.tool-result");
+
+    expect(put.textContent).toContain("What should the queue do");
+    expect(answered.textContent).toContain("crates/server/src/queue.rs");
+    expect(put).not.toBe(answered);
+  });
+
+  /// What a reader opened this for is what the agent said. What it was thinking
+  /// and what it ran are there to be opened rather than scrolled past.
+  it("opens with the reasoning and the tool calls folded away", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const reasoning = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.reasoning details",
+    );
+    const call = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.tool-use details",
+    );
+    const prose = await drawn(container, ".details-pane .turn.prose");
+
+    expect(reasoning.open).toBe(false);
+    expect(call.open).toBe(false);
+    // One line about the call, which is the tool and what it was for.
+    expect(call.querySelector("summary")!.textContent).toContain("Bash");
+    expect(call.querySelector("summary")!.textContent).toContain(
+      "Find where a delivery is retried",
+    );
+    expect(prose.querySelector("details")).toBeNull();
+  });
+
+  /// Roughly a third of a log is the backend's own bookkeeping. Folded rather
+  /// than dropped: nothing hidden, and nothing in the way.
+  it("folds the backend's bookkeeping into one group", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const kept = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .bookkeeping",
+    );
+
+    expect(kept.open).toBe(false);
+    expect(kept.querySelectorAll("li")).toHaveLength(
+      TRANSCRIPT.bookkeeping.length,
+    );
+    expect(kept.textContent).toContain("attachment");
+
+    // And not among the turns, which is what folding it away is for.
+    expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+      TRANSCRIPT.turns.length,
+    );
+  });
+
+  /// ADR 0006's containment, at the end of the wire: the log's format belongs to
+  /// somebody else, and one that has moved on should say so here rather than
+  /// quietly emptying the pane.
+  it("shows a line of a kind it does not know as the JSON it is", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const unread = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.unread details",
+    );
+
+    expect(unread.open).toBe(false);
+    expect(unread.querySelector("pre")!.textContent).toContain("divination");
+  });
+
+  /// The Capture belongs to the pane, and what the conversation is comes
   /// back when it is closed.
   it("goes back to the conversation's details when it is closed", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    await drawn(container, ".details-pane .transcript");
+    await drawn(container, ".details-pane .capture");
 
     fireEvent.click(await drawn(container, ".details-pane .close-event"));
 
     await drawn(container, ".details-pane .conversation-facts");
-    expect(container.querySelector(".details-pane .transcript")).toBeNull();
+    expect(container.querySelector(".details-pane .capture")).toBeNull();
   });
 
   /// A phone shows one level at a time, and opening an event is walking into
@@ -2539,7 +2679,7 @@ describe("a conversation blocked on the human", () => {
 });
 
 describe("an interruption's evidence", () => {
-  /// It rides on the event rather than being fetched, unlike a transcript or a
+  /// It rides on the event rather than being fetched, unlike a Capture or a
   /// diff: it is what the remedies are chosen against, and a pane that had to
   /// fetch it could draw the buttons before it could say what they were for.
   it("shows the worktree and the session's last words without another request", async () => {
@@ -2588,7 +2728,7 @@ describe("an interruption's evidence", () => {
 
   /// Read at the moment the run stopped and kept, because both move on — a
   /// worktree is a directory the human also has.
-  it("says the whole transcript is elsewhere", async () => {
+  it("says the whole capture is elsewhere", async () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
@@ -2597,7 +2737,7 @@ describe("an interruption's evidence", () => {
 
     const pane = await drawn(container, ".details-pane .evidence");
     expect(pane.closest(".details-pane")!.textContent).toContain(
-      "The whole transcript is the session's own event",
+      "The whole capture is the session's own event",
     );
   });
 });

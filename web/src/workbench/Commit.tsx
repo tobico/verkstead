@@ -1,7 +1,7 @@
 //! One commit, opened: its diff, in the details pane.
 //!
 //! Fetched here rather than carried by the Conversation, for the reason a
-//! transcript is: a diff is worth reading when somebody opens the one event it
+//! Capture is: a diff is worth reading when somebody opens the one event it
 //! belongs to, and the timeline is read again every time the page hears the
 //! world moved.
 //!

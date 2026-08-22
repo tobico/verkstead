@@ -126,9 +126,9 @@ stage: AdoptedStage | null, };
  * A session's output as the Timeline shows it: how much there is, the last
  * thing that was said, and whether more is coming.
  *
- * The summary and not the transcript. A grilling session prints megabytes over
+ * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
- * moved — so what a Conversation carries is these two lines, and the transcript
+ * moved — so what a Conversation carries is these two lines, and the Capture
  * is fetched by the pane that shows it.
  */
 export type AgentOutputEvent = { id: number, 
@@ -141,8 +141,9 @@ at: string,
  */
 lines: number, 
 /**
- * The last of them that said anything, with the terminal's own control
- * sequences taken out. Empty where nothing has been printed yet.
+ * The last thing the agent said, off its own log — or, where it kept none,
+ * the last line it printed with the terminal's control sequences taken
+ * out. Empty where it has said nothing yet.
  */
 latest: string, 
 /**
@@ -260,6 +261,19 @@ commit: string | null, };
 export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCommit";
 
 /**
+ * One line of the backend's own bookkeeping.
+ */
+export type Bookkeeping = { 
+/**
+ * What the log called it.
+ */
+kind: string, 
+/**
+ * The line itself.
+ */
+line: string, };
+
+/**
  * What the branch is to be called.
  */
 export type BranchRename = { branch: string, };
@@ -306,10 +320,26 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * One session's Capture, whole, as the details pane receives it.
+ *
+ * Byte for byte, control sequences and all: what a terminal was sent is what a
+ * session said, and a Capture that had been tidied up would be a record of
+ * something else.
+ *
+ * One thing in it is not the session's word, and says so where it appears: what
+ * `script` and bwrap wrote on the pipe beside the terminal, appended once the
+ * session is over. It is empty on every session that ran, and on one that never
+ * started it is the only account of why — which makes the Capture the place
+ * for it, being where somebody looking at a session that said nothing is
+ * already looking.
+ */
+export type Capture = { text: string, };
+
+/**
  * One commit's diff, as the details pane receives it.
  *
  * Its own request rather than a field on the Conversation, for the reason a
- * transcript is: a Timeline is read every time an open page hears the world
+ * Capture is: a Timeline is read every time an open page hears the world
  * moved, and a diff is read when somebody opens the one Event it belongs to.
  *
  * Rendered with the folds and the highlighting an attached Diff already gets,
@@ -574,10 +604,11 @@ how: string,
  */
 git_status: string, 
 /**
- * The tail of what the session printed, with the terminal's own control
- * sequences taken out. The tail and not the transcript: what went wrong is
- * at the end, and the whole of it is on the Timeline already as the session's
- * own Event. Empty where it printed nothing at all.
+ * The tail of what the session said: its own prose off the Transcript, or
+ * what it printed with the terminal's control sequences taken out where it
+ * kept no log. The tail and not the whole: what went wrong is at the end,
+ * and the whole of it is on the Timeline already as the session's own
+ * Event. Empty where it said nothing at all.
  */
 tail: string, 
 /**
@@ -771,6 +802,11 @@ direction: Direction,
 rationale_html: string, };
 
 /**
+ * The agent's prose, rendered.
+ */
+export type Prose = { html: string, };
+
+/**
  * One comment on a pull request: who said it, when, and what they said.
  *
  * The body arrives rendered, like everything else an outsider wrote — a comment
@@ -868,6 +904,11 @@ url: string, };
 export type PushKey = { key: string, };
 
 /**
+ * A turn put to the agent, rendered.
+ */
+export type Put = { html: string, };
+
+/**
  * A Question Set as the Timeline shows it: what it was called, the table of
  * what was asked against what was decided, and where it stands.
  *
@@ -927,6 +968,11 @@ heading: boolean,
  * Sub-questions have none, because the nav does not list them.
  */
 nav_text: string, };
+
+/**
+ * The agent's reasoning, rendered.
+ */
+export type Reasoning = { html: string, };
 
 /**
  * What became of a registration.
@@ -1215,20 +1261,58 @@ tasks: Array<TaskEntry>, };
 export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
 
 /**
- * One session's transcript, whole, as the details pane receives it.
- *
- * Byte for byte, control sequences and all: what a terminal was sent is what a
- * session said, and a transcript that had been tidied up would be a record of
- * something else.
- *
- * One thing in it is not the session's word, and says so where it appears: what
- * `script` and bwrap wrote on the pipe beside the terminal, appended once the
- * session is over. It is empty on every session that ran, and on one that never
- * started it is the only account of why — which makes the transcript the place
- * for it, being where somebody looking at a session that said nothing is
- * already looking.
+ * What a tool answered.
  */
-export type Transcript = { text: string, };
+export type ToolResult = { 
+/**
+ * Whether the tool failed.
+ */
+failed: boolean, 
+/**
+ * What it said, as it said it.
+ */
+text: string, };
+
+/**
+ * A tool call, as one line plus what it was called with.
+ */
+export type ToolUse = { 
+/**
+ * What the tool is called.
+ */
+name: string, 
+/**
+ * The one line about it. Empty where the call said nothing this could
+ * summarise, which leaves the name standing on its own.
+ */
+about: string, 
+/**
+ * What it was called with, whole.
+ */
+input: string, };
+
+/**
+ * One session's Transcript as the details pane receives it.
+ */
+export type TranscriptView = { 
+/**
+ * The conversation, in the order it happened.
+ */
+turns: Array<Turn>, 
+/**
+ * Everything that was not the conversation.
+ */
+bookkeeping: Array<Bookkeeping>, };
+
+/**
+ * One thing that was said, or done, or put.
+ */
+export type Turn = { "Prose": Prose } | { "Reasoning": Reasoning } | { "ToolUse": ToolUse } | { "ToolResult": ToolResult } | { "Put": Put } | { "Unread": Unread };
+
+/**
+ * A line nothing here knows how to draw.
+ */
+export type Unread = { line: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

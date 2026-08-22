@@ -2840,6 +2840,7 @@ dependencies = [
  "ammonia",
  "pulldown-cmark",
  "serde",
+ "serde_json",
  "syntect",
  "time",
  "ts-rs",

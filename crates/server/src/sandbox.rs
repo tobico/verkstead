@@ -280,9 +280,9 @@ fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
 /// see.
 ///
 /// Built rather than run — [`Sandbox::command`] hands back a [`Command`] for the
-/// caller to spawn, because what a session needs around it (a pty, a captured
-/// transcript) is the next stage's business and none of it belongs in a mount
-/// table.
+/// caller to spawn, because what a session needs around it (a pty, a Capture
+/// being written) is the next stage's business and none of it belongs in a
+/// mount table.
 #[derive(Debug, Clone)]
 pub struct Sandbox {
     /// The Conversation's worktree, read-write, and the directory the command

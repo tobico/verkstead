@@ -1407,10 +1407,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // It reads as a session that has stopped: the fixture is a payload rather
     // than a moment, and a running one would be a page drawing a spinner over
     // something that has not moved since 2026.
-    let transcript = store::start_transcript(&pool, grilling).await.unwrap();
-    store::append_transcript(
+    let capture = store::start_capture(&pool, grilling, None).await.unwrap();
+    store::append_capture(
         &pool,
-        transcript,
+        capture,
         "\u{1b}[2mReading the brief.\u{1b}[0m\r\n\
          Looking at how the queue is drained.\r\n\
          What should happen to a delivery that has failed forty times?\r\n",
@@ -1418,6 +1418,27 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             lines: 3,
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
+    )
+    .await
+    .unwrap();
+
+    // And the session's own record of what it was saying while it printed that,
+    // which is what the pane draws instead of the bytes wherever there is one.
+    // The lines are the shape a backend writes them in, because that is what the
+    // renderer reads — and one of everything, because what the pane has to draw
+    // is one of everything.
+    store::append_transcript(
+        &pool,
+        capture,
+        &[
+            r#"{"type":"user","message":{"role":"user","content":"What should the queue do with a delivery that keeps failing?"}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"Forty attempts is not a retry policy, it is a loop.","signature":"..."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Looking at how the queue is **drained**."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Bash","input":{"command":"rg -n 'retry' crates/server/src","description":"Find where a delivery is retried"}}]}}"#.to_owned(),
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","is_error":false,"content":"crates/server/src/queue.rs:118:    retry(delivery).await;"}]}}"#.to_owned(),
+            r#"{"type":"attachment","attachment":{"type":"todos","content":"three things still to do"}}"#.to_owned(),
+            r#"{"type":"divination","omen":"a kind from a version nobody here has met"}"#.to_owned(),
+        ],
     )
     .await
     .unwrap();
@@ -1881,12 +1902,23 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     );
 
     // What the details pane fetches when that Conversation's output Event is
-    // opened. Nothing to pin: a transcript is bytes a session printed.
+    // opened. Nothing to pin: a Capture is bytes a session printed.
+    write(
+        "capture.json",
+        &get(
+            &app,
+            &format!("/api/ui/conversations/{grilling}/capture/{capture}"),
+        )
+        .await,
+    );
+
+    // And what that pane draws instead wherever the session left a record of its
+    // own conversation, which is the same Event read the other way.
     write(
         "transcript.json",
         &get(
             &app,
-            &format!("/api/ui/conversations/{grilling}/transcript/{transcript}"),
+            &format!("/api/ui/conversations/{grilling}/transcript/{capture}"),
         )
         .await,
     );

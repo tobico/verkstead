@@ -7,6 +7,9 @@ rust-version.workspace = true
 [dependencies]
 verkstead-schema.workspace = true
 serde.workspace = true
+# Reading the Transcript, which is JSONL a session's backend wrote — see the
+# `transcript` module for why the reading is here and not on the way in.
+serde_json.workspace = true
 # The clock and the calendar behind the two dates the viewer is handed already
 # worded — a pending Set's age and a settled one's day. Both sides of the wire
 # need the wording, and neither needs a date library to read it.

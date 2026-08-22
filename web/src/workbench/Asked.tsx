@@ -2,7 +2,7 @@
 //! where it stands.
 //!
 //! Fetched here rather than carried by the Conversation, for the reason the
-//! transcript is: the two are different sizes. The Timeline carries the table of
+//! Capture is: the two are different sizes. The Timeline carries the table of
 //! what was asked against what was decided and is re-read every time the page
 //! hears the world moved; the document — the Preface, every Option of every
 //! Question, and the whole uncommitted Diff of the repository it was asked from —

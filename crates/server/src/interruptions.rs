@@ -41,9 +41,9 @@ const STATUS_LINES: usize = 40;
 
 /// And how much of what the session last said.
 ///
-/// The tail rather than the transcript: what went wrong is at the end, and the
-/// whole of it is on the Timeline already as the session's own Event, one row up
-/// from this one.
+/// The tail rather than the whole: what went wrong is at the end, and the whole
+/// of it is on the Timeline already as the session's own Event, one row up from
+/// this one.
 const TAIL_LINES: usize = 40;
 
 /// Stop the run: gather what went wrong and put it on the Timeline.
@@ -148,17 +148,44 @@ fn status(worktree: &Path) -> String {
     shorten(&said, STATUS_LINES, "path")
 }
 
-/// The tail of what the failed session printed, tidied for reading.
+/// The tail of what the failed session said, for the human reading the
+/// Interruption on a phone.
 ///
-/// Empty where there is nothing to read: a step nothing could be launched for, or
-/// a session that printed nothing at all before it went.
+/// The agent's own prose off its Transcript where it kept one. That is the
+/// evidence somebody wants: an agent that gave up says why in a sentence, and
+/// the terminal underneath that sentence is a display of it — boxes, colours and
+/// a status bar — that says the same thing at ten times the length.
+///
+/// The Capture where there is no Transcript, tidied of the terminal's own
+/// sequences. That is every session on a backend keeping no log, and for those
+/// it is the whole record rather than a lesser one.
+///
+/// Empty where there is nothing to read at all: a step nothing could be launched
+/// for, or a session that went without a word.
 async fn session_tail(state: &AppState, conversation_id: i64, writing: Option<i64>) -> String {
     let Some(event_id) = writing else {
         return String::new();
     };
 
     match store::transcript(&state.pool, conversation_id, event_id).await {
-        Ok(Some(transcript)) => crate::transcript::tail(&transcript, TAIL_LINES),
+        Ok(Some(lines)) => {
+            let said = verkstead_render::statements(&lines);
+
+            if !said.is_empty() {
+                // A blank line between statements, because that is what they
+                // are: an agent's turns are paragraphs of markdown and running
+                // two of them together would read as one.
+                return shorten(&said.join("\n\n"), TAIL_LINES, "line");
+            }
+        }
+        Ok(None) => return String::new(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, event_id, "reading a failed session's Transcript failed");
+        }
+    }
+
+    match store::capture(&state.pool, conversation_id, event_id).await {
+        Ok(Some(capture)) => crate::capture::tail(&capture, TAIL_LINES),
         Ok(None) => String::new(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, event_id, "reading what a failed session said failed");

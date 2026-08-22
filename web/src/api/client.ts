@@ -13,6 +13,7 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
+  Capture,
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
@@ -37,7 +38,7 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
-  Transcript,
+  TranscriptView,
   UpdateNotice,
 } from "./types";
 
@@ -148,16 +149,28 @@ export function loadConversation(id: string): Promise<ConversationView> {
 /// Fetched by the pane that shows it rather than carried by the Conversation: a
 /// session prints megabytes over an hour, and the Timeline is read again every
 /// time this page hears the world moved.
+export function loadCapture(id: number, event: number): Promise<Capture> {
+  return get<Capture>(`/api/ui/conversations/${id}/capture/${event}`);
+}
+
+/// And what it said, as a conversation.
+///
+/// The same Event read the other way: the Capture is how the session looked and
+/// this is what it was saying, parsed and rendered by the server out of the
+/// lines its own backend wrote. A session that left no such record comes back
+/// with nothing in it, which is what sends the pane to the Capture.
 export function loadTranscript(
   id: number,
   event: number,
-): Promise<Transcript> {
-  return get<Transcript>(`/api/ui/conversations/${id}/transcript/${event}`);
+): Promise<TranscriptView> {
+  return get<TranscriptView>(
+    `/api/ui/conversations/${id}/transcript/${event}`,
+  );
 }
 
 /// One commit's diff, rendered.
 ///
-/// Fetched by the pane that shows it for the transcript's reason, and read out
+/// Fetched by the pane that shows it for the Capture's reason, and read out
 /// of the repository by the server rather than out of its database: the commit
 /// is in git, which is what a commit is.
 export function loadCommitDiff(

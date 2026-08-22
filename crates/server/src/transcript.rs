@@ -1,403 +1,283 @@
-//! Reading a session's output as it arrives: bytes off a pseudo-terminal turned
-//! into the transcript that is kept and the summary the Timeline shows.
+//! Following the log a session keeps of its own conversation, and putting every
+//! line of it on the Transcript as it is written.
 //!
-//! Kept as it was printed, control sequences and all. What the session sent a
-//! terminal is what the session said, and a transcript that had been tidied on
-//! the way in would be a record of something else — so the tidying happens here,
-//! for the one line the Timeline shows, and nowhere else.
+//! The log is the agent's own file, in the agent's own format, and Verkstead is
+//! a reader of it rather than a party to it. So it is found rather than
+//! computed: Verkstead named the session before it started it (see
+//! [`crate::sessions`]), and the file named for that session is looked for
+//! inside the Agent Profile's `projects` directory. The alternative is working
+//! out where the backend would have put it, which means reimplementing a private
+//! algorithm belonging to somebody else's program (ADR 0006).
 //!
-//! What the sandbox's own plumbing said goes through this too, though it came off
-//! a pipe rather than the terminal — see `plumbing` in [`crate::sessions`]. It
-//! is written down like anything else a session produced, which is what makes it
-//! count towards the lines the Timeline shows and become the last thing said: a
-//! session that failed to start is one whose summary should be the reason.
+//! Lines go to the store exactly as they were written, and nothing here parses
+//! one. That is what holds the coupling to somebody else's file format down to
+//! whoever renders it: a format that changes can leave a line nothing knows how
+//! to draw, and it can never lose what was said. The one thing read back out of
+//! a batch on its way past is the last thing the agent said, which the Timeline
+//! row is summarised by — and even that is read by the crate with the parser in
+//! it rather than here.
 //!
-//! Both jobs need the same thing, which is why they are one type: a reading that
-//! remembers where it got to. Bytes arrive in chunks that fall wherever the
-//! kernel put them — through the middle of a character, through the middle of a
-//! line, through the middle of an escape sequence — and none of the three can be
-//! made sense of a chunk at a time.
+//! Following is plain polling, on the cadence the byte relay already flushes on
+//! — the relay is awake on that interval anyway, and a file watcher would be a
+//! second mechanism to get wrong for a file the same loop is already waiting on.
+//!
+//! A session that writes no log is followed the same way and stores nothing.
+//! That is the stub agents the test suite runs, every backend that keeps no such
+//! record, and every session Verkstead could not name: all of them are read back
+//! off the Capture instead, which is a complete record on its own.
 
-use verkstead_store::Summary;
+use std::path::{Path, PathBuf};
 
-/// The longest a summarised line is worth carrying. A Timeline row shows one
-/// line of text, and a session that printed a thousand characters without a
-/// newline has not said a thousand characters' worth.
-const LATEST_LIMIT: usize = 200;
+use sqlx::SqlitePool;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-/// How much of an unfinished line to hold on to. Only a guard: output arrives
-/// in lines, and a session that printed megabytes without one is a session
-/// whose earliest bytes are not what the Timeline is going to show.
-const LINE_LIMIT: usize = 64 * 1024;
+use crate::nudge::Nudges;
+use crate::store;
 
-/// One session's output, read as far as it has arrived.
-#[derive(Debug, Default)]
-pub(crate) struct Reading {
-    /// Bytes that are the beginning of a character whose rest has not arrived.
-    pending: Vec<u8>,
+/// One session's log, read as far as it has been written.
+///
+/// The whole of what following means is remembering where it got to: the log is
+/// appended to while a session runs, and each poll takes what has arrived since
+/// the last one.
+pub(crate) struct Tail {
+    /// Where the Agent Profile keeps its logs, one directory per project.
+    projects: PathBuf,
 
-    /// The line being printed now, as it stands.
-    current: String,
+    /// What Verkstead named this session, which is what the file is called.
+    session: String,
 
-    /// How many lines have been finished.
-    lines: i64,
+    /// The log itself, once it has been found. A session writes its log when it
+    /// starts talking rather than when it starts, so the first few polls of a
+    /// real session ordinarily find nothing.
+    log: Option<PathBuf>,
 
-    /// The last finished line that said anything, tidied.
-    latest: String,
+    /// How much of it has been read.
+    read: u64,
+
+    /// The beginning of a line whose end has not been written yet.
+    ///
+    /// A poll lands wherever the session had got to, which is regularly the
+    /// middle of a line — and half a line is not something to keep, because a
+    /// reader would take it for a whole one. Held in bytes rather than text
+    /// because the same cut goes through characters as well as lines.
+    ///
+    /// Nothing bounds it but the line itself. A cap would have to either lose
+    /// bytes or store a torn line, and both are worse than holding one line of
+    /// a file the agent wrote.
+    partial: Vec<u8>,
+
+    /// Lines that are whole and not yet stored. Kept rather than dropped where
+    /// the store refuses them, for the reason the Capture's flush keeps its own:
+    /// a store that is briefly unwritable should cost latency rather than a hole
+    /// in a record nothing can go back and fill.
+    pending: Vec<String>,
+
+    /// The last thing the agent said in its own words, as far as the log has
+    /// been followed. What the Timeline row reads — see
+    /// [`crate::capture::Reading::summary`].
+    ///
+    /// `None` until it says something, which is most of a session's first
+    /// minute and the whole of a session whose backend keeps no log.
+    latest: Option<String>,
 }
 
-impl Reading {
-    /// Take a chunk of a session's output: what it adds to the transcript, with
-    /// the summary moved on by it.
-    ///
-    /// What comes back is text rather than the bytes that went in, because that
-    /// is what is stored — and the difference between the two is only the
-    /// characters this had to wait for the rest of.
-    pub(crate) fn take(&mut self, bytes: &[u8]) -> String {
-        self.pending.extend_from_slice(bytes);
-
-        let text = decode(&mut self.pending);
-        self.follow(&text);
-
-        text
+impl Tail {
+    /// Follow the log of the session named `session`, run under `profile`.
+    pub(crate) fn of(profile: &store::Profile, session: &str) -> Tail {
+        Tail {
+            projects: profile.claude_dir.join("projects"),
+            session: session.to_owned(),
+            log: None,
+            read: 0,
+            partial: Vec::new(),
+            pending: Vec::new(),
+            latest: None,
+        }
     }
 
-    /// The last of it, once the session has stopped printing.
+    /// The last thing the agent said, for whoever is summarising the session.
+    pub(crate) fn latest(&self) -> Option<&str> {
+        self.latest.as_deref()
+    }
+
+    /// Take whatever the session has written since the last poll, and put the
+    /// whole lines of it on the Transcript.
     ///
-    /// Whatever is left of a character that never finished arriving becomes a
-    /// replacement character: the session has gone, so the rest of it is never
-    /// coming.
-    pub(crate) fn finish(&mut self) -> String {
+    /// Whether [`Tail::latest`] moved on, so that whoever is summarising the
+    /// session writes a row only where there is a new one to write.
+    pub(crate) async fn poll(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
+        if self.log.is_none() {
+            self.log = self.find().await;
+        }
+
+        if let Some(log) = self.log.clone() {
+            self.take(&log).await;
+        }
+
+        self.store(pool, nudges, event_id).await
+    }
+
+    /// Look for the log, and hand back where it is.
+    ///
+    /// `None` is the ordinary answer for most of a session's life: it is a
+    /// session that has not written anything yet, a backend that keeps no log,
+    /// and a Profile directory that has never been used. None of the three is
+    /// worth saying anything about, which is why nothing here is logged.
+    async fn find(&self) -> Option<PathBuf> {
+        let named = format!("{}.jsonl", self.session);
+
+        // Beside the project directories as well as inside one of them, because
+        // which of the two the backend chooses is the backend's business — what
+        // Verkstead knows is the directory it keeps them under and the name it
+        // gave the session.
+        let beside = self.projects.join(&named);
+        if is_file(&beside).await {
+            return Some(beside);
+        }
+
+        let mut projects = tokio::fs::read_dir(&self.projects).await.ok()?;
+
+        while let Ok(Some(project)) = projects.next_entry().await {
+            let inside = project.path().join(&named);
+
+            if is_file(&inside).await {
+                return Some(inside);
+            }
+        }
+
+        None
+    }
+
+    /// Read what has been appended to the log since last time, and split off the
+    /// lines of it that are finished.
+    async fn take(&mut self, log: &Path) {
+        let Ok(mut file) = tokio::fs::File::open(log).await else {
+            // The file was there when it was found and is not now, which is a
+            // Profile directory something else is tidying. The next poll looks
+            // again.
+            return;
+        };
+
+        if file
+            .seek(std::io::SeekFrom::Start(self.read))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        let mut arrived = Vec::new();
+
+        if let Err(error) = file.read_to_end(&mut arrived).await {
+            tracing::warn!(error = ?error, log = %log.display(), "reading a session's log failed");
+            return;
+        }
+
+        self.read += arrived.len() as u64;
+        self.partial.extend_from_slice(&arrived);
+
+        // A line ends at its newline, and the newline is the framing rather than
+        // anything the agent said — so it is what the line is split on and the
+        // only byte not kept. Decoded a whole line at a time, which is also what
+        // keeps a character the read cut in half out of the store.
+        while let Some(ends) = self.partial.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.partial.drain(..=ends).collect();
+
+            self.pending
+                .push(String::from_utf8_lossy(&line[..ends]).into_owned());
+        }
+    }
+
+    /// Put the finished lines on the Transcript, and tell whoever is watching
+    /// that they are there.
+    ///
+    /// One contentless Nudge for the batch, because that is all there is to say:
+    /// an open pane's answer to being nudged is to read everything again (ADR
+    /// 0005), so nothing finer would change what it does.
+    ///
+    /// Whether the batch carried something the agent said, which is what tells
+    /// the caller the summary has moved. A batch of tool calls has not.
+    async fn store(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if self.pending.is_empty() {
-            return String::new();
+            return false;
         }
 
-        let text = String::from_utf8_lossy(&std::mem::take(&mut self.pending)).into_owned();
-        self.follow(&text);
-
-        text
-    }
-
-    /// What the Timeline shows: how many lines, and the last thing said.
-    ///
-    /// The line being printed now counts as the latest where it has anything in
-    /// it, and is not counted in the total. A session goes quiet in the middle
-    /// of a line exactly when it has stopped to ask something, and a summary
-    /// that waited for the newline would say nothing at the one moment somebody
-    /// is reading it.
-    pub(crate) fn summary(&self) -> Summary {
-        let current = plain(&self.current);
-
-        Summary {
-            lines: self.lines,
-            latest: shorten(match current.is_empty() {
-                true => &self.latest,
-                false => &current,
-            }),
-        }
-    }
-
-    /// Move the summary on by text that has just arrived.
-    fn follow(&mut self, text: &str) {
-        let mut rest = text;
-
-        while let Some((line, tail)) = rest.split_once('\n') {
-            self.current.push_str(line);
-            self.lines += 1;
-
-            let plain = plain(&self.current);
-            if !plain.is_empty() {
-                self.latest = plain;
-            }
-
-            self.current.clear();
-            rest = tail;
-        }
-
-        self.current.push_str(rest);
-
-        if self.current.len() > LINE_LIMIT {
-            // On a character boundary, because what is being kept is text — and
-            // from the end, because the newest of it is what a summary is about.
-            let from = self
-                .current
-                .char_indices()
-                .map(|(at, _)| at)
-                .find(|at| *at >= self.current.len() - LINE_LIMIT / 2)
-                .unwrap_or(0);
-
-            self.current = self.current.split_off(from);
-        }
-    }
-}
-
-/// The characters at the front of `pending` that are whole, taken out of it.
-///
-/// What is left behind is the beginning of a character whose rest has not
-/// arrived — which is the whole reason this exists, a chunk boundary falling
-/// through the middle of one being the ordinary case rather than the strange
-/// one. Bytes that are not the beginning of anything become a replacement
-/// character and the reading goes on: a pseudo-terminal carries whatever was
-/// written to it, and one bad byte is not a session to give up on.
-fn decode(pending: &mut Vec<u8>) -> String {
-    let mut text = String::new();
-
-    loop {
-        match std::str::from_utf8(pending) {
-            Ok(whole) => {
-                text.push_str(whole);
-                pending.clear();
-                return text;
-            }
+        match store::append_transcript(pool, event_id, &self.pending).await {
             Err(error) => {
-                let good = error.valid_up_to();
+                tracing::error!(error = ?error, event_id, "keeping a session's Transcript failed");
+                false
+            }
+            Ok(()) => {
+                let said = latest(&self.pending);
+                let moved = said.is_some();
 
-                // Whole by `valid_up_to`'s own account, so there is nothing here
-                // to handle a failure of.
-                text.push_str(std::str::from_utf8(&pending[..good]).unwrap_or_default());
-
-                match error.error_len() {
-                    // The beginning of a character. Keep it for the next chunk.
-                    None => {
-                        pending.drain(..good);
-                        return text;
-                    }
-                    // Not one at all, and never going to be.
-                    Some(len) => {
-                        text.push(char::REPLACEMENT_CHARACTER);
-                        pending.drain(..good + len);
-                    }
+                if moved {
+                    self.latest = said;
                 }
+
+                self.pending.clear();
+                nudges.announce();
+
+                moved
             }
         }
     }
 }
 
-/// One line as it was left on the terminal: the escape sequences gone, and a
-/// carriage return read as what it does.
+/// The newest thing the agent said in a batch of Transcript lines, or `None`
+/// where the batch was all tools, thinking and bookkeeping.
 ///
-/// A carriage return sends the cursor back to the start of the line, so what
-/// follows one is what a reader sees — which is how a progress line that
-/// redrew itself forty times comes out as the fortieth. Approximate, and
-/// deliberately: a redraw shorter than what it drew over leaves the tail of the
-/// old text behind on a real terminal, and carrying that into a one-line
-/// summary would be carrying the noise rather than the message.
-fn plain(line: &str) -> String {
-    let mut plain = String::new();
-    let mut characters = line.chars().peekable();
-
-    while let Some(character) = characters.next() {
-        match character {
-            '\u{1b}' => skip_escape(&mut characters),
-            // Only where something follows it. A line off a pseudo-terminal
-            // ends `\r\n`, and that return goes back over nothing at all.
-            '\r' if characters.peek().is_some() => plain.clear(),
-            '\r' => {}
-            '\t' => plain.push(' '),
-            // Everything else the C0 range holds was an instruction to the
-            // terminal rather than something drawn on it.
-            character if (character as u32) < 0x20 || character == '\u{7f}' => {}
-            character => plain.push(character),
-        }
-    }
-
-    plain.trim().to_owned()
-}
-
-/// The last `lines` of a transcript that said anything, tidied of the terminal's
-/// own control sequences.
-///
-/// What an Interruption keeps as evidence. The tail and not the whole, because
-/// the whole is on the Timeline already as the session's own Event and this is
-/// meant to be readable on a phone — and tidied for the same reason the one-line
-/// summary is, a wall of cursor moves being a record of a display rather than of
-/// what was said.
-///
-/// A line that redrew itself comes out as its last state, exactly as [`plain`]
-/// leaves it: what a reader would have seen on the terminal is what a session
-/// said.
-pub(crate) fn tail(transcript: &str, lines: usize) -> String {
-    let mut said: Vec<&str> = transcript.split('\n').collect();
-
-    // A transcript ends with the newline of its last line, so the split leaves an
-    // empty piece behind that is not a line the session printed.
-    if said.last().is_some_and(|last| last.is_empty()) {
-        said.pop();
-    }
-
-    let tidied: Vec<String> = said
-        .iter()
-        .rev()
-        .map(|line| plain(line))
+/// The last line of the last statement rather than the whole of it. What reads
+/// this is one row of a Timeline, and an agent that wrote three paragraphs
+/// before asking a question has the question at the end of them — which is the
+/// half somebody glancing at the row came for.
+fn latest(lines: &[String]) -> Option<String> {
+    verkstead_render::statements(lines)
+        .last()?
+        .lines()
+        .map(str::trim)
         .filter(|line| !line.is_empty())
-        .take(lines)
-        .collect();
-
-    tidied.into_iter().rev().collect::<Vec<String>>().join("\n")
+        .next_back()
+        .map(str::to_owned)
 }
 
-/// Step over the escape sequence that has just begun, leaving the reading on
-/// whatever follows it.
-///
-/// Three shapes, which is all a terminal has. A control sequence — `ESC [` and
-/// the colours, cursor moves and clears that make up most of what an agent's
-/// display is — runs to a final byte in `@`–`~`. A string sequence — `ESC ]` and
-/// its four rarer siblings, which is how a window title or a hyperlink is set —
-/// runs to a bell or a string terminator. Everything else is `ESC`, however many
-/// intermediates, and one final character.
-fn skip_escape(characters: &mut std::iter::Peekable<std::str::Chars<'_>>) {
-    match characters.next() {
-        Some('[') => {
-            for character in characters.by_ref() {
-                if ('\u{40}'..='\u{7e}').contains(&character) {
-                    break;
-                }
-            }
-        }
-        Some(']' | 'P' | 'X' | '^' | '_') => {
-            while let Some(character) = characters.next() {
-                match character {
-                    '\u{7}' => break,
-                    // A string terminator: `ESC \`, of which the escape has
-                    // just been read and the backslash is next.
-                    '\u{1b}' => {
-                        characters.next();
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
-        // An intermediate, so the sequence runs on to its final character —
-        // `ESC ( B`, which is how a terminal is told to go back to ASCII, being
-        // the one an agent's display prints constantly.
-        Some('\u{20}'..='\u{2f}') => {
-            for character in characters.by_ref() {
-                if !('\u{20}'..='\u{2f}').contains(&character) {
-                    break;
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-/// A line cut to what a Timeline row can show, on a character boundary.
-fn shorten(line: &str) -> String {
-    match line.chars().count() > LATEST_LIMIT {
-        true => line.chars().take(LATEST_LIMIT).collect(),
-        false => line.to_owned(),
-    }
+/// Whether there is a file at `path`, asked without blocking the loop doing the
+/// asking.
+async fn is_file(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .is_ok_and(|found| found.is_file())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The transcript is what was printed, whatever the chunks it arrived in —
-    /// which is the whole of what "byte for byte" means from in here.
+    /// An agent writes what it is about to do, does it, and says how it went.
+    /// The row reads the last of those, and the end of it: what a session is
+    /// waiting on is the last thing it wrote, not the first.
     #[test]
-    fn a_character_split_across_two_chunks_is_one_character() {
-        let mut reading = Reading::default();
+    fn the_last_thing_said_is_the_end_of_the_last_thing_said() {
+        let lines = vec![
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}"#.to_owned(),
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The counter has no home.\n\nWhere should it live?"}]}}"#.to_owned(),
+        ];
 
-        let held = "héllo — ✓\n";
-        let bytes = held.as_bytes();
-
-        let mut kept = String::new();
-        for byte in bytes {
-            kept.push_str(&reading.take(&[*byte]));
-        }
-        kept.push_str(&reading.finish());
-
-        assert_eq!(kept, held, "a chunk boundary is not a character boundary");
+        assert_eq!(latest(&lines).as_deref(), Some("Where should it live?"));
     }
 
     #[test]
-    fn a_byte_that_is_no_character_at_all_does_not_stop_the_reading() {
-        let mut reading = Reading::default();
+    fn a_batch_of_nothing_but_tools_has_not_moved_what_was_said() {
+        let lines = vec![
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}"#.to_owned(),
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"limiter.md"}]}}"#.to_owned(),
+        ];
 
-        let kept = reading.take(b"before\xffafter\n");
-
-        assert_eq!(kept, "before\u{fffd}after\n");
-        assert_eq!(reading.summary().latest, "before\u{fffd}after");
+        assert_eq!(latest(&lines), None);
     }
 
     #[test]
-    fn the_summary_counts_the_lines_and_keeps_the_last_that_said_anything() {
-        let mut reading = Reading::default();
-
-        reading.take(b"first\r\nsecond\r\n\r\n");
-
-        let summary = reading.summary();
-        assert_eq!(summary.lines, 3, "a blank line is a line that was printed");
-        assert_eq!(
-            summary.latest, "second",
-            "the last line with anything in it is what there is to show"
-        );
-    }
-
-    /// A session goes quiet mid-line exactly when it has stopped to ask
-    /// something, which is the one moment somebody is reading the Timeline.
-    #[test]
-    fn a_line_still_being_printed_is_the_latest_statement() {
-        let mut reading = Reading::default();
-
-        reading.take(b"thinking\nWhat should happen when the queue is full?");
-
-        let summary = reading.summary();
-        assert_eq!(summary.lines, 1, "only the finished line is counted");
-        assert_eq!(summary.latest, "What should happen when the queue is full?");
-    }
-
-    #[test]
-    fn the_terminals_own_sequences_are_not_part_of_the_statement() {
-        let mut reading = Reading::default();
-
-        reading.take(b"\x1b[2m\x1b[38;5;244mdimmed\x1b[0m and bold\x1b[1m\x1b(B\n");
-
-        assert_eq!(reading.summary().latest, "dimmed and bold");
-    }
-
-    #[test]
-    fn an_operating_system_command_is_stepped_over_whole() {
-        let mut reading = Reading::default();
-
-        reading.take(b"\x1b]0;a title nobody printed\x07what was printed\n");
-
-        assert_eq!(reading.summary().latest, "what was printed");
-    }
-
-    /// A spinner redraws its line over and over. What it says is the last of
-    /// them, not all of them run together.
-    #[test]
-    fn a_line_that_redrew_itself_reads_as_the_last_drawing() {
-        let mut reading = Reading::default();
-
-        reading.take("Thinking.\rThinking..\rThinking…\n".as_bytes());
-
-        let summary = reading.summary();
-        assert_eq!(summary.latest, "Thinking…");
-        assert_eq!(summary.lines, 1, "one line, drawn three times");
-    }
-
-    #[test]
-    fn a_statement_longer_than_a_row_is_cut_to_one() {
-        let mut reading = Reading::default();
-
-        reading.take("x".repeat(LATEST_LIMIT * 2).as_bytes());
-
-        assert_eq!(reading.summary().latest.chars().count(), LATEST_LIMIT);
-    }
-
-    /// Everything printed is kept whatever the summary does with it — the
-    /// transcript is the record, and the summary is a line about it.
-    #[test]
-    fn nothing_is_dropped_from_what_is_kept() {
-        let mut reading = Reading::default();
-
-        let printed = "\x1b[2mdim\x1b[0m\r\nplain\r";
-        let kept = reading.take(printed.as_bytes());
-
-        assert_eq!(kept, printed);
+    fn a_session_that_keeps_no_log_has_nothing_to_say_for_itself() {
+        assert_eq!(latest(&[]), None);
     }
 }

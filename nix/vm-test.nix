@@ -194,7 +194,7 @@ testers.runNixOSTest {
         "d /srv/repos 0755 root root -"
         "d /home/watched 0755 root root -"
         # The Agent Profile's pair, owned by the service because a session
-        # writes its own transcripts and settings into it. The repository a
+        # writes its own session logs and settings into it. The repository a
         # Conversation is grilled about is deliberately not here: `committed`
         # makes that one as root and hands it over afterwards, since git refuses
         # to work in a repository belonging to somebody else whichever way round

@@ -13,7 +13,7 @@
 //! the worktree, and the tail of what the session last said.
 //!
 //! The evidence rides on the event rather than being fetched, unlike a
-//! transcript or a diff. It was bounded when it was gathered, and it is what the
+//! Capture or a diff. It was bounded when it was gathered, and it is what the
 //! remedies are chosen against — a pane that had to fetch it could draw the
 //! buttons before it could say what they were for.
 //!
@@ -286,7 +286,7 @@ export function Evidence(props: {
           <pre class="tail">{props.stopped.tail}</pre>
         </Show>
         <p class="note">
-          The tail of it, as it stood when the run stopped. The whole transcript
+          The tail of it, as it stood when the run stopped. The whole capture
           is the session's own event, further up the timeline.
         </p>
       </section>

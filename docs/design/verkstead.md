@@ -187,7 +187,7 @@ flowchart LR
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), reusing existing auth. Agents keep using `gh` inside
   the sandbox for push/PR as today.
-- **Full transcripts** are stored per session; the timeline event summarizes
+- **Full Captures** are stored per session; the timeline event summarizes
   (line count + latest statement), the details pane shows everything.
 
 ## UI
@@ -200,7 +200,7 @@ Timeline events:
 | Event | In timeline | In details pane |
 |---|---|---|
 | Brief | inline, always | — |
-| Agent output | line count + latest statement | full transcript |
+| Agent output | line count + latest statement | full Capture |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |
@@ -227,7 +227,8 @@ it combining a whole-repo rename with a process supervisor.
 1. **Workbench** — rename; watched paths and repo registration;
    conversations, briefs and the 3-pane shell; agent profiles.
 2. **Grilling** — worktrees and the bwrap sandbox; grilling sessions with
-   captured transcripts; question sets in the timeline (blocking asks only).
+   Captures of what they printed; question sets in the timeline (blocking
+   asks only).
 3. **Implementation** — direction step, inline and task-list execution,
    commit events with diffs, auto-advance.
 4. **Wrap-up** — PR events, gh integration, CI monitoring, the wrap-up loop,

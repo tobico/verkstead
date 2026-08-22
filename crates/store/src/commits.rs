@@ -6,7 +6,7 @@
 //! pane shows its diff.
 //!
 //! The summary is held here rather than read back out of git every time a page
-//! looks, for the reason a transcript's is: every open page reads the whole
+//! looks, for the reason a Capture's is: every open page reads the whole
 //! Timeline, and a repository asked once per commit per read would be a git
 //! process per row of it. The diff itself is *not* held, and that is the other
 //! half of the same judgement — it is megabytes the Timeline never shows, and
@@ -52,7 +52,7 @@ pub struct Commit {
     pub deletions: i64,
 }
 
-/// The commits table. It hangs off a Timeline Event, as a transcript does: a
+/// The commits table. It hangs off a Timeline Event, as a Capture does: a
 /// commit is one Event's full self, and the Event is what a Timeline holds.
 ///
 /// The Conversation is on the row as well as on the Event above it, which is
@@ -183,7 +183,7 @@ pub async fn recorded_commits(pool: &SqlitePool, conversation_id: i64) -> Result
 /// Conversation has no such Event.
 ///
 /// The Conversation is part of the question rather than trusted from the path,
-/// exactly as a transcript's is: a commit is reached through the Timeline it is
+/// exactly as a Capture's is: a commit is reached through the Timeline it is
 /// on, and an Event id belonging to another Conversation names nothing here.
 pub async fn commit(
     pool: &SqlitePool,

@@ -206,7 +206,7 @@ pub enum Settling {
     Settled,
 
     /// This Conversation has no such Interruption. An Event id belonging to
-    /// another Conversation names nothing here, exactly as a transcript's does.
+    /// another Conversation names nothing here, exactly as a Capture's does.
     NoSuchInterruption,
 
     /// It was settled already — from another device, or by a second press. Not
@@ -356,7 +356,7 @@ pub async fn open_interruption(pool: &SqlitePool, conversation_id: i64) -> Resul
 /// Conversation has no such Event.
 ///
 /// The Conversation is part of the question rather than trusted from the path,
-/// exactly as a transcript's and a commit's are: an Interruption is reached
+/// exactly as a Capture's and a commit's are: an Interruption is reached
 /// through the Timeline it is on.
 pub async fn interruption(
     pool: &SqlitePool,

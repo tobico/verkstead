@@ -12,7 +12,7 @@
 //! store, on the single path the browser's submit and the agent's both take, so
 //! listening to it here is what makes it impossible to Nudge about a settlement
 //! from one namespace and silently not from the other. Everything else that
-//! moves — a Set arriving, a session printing another line of its transcript —
+//! moves — a Set arriving, a session printing another line of its Capture —
 //! is announced on [`Nudges`], which is the channel for what the store has no
 //! reason to know has happened.
 //!
@@ -49,7 +49,7 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 ///
 /// The counterpart to the store's `Settlements`, for the changes that have
 /// nowhere else to come from. Nothing waits on a Set arriving and nothing waits
-/// on a transcript growing, so until the viewer wanted to hear about them there
+/// on a Capture growing, so until the viewer wanted to hear about them there
 /// was nobody to tell.
 #[derive(Debug, Clone)]
 pub(crate) struct Nudges(broadcast::Sender<()>);

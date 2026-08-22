@@ -230,11 +230,11 @@ pub enum Event {
     /// Starting to grill and aborting both land here.
     Moved(Lifecycle),
 
-    /// A session's output, summarised. The whole of it is the transcript beside
-    /// it — see [`super::transcripts`] — which is what the details pane shows
+    /// A session's output, summarised. The whole of it is the Capture beside
+    /// it — see [`super::captures`] — which is what the details pane shows
     /// and what this is a line of.
     ///
-    /// The only Event whose body is not in the `body` column: a transcript is
+    /// The only Event whose body is not in the `body` column: a Capture is
     /// written a chunk at a time for as long as a session runs, and a column
     /// that was rewritten whole on every chunk would cost more the longer the
     /// session went on.
@@ -243,7 +243,7 @@ pub enum Event {
     /// A Question Set the session put to the human, with however far it has got.
     ///
     /// Its body is not in the `body` column either, and for a different reason
-    /// from the transcript's: a Set is already a row of its own in
+    /// from the Capture's: a Set is already a row of its own in
     /// `question_sets`, answered through the same tables whether it is reached
     /// through a Conversation or through `curl`. A second copy on the Timeline
     /// would be a second thing to keep true.
@@ -271,7 +271,7 @@ pub enum Event {
 
     /// A commit a session landed on the Conversation's branch, summarised.
     ///
-    /// Its body is not in the `body` column either, and for the transcript's
+    /// Its body is not in the `body` column either, and for the Capture's
     /// reason rather than the Set's: what a commit is worth saying about it is
     /// five separate facts, and a row of them is a row of them. The diff is in
     /// neither place — see [`super::commits`] — because the repository has it.
@@ -316,7 +316,7 @@ pub enum Event {
 /// how far it has got.
 ///
 /// The whole Set rather than a summary written down beside it, unlike the
-/// transcript's. What the Timeline shows of a Set is a table of its Questions
+/// Capture's. What the Timeline shows of a Set is a table of its Questions
 /// against their Answers, and both halves of that move — the Questions when the
 /// Set arrives and the Answers when the human replies — so a stored summary
 /// would be two write paths for one row. A Conversation's Sets are counted in
@@ -356,7 +356,7 @@ impl Event {
         match self {
             Self::Brief(markdown) => markdown,
             Self::Moved(state) => state.stored(),
-            // Nothing: what a session printed is in the transcript tables, and
+            // Nothing: what a session printed is in the Capture tables, and
             // what the Timeline shows of it is read back from there too.
             Self::AgentOutput(_) => "",
             // Nothing either, and for the nearer reason: a Set is a row in
@@ -364,7 +364,7 @@ impl Event {
             Self::QuestionSet(_) => "",
             Self::Directed(direction) => direction_stored(*direction),
             Self::Handoff(markdown) => markdown,
-            // Nothing, for the transcript's reason: what a commit is, is a row
+            // Nothing, for the Capture's reason: what a commit is, is a row
             // in `commits`.
             Self::Commit(_) => "",
             // Nothing either, and for the commit's reason.
@@ -395,7 +395,7 @@ impl Event {
             "brief" => Self::Brief(body),
             "moved" => Self::Moved(Lifecycle::read(&body)?),
             "agent-output" => Self::AgentOutput(
-                summary.ok_or_else(|| anyhow!("a session's output has no transcript beside it"))?,
+                summary.ok_or_else(|| anyhow!("a session's output has no Capture beside it"))?,
             ),
             QUESTION_SET => Self::QuestionSet(Box::new(
                 set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
@@ -1018,8 +1018,8 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// happened, and two Events stamped in the same millisecond must not come back
 /// in an arbitrary one.
 ///
-/// A transcript's summary is joined in rather than fetched per Event, and no
-/// transcript itself is: a Timeline is read every time an open page looks again,
+/// A Capture's summary is joined in rather than fetched per Event, and no
+/// Capture itself is: a Timeline is read every time an open page looks again,
 /// and what a session printed is megabytes the middle pane never shows.
 ///
 /// A Question Set's whole body *is* joined in, which is the one place this pays
@@ -1029,7 +1029,7 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Set would be a read for every Question the human has ever been put.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
-    /// transcript summary that is there for one kind of Event, the Set with
+    /// Capture summary that is there for one kind of Event, the Set with
     /// however it was settled that is there for another, and the commit that is
     /// there for a third.
     type Row = (
@@ -1052,11 +1052,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT e.id, e.at, e.kind, e.body, t.lines, t.latest,
+        "SELECT e.id, e.at, e.kind, e.body, cap.lines, cap.latest,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at,
                 c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
-         LEFT JOIN transcripts t ON t.event_id = e.id
+         LEFT JOIN captures cap ON cap.event_id = e.id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
