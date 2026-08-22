@@ -2131,7 +2131,7 @@ main:has(.workbench) {
    scroll would move the list the human is not reading. */
 @media (min-width: 60rem) {
   .workbench {
-    grid-template-columns: 20rem minmax(0, 1fr);
+    grid-template-columns: 15rem 1fr;
     height: 100dvh;
   }
 
@@ -2161,7 +2161,7 @@ main:has(.workbench) {
    to, so the ways between the panes go away. */
 @media (min-width: 80rem) {
   .workbench {
-    grid-template-columns: 20rem minmax(0, 1fr) 24rem;
+    grid-template-columns: 15rem 25rem 1fr;
   }
 
   .workbench > .pane {
