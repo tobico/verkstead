@@ -30,10 +30,11 @@ mod view;
 
 pub use answering::{Archived, Submitted};
 pub use conversations::{
-    AgentOutputEvent, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefEvent, BriefSaved, Capture, Comment, CommitDiff, CommitEvent, CommitSummary,
-    ConversationAborted, ConversationEntry, ConversationView, DirectedEvent, DirectionChoice,
-    DirectionChosen, GrillingStarted, HandoffEvent, InterruptionEvent, Lifecycle, MovedEvent,
+    AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
+    BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
+    BriefSaved, Capture, Comment, CommitDiff, CommitEvent, CommitSummary, ConversationAborted,
+    ConversationEntry, ConversationView, DirectedEvent, DirectionChoice, DirectionChosen,
+    GrillingStarted, HandoffEvent, InterruptionEvent, Lifecycle, MovedEvent, NewAdoption,
     NewConversation, NoticeEvent, PinnedEvent, ProposalView, PullRequestComment, PullRequestCommit,
     PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent, Remedy,
     RemedyChoice, RemedySettled, RemedyTaken, SetRow, StageEntry, StageListEvent, Started, Stopped,

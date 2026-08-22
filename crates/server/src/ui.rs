@@ -27,11 +27,11 @@ use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
-    Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted, ConversationEntry,
-    ConversationView, DirectionChoice, DirectionChosen, GrillingStarted, Lifecycle,
-    NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice,
-    RemedySettled, RepoEntry, SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe,
-    UpdateNotice,
+    Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
+    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
+    Lifecycle, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted, Subscribed,
+    Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -51,6 +51,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
         )
+        // The roadmaps in the registered Repos that nothing is driving, drawn
+        // as a notice under the new-conversation box. Beside the Conversations
+        // rather than under a Repo, because that is where it is read: what it
+        // offers is another way to start work.
+        .route("/api/ui/abandoned-roadmaps", get(abandoned_roadmaps))
+        // And starting one to adopt a roadmap with, which is what clicking a
+        // roadmap in that notice does. Its own endpoint rather than a field on
+        // the one above: adopting is the other way into the pipeline, and what
+        // it starts is a Conversation with no Brief to write.
+        .route("/api/ui/adoptions", post(start_adoption))
         .route("/api/ui/conversations/{id}", get(conversation))
         // One Event's full self, fetched by the pane that shows it rather than
         // carried by the Conversation — see [`capture`].
@@ -82,6 +92,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
+        // And the press that adopts a roadmap's next stage, which is the
+        // grilling start's sibling: what the human presses on an adopting
+        // Conversation, there being no Brief to write and no grilling to run.
+        .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
         // How the work gets built, once the grilling has proposed wrapping up.
         // What moved the Conversation here was a Question Set being answered —
@@ -339,6 +353,29 @@ async fn register_repo(
     }
 }
 
+/// `GET /api/ui/abandoned-roadmaps` — the registered Repos holding roadmaps
+/// nothing is driving, one notice each.
+///
+/// Read from the repositories every time it is asked for, like the pinned task
+/// and stage lists: the boxes and the branches are the repository's own answer
+/// about its roadmaps, and a list Verkstead kept would be a second opinion that
+/// went wrong the moment somebody ticked a box.
+///
+/// A Repo that cannot be read contributes nothing rather than failing the list.
+/// What this decides is whether to draw a notice, and a git that was briefly
+/// busy is no reason to say a roadmap has been abandoned.
+async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
+    let repos = match store::registered_repos(&state.pool).await {
+        Ok(repos) => repos,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading the registered Repos failed");
+            return unavailable("the registered Repos could not be read");
+        }
+    };
+
+    Json(crate::stages::abandoned(repos).await).into_response()
+}
+
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
@@ -371,6 +408,24 @@ async fn start_conversation(
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation failed");
+            unavailable("the Conversation could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/adoptions` — start a Conversation to adopt a roadmap with.
+///
+/// What clicking a roadmap in the abandoned-roadmaps notice does. It records
+/// and opens; nothing about the repository is touched, and nothing is adopted
+/// until the human presses Adopt on the page this puts them on.
+async fn start_adoption(
+    State(state): State<AppState>,
+    Json(new): Json<NewAdoption>,
+) -> HttpResponse {
+    match crate::conversations::start_adopting(&state.pool, new.repo_id, &new.roadmap).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
             unavailable("the Conversation could not be started")
         }
     }
@@ -518,6 +573,22 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
+    // And what this Conversation is adopting, where it is adopting anything:
+    // the roadmap named and the stage the Adopt press would start, read off the
+    // Repo at the base commit rather than out of any row. Only the roadmap's
+    // name is stored — see [`crate::stages::adopting`].
+    let adopting = match conversation.adopting.clone() {
+        None => None,
+        Some(roadmap) => Some(
+            crate::stages::adopting(
+                conversation.repo.clone(),
+                conversation.base_commit.clone(),
+                roadmap,
+            )
+            .await,
+        ),
+    };
+
     // What the grilling proposed on its way out, read off the Timeline for the
     // reason the Brief is: it is already here, and a second read would be a
     // second opinion about which proposal is in force.
@@ -568,6 +639,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         base_commit: conversation.base_commit,
         state: lifecycle(conversation.state),
         ready_to_grill,
+        adopting,
         grilling_profile,
         implementation_profile,
         worktree,
@@ -957,6 +1029,26 @@ async fn start_grilling(State(state): State<AppState>, Path(id): Path<String>) -
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a grilling failed");
             unavailable("the grilling could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/adopt` — take a roadmap's next stage and set
+/// it working.
+///
+/// The grilling start's sibling, and checked the same way: the page names the
+/// stage it read a moment ago, and a roadmap somebody has ticked, taken or
+/// finished since is answered here rather than there.
+async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Adopted::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::adopt(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
+            unavailable("the stage could not be adopted")
         }
     }
 }

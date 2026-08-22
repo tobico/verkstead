@@ -162,6 +162,14 @@ pub struct Conversation {
     /// Conversation that has not reached Direction has had nobody to choose, and
     /// one sitting in Direction is waiting for exactly this.
     pub direction: Option<Direction>,
+
+    /// Which roadmap this Conversation is adopting, where it is adopting one.
+    ///
+    /// `None` is every Conversation started from the new-conversation box: they
+    /// begin with a Brief and a grilling. `Some` is one started from the
+    /// abandoned-roadmaps notice, and the directory name inside is the whole of
+    /// what is stored about the roadmap — see [`start_adoption`].
+    pub adopting: Option<String>,
 }
 
 /// One row of the conversations sidebar, drawn without reading a Timeline.
@@ -668,6 +676,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage branches table")?;
 
+    // Which roadmap a drafting Conversation is adopting, where it is adopting
+    // one. A table of its own for the reason the direction is one: there is no
+    // migration machinery here and `conversations` is STRICT and left alone.
+    // One roadmap per Conversation by the primary key, and a Conversation that
+    // is adopting nothing has no row — which is every Conversation started from
+    // the new-conversation box.
+    //
+    // The roadmap's directory name and nothing else. What that roadmap says —
+    // its stages, its boxes, its briefs — is the repository's and is read back
+    // off it wherever it is wanted; a copy kept here would be a second opinion
+    // about a document Verkstead does not own.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS adoptions (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             roadmap         TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the adoptions table")?;
+
     Ok(())
 }
 
@@ -687,6 +716,43 @@ pub async fn start_conversation(
     pool: &SqlitePool,
     repo_id: i64,
     branch: &str,
+) -> Result<Option<i64>> {
+    started(pool, repo_id, branch, None).await
+}
+
+/// Start a Conversation adopting `roadmap` against a registered Repo, on
+/// `branch`, with an empty Brief already in its Timeline.
+///
+/// The same Conversation as any other, with one thing more written about it:
+/// which roadmap it is adopting. That mark is what the adoption-shaped page is
+/// drawn from, and it is the only thing about the roadmap that is Verkstead's —
+/// its stages, its boxes and its briefs are read back off the repository
+/// wherever they are wanted.
+///
+/// The roadmap is taken as given. Whether it is there and whether it has a
+/// stage to start are questions about a repository at a commit, answered where
+/// the repository is read and answered again when the human presses Adopt.
+pub async fn start_adoption(
+    pool: &SqlitePool,
+    repo_id: i64,
+    branch: &str,
+    roadmap: &str,
+) -> Result<Option<i64>> {
+    started(pool, repo_id, branch, Some(roadmap)).await
+}
+
+/// What both of them do: the row, its empty Brief, and the adoption mark where
+/// there is one to write.
+///
+/// All of it in one transaction. A Conversation whose Timeline was empty
+/// because the second insert failed would be one the human could not write
+/// anything into, and one that lost its mark to a third would be a Draft drawn
+/// on the wrong page.
+async fn started(
+    pool: &SqlitePool,
+    repo_id: i64,
+    branch: &str,
+    adopts: Option<&str>,
 ) -> Result<Option<i64>> {
     let mut tx = pool.begin().await.context("starting a Conversation")?;
 
@@ -710,6 +776,9 @@ pub async fn start_conversation(
     // Empty, because nothing has been written yet. It is an Event all the same:
     // the Brief is the first thing on the Timeline whether or not it says
     // anything, and the Timeline is where the human writes it.
+    //
+    // An adopting Conversation has nobody to write it: its Brief is the stage
+    // brief, and it arrives when the stage is adopted.
     let brief = Event::Brief(String::new());
     sqlx::query(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
@@ -721,6 +790,15 @@ pub async fn start_conversation(
     .execute(&mut *tx)
     .await
     .with_context(|| format!("writing the Brief of Conversation {id}"))?;
+
+    if let Some(roadmap) = adopts {
+        sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, ?)")
+            .bind(id)
+            .bind(roadmap)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("recording what Conversation {id} is adopting"))?;
+    }
 
     tx.commit().await.context("starting a Conversation")?;
 
@@ -824,6 +902,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
+        adopting: adopting(pool, id).await?,
     }))
 }
 
@@ -857,6 +936,22 @@ async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
             .with_context(|| format!("reading the direction of Conversation {id}"))?;
 
     row.map(|(word,)| direction_read(&word)).transpose()
+}
+
+/// Which roadmap a Conversation is adopting, where it is adopting one.
+///
+/// A read of its own beside the row, as the worktree and the direction are:
+/// almost no Conversation has one, and a `LEFT JOIN`'s worth of column would
+/// say nothing this small read does not.
+pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT roadmap FROM adoptions WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading what Conversation {id} is adopting"))?;
+
+    Ok(row.map(|(roadmap,)| roadmap))
 }
 
 /// Choose the Agent Profile the grilling session will run under.

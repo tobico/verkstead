@@ -17,12 +17,13 @@
 use ts_rs::TS;
 
 use crate::{
-    Archived, BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved,
-    Capture, CommitDiff, ConversationAborted, ConversationEntry, ConversationView, DirectionChoice,
-    DirectionChosen, GrillingStarted, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted,
-    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice,
+    AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
+    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
+    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
+    NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -56,8 +57,16 @@ fn the_viewers_types_are_written_from_these() {
     // own request shape and its own named outcome, because each of them is a
     // different sentence to put in front of the human.
     ConversationEntry::export_all(&config).unwrap();
+
+    // And what is offered beside the sidebar: the Repos holding roadmaps
+    // nothing is driving, which writes the roadmap inside it.
+    AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
+
+    // And starting one to adopt a roadmap with, which is the other way in — the
+    // Conversation it starts comes back inside the view above.
+    NewAdoption::export_all(&config).unwrap();
     Started::export_all(&config).unwrap();
     BriefEdit::export_all(&config).unwrap();
     BriefSaved::export_all(&config).unwrap();
@@ -71,6 +80,11 @@ fn the_viewers_types_are_written_from_these() {
     // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationAborted::export_all(&config).unwrap();
+
+    // And the press that starts an adopted stage, which is the grilling start's
+    // sibling: one Conversation, one branch, and every way of being refused
+    // named separately. It takes no request shape either.
+    Adopted::export_all(&config).unwrap();
 
     // How the work gets built, once the grilling has proposed wrapping up. The
     // recommendation and its reasoning ride on the `ConversationView` above,

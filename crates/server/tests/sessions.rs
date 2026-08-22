@@ -25,7 +25,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
+    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
     ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
     TaskListEvent, TimelineEvent, TranscriptView, Turn,
@@ -559,6 +559,91 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
+    let app = &bench.app;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_both_profiles(id).await;
+
+    let saved: BriefSaved = post(
+        app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let grilling: GrillingStarted = post(
+        app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// A workbench with a stub where claude goes and a registered repository in it,
+/// before any Conversation has been started against it.
+///
+/// The two ways in start from here and part company at the press: one writes a
+/// Brief and grills, and the other adopts a roadmap the repository already
+/// holds — see [`adopting`].
+struct Bench {
+    watched: tempfile::TempDir,
+    state: tempfile::TempDir,
+    home: tempfile::TempDir,
+    spill: tempfile::TempDir,
+    app: Router,
+    database: PathBuf,
+
+    /// The registered repository: where it is on disk, and the id a Conversation
+    /// is started against.
+    repo: PathBuf,
+    repo_id: i64,
+}
+
+impl Bench {
+    /// Fix both Profiles on a Conversation, which is what every one of these
+    /// has to have settled before anything will start in it.
+    async fn under_both_profiles(&self, id: i64) {
+        for role in ["grilling", "implementation"] {
+            let profile = profile(&self.app, self.watched.path(), role).await;
+            let chosen: verkstead_render::ProfileChosen = post(
+                &self.app,
+                &format!("/api/ui/conversations/{id}/{role}-profile"),
+                &serde_json::json!({ "profile_id": profile }),
+            )
+            .await;
+            assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
+        }
+    }
+
+    /// The fixture the tests read, once there is a Conversation running in it.
+    fn holding(self, id: i64) -> Grilling {
+        Grilling {
+            _watched: self.watched,
+            home: self.home,
+            state: self.state,
+            spill: self.spill,
+            app: self.app,
+            id,
+            database: self.database,
+        }
+    }
+}
+
+async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -603,51 +688,15 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     let repos: Vec<verkstead_render::RepoEntry> = get(&app, "/api/ui/repos").await;
     let repo_id = repos[0].id;
 
-    let started: Started = post(
-        &app,
-        "/api/ui/conversations",
-        &serde_json::json!({ "repo_id": repo_id }),
-    )
-    .await;
-    let Started::Started { id } = started else {
-        panic!("expected the Conversation to start, got {started:?}");
-    };
-
-    for role in ["grilling", "implementation"] {
-        let profile = profile(&app, watched.path(), role).await;
-        let chosen: verkstead_render::ProfileChosen = post(
-            &app,
-            &format!("/api/ui/conversations/{id}/{role}-profile"),
-            &serde_json::json!({ "profile_id": profile }),
-        )
-        .await;
-        assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
-    }
-
-    let saved: BriefSaved = post(
-        &app,
-        &format!("/api/ui/conversations/{id}/brief"),
-        &serde_json::json!({ "markdown": BRIEF }),
-    )
-    .await;
-    assert_eq!(saved, BriefSaved::Saved);
-
-    let grilling: GrillingStarted = post(
-        &app,
-        &format!("/api/ui/conversations/{id}/grill"),
-        &serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(grilling, GrillingStarted::Started);
-
-    Grilling {
-        _watched: watched,
-        home,
+    Bench {
+        watched,
         state,
+        home,
         spill,
         app,
-        id,
         database,
+        repo,
+        repo_id,
     }
 }
 
@@ -2721,6 +2770,29 @@ async fn until_written(path: &Path) -> String {
     }
 }
 
+/// The same, waiting until what is there says something in particular — for the
+/// tests where an earlier session has already written to the file, so that
+/// merely finding it there says nothing about the one being waited on.
+async fn until_written_saying(path: &Path, said: &str) -> String {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        if let Ok(written) = std::fs::read_to_string(path) {
+            if written.contains(said) {
+                return written;
+            }
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "no session ever wrote {said:?} to {}",
+            path.display(),
+        );
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// How many sessions wrote to one of those files.
 fn prompts(written: &str) -> Vec<&str> {
     written
@@ -4472,5 +4544,334 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     assert!(
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// A roadmap committed on the repository's default branch, as the old tools or
+/// a human left it: two stages, neither of them ticked, and a brief for each.
+///
+/// Committed rather than merely written, because that is the whole difference
+/// adoption is about — a roadmap no branch Verkstead knows ever touched, so
+/// nothing it reads on its own would ever start it.
+fn a_roadmap_already_committed(repo: &Path) {
+    let directory = repo.join("docs/roadmaps/rate-limiting");
+    std::fs::create_dir_all(&directory).unwrap();
+
+    std::fs::write(
+        directory.join("ROADMAP.md"),
+        "# Rate limiting roadmap\n\n## Stages\n\n\
+         - [ ] 01: Count the requests — [brief](01-counter.md)\n\
+         - [ ] 02: Refuse the rest — [brief](02-refusing.md)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("01-counter.md"),
+        "# 01. Count the requests\n\n## Goal\n\nA counter per key, and nothing else.\n",
+    )
+    .unwrap();
+    std::fs::write(directory.join("02-refusing.md"), "# 02. Refuse the rest\n").unwrap();
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-m", "docs: the roadmap as it stands"]);
+}
+
+/// A stub that does nothing but say which session it was and where it ran, for
+/// the tests about a stage that was adopted rather than staged.
+///
+/// Nothing here writes a plan: what is being asked is whether the press starts
+/// the planning session at all, and what it is primed with.
+fn plans_whatever_it_is_given(planning: &Path) -> String {
+    format!(
+        r#"
+printf 'model=%s\nwhere=%s\n%s\n' "$1" "$(pwd)" "$2" >> {planning}
+sleep 300
+"#,
+        planning = quoted(planning),
+    )
+}
+
+/// Stand a workbench up with a roadmap the repository already holds, and press
+/// Adopt on it.
+///
+/// The other way into the pipeline, and the shorter one: there is no Brief to
+/// write and no grilling to run, so what the human settles is the two Profiles
+/// and then presses once.
+async fn adopting(spill: tempfile::TempDir, stub: &str) -> Grilling {
+    adopting_asking(spill, stub, PULL_REQUEST).await
+}
+
+/// The same, with something else where `gh` goes — for the test that carries an
+/// adopted stage the whole way to a settled wrap-up.
+async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
+    let bench = bench(spill, stub, gh).await;
+
+    a_roadmap_already_committed(&bench.repo);
+
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/adoptions",
+        &serde_json::json!({ "repo_id": bench.repo_id, "roadmap": "rate-limiting" }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_both_profiles(id).await;
+
+    let adopted: Adopted = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/adopt"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(adopted, Adopted::Adopted);
+
+    bench.holding(id)
+}
+
+/// The whole of adopting: one press on a roadmap the repository already held,
+/// and the stage is running as a Conversation on its own branch — with the
+/// planning session the unattended path would have started, in the worktree the
+/// press made.
+///
+/// Nothing about that session is adoption's own. It is the same fork of
+/// next-stage a settling predecessor launches, under the same Profile, primed
+/// with the same document — which is the point: adoption is an entry into the
+/// pipeline rather than a pipeline of its own.
+#[tokio::test]
+async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting(spill, &plans_whatever_it_is_given(&planning)).await;
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.branch, "counter",
+        "the branch is the stage brief's own name, without its number",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "straight to Implementing: the human's press stands in for the stage before it",
+    );
+
+    let brief = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief.markdown.clone()),
+            _ => None,
+        })
+        .expect("a Conversation's first Event is its Brief");
+
+    assert!(
+        brief.contains("A counter per key, and nothing else."),
+        "primed with the stage brief itself: {brief:?}",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the Timeline says which stage of which roadmap was adopted: {said:?}",
+    );
+    assert!(
+        said.contains("<code>main</code>"),
+        "and where its branch came off: {said:?}",
+    );
+
+    // The worktree git made, which is where the session is running.
+    let worktree = PathBuf::from(view.worktree.expect("an adopted stage has a Worktree").path);
+
+    assert!(
+        worktree
+            .join("docs/roadmaps/rate-limiting/01-counter.md")
+            .exists(),
+        "the branch is checked out with the roadmap it was adopted from",
+    );
+
+    // The session itself: the bundled fork of next-stage, under the
+    // implementation Profile, in that worktree.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("model=claude-implementation-5"),
+        "an adopted stage plans under the implementation Profile: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("~/.claude/skills/next-stage/SKILL.md"),
+        "inside the bundled fork of next-stage: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("A counter per key, and nothing else."),
+        "primed with the stage brief: {prompt:?}",
+    );
+    assert!(
+        prompt.contains("not stacked on anything"),
+        "and told its branch stands on nothing: adoption never stacks: {prompt:?}",
+    );
+}
+
+/// A stub that carries a roadmap stage the whole way on its own: plans it, works
+/// the one task the plan wrote, finishes it, and reads the branch back finding
+/// nothing worth raising.
+///
+/// The plan commit is the piece the chain turns on, and it is written the way
+/// `/next-stage` writes one: `.tasks/`, plus the in-progress annotation naming
+/// the branch it is on. That annotation is what touches the roadmap — so the
+/// branch has written to `docs/roadmaps/` by the time the wrap-up settles, which
+/// is the only thing the carry-on path ever looks for.
+///
+/// Which stage it is planning it reads off the branch it is standing on, because
+/// that is the fact it has: a stage's branch is its brief's name, so the entry to
+/// annotate is the one whose link names it.
+fn a_stage_planned_and_worked_to_a_finish(planning: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*next-stage/SKILL.md*)
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    printf 'planned=%s\n' "$branch" >> {planning}
+    printf 'planning the stage\n'
+    mkdir -p .tasks
+    printf '# The stage\n\n## Tasks\n\n- [ ] 01: do the work — [details](01-do-the-work.md)\n' > .tasks/TODO.md
+    printf '# 01. do the work\n' > .tasks/01-do-the-work.md
+    sed -i "/-$branch.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
+    git add -A
+    git commit --quiet -m "chore: plan the $branch stage"
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'working %s\n' "$next"
+        printf 'a counter\n' >> counter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+    else
+        printf 'finishing\n'
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish the stage'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+    )
+}
+
+/// The join adoption rests on: an adopted stage that settles starts the stage
+/// after it, down the path a staged roadmap has always gone down.
+///
+/// Nothing was changed to make that happen, and that is the whole claim. Adopting
+/// starts *one* stage; that stage's own plan commit writes the roadmap's
+/// annotation onto its branch, which is what the carry-on path reads when the
+/// wrap-up settles — so from the first stage onwards an adopted roadmap is a
+/// staged one, and the entry point is all adoption ever had to be.
+#[tokio::test]
+async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // The adopted stage runs itself the rest of the way with nothing pressed:
+    // planned, worked, finished, reviewed, green.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        until_written_saying(&planning, "planned=counter")
+            .await
+            .contains("planned=counter"),
+        "the adopted stage is the one that was planned",
+    );
+
+    let next = stage_of(&fixture).await;
+
+    assert_eq!(
+        next.branch, "refusing",
+        "the stage after the adopted one, on a branch of its own",
+    );
+    assert_eq!(
+        next.state,
+        Lifecycle::Implementing,
+        "started the ordinary way, by the stage before it settling",
+    );
+    assert_eq!(
+        next.repo.path,
+        fixture.view().await.repo.path,
+        "against the same Repo the roadmap was adopted out of",
+    );
+
+    let brief = next
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief.markdown.clone()),
+            _ => None,
+        })
+        .expect("a Conversation's first Event is its Brief");
+
+    assert!(
+        brief.contains("Refuse the rest"),
+        "primed with the brief of the stage after the adopted one: {brief:?}",
+    );
+
+    // And the notice is the unattended path's own wording rather than adoption's:
+    // nobody pressed anything for this one.
+    let said = notices(&next).join("\n");
+
+    assert!(
+        said.contains("Stage 02") && said.contains("<code>rate-limiting</code>"),
+        "the stage says which stage of which roadmap it is: {said:?}",
+    );
+    assert!(
+        said.contains("with nobody asked"),
+        "and that nothing was pressed for it, unlike the stage before it: {said:?}",
+    );
+
+    // The Conversation that settled says what became of it, where the human who
+    // pressed Adopt would be looking.
+    let carried_on = fixture
+        .until(|view| {
+            let said = notices(view).join("\n");
+
+            said.contains("Stage 02").then_some(said)
+        })
+        .await;
+
+    assert!(
+        carried_on.contains("<code>refusing</code>"),
+        "the adopted Conversation says which stage started and on what: {carried_on:?}",
+    );
+
+    // And the session it started is the same fork of next-stage the adopted stage
+    // itself was planned by, this time with nobody at the workbench at all.
+    let planned = until_written_saying(&planning, "planned=refusing").await;
+
+    assert_eq!(
+        planned.matches("planned=").count(),
+        2,
+        "one planning session for the adopted stage and one for the stage after \
+         it: {planned:?}",
     );
 }

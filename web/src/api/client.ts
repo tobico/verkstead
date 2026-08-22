@@ -6,6 +6,8 @@
 //! the whole point of generating them is that there is only ever one.
 
 import type {
+  AbandonedRepo,
+  Adopted,
   ApiError,
   Archived,
   BaseRecorded,
@@ -99,6 +101,31 @@ export function listRepos(): Promise<RepoEntry[]> {
 /// the human.
 export function registerRepo(path: string): Promise<Registered> {
   return post<Registered>("/api/ui/repos", { path });
+}
+
+/// The registered Repos holding roadmaps nothing is driving.
+///
+/// Read again every time the sidebar is, because the server reads it again
+/// every time it is asked: the boxes and the branches are the repositories'
+/// own answer, and a roadmap somebody has picked up since simply stops being
+/// on the list.
+export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
+  return get<AbandonedRepo[]>("/api/ui/abandoned-roadmaps");
+}
+
+/// Start a Conversation to adopt one of those roadmaps with.
+///
+/// What clicking a roadmap in the notice does. The stage is not sent: which one
+/// is next is the roadmap's own answer at whatever commit the Conversation ends
+/// up branching from, and the page reads it back there.
+export function startAdoption(
+  repoId: number,
+  roadmap: string,
+): Promise<Started> {
+  return post<Started>("/api/ui/adoptions", {
+    repo_id: repoId,
+    roadmap,
+  });
 }
 
 /// The Conversations in the sidebar, newest first.
@@ -208,6 +235,16 @@ export function setBaseCommit(
 /// refuses for it decides itself when the button is pressed.
 export function startGrilling(id: number): Promise<GrillingStarted> {
   return post<GrillingStarted>(`/api/ui/conversations/${id}/grill`, {});
+}
+
+/// Adopt the roadmap an adopting conversation was started for: its next stage
+/// started, on its own branch, off this conversation's base commit.
+///
+/// Nothing is sent, for the reason nothing is sent to start a grilling: which
+/// conversation is in the path, and which stage is the roadmap's own answer at
+/// the base commit — read again by the server when the button is pressed.
+export function adoptRoadmap(id: number): Promise<Adopted> {
+  return post<Adopted>(`/api/ui/conversations/${id}/adopt`, {});
 }
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch

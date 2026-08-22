@@ -10,7 +10,10 @@
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
 //! somewhere to work — see [`start_grilling`] — and where the session that does
-//! the work is launched in it. Aborting is where both are given back: the
+//! the work is launched in it. Adopting is the same moment by the other door:
+//! a roadmap Verkstead did not write has its next stage started here, with the
+//! human's press standing in for the predecessor that would otherwise have
+//! started it — see [`adopt`]. Aborting is where both are given back: the
 //! session ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
@@ -18,8 +21,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen, GrillingStarted,
-    ProfileEntry, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen,
+    GrillingStarted, ProfileEntry, Started, Worktree,
 };
 use verkstead_schema::Direction;
 
@@ -27,6 +30,7 @@ use crate::AppState;
 use crate::handoffs::Handoffs;
 use crate::repos::git;
 use crate::skills;
+use crate::stages::Startable;
 use crate::store;
 use crate::worktrees;
 
@@ -39,6 +43,32 @@ use crate::worktrees;
 pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
     Ok(
         match store::start_conversation(pool, repo_id, &branch_name()).await? {
+            Some(id) => Started::Started { id },
+            None => Started::NoSuchRepo,
+        },
+    )
+}
+
+/// Start a Conversation to adopt `roadmap` in a registered Repo with.
+///
+/// The same start as any other, with the roadmap written beside it: that mark
+/// is what draws the adoption-shaped page, and it is the only thing about the
+/// roadmap Verkstead keeps. The branch name is the server's here too, and it is
+/// discarded at the press — a stage is worked on its own slug — so what it does
+/// is name the row in the sidebar until then.
+///
+/// The roadmap is taken as the notice gave it. Whether it is still there with a
+/// stage to start is a question about a repository at a commit, and it is asked
+/// where the page is drawn and asked again when Adopt is pressed: a roadmap
+/// somebody finished between the notice and the click is a thing to say on the
+/// page rather than a start to refuse.
+pub(crate) async fn start_adopting(
+    pool: &SqlitePool,
+    repo_id: i64,
+    roadmap: &str,
+) -> Result<Started> {
+    Ok(
+        match store::start_adoption(pool, repo_id, &branch_name(), roadmap).await? {
             Some(id) => Started::Started { id },
             None => Started::NoSuchRepo,
         },
@@ -467,7 +497,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
-        return Ok(refusal);
+        return Ok(refusal.grilling());
     }
 
     // Kept rather than only judged: it is what the session about to start is
@@ -560,6 +590,197 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     Ok(GrillingStarted::Started)
 }
 
+/// Take a roadmap Verkstead did not write and start its next stage: one press,
+/// and a drafting Conversation becomes the stage's own, on the stage's own
+/// branch, with a planning session running in it.
+///
+/// The human's press stands in for the settling predecessor that starts every
+/// other stage — see [`crate::continuing`], which does the same job at the other
+/// end of a roadmap. So what this does is [`crate::continuing::start`]'s
+/// sequence with the two differences adoption has: there is no predecessor
+/// Conversation, so nothing stacks and the branch comes off the base commit; and
+/// there is a human at the workbench, so what stops it is answered to the button
+/// by name rather than said as a notice to nobody.
+///
+/// **Every refusal is named, and they are checked cheap-first**, which is
+/// [`start_grilling`]'s order and for its reason: each of them is something
+/// different for the human to go and do, and the record's own state and its
+/// Profiles are answered before anything that costs a git call. Nothing is
+/// created and nothing is checked out for any of them.
+///
+/// **The stage is read again, here, at whatever the base resolves to.** What the
+/// page showed is a reading of a moment ago, and a roadmap is a document in a
+/// repository that anybody may have moved since — ticked the last box, taken the
+/// branch, started the stage by hand. Which is why *the roadmap has finished* is
+/// among the refusals at all.
+///
+/// **Then git, and then the store**, which is the order [`start_grilling`] does
+/// the same job in and for the same reason: a row saying a stage is under way
+/// with nothing checked out is a Conversation nothing can run and nothing will
+/// clean up, where a directory the store does not know about is a directory to
+/// tidy.
+///
+/// The Timeline gets both records — the stage brief as the Brief, and what was
+/// adopted from where — and the planning session comes last, exactly as it does
+/// for a stage a predecessor started. From the plan commit onwards there is
+/// nothing new: that commit touches the roadmap, so the stage after this one is
+/// carried on by the path that was already there.
+pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
+    let pool = &state.pool;
+    let watched = &state.watched;
+
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        return Ok(Adopted::NoSuchConversation);
+    };
+
+    if conversation.state != store::Lifecycle::Draft {
+        return Ok(Adopted::NotDrafting);
+    }
+
+    // The one thing about the roadmap that is Verkstead's, and the whole of what
+    // makes this Conversation an adopting one. Everything else about it is read
+    // back out of the repository.
+    let Some(roadmap) = conversation.adopting.clone() else {
+        return Ok(Adopted::NotAdopting);
+    };
+
+    // Both Profiles, before anything that costs a git call — the cheap answers
+    // first, which is the order [`start_grilling`] checks the same pair in. Read
+    // as rows rather than judged off the ids, because a Profile whose pair has
+    // gone is not one to run a session under and the id alone cannot say so.
+    //
+    // Both, rather than only the one the work runs under: a stage inherits both
+    // from its predecessor, so what this one is adopted with is what every stage
+    // after it starts with.
+    let grilling = crate::profiles::entry(watched, conversation.grilling_profile.clone()).await?;
+    let implementation =
+        crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
+
+    if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
+        return Ok(refusal.adopting());
+    }
+
+    // Where the stage branches from. The override where the human fixed one —
+    // which is how an unmerged predecessor is stacked on, that being their move
+    // rather than Verkstead's — and the default branch's tip where they did not.
+    let named = conversation
+        .base_commit
+        .clone()
+        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+    let repo = conversation.repo.path.clone();
+
+    // The reading, off the runtime's threads: resolving a commit and reading a
+    // roadmap out of a git directory are both blocking calls.
+    let read = tokio::task::spawn_blocking({
+        let repo = repo.clone();
+        let named = named.clone();
+
+        move || {
+            let Some(commit) = worktrees::resolve(&repo, &named) else {
+                return Err(Adopted::NoBaseCommit);
+            };
+
+            // The same rule the notice was drawn by and the page was drawn by,
+            // asked here at the base commit — and asked again, rather than
+            // taken from either, because a roadmap is a document anybody may
+            // have moved since. Which clause refused it is the answer to the
+            // button: each of them is a different thing to go and do about it.
+            match crate::stages::startable(&repo, &commit, &roadmap) {
+                Startable::Stage(abandoned) => Ok((commit, abandoned.stage)),
+                Startable::NoRoadmap => Err(Adopted::NoRoadmap),
+                Startable::Complete => Err(Adopted::RoadmapComplete),
+                Startable::InFlight => Err(Adopted::StageInFlight),
+                Startable::NoBrief => Err(Adopted::NoBrief),
+                Startable::BranchTaken => Err(Adopted::BranchExists),
+            }
+        }
+    })
+    .await?;
+
+    let (commit, stage) = match read {
+        Ok(read) => read,
+        Err(refusal) => return Ok(refusal),
+    };
+
+    // The stage's own slug, as the unattended start names one — the brief's
+    // filename without its number. The name the Conversation was started under
+    // was the server's invention for a row in the sidebar, and it is discarded
+    // here: a stage is worked on the branch its roadmap will annotate it with.
+    let branch = stage.branch();
+    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
+
+    let made = tokio::task::spawn_blocking({
+        let path = path.clone();
+        let branch = branch.clone();
+        let commit = commit.clone();
+
+        move || worktrees::add(&repo, &path, &branch, &commit)
+    })
+    .await?;
+
+    if !made {
+        return Ok(Adopted::WorktreeRefused);
+    }
+
+    // And now the store, in the order the record is read in: the branch it is on,
+    // the Brief it works from, and then the move that freezes both. Adoption
+    // never stacks — there is no predecessor Conversation to stand on, and
+    // standing on an unmerged one is the base commit the human fixed above.
+    store::rename_branch(pool, id, &branch).await?;
+    store::save_brief(pool, id, &stage.brief).await?;
+
+    match store::start_stage(pool, id, &commit, &path, None).await? {
+        store::Staged::Started => {}
+        store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
+        store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
+    }
+
+    // What was adopted, from where, and where its branch came off — on the
+    // Conversation's own Timeline, because that is the only Timeline there is:
+    // adoption has no predecessor Conversation for the human to have been
+    // watching.
+    if let Err(error) = store::note(pool, id, &adopted(&stage, &branch, &named)).await {
+        tracing::error!(error = ?error, conversation_id = id, "recording what was adopted failed");
+    }
+
+    tracing::info!(
+        conversation_id = id,
+        branch,
+        label = stage.label,
+        roadmap = stage.roadmap,
+        "a roadmap stage was adopted and has started",
+    );
+
+    // A Conversation moved and the sidebar's notice has one roadmap fewer in it,
+    // and an open page should say so without being reloaded.
+    state.nudges.announce();
+
+    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None));
+
+    Ok(Adopted::Adopted)
+}
+
+/// What an adopting Conversation's Timeline is told: which stage of which
+/// roadmap was adopted, and where its branch came off.
+///
+/// [`crate::continuing::begun`]'s wording, with the two things adoption changes
+/// taken out of it. *With nobody asked* goes, because somebody did: a human
+/// pressed this. And only the came-off half is ever said, because an adopted
+/// stage has no predecessor Conversation to stack on — where its branch stands
+/// is the base commit, which is the human's to fix and theirs alone.
+fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
+    // The brief named rather than linked, as the unattended start names it: it
+    // is a path in a Worktree the workbench has no route to, and a link that
+    // went nowhere would be worse than the path itself.
+    format!(
+        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`. Its branch `{branch}` came \
+         off `{from}`: an adopted stage has no Conversation before it to stack on, so where it \
+         stands is the base commit this one was fixed to.",
+        stage.label, stage.roadmap, stage.title, stage.brief_path,
+    )
+}
+
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
 /// removed, its branch left where it is.
 ///
@@ -616,22 +837,56 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
 /// the other way round: that one says whether to offer the button, this one says
 /// what was wrong when it was pressed. Each is named separately, because
 /// choosing a Profile and mending a broken one are different jobs.
+///
+/// The rule rather than either button's answer, because both buttons ask it:
+/// starting a grilling and adopting a stage each want a pair of Profiles fixed
+/// before they will do anything, and each says so in its own words — see
+/// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
     grilling: Option<&ProfileEntry>,
     implementation: Option<&ProfileEntry>,
-) -> Option<GrillingStarted> {
+) -> Option<Unready> {
     let Some(grilling) = grilling else {
-        return Some(GrillingStarted::NoGrillingProfile);
+        return Some(Unready::NoGrillingProfile);
     };
 
     let Some(implementation) = implementation else {
-        return Some(GrillingStarted::NoImplementationProfile);
+        return Some(Unready::NoImplementationProfile);
     };
 
     [grilling, implementation]
         .into_iter()
         .any(|profile| profile.broken.is_some())
-        .then_some(GrillingStarted::ProfileBroken)
+        .then_some(Unready::ProfileBroken)
+}
+
+/// What is wrong with a Conversation's pair of Profiles, before it is put in
+/// the words of whichever press asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Unready {
+    NoGrillingProfile,
+    NoImplementationProfile,
+    ProfileBroken,
+}
+
+impl Unready {
+    /// Said to the press that starts a grilling.
+    fn grilling(self) -> GrillingStarted {
+        match self {
+            Unready::NoGrillingProfile => GrillingStarted::NoGrillingProfile,
+            Unready::NoImplementationProfile => GrillingStarted::NoImplementationProfile,
+            Unready::ProfileBroken => GrillingStarted::ProfileBroken,
+        }
+    }
+
+    /// And to the press that adopts a stage.
+    fn adopting(self) -> Adopted {
+        match self {
+            Unready::NoGrillingProfile => Adopted::NoGrillingProfile,
+            Unready::NoImplementationProfile => Adopted::NoImplementationProfile,
+            Unready::ProfileBroken => Adopted::ProfileBroken,
+        }
+    }
 }
 
 /// The Brief off a Conversation's Timeline.

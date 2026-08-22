@@ -57,6 +57,103 @@ pub struct ConversationEntry {
     pub state: Lifecycle,
 }
 
+/// One Repo's notice under the new-conversation box: the roadmaps in it that
+/// nothing is driving.
+///
+/// One notice per Repo with its roadmaps inside, rather than one per roadmap —
+/// what the human reads first is which repository has work left lying about,
+/// and a repository with three of them is one thing to look at rather than
+/// three.
+///
+/// Nothing here is stored. Every field is read off the repository at the moment
+/// the list is drawn, which is why a roadmap somebody has since picked up
+/// simply stops appearing rather than having to be taken off anything.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AbandonedRepo {
+    /// Which Repo, by the id a Conversation is started against.
+    pub repo_id: i64,
+
+    /// And what it is called, which is what the notice says.
+    pub repo: String,
+
+    /// The roadmaps in it with a stage that could be started now. Never empty:
+    /// a Repo with nothing to adopt has no notice at all.
+    pub roadmaps: Vec<AbandonedRoadmap>,
+}
+
+/// One abandoned roadmap, named with the stage that would be adopted.
+///
+/// The stage is the lowest-numbered unchecked one, which is the roadmap's own
+/// order rather than anybody's choice — see the abandoned rule in the server's
+/// `stages` module.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AbandonedRoadmap {
+    /// Its directory name under `docs/roadmaps/` — `mvp`. The roadmap's
+    /// identity, here as everywhere else.
+    pub name: String,
+
+    /// What the roadmap calls itself in its heading, or empty where it has
+    /// none. Prose about itself, riding along beside the name.
+    pub title: String,
+
+    /// The next stage's number as the roadmap writes it — `04`.
+    pub stage: String,
+
+    /// And what that stage is called.
+    pub stage_title: String,
+}
+
+/// What a Conversation is adopting, as its own page draws it: the roadmap it
+/// was started for, and the stage adopting would start.
+///
+/// Read off the repository at the Conversation's base commit every time the
+/// page is, rather than kept: the roadmap is the repository's document, and
+/// only the name of it is Verkstead's. So a base commit the human overrides is
+/// answered by the stage that is next *there*, which is the whole reason the
+/// stage is not carried over from the notice that was clicked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdoptionView {
+    /// Its directory name under `docs/roadmaps/` — `mvp`. The one thing about
+    /// the roadmap that is stored, and the one thing that is true whatever the
+    /// base commit says.
+    pub roadmap: String,
+
+    /// What the roadmap calls itself in its heading at that commit, or empty
+    /// where it has none — and where the roadmap is not there to read.
+    pub title: String,
+
+    /// The stage adopting would start: the lowest-numbered unchecked one, read
+    /// at the base commit.
+    ///
+    /// `null` where there is none to start there — the roadmap is finished, or
+    /// gone, or its next stage is somebody else's already. The press says which
+    /// of those it is; this is only what the page can name.
+    pub stage: Option<AdoptedStage>,
+}
+
+/// The stage an adoption would start, named.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct AdoptedStage {
+    /// Its number as the roadmap writes it — `04`.
+    pub label: String,
+
+    /// And what the roadmap calls it.
+    pub title: String,
+
+    /// Where its brief is in the repository, which is the document the work
+    /// starts from.
+    pub brief_path: String,
+
+    /// The branch the stage would be worked on: its own slug, as the unattended
+    /// path names one. The Conversation's server-invented name is discarded at
+    /// the press, so this is the name to say rather than that one.
+    pub branch: String,
+}
+
 /// One Conversation, whole: what it is attached to, what the human has settled
 /// about it, and everything that has happened to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +192,15 @@ pub struct ConversationView {
     /// button is pressed — this is what decides whether to offer the button, and
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
+
+    /// What this Conversation is adopting, where it is adopting anything.
+    ///
+    /// `null` is the ordinary Conversation, which begins with a Brief and a
+    /// grilling. Anything else is one started from the abandoned-roadmaps
+    /// notice, and it is what puts the page on the adoption shape: the roadmap
+    /// and its stage named, both Profiles and the base commit to fix, and one
+    /// Adopt press — no Brief to write and no grilling to start.
+    pub adopting: Option<AdoptionView>,
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
@@ -1139,6 +1245,20 @@ pub struct NewConversation {
     pub repo_id: i64,
 }
 
+/// Starting one to adopt a roadmap with: which Repo, and which of its roadmaps.
+///
+/// What the notice sends when a roadmap in it is clicked. The roadmap is named
+/// by its directory under `docs/roadmaps/`, which is its identity here as
+/// everywhere else — the stage is not sent, because which stage is next is the
+/// roadmap's own answer at whatever commit the Conversation ends up branching
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewAdoption {
+    pub repo_id: i64,
+    pub roadmap: String,
+}
+
 /// What became of starting one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -1255,6 +1375,74 @@ pub enum GrillingStarted {
 
     /// The branch is already there. Verkstead did not make it, so it will not
     /// take it over: what is on it is somebody's work.
+    BranchExists,
+
+    /// Git would not make the worktree. The reason is in the server's log — this
+    /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+}
+
+/// What became of pressing Adopt.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason: a
+/// human is at the workbench pressing the button, and each of these is
+/// something different for them to go and do. What is decided while nobody is
+/// watching says itself on a Timeline instead — see the server's `continuing`
+/// module, which starts the same stage by the other route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Adopted {
+    /// The branch and the worktree are made, the stage brief is the Brief, and
+    /// the Conversation is implementing the stage.
+    Adopted,
+
+    NoSuchConversation,
+
+    /// It is past drafting, so it has been adopted once already — or aborted.
+    NotDrafting,
+
+    /// It is adopting nothing, which is every Conversation that began with a
+    /// Brief and a grilling. There is no roadmap here to take a stage from.
+    NotAdopting,
+
+    /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
+    /// rather than run under: every stage after it inherits both Profiles from
+    /// its predecessor, and a Conversation that is reopened is grilled.
+    NoGrillingProfile,
+
+    /// And none is chosen for the implementation, which is what the stage's own
+    /// work runs under.
+    NoImplementationProfile,
+
+    /// A chosen Profile's pair is not where it was left, so there is no account
+    /// to run the session under.
+    ProfileBroken,
+
+    /// Nothing in the repository answers to what the stage would branch from —
+    /// an overridden commit that has gone, or a default branch that has.
+    NoBaseCommit,
+
+    /// No roadmap by that name is readable at the base commit, or what is there
+    /// plans nothing.
+    NoRoadmap,
+
+    /// Every stage of it is ticked. The roadmap finished — between the notice
+    /// being drawn and the button being pressed, if it had a stage a moment
+    /// ago.
+    RoadmapComplete,
+
+    /// The next stage names a brief that cannot be read at the base commit. The
+    /// roadmap's own to fix: starting the stage after it instead would be
+    /// Verkstead deciding to skip work.
+    NoBrief,
+
+    /// The next stage is annotated with a branch that still exists, so somebody
+    /// or something is already on it.
+    StageInFlight,
+
+    /// The stage's own slug branch is already there. Verkstead did not make it
+    /// for this, so it will not take it over — and a branch git would not answer
+    /// about counts as one that is there.
     BranchExists,
 
     /// Git would not make the worktree. The reason is in the server's log — this

@@ -1,0 +1,40 @@
+{
+  "adopting": {
+    "roadmap": "mvp",
+    "stage": {
+      "branch": "wrap-up",
+      "brief_path": "docs/roadmaps/mvp/04-wrap-up.md",
+      "label": "04",
+      "title": "Wrap-up"
+    },
+    "title": "MVP roadmap"
+  },
+  "base_commit": null,
+  "blocked_on": null,
+  "branch": "spring-otter",
+  "direction": null,
+  "grilling_profile": null,
+  "id": 1,
+  "implementation_profile": null,
+  "pinned": [],
+  "proposal": null,
+  "ready_to_grill": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Draft",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "",
+        "id": 1,
+        "markdown": ""
+      }
+    }
+  ],
+  "worktree": null
+}
