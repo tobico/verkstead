@@ -45,3 +45,20 @@ HTMLCanvasElement.prototype.getContext = () => null;
 // that it happened: the one place that scrolls the window is the table of
 // contents' animated jump, and what its tests watch is `scrollIntoView`.
 window.scrollTo = () => {};
+
+// A third gap in the same environment: jsdom has no layout, so it has no
+// `ResizeObserver` either. The Screen of a live session watches the pane it is
+// drawn in with one, to send its width up the socket — see `Screen.tsx`.
+//
+// Nothing here has a layout to change, so this observes and never reports. What
+// the tests drive instead is the other thing that makes the pane measure itself:
+// a repaint arriving, which is when the terminal it would be measured against
+// first exists.
+Object.defineProperty(window, "ResizeObserver", {
+  writable: true,
+  value: class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+});

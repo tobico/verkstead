@@ -1153,6 +1153,26 @@ diagrams: boolean,
 standing: Standing, };
 
 /**
+ * What the server says down a live Screen's socket.
+ *
+ * Watching a running session is the one place the viewer is sent something
+ * rather than fetching it, so the two things it can be sent say which they are
+ * rather than being told apart by shape. A repaint arrives first and whenever
+ * the grid has been resized under everybody; what the session printed arrives
+ * as it prints it.
+ */
+export type Shown = { "Painted": Screen } | { "Printed": string };
+
+/**
+ * How big a Screen is, in characters.
+ *
+ * Named for the Screen rather than for the window it was measured in, because
+ * that is what it becomes: a watcher reports the size of the pane it drew, and
+ * the latest one is the size the Screen and the session's own terminal are.
+ */
+export type Size = { columns: number, rows: number, };
+
+/**
  * One stage of a roadmap: the number it answers to, what it is called, and
  * whether it is done.
  */
@@ -1353,6 +1373,15 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * And what a watcher says back up it.
+ *
+ * One kind of thing for now, named all the same: the socket is a conversation
+ * in both directions, and a message that says what it is can be joined by
+ * another that says what *it* is.
+ */
+export type Watching = { "Resized": Size };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

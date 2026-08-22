@@ -924,6 +924,52 @@ pub struct Screen {
     pub rows: u16,
 }
 
+/// What the server says down a live Screen's socket.
+///
+/// Watching a running session is the one place the viewer is sent something
+/// rather than fetching it, so the two things it can be sent say which they are
+/// rather than being told apart by shape. A repaint arrives first and whenever
+/// the grid has been resized under everybody; what the session printed arrives
+/// as it prints it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Shown {
+    /// The whole grid as it stands — see [`Screen`]. The first thing a watcher
+    /// is sent, so that one attaching halfway through a session sees the
+    /// session rather than the rest of it.
+    Painted(Screen),
+
+    /// What the session has printed since the last thing said here, to be
+    /// written on the terminal the repaint painted.
+    Printed(String),
+}
+
+/// And what a watcher says back up it.
+///
+/// One kind of thing for now, named all the same: the socket is a conversation
+/// in both directions, and a message that says what it is can be joined by
+/// another that says what *it* is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Watching {
+    /// How big this watcher's window is. The latest one wins for everybody —
+    /// there is one Screen however many devices are watching it — and it
+    /// reaches the session's own terminal, so its interface redraws to fit.
+    Resized(Size),
+}
+
+/// How big a Screen is, in characters.
+///
+/// Named for the Screen rather than for the window it was measured in, because
+/// that is what it becomes: a watcher reports the size of the pane it drew, and
+/// the latest one is the size the Screen and the session's own terminal are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Size {
+    pub columns: u16,
+    pub rows: u16,
+}
+
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {

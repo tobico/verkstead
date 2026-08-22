@@ -12,23 +12,34 @@
 //! The stub is handed exactly what claude would be: `--model`, the Profile's
 //! model, and then the Brief. So `$1` is the model it was told to run and `$2`
 //! is the Brief it was primed with — which is how these read them back.
+//!
+//! Watching a live session is here too, at the end, and is the one thing asked
+//! over a socket rather than of the Router: an upgrade is a connection rather
+//! than a request — see [`Watcher`]. It belongs in this file all the same,
+//! because what makes a Screen live is a session running on a real terminal, and
+//! this is where one runs.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use avt::Vt;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
-    ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
-    TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Shown, Size, Started,
+    Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -286,6 +297,41 @@ impl Grilling {
     async fn stopped(&self) -> InterruptionEvent {
         self.until(|view| interruptions(view).last().map(|it| (*it).clone()))
             .await
+    }
+
+    /// Wait until there is a session running, and hand back the Event it is
+    /// printing into — which is what a Screen is watched by.
+    async fn running(&self) -> i64 {
+        self.until(|view| output(view).filter(|output| output.running).map(|o| o.id))
+            .await
+    }
+
+    /// The same workbench, on a socket of its own, and where to find it.
+    ///
+    /// Everything else here asks the Router directly, which is cheaper and is
+    /// how every other endpoint is asked. The Screen's socket cannot be asked
+    /// that way: an upgrade is a connection rather than a request, so this is
+    /// the one thing that needs a server actually listening somewhere.
+    ///
+    /// The same Router rather than a second one, because it is the same server:
+    /// what the socket hands over is the session this fixture started, held in
+    /// the register this Router shares.
+    async fn listening(&self) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("a port to listen on");
+
+        let at = listener.local_addr().unwrap();
+        let app = self.app.clone();
+
+        // Left running for the rest of the test. Nothing takes it down: the
+        // process ends when the test does, and a listener held open costs a
+        // socket.
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        at
     }
 }
 
@@ -4920,4 +4966,270 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         "one planning session for the adopted stage and one for the stage after \
          it: {planned:?}",
     );
+}
+
+/// A browser watching one live session's Screen: the socket it is attached
+/// over, and the terminal it is painting on.
+///
+/// A terminal of its own rather than a list of the messages that arrived,
+/// because that is what a browser *is* here — xterm.js fed a repaint and then
+/// what the session printed after it. So what these assertions read is the grid,
+/// which is the only claim the socket makes: a watcher ends up showing what the
+/// session is showing.
+struct Watcher {
+    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    vt: Vt,
+}
+
+impl Watcher {
+    /// Attach to a session's Screen the way the workbench does, and take the
+    /// repaint it opens with.
+    async fn attach(at: SocketAddr, conversation: i64, event: i64) -> Watcher {
+        let (socket, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{at}/api/ui/conversations/{conversation}/screen/{event}/attach"
+        ))
+        .await
+        .expect("the session's Screen to be attachable");
+
+        let mut watcher = Watcher {
+            socket,
+            // Replaced by the repaint's own size below. A watcher does not know
+            // how big the Screen is until it is told, which is why the size
+            // comes with the repaint.
+            vt: Vt::new(1, 1),
+        };
+
+        match watcher.shown().await {
+            Shown::Painted(painted) => watcher.paint(&painted),
+            shown => panic!("a socket should open with a repaint, and it said: {shown:?}"),
+        }
+
+        watcher
+    }
+
+    /// The next thing the server says, or a panic if it says nothing for long
+    /// enough.
+    async fn shown(&mut self) -> Shown {
+        let said = tokio::time::timeout(PATIENCE, self.socket.next())
+            .await
+            .expect("the server to say something")
+            .expect("the socket to still be open")
+            .expect("the socket to be readable");
+
+        match said {
+            Message::Text(said) => read(&said),
+            said => panic!("a Screen's socket speaks JSON, and it said: {said:?}"),
+        }
+    }
+
+    /// Start again on a grid the repaint's size, and paint it — which is what a
+    /// terminal handed one does, a repaint saying what the whole grid is rather
+    /// than what has changed about it.
+    fn paint(&mut self, painted: &verkstead_render::Screen) {
+        self.vt = Vt::new(usize::from(painted.columns), usize::from(painted.rows));
+        self.vt.feed_str(&painted.repaint);
+    }
+
+    /// Follow the socket until the grid says something, and hand back what it is
+    /// showing.
+    async fn until(&mut self, enough: impl Fn(&str) -> bool) -> Vec<String> {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let showing = self.showing();
+
+            if enough(&showing.join("\n")) {
+                return showing;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the Screen never showed it. It is showing: {showing:?}"
+            );
+
+            match self.shown().await {
+                Shown::Painted(painted) => self.paint(&painted),
+                Shown::Printed(printed) => {
+                    self.vt.feed_str(&printed);
+                }
+            }
+        }
+    }
+
+    /// This watcher's window is now that big — which is the Screen's size from
+    /// here on, for everybody watching it.
+    async fn resize(&mut self, columns: u16, rows: u16) {
+        let said = serde_json::to_string(&Watching::Resized(Size { columns, rows })).unwrap();
+
+        self.socket
+            .send(Message::Text(said.into()))
+            .await
+            .expect("the socket to take a resize");
+    }
+
+    /// The grid it is showing, row by row, with the blank rows at the bottom
+    /// left off.
+    fn showing(&self) -> Vec<String> {
+        let mut rows: Vec<String> = self
+            .vt
+            .view()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+
+        while rows.last().is_some_and(|row| row.is_empty()) {
+            rows.pop();
+        }
+
+        rows
+    }
+}
+
+/// Everybody watching one session is watching the one Screen — and a watcher
+/// that goes away and comes back is put where the others already are.
+///
+/// The whole of what a repaint is for. A session prints for an hour and a
+/// browser opened at the end of it has seen none of that hour, so what it is
+/// handed on connect is not what happens next but what the grid *is*.
+#[tokio::test]
+async fn everybody_watching_one_session_sees_the_one_screen() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        printf 'thinking\rthinking… done\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut one = Watcher::attach(at, fixture.id, event).await;
+    let mut two = Watcher::attach(at, fixture.id, event).await;
+
+    let showing = one.until(|grid| grid.contains("thinking… done")).await;
+
+    assert_eq!(
+        two.until(|grid| grid.contains("thinking… done")).await,
+        showing,
+        "two browsers on one session should be showing the one grid",
+    );
+
+    // The watcher goes — a closed tab, a phone that slept, a connection that
+    // dropped — and comes back to find the session exactly where it was.
+    drop(one);
+
+    let again = Watcher::attach(at, fixture.id, event).await;
+
+    assert_eq!(
+        again.showing(),
+        showing,
+        "a watcher that reconnects should be repainted with what the others are showing",
+    );
+}
+
+/// The size reaches the session's own terminal, so its interface redraws to fit.
+///
+/// Read back off the session rather than off the Screen, because that is the
+/// claim: a grid made wider on the server and nowhere else would be a Screen the
+/// session never heard about and went on drawing a hundred columns into. The
+/// stub asks the terminal underneath it how big it is, which is what a terminal
+/// application does when it is told the window changed.
+#[tokio::test]
+async fn resizing_a_watchers_window_resizes_the_session() {
+    let fixture = grilling(
+        r#"
+        trap 'stty size' WINCH
+        stty size
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+
+    // The size it started on, which is the terminal Verkstead opened for it.
+    watcher.until(|grid| grid.contains("30 100")).await;
+
+    watcher.resize(132, 43).await;
+
+    let showing = watcher.until(|grid| grid.contains("43 132")).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains("43 132")),
+        "the session should have been told its window is now 132 by 43, \
+         and the Screen is showing: {showing:?}",
+    );
+}
+
+/// Watching commits the human to nothing: no Event, no move, and nothing about
+/// the run different for somebody having looked.
+///
+/// The Timeline records the work rather than the watching — the carve-out is
+/// written into its glossary entry — and this is the whole of what that means in
+/// code. A watcher attaches, sees the session, and goes; what is left behind is
+/// the Timeline that was there before.
+#[tokio::test]
+async fn watching_a_session_leaves_nothing_behind() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let before = fixture.view().await;
+    let at = fixture.listening().await;
+
+    {
+        let mut watcher = Watcher::attach(at, fixture.id, event).await;
+        watcher
+            .until(|grid| grid.contains("reading the brief"))
+            .await;
+    }
+
+    // Read after the socket has gone rather than while it is open, because the
+    // claim is about closing one as well as opening it.
+    let after = fixture.view().await;
+
+    assert_eq!(after.state, before.state, "watching moved the Conversation");
+    assert_eq!(
+        after.timeline, before.timeline,
+        "watching left something on the Timeline",
+    );
+}
+
+/// A session that has ended has no socket to attach to.
+///
+/// Its Screen is the one the details pane fetches — the screen it last stood on,
+/// read-only — and there is nowhere for a keystroke to go, because there is no
+/// terminal at the other end of one. Refused rather than opened and left silent:
+/// a socket that connected to nothing would be a browser waiting for a session
+/// that had already gone.
+#[tokio::test]
+async fn a_session_that_has_ended_has_no_screen_to_attach_to() {
+    let fixture = grilling("printf 'and out\\r\\n'").await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let refused = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{}/screen/{event}/attach",
+        fixture.id
+    ))
+    .await;
+
+    let Err(tokio_tungstenite::tungstenite::Error::Http(response)) = refused else {
+        panic!("attaching to a session that has ended should be refused, and it was not");
+    };
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }

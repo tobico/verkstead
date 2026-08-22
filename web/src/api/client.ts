@@ -179,6 +179,27 @@ export function loadScreen(id: number, event: number): Promise<Screen> {
   return get<Screen>(`/api/ui/conversations/${id}/screen/${event}`);
 }
 
+/// And where to watch a session that is still running: the one socket in the
+/// app, and the one place the viewer is sent something rather than fetching it.
+///
+/// A repaint on connect and what the session prints after it, with the size of
+/// the window it is being watched in going back the other way. Everything else
+/// here stays on SSE and a refetch — a terminal being drawn is the one thing
+/// neither of those is any good for.
+///
+/// Built off the page's own origin, so the socket goes wherever the page came
+/// from: the dev server proxying `/api`, or the one binary serving both.
+export function screenSocket(id: number, event: number): string {
+  const at = new URL(
+    `/api/ui/conversations/${id}/screen/${event}/attach`,
+    window.location.href,
+  );
+
+  at.protocol = at.protocol === "https:" ? "wss:" : "ws:";
+
+  return at.href;
+}
+
 /// One commit's diff, rendered.
 ///
 /// Fetched by the pane that shows it for the Capture's reason, and read out

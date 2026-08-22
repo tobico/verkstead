@@ -16,7 +16,10 @@ verkstead-store.workspace = true
 # recording rather than to draw a window — it parses and holds state, and has no
 # renderer, no input handling and no platform half at all.
 avt = "0.18"
-axum = "0.8"
+# `ws` for the Screen a live session is watched over: the first bidirectional
+# transport here, and the one place the viewer is sent something rather than
+# fetching it (ADR 0007). Everything else stays on SSE and a refetch.
+axum = { version = "0.8", features = ["ws"] }
 base64.workspace = true
 clap.workspace = true
 # The random half of a Conversation's prefilled branch name.
@@ -90,10 +93,19 @@ tracing = "0.1"
 web-push-native = { version = "0.4", default-features = false }
 
 [dev-dependencies]
+# Reading and writing the socket below, which is a `Stream` and a `Sink` and
+# nothing else — the two traits are this crate's and are not in the standard
+# library.
+futures-util = { version = "0.3", default-features = false }
 http-body-util = "0.1"
 serde-saphyr.workspace = true
 tempfile.workspace = true
 # `test-util` for the runtime's own clock: a keep-alive is a quarter-minute
 # apart, and no test should spend that waiting for one.
 tokio = { workspace = true, features = ["test-util"] }
+# Dialling the Screen's socket the way a browser does. It is the one endpoint a
+# `oneshot` over the Router cannot ask about: an upgrade is a connection rather
+# than a request. The same version axum's own `ws` half is built on, so the test
+# and the server are speaking one protocol rather than two.
+tokio-tungstenite = "0.29"
 tower = { version = "0.5", features = ["util"] }

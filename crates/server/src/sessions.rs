@@ -37,6 +37,7 @@ use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::screen::Live;
 use crate::skills::Skills;
 use crate::store;
 use crate::terminal::Terminal;
@@ -316,17 +317,27 @@ impl Quiet {
 
 /// A session that has been started, as its relay holds it.
 ///
-/// The two travel together because neither is any use without the other: what
-/// the session says comes off the terminal, and what ends the session is done to
-/// the process — and the terminal has to outlive the process, because the last
-/// thing it says is said on its way out.
+/// The three travel together because none is any use without the others: what
+/// the session says comes off the terminal, what ends the session is done to the
+/// process, and the Screen is the terminal read as a grid. The terminal has to
+/// outlive the process, because the last thing a session says is said on its way
+/// out.
 struct Launched {
     /// The terminal it was started on, which is where everything it prints
     /// arrives.
-    terminal: Terminal,
+    ///
+    /// Shared, because the relay is no longer the only thing that touches it: a
+    /// watcher resizing its window resizes this, and what makes the session
+    /// redraw to fit is the resize reaching the terminal it is on — see
+    /// [`Live`].
+    terminal: Arc<Terminal>,
 
     /// The sandbox around it, which is what killing it kills.
     child: Child,
+
+    /// What it is drawing, fed the same text the Capture is written from — see
+    /// [`Live`].
+    screen: Live,
 }
 
 /// One running session, as whatever wants to stop it sees it.
@@ -341,6 +352,13 @@ struct Running {
     /// The relay itself, so that ending a session can wait for it to be over
     /// rather than only ask.
     relay: JoinHandle<()>,
+
+    /// What it is drawing, for anybody who wants to watch — see [`Live`].
+    ///
+    /// Held beside the session rather than under a register of its own, because
+    /// it is the same fact: a Screen that is live is a session that is running,
+    /// and the two would only ever be looked up together.
+    screen: Live,
 }
 
 impl Sessions {
@@ -415,6 +433,22 @@ impl Sessions {
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
             .map(|running| running.event_id)
+    }
+
+    /// What a Conversation's running session is drawing, or `None` where the
+    /// Event named is not one this Conversation has a session still running for.
+    ///
+    /// By the Event as well as by the Conversation, for the reason
+    /// [`Sessions::forget`] is: a Timeline holds every session a Conversation
+    /// has ever had, and a watcher who asked for one that has ended should be
+    /// told so rather than handed the screen of whatever is running now.
+    pub(crate) fn screen(&self, conversation_id: i64, event_id: i64) -> Option<Live> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .filter(|running| running.event_id == event_id)
+            .map(|running| running.screen.clone())
     }
 
     /// The pace the runner works a backlog at — see [`Agents::pace`].
@@ -529,7 +563,20 @@ impl Sessions {
             }
         };
 
-        let mut launched = Launched { terminal, child };
+        // Shared from here on: the relay reads it, and — once somebody is
+        // watching — a resize from the browser reaches it.
+        let terminal = Arc::new(terminal);
+
+        // And the Screen it is drawing, empty and the size the terminal was
+        // opened at. Made before the session is registered, so that a watcher
+        // that arrives with the first line of output has a Screen to attach to.
+        let screen = Live::on(terminal.clone());
+
+        let mut launched = Launched {
+            terminal,
+            child,
+            screen: screen.clone(),
+        };
 
         let event_id = store::start_capture(pool, conversation_id, session.as_deref()).await?;
 
@@ -652,6 +699,7 @@ impl Sessions {
                     event_id,
                     stop,
                     relay,
+                    screen,
                 },
             );
         }
@@ -788,6 +836,11 @@ fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
 /// written down: what it is measuring is whether the session is still talking,
 /// and a redraw the summariser throws away is a session talking.
 ///
+/// The session's Screen is fed the same text, and immediately rather than every
+/// [`FLUSH_EVERY`]. The store is a record and half a second is nothing to one;
+/// the Screen is a terminal somebody may be watching, and half a second is a
+/// long time to watch a terminal not move.
+///
 /// What comes back is how it ended, which is what whoever is driving decides
 /// between carrying on and raising an Interruption by.
 async fn relay(
@@ -799,7 +852,11 @@ async fn relay(
     mut tail: Option<Tail>,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
-    let Launched { terminal, child } = session;
+    let Launched {
+        terminal,
+        child,
+        screen,
+    } = session;
 
     let mut reading = Reading::default();
     let mut buffer = vec![0u8; CHUNK];
@@ -819,7 +876,10 @@ async fn relay(
                 Ok(0) => break,
                 Ok(taken) => {
                     quiet.spoke();
-                    pending.push_str(&reading.take(&buffer[..taken]));
+
+                    let text = reading.take(&buffer[..taken]);
+                    screen.printed(&text);
+                    pending.push_str(&text);
                 }
                 Err(error) => {
                     tracing::error!(error = ?error, event_id, "reading a session's output failed");
@@ -857,7 +917,10 @@ async fn relay(
         }
     }
 
-    pending.push_str(&reading.finish());
+    let last = reading.finish();
+    screen.printed(&last);
+    pending.push_str(&last);
+
     let said = tail.as_ref().and_then(Tail::latest);
     flush(pool, nudges, event_id, &mut pending, &reading, said).await;
 

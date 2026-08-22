@@ -74,6 +74,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // And how it looked while it was saying it: the grid those bytes leave
         // on a terminal — see [`screen`].
         .route("/api/ui/conversations/{id}/screen/{event}", get(screen))
+        // And the same Screen watched as it is drawn, where the session is still
+        // running: the one socket in the codebase — see
+        // [`crate::screen::attach`]. Beside the fetch rather than instead of it,
+        // because a session that has ended has no socket and its last screen is
+        // still worth showing.
+        .route(
+            "/api/ui/conversations/{id}/screen/{event}/attach",
+            get(crate::screen::attach),
+        )
         // And one commit's diff, fetched the same way and for the same reason —
         // see [`commit_diff`].
         .route(
@@ -1444,7 +1453,11 @@ fn no_such_transcript() -> HttpResponse {
 /// worded apart from it all the same: what was asked for is the terminal the
 /// bytes were addressed to, and a reader who asked for that should be told
 /// there is no such thing rather than about a record they did not ask about.
-fn no_such_screen() -> HttpResponse {
+///
+/// Shared with the socket a live one is watched over — see
+/// [`crate::screen::attach`] — which refuses the same way for the same reason:
+/// a session that is not running has no Screen to attach to.
+pub(crate) fn no_such_screen() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Screen on that Conversation"),

@@ -32,6 +32,7 @@ import type {
   RemedySettled,
   RepoEntry,
   Screen,
+  Shown,
   SetView,
   Submitted,
   TimelineEvent,
@@ -62,6 +63,27 @@ import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json"
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
 /// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
+
+/// How many columns fit in the pane, which is what the Screen of a live session
+/// sends up its socket.
+///
+/// Mocked because it is arithmetic over a layout, and jsdom has none: the real
+/// addon measures a rendered character against the width of the element the
+/// terminal was opened in, and both are zero here. What is worth asserting on
+/// this side of the wire is that the pane measures itself and says what it
+/// found, which is what this makes askable.
+const FITS = { cols: 132, rows: 43 };
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    activate() {}
+    dispose() {}
+    fit() {}
+    proposeDimensions() {
+      return FITS;
+    }
+  },
+}));
 
 const SIDEBAR = conversations as ConversationEntry[];
 const OPEN = conversation as ConversationView;
@@ -1137,6 +1159,85 @@ const TRANSCRIPT_OF_IT = `/api/ui/conversations/${GRILLING.id}/transcript/${OUTP
 /// And where it fetches the grid those bytes leave on a terminal.
 const SCREEN_OF_IT = `/api/ui/conversations/${GRILLING.id}/screen/${OUTPUT.id}`;
 
+/// And where it watches that grid while the session is still drawing it.
+const WATCHING_IT = `/api/ui/conversations/${GRILLING.id}/screen/${OUTPUT.id}/attach`;
+
+/// The repaint the fixture holds, as the socket sends one.
+const PAINTED: Shown = { Painted: SCREEN };
+
+/// A stand-in for the socket a live session's Screen is watched over.
+///
+/// jsdom has a `WebSocket` and it would dial one, so this stands where it goes
+/// — the same shape from the page's side, with what the server says pushed in by
+/// the test rather than arriving over a network there is none of here.
+class Attached {
+  /// What the page reads off the real one to know it may write — see the
+  /// measuring in `Screen.tsx`.
+  static readonly OPEN = 1;
+
+  /// Every socket opened since the last test, in the order they were opened.
+  static opened: Attached[] = [];
+
+  readonly url: string;
+
+  /// What the page has said up it, as it wrote it.
+  readonly sent: string[] = [];
+
+  readyState = Attached.OPEN;
+  closed = false;
+
+  private readonly listeners = new Map<string, Array<(event: never) => void>>();
+
+  constructor(url: string) {
+    this.url = url;
+    Attached.opened.push(this);
+
+    // A turn of the event loop later, as a real one is: a page that had a
+    // socket open before it finished making one would be a page the browser
+    // never gives it.
+    queueMicrotask(() => this.fire("open", new Event("open")));
+  }
+
+  addEventListener(kind: string, listener: (event: never) => void): void {
+    const listening = this.listeners.get(kind) ?? [];
+    listening.push(listener);
+    this.listeners.set(kind, listening);
+  }
+
+  removeEventListener(): void {}
+
+  send(said: string): void {
+    this.sent.push(said);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.readyState = 3;
+  }
+
+  /// What the server says down it.
+  says(shown: Shown): void {
+    this.fire("message", { data: JSON.stringify(shown) } as never);
+  }
+
+  private fire(kind: string, event: unknown): void {
+    for (const listener of this.listeners.get(kind) ?? []) {
+      listener(event as never);
+    }
+  }
+}
+
+/// Wait for the page to have attached, and hand back the socket it opened.
+function attached(): Promise<Attached> {
+  return waitFor(() => {
+    const socket = Attached.opened[0];
+    if (!socket) {
+      throw new Error("nothing has attached to a screen");
+    }
+    return socket;
+  });
+}
+
 /// A session that kept no record of its own conversation, which is what the
 /// server says for every stub agent and every backend that writes no log — and
 /// what sends the pane to the Capture.
@@ -1609,6 +1710,144 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() => expect(output.classList).toContain("selected"));
     expect(output.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+/// The Screen of a session that is still drawing it: watched over a socket
+/// rather than fetched, which is the one place in the app the viewer is sent
+/// something instead of asking for it.
+///
+/// What the server sends is a repaint and then what the session printed, and
+/// what goes back up is how wide the pane is. Everything asserted here is the
+/// grid or the wire — the terminal is the server's, and this side only paints
+/// what it is handed (ADR 0007).
+describe("watching a live session's screen", () => {
+  /// The workbench with the session still running, and the socket stubbed.
+  function watching(): ReturnType<typeof serving> {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    return theGrillingOutput({ running: true });
+  }
+
+  /// Open the Screen of the running session, and hand back what the page and
+  /// the socket are.
+  async function watched(): Promise<{
+    container: ParentNode;
+    socket: Attached;
+  }> {
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    return { container, socket: await attached() };
+  }
+
+  /// A repaint on connect and what the session prints after it — which is the
+  /// whole of the protocol from this side.
+  it("paints the repaint it is sent, and then what the session prints", async () => {
+    const fetching = watching();
+    const { container, socket } = await watched();
+
+    expect(socket.url.startsWith("ws://")).toBe(true);
+    expect(socket.url.endsWith(WATCHING_IT)).toBe(true);
+
+    socket.says(PAINTED);
+
+    const grid = await drawn(container, ".details-pane .screen .xterm-rows");
+
+    await waitFor(() =>
+      expect(grid.textContent).toContain(
+        "What should happen to a delivery that has failed forty times?",
+      ),
+    );
+
+    socket.says({ Printed: "and then it went quiet\r\n" });
+
+    await waitFor(() =>
+      expect(grid.textContent).toContain("and then it went quiet"),
+    );
+
+    // Watching, and read-only all the same: there is nowhere for a keystroke to
+    // go until the Hold exists, and a terminal that swallowed one quietly would
+    // read as broken rather than as read-only.
+    const said = await drawn(container, ".details-pane .screen .read-only");
+    expect(said.textContent).toContain("Watching");
+    expect(said.textContent).toContain("Read-only");
+
+    // Nothing was fetched: a request for the grid as the store last had it
+    // would be a request for what the repaint has already replaced.
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
+  });
+
+  /// How wide the pane is goes back up, and the server decides what to do with
+  /// it: the size that comes back is a repaint, not this side's own guess.
+  it("says how wide the pane it is drawn in is", async () => {
+    watching();
+    const { socket } = await watched();
+
+    socket.says(PAINTED);
+
+    await waitFor(() => expect(socket.sent.length).toBeGreaterThan(0));
+
+    expect(JSON.parse(socket.sent[0]!)).toEqual({
+      Resized: { columns: FITS.cols, rows: SCREEN.rows },
+    });
+  });
+
+  /// Two watchers of different sizes must not argue. A repaint arriving at a
+  /// width this pane never asked for is the latest window having won, and this
+  /// one asking for its own back would be the two of them trading repaints for
+  /// as long as both stayed open.
+  it("does not ask for its width back when somebody else resizes", async () => {
+    watching();
+    const { socket } = await watched();
+
+    socket.says(PAINTED);
+    await waitFor(() => expect(socket.sent).toHaveLength(1));
+
+    // The server's answer to that, and then a repaint at a width nothing here
+    // asked for: another device, watching the same Screen on a smaller one.
+    socket.says({ Painted: { ...SCREEN, columns: FITS.cols } });
+    socket.says({ Painted: { ...SCREEN, columns: 60 } });
+
+    // Said synchronously if it were said at all — the handler measures the pane
+    // the moment it has painted the repaint.
+    expect(socket.sent).toHaveLength(1);
+  });
+
+  /// Closing the pane lets the socket go. Watching commits the human to nothing
+  /// and a watcher that leaves takes nothing with it — on this side that is one
+  /// socket closed and no request made.
+  it("lets the socket go when the screen is closed", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+    await drawn(container, ".details-pane .screen .xterm-rows");
+
+    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+
+    await waitFor(() => expect(socket.closed).toBe(true));
+    expect(Attached.opened).toHaveLength(1);
+  });
+
+  /// And a session that has ended has nothing to attach to: its Screen is the
+  /// one it last stood on, which is fetched.
+  it("fetches the screen of a session that has ended rather than watching it", async () => {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+
+    const fetching = theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    await drawn(container, ".details-pane .screen .xterm-rows");
+
+    expect(Attached.opened).toHaveLength(0);
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBeGreaterThan(0);
   });
 });
 

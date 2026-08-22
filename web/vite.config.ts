@@ -31,8 +31,13 @@ export default defineConfig(({ mode }) => ({
     // is the real server's, so the two run side by side and the browser sees
     // one origin. Development only — a build is one binary serving both, with
     // no proxy anywhere in it.
+    //
+    // `ws` because one thing under `/api` is a websocket: the Screen a live
+    // session is watched over. A proxy without it passes the request through
+    // and drops the upgrade, so the socket fails in the dev loop and nowhere
+    // else — which is the worst place for it to fail.
     proxy: {
-      "/api": SERVER,
+      "/api": { target: SERVER, ws: true },
     },
 
     // Under vitest, let a test read a file above this directory — which
