@@ -22,8 +22,8 @@ use crate::{
     ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
     NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
     ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice,
+    RemedyChoice, RemedySettled, RepoEntry, Screen, SetView, Started, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -104,6 +104,12 @@ fn the_viewers_types_are_written_from_these() {
     // of the log and the rendering of what is in it both happen on this side of
     // the wire, so what the viewer receives is HTML to put in the page.
     TranscriptView::export_all(&config).unwrap();
+
+    // And how it looked, which is the same pane read the third way: the grid
+    // those bytes leave on a terminal, as the escape sequences that would paint
+    // it. The parsing that decided them happened here — the browser is handed a
+    // repaint to feed a terminal, not a Capture to make sense of.
+    Screen::export_all(&config).unwrap();
 
     // And what a session committed. The summary rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff

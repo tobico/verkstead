@@ -31,6 +31,7 @@ import type {
   PullRequestDetails,
   RemedySettled,
   RepoEntry,
+  Screen,
   SetView,
   Submitted,
   TimelineEvent,
@@ -55,6 +56,7 @@ import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" }
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
+import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
 /// The renderer is a page's own doing and neither Set fixture has a Diagram;
@@ -1115,6 +1117,7 @@ describe("the panes on a narrow window", () => {
 const GRILLING = grilling as ConversationView;
 const CAPTURE = capture as Capture;
 const TRANSCRIPT = transcript as TranscriptView;
+const SCREEN = screenOfIt as Screen;
 
 /// The session's output on the grilling conversation's timeline.
 const OUTPUT = (() => {
@@ -1130,6 +1133,9 @@ const CAPTURE_OF_IT = `/api/ui/conversations/${GRILLING.id}/capture/${OUTPUT.id}
 
 /// And where it fetches what the session was saying while it printed that.
 const TRANSCRIPT_OF_IT = `/api/ui/conversations/${GRILLING.id}/transcript/${OUTPUT.id}`;
+
+/// And where it fetches the grid those bytes leave on a terminal.
+const SCREEN_OF_IT = `/api/ui/conversations/${GRILLING.id}/screen/${OUTPUT.id}`;
 
 /// A session that kept no record of its own conversation, which is what the
 /// server says for every stub agent and every backend that writes no log — and
@@ -1150,6 +1156,7 @@ function theGrilling(...answers: Parameters<typeof serving>) {
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
     ...answers,
   );
 }
@@ -1164,6 +1171,7 @@ function theSpeaking(...answers: Parameters<typeof serving>) {
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
     whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
     ...answers,
   );
 }
@@ -1189,6 +1197,7 @@ function theGrillingOutput(over: Partial<AgentOutputEvent>) {
     ),
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
   );
 }
 
@@ -1383,6 +1392,74 @@ describe("a session's output on the timeline", () => {
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// The pane opens on what the session said rather than on how it looked: the
+  /// Screen is the other half of the switch, and nothing is fetched for it until
+  /// somebody asks.
+  it("opens on the transcript, with the screen a click away", async () => {
+    const fetching = theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const showing = await drawn(
+      container,
+      '.details-pane .record-switch .transcript-tab[aria-pressed="true"]',
+    );
+
+    expect(showing.textContent).toBe("Transcript");
+    expect(container.querySelector(".details-pane .screen")).toBeNull();
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
+  });
+
+  /// The Screen of a session that has ended: what its terminal last showed,
+  /// drawn as a terminal rather than as the bytes that drew it.
+  ///
+  /// The server holds the terminal that decided the repaint and this one paints
+  /// it — which is the whole of the exception to the browser never parsing, and
+  /// why what is asserted is the grid rather than the payload.
+  it("shows the screen the session left, drawn as a terminal", async () => {
+    const fetching = theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const grid = await drawn(container, ".details-pane .screen .xterm-rows");
+
+    await waitFor(() =>
+      expect(grid.textContent).toContain(
+        "What should happen to a delivery that has failed forty times?",
+      ),
+    );
+
+    // The escapes the session dimmed its first line with are instructions to a
+    // terminal rather than something a terminal prints, so none of them are on
+    // the grid — which is the difference between the Screen and the Capture.
+    expect(grid.textContent).toContain("Reading the brief.");
+    expect(grid.textContent).not.toContain("2m");
+
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// There is nowhere to type: a session that has ended is showing the screen it
+  /// left, and the pane says so rather than swallowing keystrokes quietly.
+  it("says the screen is read-only and takes no input", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const said = await drawn(container, ".details-pane .screen .read-only");
+    expect(said.textContent).toContain("Read-only");
+
+    const typing = await drawn<HTMLTextAreaElement>(
+      container,
+      ".details-pane .screen textarea",
+    );
+    expect(typing.readOnly).toBe(true);
   });
 
   /// And what it shows instead wherever there is a Transcript: the conversation

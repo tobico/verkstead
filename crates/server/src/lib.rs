@@ -48,6 +48,7 @@ mod runner;
 /// detail of the endpoints — and because what proves a boundary is a probe run
 /// inside it, which is a test standing where the orchestrator does.
 pub mod sandbox;
+mod screen;
 mod sessions;
 mod sets;
 mod settling;

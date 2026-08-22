@@ -1,0 +1,5 @@
+{
+  "columns": 100,
+  "repaint": "\u001b[2mReading the brief.\u001b[22m \u001b[81b\r\nLooking at how the queue is drained. \u001b[63b\r\nWhat should happen to a delivery that has failed forty times? \u001b[38b\r\n\u001b[0m\u001b[4;1H\u001b[0m",
+  "rows": 30
+}

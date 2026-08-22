@@ -1922,6 +1922,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )
         .await,
     );
+
+    // And how it looked while it printed that: the grid those bytes leave on a
+    // terminal, as the escape sequences that would paint it. Nothing to pin
+    // here either — a repaint is what a Capture leaves on a terminal, and this
+    // one is that Capture's.
+    write(
+        "screen.json",
+        &get(
+            &app,
+            &format!("/api/ui/conversations/{grilling}/screen/{capture}"),
+        )
+        .await,
+    );
 }
 
 /// Pin everything in a payload that the filesystem would otherwise decide: a

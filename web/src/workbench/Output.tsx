@@ -1,12 +1,15 @@
-//! One session, opened: what it said, in the details pane.
+//! One session, opened: what it said and how it looked, in the details pane.
 //!
-//! Two records of the same session, and the pane shows whichever there is. The
-//! Transcript is the session's own account of its conversation — the agent's
-//! prose, its reasoning, the tools it called and the turns put to it — and the
-//! Capture is the bytes it sent a terminal. Where a session left a Transcript
-//! that is what a reader came for; where it left none, which is every stub agent
-//! and every backend that keeps no such log, the Capture is a complete record on
-//! its own and is drawn exactly as it always was.
+//! A two-way switch at the top, opening on the Transcript because that is what
+//! a reader usually came for. The Transcript is the session's own account of its
+//! conversation — the agent's prose, its reasoning, the tools it called and the
+//! turns put to it — and where a session left none, which is every stub agent
+//! and every backend that keeps no such log, the Capture stands in its place and
+//! is drawn exactly as it always was.
+//!
+//! The Screen is the same session read the other way: not the bytes it sent a
+//! terminal but the terminal at the other end of them, drawn as a terminal — see
+//! [`./Screen`], which is where the one exception to the rule below lives.
 //!
 //! Fetched here rather than carried by the Conversation, because of the two
 //! sizes involved. A session talks for an hour and the Timeline is read again
@@ -29,9 +32,17 @@
 //! group at the end: nothing hidden, and nothing in the way.
 
 import { useQuery } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
 import { loadCapture, loadTranscript } from "../api/client";
+import { Screen } from "./Screen";
 import type {
   AgentOutputEvent,
   Bookkeeping,
@@ -74,6 +85,15 @@ export function Output(props: {
     enabled: transcript.data !== undefined && !spoke(),
   }));
 
+  /// Which of the two records is showing.
+  ///
+  /// The Transcript to begin with, because it is what a reader usually came for:
+  /// what the session *said*. The Screen is how it looked while it said it, and
+  /// it is a click away rather than a scroll away.
+  const [showing, setShowing] = createSignal<"transcript" | "screen">(
+    "transcript",
+  );
+
   return (
     <>
       <div class="pane-head">
@@ -95,50 +115,79 @@ export function Output(props: {
         </Show>
       </p>
 
-      <Switch>
-        <Match when={transcript.isPending}>
-          <p class="empty">Loading…</p>
-        </Match>
-        <Match when={transcript.isError}>
-          <p class="error">
-            Could not read what this session said: {transcript.error?.message}
-          </p>
-        </Match>
-        <Match when={spoke() && transcript.data}>
-          {(said) => (
-            <>
-              <ol class="transcript">
-                <For each={said().turns}>
-                  {(turn) => <Said turn={turn} />}
-                </For>
-              </ol>
-              <Kept lines={said().bookkeeping} />
-            </>
-          )}
-        </Match>
-        {/* No Transcript, so the bytes — which is the whole details-pane story
-            for a session whose backend kept no log of itself. */}
-        <Match when={capture.isError}>
-          <p class="error">
-            Could not read this capture: {capture.error?.message}
-          </p>
-        </Match>
-        <Match when={capture.data}>
-          {(capture) => (
-            <Show
-              when={capture().text !== ""}
-              fallback={
-                <p class="empty">This session has printed nothing yet.</p>
-              }
-            >
-              <pre class="capture">{capture().text}</pre>
-            </Show>
-          )}
-        </Match>
-        <Match when={true}>
-          <p class="empty">Loading…</p>
-        </Match>
-      </Switch>
+      {/* The two ways of reading the one session. Buttons that say which they
+          are rather than tabs: there are two of them, both are always there,
+          and `aria-pressed` is the one word that says which is showing. */}
+      <div class="record-switch" role="group" aria-label="How to read this session">
+        <button
+          type="button"
+          class="transcript-tab"
+          aria-pressed={showing() === "transcript"}
+          onClick={() => setShowing("transcript")}
+        >
+          Transcript
+        </button>
+        <button
+          type="button"
+          class="screen-tab"
+          aria-pressed={showing() === "screen"}
+          onClick={() => setShowing("screen")}
+        >
+          Screen
+        </button>
+      </div>
+
+      <Show
+        when={showing() === "transcript"}
+        fallback={
+          <Screen conversation={props.conversation} output={props.output} />
+        }
+      >
+        <Switch>
+          <Match when={transcript.isPending}>
+            <p class="empty">Loading…</p>
+          </Match>
+          <Match when={transcript.isError}>
+            <p class="error">
+              Could not read what this session said: {transcript.error?.message}
+            </p>
+          </Match>
+          <Match when={spoke() && transcript.data}>
+            {(said) => (
+              <>
+                <ol class="transcript">
+                  <For each={said().turns}>
+                    {(turn) => <Said turn={turn} />}
+                  </For>
+                </ol>
+                <Kept lines={said().bookkeeping} />
+              </>
+            )}
+          </Match>
+          {/* No Transcript, so the bytes — which is the whole Transcript-side
+              story for a session whose backend kept no log of itself. */}
+          <Match when={capture.isError}>
+            <p class="error">
+              Could not read this capture: {capture.error?.message}
+            </p>
+          </Match>
+          <Match when={capture.data}>
+            {(capture) => (
+              <Show
+                when={capture().text !== ""}
+                fallback={
+                  <p class="empty">This session has printed nothing yet.</p>
+                }
+              >
+                <pre class="capture">{capture().text}</pre>
+              </Show>
+            )}
+          </Match>
+          <Match when={true}>
+            <p class="empty">Loading…</p>
+          </Match>
+        </Switch>
+      </Show>
     </>
   );
 }

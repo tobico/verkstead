@@ -905,6 +905,25 @@ pub struct Capture {
     pub text: String,
 }
 
+/// One session's Screen: the grid its Capture leaves on a terminal.
+///
+/// Not the bytes and not a picture of them — the escape sequences that would
+/// paint the grid as it stands, which is what the terminal in the details pane
+/// is fed. The server holds the terminal that decided them and hands over the
+/// repaint; the browser's copy is a window onto that one rather than a second
+/// opinion about it (ADR 0007).
+///
+/// The size comes with it because a repaint means nothing without one: the same
+/// sequences put a session's display in different places on a grid of a
+/// different width.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Screen {
+    pub repaint: String,
+    pub columns: u16,
+    pub rows: u16,
+}
+
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {

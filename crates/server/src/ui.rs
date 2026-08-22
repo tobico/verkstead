@@ -71,6 +71,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/transcript/{event}",
             get(transcript),
         )
+        // And how it looked while it was saying it: the grid those bytes leave
+        // on a terminal — see [`screen`].
+        .route("/api/ui/conversations/{id}/screen/{event}", get(screen))
         // And one commit's diff, fetched the same way and for the same reason —
         // see [`commit_diff`].
         .route(
@@ -810,6 +813,53 @@ async fn transcript(
     }
 }
 
+/// `GET /api/ui/conversations/{id}/screen/{event}` — how one session looked:
+/// the grid its Capture leaves on a terminal.
+///
+/// The same Event read a third way. The Transcript is what the session said and
+/// the Capture is the bytes it sent a terminal; this is the terminal at the
+/// other end of them — the grid, with the cursor where the session left it,
+/// handed over as the escape sequences that would paint it.
+///
+/// Replayed here rather than kept, because the Capture is the record and a
+/// second copy of the same thing in a different shape is a second thing to keep
+/// in step. A session that has ended replays to the screen it last stood on; a
+/// live one replays to wherever its Capture has got to.
+///
+/// The parsing is the server's, which is what makes this the exception to the
+/// rule that the browser never parses rather than a hole in it (ADR 0007): what
+/// crosses the wire is a repaint to feed a terminal, and the terminal that
+/// decided it stays here.
+async fn screen(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Read as permissively as every other pair of ids here: neither of them
+    // naming a number cannot name a Screen.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_screen();
+    };
+
+    match store::capture(&state.pool, id, event).await {
+        Ok(Some(text)) => {
+            let replayed = crate::screen::replay(&text);
+            let (columns, rows) = replayed.size();
+
+            Json(verkstead_render::Screen {
+                repaint: replayed.repaint(),
+                columns,
+                rows,
+            })
+            .into_response()
+        }
+        Ok(None) => no_such_screen(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Screen failed");
+            unavailable("the Screen could not be read")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
 /// rendered.
 ///
@@ -1387,6 +1437,17 @@ fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Transcript on that Conversation"),
+    )
+}
+
+/// And no such Screen, which is the same question as no such Capture and
+/// worded apart from it all the same: what was asked for is the terminal the
+/// bytes were addressed to, and a reader who asked for that should be told
+/// there is no such thing rather than about a record they did not ask about.
+fn no_such_screen() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such Screen on that Conversation"),
     )
 }
 

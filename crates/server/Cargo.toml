@@ -10,6 +10,12 @@ anyhow.workspace = true
 verkstead-render.workspace = true
 verkstead-schema.workspace = true
 verkstead-store.workspace = true
+# The virtual terminal the Screen is: what a session's Capture leaves on a
+# terminal, held as a grid and handed back as the escape sequences that would
+# paint it (ADR 0007). asciinema's, which is the one written to be fed a
+# recording rather than to draw a window — it parses and holds state, and has no
+# renderer, no input handling and no platform half at all.
+avt = "0.18"
 axum = "0.8"
 base64.workspace = true
 clap.workspace = true

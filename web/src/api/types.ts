@@ -1065,6 +1065,21 @@ answers: Array<Answer>,
 comment?: string | null, };
 
 /**
+ * One session's Screen: the grid its Capture leaves on a terminal.
+ *
+ * Not the bytes and not a picture of them — the escape sequences that would
+ * paint the grid as it stands, which is what the terminal in the details pane
+ * is fed. The server holds the terminal that decided them and hands over the
+ * repaint; the browser's copy is a window onto that one rather than a second
+ * opinion about it (ADR 0007).
+ *
+ * The size comes with it because a repaint means nothing without one: the same
+ * sequences put a session's display in different places on a grid of a
+ * different width.
+ */
+export type Screen = { repaint: string, columns: number, rows: number, };
+
+/**
  * One row of a Question Set's Timeline table: the number it answers to, what
  * was asked, and what was decided.
  *

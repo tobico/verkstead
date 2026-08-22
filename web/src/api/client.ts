@@ -33,6 +33,7 @@ import type {
   RemedySettled,
   RepoEntry,
   Response as Decided,
+  Screen,
   SetView,
   Started,
   Submitted,
@@ -166,6 +167,16 @@ export function loadTranscript(
   return get<TranscriptView>(
     `/api/ui/conversations/${id}/transcript/${event}`,
   );
+}
+
+/// And how it looked, which is the same Event read the third way.
+///
+/// The grid those bytes leave on a terminal, as the escape sequences that would
+/// paint it — the server holds the terminal that decided them, and this is a
+/// repaint to feed the one in the pane (ADR 0007). A session that has ended
+/// repaints to the screen it last stood on.
+export function loadScreen(id: number, event: number): Promise<Screen> {
+  return get<Screen>(`/api/ui/conversations/${id}/screen/${event}`);
 }
 
 /// One commit's diff, rendered.
