@@ -1,4 +1,4 @@
-/usr/bin/env bash
+#!/usr/bin/env bash
 
 pushd web
 pnpm install && pnpm build
