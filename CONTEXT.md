@@ -90,6 +90,19 @@ _Avoid_: prompt, instructions, plugin, workflow file
 The editable markdown document a Conversation starts from, and its first
 Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
 rather than editing the frozen one.
+
+Written where it is read: while the Conversation is drafting, the Brief on its
+card *is* the field — raw markdown, always open, keeping itself on a pause in
+the typing and whenever the field is left, with a word beside the heading
+saying the record has it. There is no Edit and no Save, because there is no
+other thing the Brief could be doing while it is a draft. Once it freezes it is
+the server's rendering of it and nothing else.
+
+While it is still a draft its card carries the whole of the Conversation's
+setup under it — the branch, the base commit, both Pairings and the readiness
+verdict — because setting the work up and kicking it off are one act, and both
+belong where the work is read. Every one of those freezes at the same moment
+the Brief does, so once grilling starts the card is the Brief alone.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:
@@ -158,22 +171,41 @@ _Avoid_: takeover (the Remedy's word), pause, manual mode, lock
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
-directory and config file pair, a default model, and an agent-type
-discriminator so other backends can slot in later. The pair is bind-mounted at
-`~/.claude` / `~/.claude.json` inside the sandbox, which is what keeps accounts
-separate.
+directory and config file pair, the models that account can run, and an
+agent-type discriminator so other backends can slot in later. The pair is
+bind-mounted at `~/.claude` / `~/.claude.json` inside the sandbox, which is what
+keeps accounts separate. The models are a list and the list is the Profile's
+own, because different Profiles reach different accounts and each can launch
+different things; none of them is a default, so which one a session runs is
+always picked — as a Pairing, alongside the Profile itself.
 _Avoid_: account, identity, persona, agent config
 
-**Grilling Profile** / **Implementation Profile**:
-The two Agent Profiles a Conversation fixes before grilling starts — one for
-the grilling session, one for the implementation work. They are roles a Profile
-is used in, not kinds of Profile: the same Profile may fill both. The line
-between them is planning against building: the grilling session's tail —
-writing the handoff, the backlog or the roadmap — is the Grilling Profile's,
-and the Implementation Profile drives what builds. Distinct Profiles are why
-an inline implementation is a fresh session rather than the grilling session
-carrying on.
-_Avoid_: primary/secondary profile, planner/worker, grilling agent
+**Pairing**:
+An Agent Profile and one of the models it lists, chosen together, and what a
+session is actually launched under. Neither half runs anything alone: the
+Profile says which account, its list says what that account can launch, and a
+session runs one model. Offered as one flat list wherever it is picked — a row
+per Profile-and-model combination — because the counts are small and a
+two-stage pick would cost a tap every time. There is no default model
+anywhere, so an unpaired Profile is half a choice and reads as none.
+_Avoid_: profile choice, model selection, profile+model, combination
+
+**Grilling Pairing** / **Implementation Pairing**:
+The two Pairings a Conversation fixes before grilling starts — one for the
+grilling session, one for the implementation work. They are roles a Pairing is
+used in, not kinds of Pairing: the same Profile, even the same model, may fill
+both. The line between them is planning against building: the grilling
+session's tail — writing the handoff, the backlog or the roadmap — is the
+Grilling Pairing's, and the Implementation Pairing drives what builds. Distinct
+accounts are why an inline implementation is a fresh session rather than the
+grilling session carrying on.
+
+Both are **fixed when grilling starts**, alongside the branch, the base commit
+and the Brief: what runs the work is settled before the work begins rather than
+swapped underneath it — and the implementation one is used long after that,
+which is exactly why it is not left changeable until then.
+_Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
+profile (the Profile is half of it)
 
 **Direction**:
 How a Conversation's work gets built — **inline**, **task list** or **roadmap**
@@ -264,7 +296,7 @@ _Avoid_: job, iteration, unit of work, stage (that is a roadmap's)
 One numbered entry of a roadmap, and a Conversation of its own: one branch, one
 review unit, one pull request. Started by the Stage before it settling rather
 than by anybody pressing anything — against the same Repo, under the same
-Profiles, primed with the stage brief as its Brief, and Implementing from the
+Pairings, primed with the stage brief as its Brief, and Implementing from the
 first moment, because the grilling that would have settled the work wrote the
 brief. Its branch stacks on the unmerged predecessor where the target
 repository records how, and comes off the default branch where it does not.
@@ -280,7 +312,7 @@ Take a roadmap the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline, by starting its next
 Stage as a Conversation. The human's press stands in for the Stage before it
 that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the two Profiles and the base commit, and the stage
+write: what they settle is the two Pairings and the base commit, and the stage
 brief becomes the Brief. One Stage is the whole of what adopting starts, and all
 it has to start — that Stage's own plan commit writes to the roadmap, so when it
 settles the Stage after it begins the ordinary unattended way, and an adopted
@@ -340,8 +372,9 @@ pipeline is not driving it.
 Outside the pipeline in every sense that matters. It moves the Conversation into
 no state and out of none, closes no open Interruption, and reopens nothing a Done
 Conversation settled; what it leaves behind is its instruction on the record,
-what its session printed, and whatever that committed. The Profile picked is for
-that submission alone and never becomes the Conversation's.
+what its session printed, and whatever that committed. The Pairing picked is for
+that submission alone and never becomes the Conversation's — the composer starts
+on the Conversation's implementation Pairing and otherwise asks for a pick.
 
 Ended on quiet with no Question Set of its own still open, there being no done
 file to end it by — so a session idling on a Blocking Ask is left where it is.
@@ -349,7 +382,7 @@ file to end it by — so a session idling on a Blocking Ask is left where it is.
 One whose session exits badly stops at an Interruption, with the usual three
 Remedies: the human submits from a phone and walks away, so being asked is the
 only thing that reaches them. Retry runs the same instruction again, read back
-off the Timeline, under the Conversation's implementation Profile. One that
+off the Timeline, under the Conversation's implementation Pairing. One that
 exits cleanly having committed nothing raises nothing — an instruction may
 legitimately change nothing.
 _Avoid_: step (the unattended unit a done file ends), task (a backlog's), hold,

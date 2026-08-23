@@ -9,12 +9,19 @@
 //! Above the list are the pinned Events, which are a fixed set — the backlog
 //! now, the stage list and the PR as those stages arrive. They are not on the
 //! record and do not scroll with it: each is the current state of something the
-//! work is against rather than a moment in it.
+//! work is against rather than a moment in it. More than one of them is a
+//! carousel rather than a stack, because everything pinned is held above the
+//! record and a stack of them is what the record is pushed down by.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
-//! details pane, which is why this takes a way of selecting one. The Brief has
-//! no full self beyond what is already drawn, so it is the one Event nothing
-//! opens.
+//! details pane, which is why this takes a way of selecting one. Three of them
+//! are documents — the frozen Brief, the handoff and a Manual Task's
+//! instruction — and a document's summary is its own opening: the card shows
+//! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
+//! Brief is also the one Event that is written here as well as read: while the
+//! Conversation is drafting it is a field that saves itself rather than a card
+//! to open, and it carries a Conversation's setup under it for as long as there
+//! is a draft to set up.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
@@ -30,7 +37,16 @@
 //! answered on and land here as the answered Set.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  onCleanup,
+  onMount,
+  type JSX,
+} from "solid-js";
 
 import {
   abortConversation,
@@ -53,16 +69,20 @@ import type {
   ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
+  PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
   TaskListEvent,
+  TimelineEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
+import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
+import { Setup } from "./Setup";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -74,15 +94,22 @@ export const ABBREVIATED = 7;
 
 /// What each way of being refused a Brief says.
 ///
-/// `Saved` is here for completeness of the mapping and never drawn: nothing is
-/// said about an edit that worked, because the Brief reading back as what was
-/// written is what says it.
+/// `Saved` is here for completeness of the mapping and never drawn: a save that
+/// worked is said by the indicator on the card, in one word.
 export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
   Saved: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
+
+/// How long a pause in typing is, before what is in the Brief field is kept.
+///
+/// Long enough that a sentence is one save rather than a save a word, and short
+/// enough that a human who typed and then sat back has a saved brief by the time
+/// they have read it over. Leaving the field saves it whatever the timer was
+/// about to do.
+const SETTLE = 800;
 
 /// And each way of being refused a start.
 ///
@@ -92,9 +119,9 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile: "Choose a grilling profile first, in the details pane.",
+  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
-    "Choose an implementation profile first, in the details pane.",
+    "Choose an implementation profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the grilling starts from.",
@@ -128,19 +155,116 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
     "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
   EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
   NoSuchProfile: "That profile has been removed.",
+  NoSuchModel: "That profile no longer lists that model.",
   NotStarted:
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
-/// What a move reads as. The state moved *to*, said as something that happened.
-const MOVED: Record<Lifecycle, string> = {
-  Draft: "Went back to drafting",
-  Grilling: "Started grilling",
-  Implementing: "Started implementing",
-  Wrapping: "Moved to wrapping up",
-  Done: "Finished",
-  Aborted: "Aborted",
-};
+/// The state a move came *from*: the state the move before it went to, and
+/// `Draft` where there is no move before it, since a Conversation starts
+/// drafting and its first move is the one out of that.
+///
+/// A move records only the state it went to, so the other half of the
+/// transition is the Timeline's own to work out by reading back up itself.
+function movedFrom(timeline: TimelineEvent[], index: number): Lifecycle {
+  for (const event of timeline.slice(0, index).reverse()) {
+    if ("Moved" in event) {
+      return event.Moved.state;
+    }
+  }
+
+  return "Draft";
+}
+
+/// How many lines of a document a card shows before it is cut off.
+///
+/// Five: enough for the opening of a handoff or an instruction to say what it is
+/// about, and not enough for either to push the record off the screen. Where the
+/// fifth line ends is a fact about the laid-out box rather than about the
+/// markdown — how wide the pane is decides it — so the clamp is a height in the
+/// stylesheet and this is what that height is written from.
+export const CLAMPED_LINES = 5;
+
+/// A document's markdown on a card, cut off at [`CLAMPED_LINES`].
+///
+/// The fade over the last line is drawn only where the document goes on under
+/// it: it says there is more, and a card that already shows the whole thing
+/// would be saying something untrue. Whether it overflows is another fact about
+/// the laid-out box, so it is measured rather than counted — the observer
+/// watches the markdown inside the clamp, whose height is the document's own, so
+/// a rendering that changed and a pane that was resized both come back through
+/// it.
+function Clamped(props: { class: string; html: string }): JSX.Element {
+  let clamp: HTMLDivElement | undefined;
+  let body: HTMLDivElement | undefined;
+
+  const [cut, setCut] = createSignal(false);
+
+  onMount(() => {
+    const measure = () => {
+      if (clamp) {
+        // A pixel of slack: a line height that is not a whole number of pixels
+        // rounds either way, and a card faded over the last pixel of a document
+        // that fits would read as one with something after it.
+        setCut(clamp.scrollHeight - clamp.clientHeight > 1);
+      }
+    };
+
+    const watching = new ResizeObserver(measure);
+
+    if (body) {
+      watching.observe(body);
+    }
+
+    onCleanup(() => watching.disconnect());
+  });
+
+  return (
+    <div class="clamp" classList={{ cut: cut() }} ref={clamp}>
+      <div class={`${props.class} markdown`} innerHTML={props.html} ref={body} />
+    </div>
+  );
+}
+
+/// A card whose whole surface opens the details pane.
+///
+/// Every other openable Event is a `button`, and these three cannot be: what
+/// they hold is rendered markdown, and a link inside a button is not something a
+/// browser will have. So the affordance goes on the article instead — the press,
+/// the keyboard and the role that says what it is — and it reads as the same
+/// card either way.
+///
+/// `open` is nothing where the card is not openable, which is the Brief for as
+/// long as it is a draft: a field is not a thing to press, and neither is the
+/// setup standing under it.
+function Openable(props: {
+  kind: string;
+  selected: boolean;
+  open: (() => void) | null;
+  children: JSX.Element;
+}): JSX.Element {
+  const press = () => props.open?.();
+
+  return (
+    <article
+      class={props.kind}
+      classList={{ openable: props.open !== null, selected: props.selected }}
+      role={props.open === null ? undefined : "button"}
+      tabindex={props.open === null ? undefined : 0}
+      aria-pressed={props.open === null ? undefined : props.selected}
+      onClick={press}
+      onKeyDown={(ev) => {
+        // What a button would do for nothing: Enter and Space press it.
+        if (props.open !== null && (ev.key === "Enter" || ev.key === " ")) {
+          ev.preventDefault();
+          press();
+        }
+      }}
+    >
+      {props.children}
+    </article>
+  );
+}
 
 export function Timeline(props: {
   conversation: ConversationView;
@@ -188,9 +312,16 @@ export function Timeline(props: {
             )}
           </Show>
           <Actions conversation={props.conversation} />
-          <button type="button" class="pane-forward" onClick={props.details}>
-            Details →
-          </button>
+          {/* And the way on to the next level, drawn only where there is a next
+              level to reach: the details pane holds the selected Event and
+              nothing else, so with nothing selected it is bare paper and a
+              control that paged into it would page into nothing. Hidden by the
+              stylesheet anyway where all three panes are on screen at once. */}
+          <Show when={props.selected !== null}>
+            <button type="button" class="pane-forward" onClick={props.details}>
+              Details →
+            </button>
+          </Show>
         </div>
 
         <Pinned
@@ -203,29 +334,56 @@ export function Timeline(props: {
 
       <ol class="timeline">
         <For each={props.conversation.timeline}>
-          {(event) => (
+          {(event, index) => (
             <li class="timeline-event">
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
                     <Brief
-                      id={props.conversation.id}
+                      conversation={props.conversation}
                       brief={brief()}
-                      adopting={props.conversation.adopting !== null}
+                      selected={props.selected === brief().id}
+                      open={() => {
+                        props.select(brief().id);
+                        props.details();
+                      }}
                     />
                   )}
                 </Match>
                 <Match when={"Moved" in event && event.Moved}>
-                  {(moved) => <Moved moved={moved()} />}
+                  {(moved) => (
+                    <Moved
+                      from={movedFrom(props.conversation.timeline, index())}
+                      moved={moved()}
+                    />
+                  )}
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
-                  {(handoff) => <Handoff handoff={handoff()} />}
+                  {(handoff) => (
+                    <Handoff
+                      handoff={handoff()}
+                      selected={props.selected === handoff().id}
+                      open={() => {
+                        props.select(handoff().id);
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
                   {(notice) => <Notice notice={notice()} />}
                 </Match>
                 <Match when={"ManualTask" in event && event.ManualTask}>
-                  {(manual) => <ManualTask manual={manual()} />}
+                  {(manual) => (
+                    <ManualTask
+                      manual={manual()}
+                      selected={props.selected === manual().id}
+                      open={() => {
+                        props.select(manual().id);
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -266,7 +424,6 @@ export function Timeline(props: {
                 <Match when={"Interruption" in event && event.Interruption}>
                   {(stopped) => (
                     <Interruption
-                      conversation={props.conversation}
                       stopped={stopped()}
                       selected={props.selected === stopped().id}
                       open={() => {
@@ -306,7 +463,7 @@ export function Timeline(props: {
   );
 }
 
-/// The way to move a conversation by hand: an instruction, a profile to run it
+/// The way to move a conversation by hand: an instruction, a pairing to run it
 /// under, and a submit.
 ///
 /// Drawn whenever there is a worktree to run in, the conversation is neither
@@ -320,7 +477,7 @@ export function Timeline(props: {
 /// Drafting and aborted are the two states with no worktree, so those are the
 /// two it is never offered in — there is nowhere for a session to run.
 ///
-/// The profile starts on the conversation's implementation one and picking
+/// The pairing starts on the conversation's implementation one and picking
 /// another is one-off: it is what this task runs under, and it never becomes the
 /// conversation's own. Nothing here writes it back.
 function ManualTaskComposer(props: {
@@ -329,25 +486,30 @@ function ManualTaskComposer(props: {
   const queries = useQueryClient();
 
   const [instruction, setInstruction] = createSignal("");
-  const [picked, setPicked] = createSignal<number | null>(null);
+  const [picked, setPicked] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
 
-  /// The profile list, read here rather than passed down, the way the details
-  /// pane's pickers read it: the control is whole wherever it is drawn.
+  /// The profile list, read here rather than passed down, the way the setup's
+  /// pickers read it: the control is whole wherever it is drawn.
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
 
-    // And the same merge, for the same picker — see the details pane. This one
-    // sits under a half-typed instruction while a session is talking above it,
-    // which is the loudest a Nudge ever gets.
+    // And the same merge, for the same picker — see the setup on the brief
+    // card. This one sits under a half-typed instruction while a session is
+    // talking above it, which is the loudest a Nudge ever gets.
     freshness: { reconcile: "id" },
   }));
 
-  /// Which profile is selected: whatever the human picked, and the
+  /// Which pairing is selected: whatever the human picked, and the
   /// conversation's implementation one until they pick anything.
+  ///
+  /// The empty string is nothing selected, which is where the composer opens on
+  /// a conversation whose implementation profile was chosen before models were
+  /// paired with them: there is no default model anywhere, so the pick is the
+  /// human's to make.
   const running = () =>
-    picked() ?? props.conversation.implementation_profile?.id ?? null;
+    picked() ?? pairing.chosen(props.conversation.implementation_pairing);
 
   /// Whether the composer belongs on this conversation at all.
   const offered = () =>
@@ -357,8 +519,12 @@ function ManualTaskComposer(props: {
     !props.conversation.working;
 
   const submit = useMutation(() => ({
-    mutationFn: (profileId: number) =>
-      startManualTask(props.conversation.id, instruction(), profileId),
+    mutationFn: (chosen: string) =>
+      startManualTask(
+        props.conversation.id,
+        instruction(),
+        pairing.choice(chosen),
+      ),
     onSuccess: (outcome: ManualTaskStarted) => {
       if (outcome !== "Started") {
         setRefused(outcome);
@@ -400,11 +566,11 @@ function ManualTaskComposer(props: {
           />
         </div>
 
-        {/* Drawn only once the list is here, the way the details pane's pickers
-            are: a select whose value is set before its options exist is a
-            select showing nothing. */}
+        {/* Drawn only once the list is here, the way the setup's pickers are:
+            a select whose value is set before its options exist is a select
+            showing nothing. */}
         <div class="manual-task-profile">
-          <label for="manual-task-profile">Run it as</label>
+          <label for="manual-task-pairing">Run it as</label>
           <Show
             when={profiles.data}
             fallback={
@@ -416,20 +582,20 @@ function ManualTaskComposer(props: {
             }
           >
             {(saved) => (
-              /* A [`Picker`] rather than a `<select>`, the way the details
-                 pane's pickers are: what this shows and what the press below
-                 runs the task as are the same profile, list or no list — see
+              /* A [`Picker`] rather than a `<select>`, the way the setup's
+                 pickers are: what this shows and what the press below runs the
+                 task as are the same pairing, list or no list — see
                  `src/picking.tsx`. */
               <Picker
-                id="manual-task-profile"
-                options={saved()}
-                value={(profile) => String(profile.id)}
-                label={(profile) => `${profile.name} — ${profile.model}`}
-                chosen={running() === null ? "" : String(running())}
-                pick={(chosen) => setPicked(Number(chosen))}
+                id="manual-task-pairing"
+                options={pairing.pairings(saved())}
+                value={pairing.value}
+                label={pairing.label}
+                chosen={running()}
+                pick={setPicked}
                 // The one-off pick is gone from the list: it is dropped, and
                 // `running` falls back to the conversation's own implementation
-                // profile — which is where the composer opened.
+                // pairing — which is where the composer opened.
                 gone={() => setPicked(null)}
                 disabled={submit.isPending}
               />
@@ -441,14 +607,12 @@ function ManualTaskComposer(props: {
           type="button"
           class="start-manual-task"
           disabled={
-            submit.isPending ||
-            instruction().trim() === "" ||
-            running() === null
+            submit.isPending || instruction().trim() === "" || running() === ""
           }
           onClick={() => {
-            const profileId = running();
-            if (profileId !== null) {
-              submit.mutate(profileId);
+            const chosen = running();
+            if (chosen !== "") {
+              submit.mutate(chosen);
             }
           }}
         >
@@ -484,9 +648,11 @@ function ManualTaskComposer(props: {
 /// Pinning is the fixed set — a task list, a stage list and the pull request —
 /// so there is nothing to pin, nothing to unpin, and no control for either.
 ///
-/// One of them opens: a pull request has a full self, which is what is on it
-/// right now. Neither list does — what a details pane would show of one is what
-/// is already drawn here.
+/// One card at a time once there is more than one of them: they are held above
+/// the record, so a stack of them is a stack the record is pushed down by, and
+/// what is pinned is worth having in view rather than worth having all of at
+/// once. One of them alone is drawn exactly as it always was — a carousel of one
+/// is furniture around a card nothing can be turned to.
 function Pinned(props: {
   conversation: ConversationView;
   selected: number | null;
@@ -496,32 +662,211 @@ function Pinned(props: {
   return (
     <Show when={props.conversation.pinned.length > 0}>
       <div class="pinned">
-        <For each={props.conversation.pinned}>
-          {(event) => (
-            <Switch>
-              <Match when={"TaskList" in event && event.TaskList}>
-                {(tasks) => <TaskList tasks={tasks()} />}
-              </Match>
-              <Match when={"StageList" in event && event.StageList}>
-                {(stages) => <StageList stages={stages()} />}
-              </Match>
-              <Match when={"PullRequest" in event && event.PullRequest}>
-                {(opened) => (
-                  <PullRequest
-                    opened={opened()}
-                    selected={props.selected === opened().id}
-                    open={() => {
-                      props.select(opened().id);
-                      props.details();
-                    }}
-                  />
-                )}
-              </Match>
-            </Switch>
-          )}
-        </For>
+        <Show
+          when={props.conversation.pinned.length > 1}
+          fallback={
+            <Card
+              event={props.conversation.pinned[0]!}
+              selected={props.selected}
+              select={props.select}
+              details={props.details}
+            />
+          }
+        >
+          <Carousel
+            conversation={props.conversation}
+            selected={props.selected}
+            select={props.select}
+            details={props.details}
+          />
+        </Show>
       </div>
     </Show>
+  );
+}
+
+/// How far a finger has to travel across a card before it has swiped it, in the
+/// pixels a touch reports.
+///
+/// Far enough that a press which slid a little is still a press — a dot and a
+/// pull request's title are both pressed through this — and short enough that a
+/// flick across a card in a phone-width pane counts.
+export const SWIPE = 40;
+
+/// The carousel: one pinned card showing, and the ways to the others.
+///
+/// Dots beneath saying how many there are and which is showing, arrows over the
+/// card's edges where there is a pointer to reach them with, and a swipe across
+/// the card where there is not. All three are the same move, which is why they
+/// are one function between them.
+///
+/// It wraps: with two or three cards, an arrow that stopped at the end would be
+/// a dead control most of the time.
+///
+/// Which card fronts is [`fronting`]'s to say, and it says it once — when the
+/// conversation is opened and this is built. Nothing is remembered between
+/// visits, and nothing moves the card under a reader afterwards: a re-read that
+/// jumped the carousel back to where it started would be the page arguing with
+/// whoever is holding it.
+function Carousel(props: {
+  conversation: ConversationView;
+  selected: number | null;
+  select: (event: number) => void;
+  details: () => void;
+}): JSX.Element {
+  const cards = () => props.conversation.pinned;
+
+  const [at, setAt] = createSignal(fronting(props.conversation));
+
+  /// Never off the end of a list that shrank underneath it — a pull request is
+  /// pinned as the run finishes, and a backlog stops being pinned as its last
+  /// task file goes.
+  const showing = () => Math.min(at(), cards().length - 1);
+
+  /// Turn to a card, counting round both ends.
+  const turn = (to: number) => {
+    const many = cards().length;
+    setAt(((to % many) + many) % many);
+  };
+
+  /// Where the finger went down, in the coordinates it will come back up in.
+  let from: number | null = null;
+
+  return (
+    <div class="carousel">
+      <div
+        class="showing"
+        onTouchStart={(event) => {
+          from = event.changedTouches[0]?.clientX ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const to = event.changedTouches[0]?.clientX;
+          const went = from;
+          from = null;
+          if (went === null || to === undefined) {
+            return;
+          }
+          // Leftwards is onwards, the way a page turns.
+          if (Math.abs(to - went) >= SWIPE) {
+            turn(showing() + (to < went ? 1 : -1));
+          }
+        }}
+      >
+        <Card
+          event={cards()[showing()]!}
+          selected={props.selected}
+          select={props.select}
+          details={props.details}
+        />
+      </div>
+
+      {/* The arrows, which the stylesheet draws only where there is a pointer:
+          on a touch device the swipe is what these are, and two buttons lying
+          over the card would be two buttons in the way of it. */}
+      <button
+        type="button"
+        class="step back"
+        aria-label="Previous pinned card"
+        onClick={() => turn(showing() - 1)}
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        class="step on"
+        aria-label="Next pinned card"
+        onClick={() => turn(showing() + 1)}
+      >
+        ›
+      </button>
+
+      {/* And the dots: how many cards there are, which one is showing, and a way
+          straight to any of them. Each is named for the card it turns to rather
+          than numbered, because that is what a reader who cannot see the dots
+          needs to know about it. */}
+      <ol class="dots">
+        <For each={cards()}>
+          {(card, index) => (
+            <li>
+              <button
+                type="button"
+                aria-label={named(card)}
+                aria-current={showing() === index() ? "true" : undefined}
+                onClick={() => turn(index())}
+              />
+            </li>
+          )}
+        </For>
+      </ol>
+    </div>
+  );
+}
+
+/// Which card is showing when a conversation is opened: the one needing
+/// attention, and otherwise the first.
+///
+/// The first is the fixed order — task list, then roadmap, then pull request —
+/// because that is the order the server hands them over in, which is the order
+/// the work goes through them in.
+///
+/// Needing attention is the conversation being blocked on the card, which only a
+/// pull request can be: it is the one pinned event that is also on the record,
+/// and the two lists are read off the worktree rather than being moments
+/// anything could have stopped at. So a pull request with feedback waiting on it
+/// fronts over the backlog beside it, which is what a reader opening the
+/// conversation is being stopped for.
+function fronting(conversation: ConversationView): number {
+  const at = conversation.pinned.findIndex(
+    (event) =>
+      "PullRequest" in event && event.PullRequest.id === conversation.blocked_on,
+  );
+
+  return at === -1 ? 0 : at;
+}
+
+/// What a pinned card is called, in the words its own heading uses.
+function named(event: PinnedEvent): string {
+  if ("TaskList" in event) {
+    return "Task list";
+  }
+  if ("StageList" in event) {
+    return "Roadmap";
+  }
+  return "Pull request";
+}
+
+/// One pinned card, whichever of the three kinds it is.
+///
+/// One of them opens: a pull request has a full self, which is what is on it
+/// right now. Neither list does — what a details pane would show of one is what
+/// is already drawn here.
+function Card(props: {
+  event: PinnedEvent;
+  selected: number | null;
+  select: (event: number) => void;
+  details: () => void;
+}): JSX.Element {
+  return (
+    <Switch>
+      <Match when={"TaskList" in props.event && props.event.TaskList}>
+        {(tasks) => <TaskList tasks={tasks()} />}
+      </Match>
+      <Match when={"StageList" in props.event && props.event.StageList}>
+        {(stages) => <StageList stages={stages()} />}
+      </Match>
+      <Match when={"PullRequest" in props.event && props.event.PullRequest}>
+        {(opened) => (
+          <PullRequest
+            opened={opened()}
+            selected={props.selected === opened().id}
+            open={() => {
+              props.select(opened().id);
+              props.details();
+            }}
+          />
+        )}
+      </Match>
+    </Switch>
   );
 }
 
@@ -550,6 +895,20 @@ function PullRequest(props: {
         {props.opened.title}
       </button>
     </article>
+  );
+}
+
+/// Whether one entry of a list is finished, drawn the way the file it is read
+/// out of writes it: an empty box, or a checked one.
+///
+/// The glyph and nothing else — it is the same fact the row's own `state` word
+/// carries, so it is hidden from anything that reads rather than looks, and the
+/// word is what those get.
+function Box(props: { done: boolean }): JSX.Element {
+  return (
+    <span class="box" aria-hidden="true">
+      {props.done ? "☑" : "☐"}
+    </span>
   );
 }
 
@@ -582,6 +941,7 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
         <For each={props.tasks.tasks}>
           {(task) => (
             <li classList={{ done: task.done }}>
+              <Box done={task.done} />
               <span class="n">{task.number}</span>
               <span class="what">{task.title}</span>
               {/* The word travels with the row rather than being drawn by the
@@ -622,6 +982,7 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
         <For each={props.stages.stages}>
           {(stage) => (
             <li classList={{ done: stage.done }}>
+              <Box done={stage.done} />
               <span class="n">{stage.number}</span>
               <span class="what">{stage.title}</span>
               {/* The word travels with the row rather than being drawn by the
@@ -646,14 +1007,22 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
 /// Read-only, unlike the Brief beside it. It is the agent's account of a
 /// conversation that is over, and a document the human could edit afterwards
 /// would be a record of something that never happened.
-function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
+///
+/// Clamped, and opened by pressing it: a settled handoff runs to a page or two,
+/// and a timeline that had to be scrolled past one to reach what happened next
+/// is a record nobody reads.
+function Handoff(props: {
+  handoff: HandoffEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   return (
-    <article class="handoff">
+    <Openable kind="handoff" selected={props.selected} open={props.open}>
       <div class="event-head">
         <h2>Handoff</h2>
       </div>
-      <div class="markdown" innerHTML={props.handoff.html} />
-    </article>
+      <Clamped class="handoff-body" html={props.handoff.html} />
+    </Openable>
   );
 }
 
@@ -680,25 +1049,39 @@ function Notice(props: { notice: NoticeEvent }): JSX.Element {
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it
 /// committed — under this one and in the order it happened.
-function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+///
+/// Clamped and openable, as the handoff is: an instruction is as long as whoever
+/// typed it made it, and the events it set going belong directly under it.
+function ManualTask(props: {
+  manual: ManualTaskEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   return (
-    <article class="manual-task">
+    <Openable kind="manual-task" selected={props.selected} open={props.open}>
       <div class="event-head">
         <h2>Manual task</h2>
       </div>
-      <div class="markdown" innerHTML={props.manual.html} />
-    </article>
+      <Clamped class="manual-task-body" html={props.manual.html} />
+    </Openable>
   );
 }
 
-/// A move: the Conversation changing hands, said in a line.
+/// A move: the Conversation changing hands, said as the transition itself.
 ///
 /// A line and not a card, because there is nothing to it but the fact and the
-/// time — everything a move has to say is already in the two.
-function Moved(props: { moved: MovedEvent }): JSX.Element {
+/// time — everything a move has to say is already in the two. Centred, so the
+/// run of cards is what the eye follows and the moves read as the joins between
+/// them.
+///
+/// Both states, `Grilling → Implementing`, rather than a verb phrase for the one
+/// that was moved to: where the work has got to is a step from somewhere, and a
+/// line saying only where it arrived leaves the reader to remember where it
+/// was. The state it came from is [`movedFrom`]'s to say.
+function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
   return (
     <p class="moved" classList={{ [props.moved.state.toLowerCase()]: true }}>
-      {MOVED[props.moved.state]}
+      {props.from} → {props.moved.state}
     </p>
   );
 }
@@ -757,17 +1140,25 @@ function AgentOutput(props: {
   );
 }
 
-/// A Question Set the session put to the human: the table of what was asked
-/// against what was decided.
+/// A Question Set the session put to the human, read as the interview it was:
+/// a question line and the answer line under it, pair after pair.
+///
+/// Not a table any more. Three columns never fitted the middle pane, and what
+/// they were holding apart is two lines of one exchange: the label leads the
+/// question the way the detail page has it lead one, and the answer is set in
+/// far enough to clear the label, so the two texts share a left edge and the
+/// card reads down rather than across.
+///
+/// Every pair is drawn — a long Set earns a long card. Nothing is clamped here
+/// the way a document card is: a document has a first paragraph that stands for
+/// the rest of it, and a Set that showed four of its questions would be a Set
+/// with questions hidden in it.
 ///
 /// A button, as a session's output is, and for the same reason: the whole
-/// document is in the details pane, and this is how it is opened. What the row
-/// shows is the design's summary — the number, the question and the answer —
-/// which is what makes a Timeline readable as the record of a conversation
-/// rather than as a list of things to go and open.
+/// document is in the details pane, and this is how it is opened.
 ///
 /// A Set still waiting says so instead of drawing a column of blanks: nothing
-/// has been decided yet, and an empty answer column would read as a Set that was
+/// has been decided yet, and an empty answer would read as a Set that was
 /// answered with nothing.
 function QuestionSet(props: {
   asked: QuestionSetEvent;
@@ -796,28 +1187,29 @@ function QuestionSet(props: {
         </Show>
       </span>
 
-      <table class="asked">
-        <tbody>
-          <For each={props.asked.rows}>
-            {(row) => (
-              <tr classList={{ nested: row.nested }}>
-                <td class="n">{row.name}</td>
-                <td class="question">{row.question}</td>
-                <td class="answer">
-                  <Show
-                    when={row.answer !== ""}
-                    fallback={
-                      <span class="open">{waiting() ? "—" : "unanswered"}</span>
-                    }
-                  >
-                    {row.answer}
-                  </Show>
-                </td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
+      {/* Spans rather than the blocks this reads as, laid out as blocks by the
+          stylesheet: everything here is inside a button, and a button holds
+          phrasing. */}
+      <span class="asked">
+        <For each={props.asked.rows}>
+          {(row) => (
+            <span class="ask" classList={{ nested: row.nested }}>
+              <span class="n">{row.name}</span>
+              <span class="question">{row.question}</span>
+              <span class="answer">
+                <Show
+                  when={row.answer !== ""}
+                  fallback={
+                    <span class="open">{waiting() ? "—" : "unanswered"}</span>
+                  }
+                >
+                  {row.answer}
+                </Show>
+              </span>
+            </span>
+          )}
+        </For>
+      </span>
     </button>
   );
 }
@@ -904,10 +1296,9 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show
           when={props.conversation.ready_to_grill}
           fallback={
-            // Deliberately not the details pane's wording. That one is a
-            // verdict on the conversation, drawn where the profiles are fixed;
-            // this one stands in for the button, and says what would make it
-            // appear.
+            // Deliberately not the setup's wording. That one is a verdict on
+            // the conversation, drawn where the profiles are fixed; this one
+            // stands in for the button, and says what would make it appear.
             <p class="note">
               Write the brief and choose both agent profiles, and the grilling
               can start.
@@ -1013,84 +1404,160 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 /// Inline in the Timeline rather than in the details pane, because there is
 /// nothing of it the Timeline does not already show — it *is* its own summary.
 ///
-/// Read as the server rendered it and written as it was typed. The two are one
-/// field's worth of markdown either way, and the Brief is the one document on
-/// this wire that travels both ways for exactly that reason.
+/// While the Conversation is drafting the Brief *is* a field: raw markdown in a
+/// textarea that is always there, growing with what is typed into it, saving
+/// itself on a pause and on the way out of it. There is no Edit and no Save,
+/// because a document that is only ever written in one state does not need a
+/// mode to be written in — and a card that swapped a rendering for a field
+/// would cost a tap before every correction.
+///
+/// Once grilling starts it freezes, and from then on it is read as the server
+/// rendered it. The two are one field's worth of markdown either way, and the
+/// Brief is the one document on this wire that travels both ways for exactly
+/// that reason.
+///
+/// The setup rides under it while the Conversation is still drafting — the
+/// branch, the base commit and the two pairings — because setting the work up
+/// and kicking it off are one act, and this is where it is kicked off. Once
+/// grilling starts the card is the Brief alone: everything under it froze at
+/// that moment, so there is nothing there to draw.
+///
+/// Which is also when it becomes a card to press: frozen, it is a document like
+/// the handoff, clamped to [`CLAMPED_LINES`] with the whole of it in the details
+/// pane. While it is a draft it is not openable at all — the card is a field
+/// with a setup under it, and every press on it belongs to one of those.
 function Brief(props: {
-  id: number;
+  conversation: ConversationView;
   brief: BriefEvent;
-
-  /// Whether this conversation is adopting a roadmap, in which case the brief
-  /// is nobody here to write: it is the stage brief, and it arrives when the
-  /// stage is adopted. So there is no editor, and nothing to open one on.
-  adopting: boolean;
+  selected: boolean;
+  open: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
 
-  // Whether the Brief is being written rather than read. Its own signal and not
-  // "is there a draft": an empty Brief is a perfectly ordinary thing to open the
-  // field on, and it is the first thing anyone does with a new Conversation.
-  const [editing, setEditing] = createSignal(false);
+  /// Whether the Brief is the human's to write here.
+  ///
+  /// While it is a draft, and never where the Conversation is adopting a
+  /// roadmap: that Brief is the stage's, and it arrives with the adoption
+  /// rather than from anyone at this keyboard.
+  const writing = () =>
+    props.conversation.state === "Draft" && props.conversation.adopting === null;
 
-  // What is being typed. Seeded from the Brief when editing starts rather than
-  // kept in step with it, so a Brief that changed underneath is the one that
-  // opens in the field.
-  const [draft, setDraft] = createSignal("");
+  /// Whether the Brief has frozen, which is the one thing that decides what kind
+  /// of card this is.
+  ///
+  /// Frozen, it is a document like the handoff: clamped, and pressed to read the
+  /// whole of it. Still a draft, it is a card with things on it to press — the
+  /// field, or the setup that stands under a Brief arriving with an adoption —
+  /// so it neither opens nor clamps. The two go together deliberately: a card
+  /// that cut a document off without offering the rest would be one that had
+  /// hidden it.
+  const frozen = () => props.conversation.state !== "Draft";
+
+  // What has been typed, or nothing if nothing has been. The field follows the
+  // Event until the first keystroke and follows itself after it, so a read of
+  // the Conversation landing mid-sentence cannot take the sentence with it.
+  const [typed, setTyped] = createSignal<string | null>(null);
+  const text = () => typed() ?? props.brief.markdown;
+
+  // What the record has, as far as this card knows: what came down with the
+  // Event, until a save of its own puts something else there.
+  const [kept, setKept] = createSignal<string | null>(null);
+  const recorded = () => kept() ?? props.brief.markdown;
 
   const [refused, setRefused] = createSignal<BriefSaved | null>(null);
 
-  const write = () => {
-    setDraft(props.brief.markdown);
-    setEditing(true);
-  };
-
-  const stop = () => {
-    setEditing(false);
-    setRefused(null);
-  };
+  /// Whether the field is ahead of the record, which is the whole of what there
+  /// is to save.
+  const unsaved = () => text() !== recorded();
 
   const save = useMutation(() => ({
-    mutationFn: (markdown: string) => saveBrief(props.id, markdown),
-    onSuccess: (outcome: BriefSaved) => {
+    mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
+    onSuccess: (outcome: BriefSaved, markdown: string) => {
       if (outcome !== "Saved") {
-        // The draft stands: it is the only copy of what was written, and the
-        // human is owed the chance to take it somewhere else.
+        // What was typed stands: it is the only copy of it there is, and the
+        // human is owed the chance to take it somewhere else. The commonest
+        // refusal is the freeze landing mid-edit, which is why it is said in
+        // words rather than left to a field that quietly stopped keeping up.
         setRefused(outcome);
         return;
       }
 
       setRefused(null);
-      setEditing(false);
+      setKept(markdown);
+      // The readiness verdict under this card is a fact about the Brief, so it
+      // is read again every time the Brief moves.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
+
+      // Typed into while that was in flight, so the record is behind again.
+      if (unsaved()) keep();
     },
   }));
 
+  // The pause: one timer, restarted by every keystroke and cancelled by
+  // whatever saves before it comes round.
+  let pause: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    clearTimeout(pause);
+    pause = setTimeout(keep, SETTLE);
+  };
+
+  /// Keep what is in the field, if the record does not have it already.
+  ///
+  /// One save at a time: another started while one is in flight could land in
+  /// either order, and the loser would be the record. What was typed meanwhile
+  /// is saved when the one in flight comes back.
+  ///
+  /// A refusal stops it for good, because both of them are permanent — a Brief
+  /// that has frozen does not thaw, and a Conversation that is gone does not
+  /// come back. Trying again every time the typing paused would be a request a
+  /// second for as long as the human went on writing, and the answer would be
+  /// the same one already on the card.
+  const keep = () => {
+    clearTimeout(pause);
+    if (refused() || !unsaved() || save.isPending) return;
+    save.mutate(text());
+  };
+
+  onCleanup(() => clearTimeout(pause));
+
+  /// What the quiet indicator says, and nothing until something has been
+  /// typed: a Brief nobody has touched saying `Saved` is the card claiming
+  /// credit for what the human did on another day.
+  const standing = () => {
+    if (save.isPending) return "Saving…";
+    if (unsaved()) return "Not saved yet";
+    return typed() === null ? "" : "Saved";
+  };
+
   return (
-    <article class="brief">
+    <Openable
+      kind="brief"
+      selected={props.selected}
+      open={frozen() ? props.open : null}
+    >
       <div class="event-head">
         <h2>Brief</h2>
-        <Show when={!editing() && !props.adopting}>
-          <button type="button" class="edit-brief" onClick={write}>
-            Edit
-          </button>
+        {/* Where the Edit button used to be, saying what became of what was
+            typed. Announced politely, because it is the only word the human
+            gets that the record has their brief. */}
+        <Show when={writing() && standing() !== ""}>
+          <p class="brief-standing" aria-live="polite">
+            {standing()}
+          </p>
         </Show>
       </div>
 
       <Show
-        when={editing()}
+        when={writing()}
         fallback={
           <Show
             when={props.brief.markdown !== ""}
             fallback={
               <p class="empty">
                 <Show
-                  when={props.adopting}
-                  fallback={
-                    <>
-                      Nothing written yet — this is what the grilling starts
-                      from.
-                    </>
-                  }
+                  when={props.conversation.adopting}
+                  fallback={<>Nothing was written.</>}
                 >
                   Nothing written yet — adopting the stage is what puts its
                   brief here.
@@ -1098,49 +1565,50 @@ function Brief(props: {
               </p>
             }
           >
-            <div class="brief-body markdown" innerHTML={props.brief.html} />
+            <Show
+              when={frozen()}
+              fallback={
+                <div class="brief-body markdown" innerHTML={props.brief.html} />
+              }
+            >
+              <Clamped class="brief-body" html={props.brief.html} />
+            </Show>
           </Show>
         }
       >
-        <form
-          class="edit-brief-form"
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            save.mutate(draft());
-          }}
-        >
-          {/* A copy of what has been typed gives the field its height — see
-              `.grow`. */}
-          <div class="grow" data-value={draft()}>
-            <textarea
-              rows="1"
-              aria-label="Brief"
-              placeholder="What is this piece of work?"
-              value={draft()}
-              onInput={(ev) => {
-                setDraft(ev.currentTarget.value);
-                setRefused(null);
-              }}
-            />
-          </div>
-          <div class="edit-brief-buttons">
-            <button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </button>
-            <button type="button" class="cancel" onClick={stop}>
-              Cancel
-            </button>
-          </div>
-          <Show when={refused()}>
-            {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
-          </Show>
-          <Show when={save.isError}>
-            <p class="error">
-              The brief could not be saved: {save.error?.message}
-            </p>
-          </Show>
-        </form>
+        {/* A copy of what has been typed gives the field its height — see
+            `.grow`. */}
+        <div class="grow" data-value={text()}>
+          <textarea
+            rows="1"
+            aria-label="Brief"
+            placeholder="What is this piece of work?"
+            value={text()}
+            onInput={(ev) => {
+              setTyped(ev.currentTarget.value);
+              settle();
+            }}
+            onBlur={() => keep()}
+          />
+        </div>
       </Show>
-    </article>
+
+      {/* Outside the field rather than under it, so a freeze that lands while
+          the human was typing is still explained on the card it happened to
+          once the card has gone back to being a rendering. */}
+      <Show when={refused()}>
+        {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
+      </Show>
+      <Show when={save.isError}>
+        <p class="error">The brief could not be saved: {save.error?.message}</p>
+      </Show>
+
+      {/* Under the brief, and only while the brief is still a draft: the branch,
+          the base commit and the two pairings all freeze when grilling starts,
+          so past that moment there is nothing here that could be changed. */}
+      <Show when={props.conversation.state === "Draft"}>
+        <Setup conversation={props.conversation} />
+      </Show>
+    </Openable>
   );
 }

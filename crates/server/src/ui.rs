@@ -144,12 +144,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             post(start_manual_task),
         )
         .route(
-            "/api/ui/conversations/{id}/grilling-profile",
-            post(choose_grilling_profile),
+            "/api/ui/conversations/{id}/grilling-pairing",
+            post(choose_grilling_pairing),
         )
         .route(
-            "/api/ui/conversations/{id}/implementation-profile",
-            post(choose_implementation_profile),
+            "/api/ui/conversations/{id}/implementation-pairing",
+            post(choose_implementation_pairing),
         )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
@@ -533,31 +533,31 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // The two Profiles are read as rows rather than as ids: what the pane says
-    // about one, and whether it can still be run under, is the same reading the
-    // Profile list gets.
-    let grilling_profile = match crate::profiles::entry(
+    // The two Pairings are read as rows rather than as ids: what the pane says
+    // about a Profile, and whether it can still be run under, is the same
+    // reading the Profile list gets.
+    let grilling_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.grilling_profile,
+        conversation.grilling_pairing,
     )
     .await
     {
-        Ok(profile) => profile,
+        Ok(pairing) => pairing,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Profile failed");
+            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
             return unavailable("the Conversation could not be read");
         }
     };
 
-    let implementation_profile = match crate::profiles::entry(
+    let implementation_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.implementation_profile,
+        conversation.implementation_pairing,
     )
     .await
     {
-        Ok(profile) => profile,
+        Ok(pairing) => pairing,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Profile failed");
+            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
             return unavailable("the Conversation could not be read");
         }
     };
@@ -621,8 +621,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        grilling_profile.as_ref(),
-        implementation_profile.as_ref(),
+        grilling_pairing.as_ref(),
+        implementation_pairing.as_ref(),
         brief,
     );
 
@@ -687,8 +687,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         state: lifecycle(conversation.state),
         ready_to_grill,
         adopting,
-        grilling_profile,
-        implementation_profile,
+        grilling_pairing,
+        implementation_pairing,
         worktree,
         direction: conversation.direction,
         pinned,
@@ -1249,7 +1249,7 @@ async fn start_manual_task(
         return Json(ManualTaskStarted::NoSuchConversation).into_response();
     };
 
-    match crate::manual::submit(&state, id, &submission.instruction, submission.profile_id).await {
+    match crate::manual::submit(&state, id, &submission).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
@@ -1306,9 +1306,9 @@ async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> Htt
     Json(HandedBack::HandedBack).into_response()
 }
 
-/// `POST /api/ui/conversations/{id}/grilling-profile` — which account and model
+/// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
 /// the grilling session runs under.
-async fn choose_grilling_profile(
+async fn choose_grilling_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(choice): Json<ProfileChoice>,
@@ -1317,18 +1317,18 @@ async fn choose_grilling_profile(
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_grilling(&state.pool, id, choice.profile_id).await {
+    match crate::profiles::choose_grilling(&state.pool, id, &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Profile failed");
-            unavailable("the grilling profile could not be chosen")
+            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Pairing failed");
+            unavailable("the grilling pairing could not be chosen")
         }
     }
 }
 
-/// `POST /api/ui/conversations/{id}/implementation-profile` — and the one the
+/// `POST /api/ui/conversations/{id}/implementation-pairing` — and the one the
 /// implementation runs under, which is a separate choice.
-async fn choose_implementation_profile(
+async fn choose_implementation_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(choice): Json<ProfileChoice>,
@@ -1337,11 +1337,11 @@ async fn choose_implementation_profile(
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_implementation(&state.pool, id, choice.profile_id).await {
+    match crate::profiles::choose_implementation(&state.pool, id, &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Profile failed");
-            unavailable("the implementation profile could not be chosen")
+            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
+            unavailable("the implementation pairing could not be chosen")
         }
     }
 }

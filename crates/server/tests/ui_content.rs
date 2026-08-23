@@ -1103,6 +1103,20 @@ fn wrap_up_proposal() -> QuestionSet {
 /// The human accepting it, which is picking a direction on the chooser — and
 /// picking one the agent did not recommend, because that is as much an
 /// acceptance as agreeing with it.
+/// Settle a Conversation's two Pairings: the first Profile for the grilling and
+/// the second for the implementation, each with the first model it lists.
+///
+/// Both while the Conversation is still drafting, which is the only state
+/// either can be recorded in — every fixture below chooses before it advances.
+async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profile]) {
+    store::set_grilling_pairing(pool, conversation, profiles[0].id, profiles[0].model())
+        .await
+        .unwrap();
+    store::set_implementation_pairing(pool, conversation, profiles[1].id, profiles[1].model())
+        .await
+        .unwrap();
+}
+
 fn accepting_the_proposal() -> Response {
     Response {
         answers: vec![Answer {
@@ -1314,10 +1328,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is exactly what the broken reading is for: this app watches nothing,
     // so every Profile it reads back is broken, and these fixtures are what the
     // viewer's tests draw that state from.
+    //
+    // One of them lists more than one model, because a Profile carries the whole
+    // list of what its account can launch and the viewer draws every entry.
     let mut profiles = Vec::new();
-    for (name, home, model) in [
-        ("fable", "/srv/accounts/fable", "claude-fable-5"),
-        ("opus", "/srv/accounts/opus", "claude-opus-5"),
+    for (name, home, models) in [
+        ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
+        (
+            "opus",
+            "/srv/accounts/opus",
+            &["claude-opus-5", "claude-haiku-4-5-20251001"][..],
+        ),
     ] {
         profiles.push(
             store::create_profile(
@@ -1326,7 +1347,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                     name: name.to_owned(),
                     claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
                     config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
-                    model: model.to_owned(),
+                    models: models.iter().map(|model| (*model).to_owned()).collect(),
                     agent_type: store::AgentType::Claude,
                 },
             )
@@ -1344,12 +1365,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, drafting, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, drafting, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, drafting, &profiles).await;
     store::save_brief(
         &pool,
         drafting,
@@ -1387,12 +1403,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, grilling, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, grilling, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, grilling, &profiles).await;
     store::save_brief(
         &pool,
         grilling,
@@ -1501,12 +1512,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, directing, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, directing, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, directing, &profiles).await;
     store::save_brief(
         &pool,
         directing,
@@ -1613,12 +1619,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, tasked, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, tasked, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, tasked, &profiles).await;
     store::save_brief(
         &pool,
         tasked,
@@ -1761,12 +1762,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, wrapping, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, wrapping, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, wrapping, &profiles).await;
     store::save_brief(
         &pool,
         wrapping,
@@ -1850,12 +1846,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, staged, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, staged, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, staged, &profiles).await;
     store::save_brief(
         &pool,
         staged,
@@ -2094,15 +2085,16 @@ fn pin_written_at(json: &str, under: &str) -> String {
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    // A list of Profiles, or one Conversation carrying the two it has chosen.
+    // A list of Profiles, or one Conversation carrying the two Pairings it has
+    // chosen — whose Profile half is the one the filesystem has an opinion of.
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
             let mut ready = payload["state"] == "Draft";
 
-            for role in ["grilling_profile", "implementation_profile"] {
+            for role in ["grilling_pairing", "implementation_pairing"] {
                 match payload.get_mut(role).filter(|it| !it.is_null()) {
-                    Some(profile) => mend(profile),
+                    Some(pairing) => mend(&mut pairing["profile"]),
                     None => ready = false,
                 }
             }

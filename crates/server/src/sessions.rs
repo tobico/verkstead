@@ -160,13 +160,19 @@ impl Agents {
         Agents { pace, ..self }
     }
 
-    /// What a session for `profile` on `prompt`, named `session`, runs.
+    /// What a session under `pairing` on `prompt`, named `session`, runs.
     ///
-    /// The model is the Profile's, said on the command line rather than left to
+    /// The model is the Pairing's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
-    /// half of what an Agent Profile *is*. The prompt follows it as the one
-    /// positional argument, which is where an interactive claude takes the thing
-    /// it is to start on.
+    /// the half of the choice the Profile does not make. A Conversation that
+    /// chose its Profile before there was a model to choose beside it runs on
+    /// the one that Profile carried — see [`store::Pairing::runs_on`]. The
+    /// prompt follows it as the one positional argument, which is where an
+    /// interactive claude takes the thing it is to start on.
+    ///
+    /// A Profile listing no models is refused when it is saved, so the flag is
+    /// only ever left off for a row somebody edited by hand — and left off
+    /// rather than passed empty, for the reason the name below is.
     ///
     /// The name comes after the prompt rather than before it, and claude reads
     /// its options on either side of the positional one. What is on the other
@@ -180,10 +186,14 @@ impl Agents {
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
     /// told anything picks its own.
-    fn argv(&self, profile: &store::Profile, prompt: &str, session: Option<&str>) -> Vec<String> {
+    fn argv(&self, pairing: &store::Pairing, prompt: &str, session: Option<&str>) -> Vec<String> {
         let mut argv = self.agent.clone();
-        argv.push("--model".to_owned());
-        argv.push(profile.model.clone());
+
+        if let Some(model) = pairing.runs_on() {
+            argv.push("--model".to_owned());
+            argv.push(model.to_owned());
+        }
+
         argv.push(prompt.to_owned());
 
         if let Some(session) = session {
@@ -628,7 +638,7 @@ impl Sessions {
         self.holds.until_handed_back(conversation_id).await
     }
 
-    /// Run `profile`'s agent on `prompt`, inside `conversation`'s sandbox, and
+    /// Run `pairing`'s agent on `prompt`, inside `conversation`'s sandbox, and
     /// put what it prints on the Timeline as it arrives.
     ///
     /// The session that was started, for whoever is driving it — see
@@ -645,7 +655,7 @@ impl Sessions {
         pool: &SqlitePool,
         nudges: &Nudges,
         conversation: &store::Conversation,
-        profile: &store::Profile,
+        pairing: &store::Pairing,
         prompt: &str,
     ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
@@ -660,7 +670,7 @@ impl Sessions {
         // the whole of why the log it writes can be found at all — see
         // [`session_name`].
         let session = session_name();
-        let argv = agents.argv(profile, prompt, session.as_deref());
+        let argv = agents.argv(pairing, prompt, session.as_deref());
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -668,7 +678,7 @@ impl Sessions {
         // decided before anything is spawned.
         let built = tokio::task::spawn_blocking({
             let conversation = conversation.clone();
-            let profile = profile.clone();
+            let profile = pairing.profile.clone();
             let home = agents.home.clone();
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
@@ -761,7 +771,7 @@ impl Sessions {
         // [`crate::transcript`].
         let tail = session
             .as_deref()
-            .map(|session| Tail::of(conversation_id, profile, session));
+            .map(|session| Tail::of(conversation_id, &pairing.profile, session));
 
         let (stop, stopping) = oneshot::channel();
 
@@ -1315,8 +1325,17 @@ mod tests {
             name: "fable".to_owned(),
             claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
             config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            model: "claude-fable-5".to_owned(),
+            models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             agent_type: store::AgentType::Claude,
+        }
+    }
+
+    /// That Profile, paired with the second of its models — so the argv below
+    /// says the pick and not the list.
+    fn pairing() -> store::Pairing {
+        store::Pairing {
+            profile: profile(),
+            model: Some("claude-opus-5".to_owned()),
         }
     }
 
@@ -1337,10 +1356,37 @@ mod tests {
     /// The prompt is what the grilling starts from, and an interactive claude
     /// takes what it is to start on as a positional argument.
     #[test]
-    fn a_session_runs_the_profiles_model_on_the_prompt() {
+    fn a_session_runs_the_pairings_model_on_the_prompt() {
         let state = tempfile::tempdir().unwrap();
         let argv = agents(vec!["claude".to_owned()], state.path()).argv(
-            &profile(),
+            &pairing(),
+            "# Rate limiting\n",
+            None,
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "claude".to_owned(),
+                "--model".to_owned(),
+                "claude-opus-5".to_owned(),
+                "# Rate limiting\n".to_owned(),
+            ]
+        );
+    }
+
+    /// And a Conversation that chose its Profile before there was a model to
+    /// choose beside it runs on the one that Profile carries, which is how
+    /// everything chosen before pairings existed goes on working.
+    #[test]
+    fn an_unpaired_choice_runs_on_the_profiles_own_model() {
+        let state = tempfile::tempdir().unwrap();
+        let unpaired = store::Pairing {
+            profile: profile(),
+            model: None,
+        };
+        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+            &unpaired,
             "# Rate limiting\n",
             None,
         );
@@ -1362,7 +1408,7 @@ mod tests {
     fn a_named_session_is_run_under_the_name_it_was_given() {
         let state = tempfile::tempdir().unwrap();
         let argv = agents(vec!["claude".to_owned()], state.path()).argv(
-            &profile(),
+            &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
         );
@@ -1372,7 +1418,7 @@ mod tests {
             vec![
                 "claude".to_owned(),
                 "--model".to_owned(),
-                "claude-fable-5".to_owned(),
+                "claude-opus-5".to_owned(),
                 "# Rate limiting\n".to_owned(),
                 "--session-id".to_owned(),
                 "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),

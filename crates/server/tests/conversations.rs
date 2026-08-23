@@ -536,7 +536,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "model": "claude-opus-5",
+            "models": ["claude-opus-5"],
         }),
     )
     .await;
@@ -550,11 +550,13 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
         .id
 }
 
+/// Pair a Profile with the one model [`profile`] gives every Profile here, for
+/// one of a Conversation's two roles.
 async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
     let chosen: verkstead_render::ProfileChosen = post(
         app,
-        &format!("/api/ui/conversations/{id}/{role}-profile"),
-        &serde_json::json!({ "profile_id": profile_id }),
+        &format!("/api/ui/conversations/{id}/{role}-pairing"),
+        &serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" }),
     )
     .await;
     assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);

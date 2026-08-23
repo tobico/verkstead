@@ -11,6 +11,15 @@ import type { Direction } from "./api/types";
 /// also the order to consider them in.
 export const DIRECTIONS: Direction[] = ["inline", "task-list", "roadmap"];
 
+/// What the ask itself is labelled, where a Question carries the name it
+/// answers to: the human's own word for what the chooser decides — how the
+/// grilling ends.
+///
+/// A word rather than a number, because this is not one of the Questions: a
+/// `Q4` after `Q3` would read as a fourth question whose answer the Response
+/// had lost.
+export const DIRECTION_LABEL = "End";
+
 /// What each direction is called, wherever one is named: on the chooser, and on
 /// the record it becomes once the Set is answered.
 ///

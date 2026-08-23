@@ -68,13 +68,24 @@ flowchart LR
   conversation can reopen with a new brief round. Aborting is possible from
   any state, and **Aborted** is a state of its own — off the ladder rather than
   on it, since every other state is somewhere the work has got to.
-- **Agent profiles** are minimal: name, claude home dir + config file pair,
-  default model — plus an agent-type discriminator so other backends can slot
-  in later (claude is the only type now). Account separation works as in the
+- **Agent profiles** are minimal: name, claude home dir + config file pair, the
+  list of models that account can run — plus an agent-type discriminator so
+  other backends can slot in later (claude is the only type now). The model
+  list is the profile's own rather than one list shared by all of them, and it
+  has no default entry: the profile says what is available and the pick is made
+  where a session is set up. Account separation works as in the
   current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox. Each conversation fixes **two**
-  profiles before grilling starts: one for grilling, one for implementation
-  work (today's split: grill on fable, implement on opus).
+  `~/.claude.json` inside the sandbox.
+- **Pairings.** What runs a conversation's sessions is a profile *and* one of
+  that profile's models, picked together. Each conversation fixes **two** of
+  them before grilling starts: one for grilling, one for implementation work
+  (today's split: grill on fable, implement on opus). Every picker offers the
+  pairings as one flat list, a row per profile-and-model combination — a
+  two-stage profile-then-model picker was considered and rejected, since it
+  costs a tap every time and the counts stay small. Both are fixed when
+  grilling starts, alongside the branch, the base commit and the brief: what
+  runs the work is settled before the work begins rather than swapped
+  underneath it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —
@@ -92,7 +103,7 @@ flowchart LR
 ## Workflow
 
 - **Grilling.** "Start grilling" creates the branch + worktree and launches a
-  grilling session under the conversation's grilling profile. Question sets
+  grilling session under the conversation's grilling pairing. Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
@@ -101,8 +112,8 @@ flowchart LR
   the `.tasks/` backlog, the `docs/roadmaps/` staging, or (for **inline**) a
   handoff document — and the artifact landing plus quiet is what moves the
   conversation on. Inline needs the handoff because its builder is a fresh
-  session under the implementation profile: the grilling session cannot simply
-  continue, the profiles differ (ADR-0008).
+  session under the implementation pairing: the grilling session cannot simply
+  continue, the accounts differ (ADR-0008).
 - **Two kinds of ask.** *Blocking* asks work as in askance: the session idles
   until the answer arrives. *Deferred* asks don't block; they sit in the
   timeline awaiting answers, which are folded into a later session's prompt.
@@ -129,10 +140,15 @@ flowchart LR
   says; a repo that records none gets a branch off the default branch, said on
   the timeline, because there is no convention to invent on its behalf.
 - **The brief freezes at grill start.** A reopened round adds a new brief
-  event rather than editing the old one.
-- **Interruptions** (crash, hang) become timeline events with retry /
-  take-over-manually / abort actions in the GUI — roadrunner's remedies,
-  GUI-native.
+  event rather than editing the old one. Until then it is edited where it
+  stands, with no mode to enter and no Save to press (*settled 2026-08-24,
+  building workbench-refit*): the field is always there, it grows with what is
+  in it, and it keeps itself on a pause in the typing and on the way out of
+  the field.
+- **Interruptions** (crash, hang) become timeline events offering retry /
+  take-over-manually / abort — roadrunner's remedies, GUI-native. The event is
+  a plain openable card and the three are answered in the details pane, like a
+  question set (*settled 2026-08-24, building workbench-refit*).
 - **Usage limits.** When a claude account exhausts its window mid-run, the
   conversation pauses and push-notifies; it resumes on the human's say-so or
   when the window resets.
@@ -227,22 +243,59 @@ flowchart LR
 Fully responsive 3-pane hierarchy: conversations list → timeline of the
 selected conversation → details pane of the selected event.
 
+The panes are resizable where they stand side by side (*settled 2026-08-24,
+building workbench-refit*). Widths are shares of the window rather than fixed
+lengths — what is traded away is a part of what this screen has, and no two
+screens have the same — and the dividers between the panes drag: both of them
+with all three panes up, the sidebar's alone with two. Each pane keeps a floor
+so none can be dragged away, a double-click on a divider puts the defaults
+back, and what a drag settles on is remembered per device. Below the two-pane
+breakpoint the layout pages one pane at a time: no dividers, and nothing
+remembered is read. The details pane caps its content at the 60rem the Set and
+Settings pages are read at and centres it when the pane is wider, so a pane
+dragged to the width of a window is still a pane a line can be read across.
+
+The details pane is the selected Event and nothing else: with nothing selected
+it is blank, and a narrow layout offers no way to page into it (*settled
+2026-08-24, building workbench-refit*). What a Conversation needs settling
+before it runs — branch, base commit, both Pairings, the readiness verdict —
+rides under the Brief on its timeline card instead, disappearing entirely once
+grilling starts, since the server freezes all of it at that moment. The repo
+name, the worktree path and the conversation state are drawn nowhere: the
+record tells that story.
+
 Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always | — |
+| Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |
 | Stage list | inline, pinned | — |
 | PR | name + id, pinned | fetched commit list and comments |
-| Interruption | inline with remedy actions | session tail / evidence |
+| Interruption | what stopped, badge or chosen remedy | evidence, then the remedies as a sheet |
 | Notice | inline, nothing to do about it | — |
 
+- **An interruption is answered like a question set** (*settled 2026-08-24,
+  building workbench-refit*): its card is a plain button carrying what stopped
+  and either the *blocked on you* badge or the remedy chosen, and pressing
+  anywhere on it opens the pane. The pane reads as an answer sheet — the
+  evidence above, the three remedies as option rows under it, one note field and
+  one submit — so nothing acts on a stray tap, which matters most for aborting
+  and is anyway how answering already works. A settled one reads back the same
+  way: the evidence, the remedy taken, and what was written alongside it.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
-  summary box at the top of the timeline; no manual pin/unpin.
+  summary box at the top of the timeline; no manual pin/unpin. More than one
+  pinned card is a carousel rather than a stack (*settled 2026-08-24, building
+  workbench-refit*): everything pinned is held above the record, so a stack of
+  them is what the record gets pushed down by. Dots beneath say how many there
+  are and which is showing, arrows over the card's edges turn it where there is
+  a pointer, and a swipe across it does where there is not. What fronts on
+  opening is the card the conversation is blocked on — a PR with feedback
+  waiting — and otherwise the first of the fixed order; nothing is remembered
+  between visits, and a single pinned card gets none of the furniture.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is
@@ -255,6 +308,29 @@ Timeline events:
   On the card the waiting dot still outranks both rings, so a grilling sitting
   on an open set is drawn as waiting rather than as idle (*settled 2026-08-23,
   building agent-output-polish*).
+- **A call and the answer to it are one card** (*settled 2026-08-24, building
+  workbench-refit*): on the Transcript a tool call and the result answering it
+  are a single fold — the tool and its one line while it is shut, what it was
+  called with above what it said back once it is open. Two rows were two things
+  to open for one thing that happened, and the second of them said *Result* and
+  nothing else. Which two go together is the name the log gave the call, carried
+  on both turns and joined by the pane rather than by the server, so a call whose
+  tool is still running opens on its own and grows its answer where it stands.
+  Success is quiet and a failure says *failed* in the summary line, in the
+  stopped-run red — a session's one bad call is then findable without opening
+  the ninety-nine good ones.
+- **Starting work is one menu** (*settled 2026-08-24, building
+  workbench-refit*): a button at the top of the sidebar drops the registered
+  Repos, and the Repo pressed is the Conversation started. Under them, behind a
+  rule, is *Adopt a roadmap* — every abandoned roadmap there is, flat and named
+  with its Repo and the stage a press would start. Both were permanent
+  furniture before: a form of three controls, and a stack of notices under it
+  that the conversations were pushed down by. Nothing is waiting on the human
+  in either, which is what says they belong behind a press — and the roadmaps
+  are still not dismissible, because the group is in the menu every time it
+  opens and a roadmap's score is the repository's to keep. The menu closes on a
+  choice, on escape and on a press outside it, and hands the focus to the first
+  Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,

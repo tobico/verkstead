@@ -9,6 +9,15 @@
 //! The floating header is here too, because it reads the same signal: it names
 //! where the reader is, so it cannot be built from anything but the list the
 //! highlight moves along.
+//!
+//! A nav drawn inside a details pane is the same nav, and picks between the same
+//! two shapes — but from the pane's width rather than the window's, because a
+//! pane is a column the human drags and the window has nothing to say about how
+//! wide they left it. That is the one thing the stylesheet cannot answer on its
+//! own: a container query would make the pane a containing block for everything
+//! fixed inside it, and the confirm sheet and the standing menu are two of
+//! those. So the width is measured here and said as a class, and the rules for
+//! the two shapes stay where every other rule about them is.
 
 import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
@@ -63,19 +72,36 @@ export function navigation(): Nav {
 ///
 /// The outline and the watched list are worked out by the caller and handed to
 /// the floating header as well, so the two cannot describe different pages.
+///
+/// `paned` says this one is drawn inside a details pane, where which of the two
+/// shapes it takes is the pane's width's answer rather than the window's — see
+/// [`roominess`].
 export function Contents(props: {
   sections: Section[];
   watched: Watched[];
   nav: Nav;
+  paned?: boolean;
 }): JSX.Element {
   const [open, setOpen] = props.nav.open;
 
   follow(() => props.watched, props.nav);
   dismiss(props.nav);
 
+  let element: HTMLElement | undefined;
+  const roomy = roominess(() => (props.paned === true ? element : undefined));
+
   return (
     <nav
-      class={open() ? "contents contents-open" : "contents"}
+      ref={element}
+      classList={{
+        contents: true,
+        "contents-open": open(),
+        // What the stylesheet keys the pane's own two shapes off, said only
+        // where the nav is in a pane: on a page there is nothing to measure
+        // and the window's own rules are the whole of the answer.
+        "contents-paned": props.paned === true,
+        "contents-roomy": props.paned === true && roomy(),
+      }}
       aria-label="On this page"
     >
       <Bar watched={props.watched} nav={props.nav} />
@@ -391,6 +417,61 @@ function headingPassed(watched: Accessor<Watched[]>): Accessor<boolean> {
   return passed;
 }
 
+/// How wide a details pane has to stand before its margin holds the sidebar, in
+/// rem.
+///
+/// The pane caps what it holds at 60rem and centres it, so its margin is half of
+/// whatever is left over — and the nav wants 8rem of it, a gap of 1rem from the
+/// column and 1rem of paper at the pane's edge. 80rem of pane is the first width
+/// where 10rem of margin exists on each side, which is the same arithmetic the
+/// window's own breakpoint is made of.
+const ROOM = 80;
+
+/// Whether the pane this nav is in stands wide enough for the sidebar, watched
+/// as the human drags the divider.
+///
+/// The pane is found from the nav rather than passed to it: what the nav has to
+/// know is how much margin there is around the column it is describing, and the
+/// pane is the one element that says. A nav with no pane above it — the page's —
+/// measures nothing and is never roomy: there the window's own rules are the
+/// whole of the answer.
+///
+/// Rem rather than pixels because that is what the stylesheet's own widths are
+/// said in, and a reader who has made their text bigger has made the column
+/// wider with it.
+function roominess(nav: Accessor<HTMLElement | undefined>): Accessor<boolean> {
+  const [roomy, setRoomy] = createSignal(false);
+
+  createEffect(() => {
+    const pane = nav()?.closest(".details-pane");
+    if (pane === null || pane === undefined) {
+      return;
+    }
+
+    const measure = () => {
+      const rem =
+        Number.parseFloat(getComputedStyle(document.documentElement).fontSize) ||
+        16;
+      setRoomy(pane.clientWidth >= ROOM * rem);
+    };
+
+    measure();
+
+    // A browser with no observer to be had keeps the bar: it is the shape that
+    // asks nothing of the margin, so it is the one that is right whatever the
+    // pane turns out to be.
+    if (typeof ResizeObserver !== "function") {
+      return;
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    onCleanup(() => observer.disconnect());
+  });
+
+  return roomy;
+}
+
 /// Take the reader to the section, file or Question this id names.
 ///
 /// A folded file is unfolded before the jump: landing on a closed fold is
@@ -439,17 +520,24 @@ function bring(target: Element): void {
     return;
   }
 
+  const box = scroller(target);
+
   // Where the browser would have put it: the top of the target, less the
   // scroll margin the stylesheet reserves for whatever is pinned across the
-  // top edge — and never past the bottom of the page.
+  // top edge — and never past the bottom of what is being scrolled.
   const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
-  const limit = document.documentElement.scrollHeight - window.innerHeight;
-  const to = Math.min(
-    Math.max(window.scrollY + target.getBoundingClientRect().top - margin, 0),
-    Math.max(limit, 0),
-  );
+  const from = box === null ? window.scrollY : box.scrollTop;
+  const top =
+    box === null
+      ? target.getBoundingClientRect().top
+      : target.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  const limit =
+    box === null
+      ? document.documentElement.scrollHeight - window.innerHeight
+      : box.scrollHeight - box.clientHeight;
 
-  const from = window.scrollY;
+  const to = Math.min(Math.max(from + top - margin, 0), Math.max(limit, 0));
+
   const began = performance.now();
 
   const step = (now: number) => {
@@ -457,13 +545,37 @@ function bring(target: Element): void {
     // Ease-out: the distance is covered early and the landing is soft, which
     // reads as arriving rather than stopping.
     const eased = 1 - (1 - part) ** 2;
-    window.scrollTo(0, from + (to - from) * eased);
+    const at = from + (to - from) * eased;
+    if (box === null) {
+      window.scrollTo(0, at);
+    } else {
+      box.scrollTo(0, at);
+    }
     if (part < 1) {
       window.requestAnimationFrame(step);
     }
   };
 
   window.requestAnimationFrame(step);
+}
+
+/// The box a jump has to move to bring `target` into view: the nearest ancestor
+/// that scrolls, and `null` for the page itself.
+///
+/// Asked of the layout rather than assumed, because the one page a Set is drawn
+/// on is not the only place it is read: in the workbench the same sheet is a
+/// details pane, and a pane above the first breakpoint scrolls on its own while
+/// the window behind it does not move at all. Scrolling the window there would
+/// be a jump that goes nowhere.
+function scroller(target: Element): HTMLElement | null {
+  for (let at = target.parentElement; at !== null; at = at.parentElement) {
+    const how = getComputedStyle(at).overflowY;
+    if (how === "auto" || how === "scroll") {
+      return at;
+    }
+  }
+
+  return null;
 }
 
 /// Where the reading line sits, written as the margins the browser is to put

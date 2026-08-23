@@ -30,7 +30,7 @@
 //! prints nothing for hours, so it is quiet *and* nothing of its own awaiting an
 //! answer, or it is left where it is.
 
-use verkstead_render::ManualTaskStarted;
+use verkstead_render::{ManualTaskStarted, ManualTaskSubmission};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
@@ -39,7 +39,7 @@ use crate::skills;
 use crate::store;
 
 /// Set a Manual Task going: the instruction on the Timeline, and a session under
-/// `profile_id` doing what it says.
+/// the Pairing `choice` names doing what it says.
 ///
 /// Returns as soon as the session is running. Seeing it out is a task of its own
 /// — a manual task takes as long as it takes, and the browser that submitted it
@@ -50,10 +50,9 @@ use crate::store;
 pub(crate) async fn submit(
     state: &AppState,
     conversation_id: i64,
-    instruction: &str,
-    profile_id: i64,
+    submission: &ManualTaskSubmission,
 ) -> anyhow::Result<ManualTaskStarted> {
-    let instruction = instruction.trim();
+    let instruction = submission.instruction.trim();
 
     if instruction.is_empty() {
         return Ok(ManualTaskStarted::EmptyInstruction);
@@ -75,8 +74,23 @@ pub(crate) async fn submit(
         return Ok(ManualTaskStarted::NowhereToWork);
     }
 
-    let Some(profile) = store::load_profile(&state.pool, profile_id).await? else {
+    let Some(profile) = store::load_profile(&state.pool, submission.profile_id).await? else {
         return Ok(ManualTaskStarted::NoSuchProfile);
+    };
+
+    // The model half of the pick, held to the Profile's list the way the two
+    // Pairing choices are: a Profile whose list was edited between the composer
+    // being drawn and the press is a session that would launch on a model that
+    // account cannot run.
+    if !profile.models.contains(&submission.model) {
+        return Ok(ManualTaskStarted::NoSuchModel);
+    }
+
+    // The pick is one-off, and it is a Pairing rather than a row of the record:
+    // nothing about this is written down as the Conversation's.
+    let pairing = store::Pairing {
+        profile,
+        model: Some(submission.model.clone()),
     };
 
     // Tried for rather than waited for, and the two are different answers to the
@@ -113,7 +127,7 @@ pub(crate) async fn submit(
 
     let started = state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
+        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await?;
 
     let Some(session) = started else {
@@ -128,7 +142,8 @@ pub(crate) async fn submit(
     tracing::info!(
         conversation_id,
         event_id = session.event_id,
-        profile = profile.name,
+        profile = pairing.profile.name,
+        model = submission.model,
         "a manual task is running"
     );
 
@@ -279,10 +294,10 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String)
         }
     };
 
-    let Some(profile) = conversation.implementation_profile.clone() else {
+    let Some(pairing) = conversation.implementation_pairing.clone() else {
         tracing::error!(
             conversation_id,
-            "the implementation Profile is gone, so the manual task was not run again"
+            "the implementation Pairing is gone, so the manual task was not run again"
         );
         return;
     };
@@ -296,7 +311,7 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String)
 
     let started = state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
+        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await;
 
     let session = match started {

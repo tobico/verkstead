@@ -37,6 +37,17 @@
 //! backend's own bookkeeping — modes, reminders, attachments, snapshots — is a
 //! third of every log and none of what anybody came for, so it folds into one
 //! group at the end: nothing hidden, and nothing in the way.
+//!
+//! And a call and the answer to it are one of those folds rather than two: one
+//! card, carrying what was run while it is shut and what it was called with
+//! above what it said back once it is open. Two rows were two things to open
+//! for one thing that happened, and the second of them said "Result" and
+//! nothing else. Which two go together is the log's own answer, carried on both
+//! turns — see [`../api/types`] — because an agent that calls three tools at
+//! once writes three calls and then three answers, and only the names say which
+//! answered which. The joining is done here, over the whole record this pane has
+//! accumulated, since a batch of a Transcript ends wherever the log had got to
+//! and a call whose answer had not been written yet arrives on its own.
 
 import {
   For,
@@ -44,6 +55,7 @@ import {
   Show,
   Switch,
   createEffect,
+  createMemo,
   createSignal,
   type JSX,
 } from "solid-js";
@@ -56,6 +68,7 @@ import type {
   AgentOutputEvent,
   Bookkeeping,
   ConversationView,
+  ToolResult,
   TranscriptView,
   Turn,
 } from "../api/types";
@@ -281,16 +294,7 @@ export function Output(props: {
             </p>
           </Match>
           <Match when={spoke() && transcript.data}>
-            {(said) => (
-              <>
-                <ol class="transcript">
-                  <For each={said().turns}>
-                    {(turn) => <Said turn={turn} />}
-                  </For>
-                </ol>
-                <Kept lines={said().bookkeeping} />
-              </>
-            )}
+            {(said) => <Record said={said()} />}
           </Match>
           {/* No Transcript, so the bytes — which is the whole Transcript-side
               story for a session whose backend kept no log of itself. */}
@@ -320,13 +324,85 @@ export function Output(props: {
   );
 }
 
+/// One session's conversation, with each call and the answer to it drawn as the
+/// one card.
+///
+/// The pairing is done here rather than by the server because a reading of a
+/// Transcript is a batch of it: a call whose answer had not been written when
+/// the batch was taken arrives alone, and its answer comes on the next Nudge.
+/// What this holds is the record accumulated so far, which is where both halves
+/// of every pair eventually are — so a card that opened without an answer grows
+/// one where it stands.
+///
+/// And it is done without touching the list the rows are drawn from, because
+/// that list is what `For` keys them on: a list of pairs would be new objects
+/// on every read, every row would be built again, and every fold a reader had
+/// opened would snap shut with the element it was DOM state on. So the rows
+/// stay the turns themselves — a call looks its answer up, and an answer a call
+/// is already drawing draws nothing of its own.
+function Record(props: { said: TranscriptView }): JSX.Element {
+  /// The answers, by the call each of them names.
+  const answers = createMemo(() => {
+    const by = new Map<string, ToolResult>();
+
+    for (const turn of props.said.turns) {
+      // An answer the log did not name has nothing to pair it to, and filing
+      // every one of those under the same empty name would pair them with each
+      // other.
+      if (turn.kind === "ToolResult" && turn.call !== "") {
+        by.set(turn.call, turn);
+      }
+    }
+
+    return by;
+  });
+
+  /// And the calls by name, which is how an answer knows whether one of them is
+  /// drawing it.
+  const calls = createMemo(() => {
+    const named = new Set<string>();
+
+    for (const turn of props.said.turns) {
+      if (turn.kind === "ToolUse" && turn.call !== "") named.add(turn.call);
+    }
+
+    return named;
+  });
+
+  return (
+    <>
+      <ol class="transcript">
+        <For each={props.said.turns}>
+          {(turn) => (
+            <Said
+              turn={turn}
+              answer={(call) => answers().get(call)}
+              paired={(call) => calls().has(call)}
+            />
+          )}
+        </For>
+      </ol>
+      <Kept lines={props.said.bookkeeping} />
+    </>
+  );
+}
+
 /// One turn, drawn as whichever of the six its `kind` says it is.
 ///
 /// Each is its own element with its own class, because the whole of what makes a
 /// Transcript readable is that a reader can tell a person's turn from a tool's
 /// answer without reading either — and the two arrive from the log under the
 /// same type, which is why the server told them apart before this got them.
-function Said(props: { turn: Turn }): JSX.Element {
+///
+/// Six kinds and five shapes: a call draws the answer to it as well, so an
+/// answer drawn that way draws nothing here. `answer` and `paired` are how
+/// each of them asks — the record is [`Record`]'s to hold, and a row's business
+/// with it is one lookup by name.
+function Said(props: {
+  turn: Turn;
+  answer: (call: string) => ToolResult | undefined;
+  paired: (call: string) => boolean;
+}): JSX.Element {
   return (
     <Switch>
       <Match when={props.turn.kind === "Prose" && props.turn}>
@@ -349,29 +425,57 @@ function Said(props: { turn: Turn }): JSX.Element {
       </Match>
 
       <Match when={props.turn.kind === "ToolUse" && props.turn}>
-        {(call) => (
-          <li class="turn tool-use">
-            <details>
-              <summary>
-                <span class="tool">{call().name}</span>
-                <Show when={call().about}>
-                  <span class="about">{call().about}</span>
+        {(call) => {
+          /// What answered it, once anything has. Nothing while the tool is
+          /// still running, and nothing ever for a call the log did not name.
+          const answer = () => props.answer(call().call);
+
+          return (
+            <li class="turn tool-call">
+              <details>
+                {/* Shut, a pair says what was run and nothing about how it
+                    went: a session calls a hundred tools and ninety-nine of
+                    them work, so a word saying so on every one of them would
+                    be a word to read past. A failure is the exception and
+                    says so, in the red a stopped run is said in — which is
+                    what makes one findable without opening anything. */}
+                <summary>
+                  <span class="tool">{call().name}</span>
+                  <Show when={call().about}>
+                    <span class="about">{call().about}</span>
+                  </Show>
+                  <Show when={answer()?.failed}>
+                    <span class="failed">failed</span>
+                  </Show>
+                </summary>
+                <pre class="input">{call().input}</pre>
+                {/* And what it said back, under what it was called with,
+                    because that is the order the two happened in. Absent
+                    while the tool is still working, which is a card a reader
+                    can open on a call that has not come back yet. */}
+                <Show when={answer()}>
+                  {(answered) => <pre class="output">{answered().text}</pre>}
                 </Show>
-              </summary>
-              <pre class="input">{call().input}</pre>
-            </details>
-          </li>
-        )}
+              </details>
+            </li>
+          );
+        }}
       </Match>
 
+      {/* An answer with no call above it to draw it: a record read from a log
+          whose first lines are gone, or a format that has stopped naming the
+          two. Drawn as it always was rather than dropped — something answered,
+          and a pane that swallowed it would be a pane missing a turn. */}
       <Match when={props.turn.kind === "ToolResult" && props.turn}>
         {(answer) => (
-          <li class="turn tool-result" classList={{ failed: answer().failed }}>
-            <details>
-              <summary>{answer().failed ? "Failed" : "Result"}</summary>
-              <pre class="output">{answer().text}</pre>
-            </details>
-          </li>
+          <Show when={!props.paired(answer().call)}>
+            <li class="turn tool-result" classList={{ failed: answer().failed }}>
+              <details>
+                <summary>{answer().failed ? "Failed" : "Result"}</summary>
+                <pre class="output">{answer().text}</pre>
+              </details>
+            </li>
+          </Show>
         )}
       </Match>
 

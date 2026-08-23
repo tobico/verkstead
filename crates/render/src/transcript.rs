@@ -12,6 +12,14 @@
 //! under. Keying off the type alone would draw a directory listing as though a
 //! person had read it out, so what decides is the block inside.
 //!
+//! **A call and its answer are linked, not merged.** The pane draws the two as
+//! one card, and what says which answer belongs to which call is the name the
+//! backend gave the call, carried on both turns. Joining them here would not
+//! survive an incremental reading: a batch ends wherever the log had got to, so
+//! a call whose answer falls in the next batch would have to be held back or
+//! sent twice. The link crosses the wire and the pane does the joining, over
+//! the whole record it has accumulated.
+//!
 //! **Three classes of line, not two.** Beside the conversation a log carries the
 //! backend's own bookkeeping — modes, reminders, attachments, snapshots — which
 //! is roughly a third of every log and none of it anything a reader came for. It
@@ -174,6 +182,11 @@ pub struct ToolUse {
     /// What the tool is called.
     pub name: String,
 
+    /// The name the backend gave this call, which its answer names back. Empty
+    /// where the log gave none, which leaves the call with nothing to pair it
+    /// to — still a call, still shown.
+    pub call: String,
+
     /// The one line about it. Empty where the call said nothing this could
     /// summarise, which leaves the name standing on its own.
     pub about: String,
@@ -188,6 +201,10 @@ pub struct ToolUse {
 pub struct ToolResult {
     /// The turn's place in the conversation, counted from 1.
     pub id: u32,
+
+    /// The call this answers, by the name the backend gave it. Empty where the
+    /// log gave none, which leaves the answer standing on its own.
+    pub call: String,
 
     /// Whether the tool failed.
     pub failed: bool,
@@ -588,6 +605,7 @@ fn called(block: &Value, reads: Reads) -> ToolUse {
     ToolUse {
         id: UNPLACED,
         name: text(block["name"].as_str().unwrap_or_default(), reads),
+        call: text(block["id"].as_str().unwrap_or_default(), reads),
         about: match reads {
             Reads::Drawing => about(input),
             Reads::Counting => String::new(),
@@ -628,6 +646,7 @@ fn answered(block: &Value, reads: Reads) -> ToolResult {
     if reads == Reads::Counting {
         return ToolResult {
             id: UNPLACED,
+            call: String::new(),
             failed: false,
             text: String::new(),
         };
@@ -635,6 +654,7 @@ fn answered(block: &Value, reads: Reads) -> ToolResult {
 
     ToolResult {
         id: UNPLACED,
+        call: text(block["tool_use_id"].as_str().unwrap_or_default(), reads),
         failed: block["is_error"].as_bool().unwrap_or(false),
         text: match &block["content"] {
             Value::String(text) => text.clone(),
@@ -769,6 +789,7 @@ mod tests {
                 Turn::ToolUse(ToolUse {
                     id: 4,
                     name: "Bash".to_owned(),
+                    call: "toolu_1".to_owned(),
                     about: "List the task files".to_owned(),
                     input: serde_json::to_string_pretty(&serde_json::json!({
                         "command": "ls .tasks",
@@ -778,6 +799,7 @@ mod tests {
                 }),
                 Turn::ToolResult(ToolResult {
                     id: 5,
+                    call: "toolu_1".to_owned(),
                     failed: false,
                     text: "04-render.md\n05-summaries.md".to_owned()
                 }),
@@ -932,6 +954,55 @@ mod tests {
         );
     }
 
+    /// A call and the answer to it name each other, which is what the pane
+    /// draws the two as one card on. The names come from the log rather than
+    /// from the order: an agent that called three tools at once wrote three
+    /// calls and then three answers, and only the names say which answered
+    /// which.
+    #[test]
+    fn a_call_and_its_answer_carry_the_name_that_joins_them() {
+        let view = transcript_view(&lines(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Read","input":{"file_path":"one.rs"}},{"type":"tool_use","id":"toolu_b","name":"Read","input":{"file_path":"two.rs"}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"two"},{"type":"tool_result","tool_use_id":"toolu_a","content":"one"}]}}"#,
+        ]));
+
+        let named: Vec<&str> = view
+            .turns
+            .iter()
+            .map(|turn| match turn {
+                Turn::ToolUse(call) => call.call.as_str(),
+                Turn::ToolResult(answer) => answer.call.as_str(),
+                _ => "",
+            })
+            .collect();
+
+        assert_eq!(
+            named,
+            ["toolu_a", "toolu_b", "toolu_b", "toolu_a"],
+            "the answers came back the other way round, and say so"
+        );
+    }
+
+    /// A log that named neither leaves both standing on their own rather than
+    /// pairing everything nameless with everything else.
+    #[test]
+    fn a_call_the_log_did_not_name_has_nothing_to_pair_it_to() {
+        let view = transcript_view(&lines(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"one.rs"}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"one"}]}}"#,
+        ]));
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.call.is_empty() && answer.call.is_empty()
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
     /// An answer that came back as blocks rather than as text, which is how a
     /// screenshot arrives. Nothing of it is dropped: what cannot be drawn as
     /// text says what it was instead.
@@ -946,6 +1017,7 @@ mod tests {
             view.turns,
             vec![Turn::ToolResult(ToolResult {
                 id: 1,
+                call: "toolu_3".to_owned(),
                 failed: true,
                 text: "could not read it\n[image]".to_owned(),
             })]

@@ -91,13 +91,13 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, note: String, d
         }
     };
 
-    // The grilling Profile, which is the one a grilling runs under whatever else
+    // The grilling Pairing, which is the one a grilling runs under whatever else
     // has happened since — the implementation one is what the work is built
     // under, and this session is not building anything.
-    let Some(profile) = conversation.grilling_profile.clone() else {
+    let Some(pairing) = conversation.grilling_pairing.clone() else {
         tracing::error!(
             conversation_id,
-            "the grilling Profile is gone, so the grilling was not started again"
+            "the grilling Pairing is gone, so the grilling was not started again"
         );
         return;
     };
@@ -109,7 +109,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, note: String, d
 
     let started = state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
+        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await;
 
     match started {

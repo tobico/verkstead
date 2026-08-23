@@ -23,6 +23,10 @@ import profiles from "./fixtures/profiles.json" with { type: "json" };
 const SAVED = profiles as ProfileEntry[];
 const FABLE = SAVED[0]!;
 
+/// The fixture's other account, which lists more than one model — a profile
+/// says everything it can launch, and the row is where that is read.
+const OPUS = SAVED[1]!;
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -60,15 +64,15 @@ function sent(fetching: ReturnType<typeof serving>, path: string): unknown {
 /// Fill the form in, whichever profile it is about.
 function fillIn(profile: {
   name: string;
-  model: string;
+  models: string[];
   claude_dir: string;
   config_file: string;
 }) {
   fireEvent.input(screen.getByLabelText("Name"), {
     target: { value: profile.name },
   });
-  fireEvent.input(screen.getByLabelText("Default model"), {
-    target: { value: profile.model },
+  fireEvent.input(screen.getByLabelText("Models, one per line"), {
+    target: { value: profile.models.join("\n") },
   });
   fireEvent.input(screen.getByLabelText(/Claude directory/), {
     target: { value: profile.claude_dir },
@@ -80,7 +84,7 @@ function fillIn(profile: {
 
 const NEW = {
   name: "personal",
-  model: "claude-sonnet-5",
+  models: ["claude-sonnet-5"],
   claude_dir: "/home/you/accounts/personal/.claude",
   config_file: "/home/you/accounts/personal/.claude.json",
 };
@@ -114,13 +118,32 @@ describe("the agent profiles page", () => {
       "li",
     )!;
 
-    expect(row.querySelector(".model")!.textContent).toBe(FABLE.model);
+    expect([...row.querySelectorAll(".model")].map((it) => it.textContent)).toEqual(
+      FABLE.models,
+    );
     expect(row.querySelector(".agent-type")!.textContent).toBe(
       FABLE.agent_type,
     );
 
     const paths = [...row.querySelectorAll(".path")].map((it) => it.textContent);
     expect(paths).toEqual([FABLE.claude_dir, FABLE.config_file]);
+  });
+
+  /// The list is the whole of what the account can launch, so the row shows all
+  /// of it: one entry drawn out of several would be a preference the profile
+  /// does not have.
+  it("shows every model a profile lists", async () => {
+    theProfiles();
+    mount();
+
+    const row = (await waitFor(() => screen.getByText(OPUS.name))).closest(
+      "li",
+    )!;
+
+    expect(OPUS.models.length).toBeGreaterThan(1);
+    expect([...row.querySelectorAll(".model")].map((it) => it.textContent)).toEqual(
+      OPUS.models,
+    );
   });
 
   it("says so plainly when nothing is saved yet", async () => {
@@ -173,7 +196,7 @@ describe("saving a profile", () => {
     ["DirNotAbsolute", /claude directory's absolute path/i],
     ["ConfigNotAbsolute", /config file's absolute path/i],
     ["Nameless", /give the profile a name/i],
-    ["Modelless", /give the profile a model/i],
+    ["Modelless", /at least one model/i],
     ["NameTaken", /another profile is called that already/i],
   ])("says why %s was refused, in words", async (outcome, said) => {
     theProfiles(json(outcome));
@@ -219,8 +242,9 @@ describe("rewriting a profile", () => {
       ),
     );
     expect(
-      (screen.getByLabelText("Default model") as HTMLInputElement).value,
-    ).toBe(FABLE.model);
+      (screen.getByLabelText("Models, one per line") as HTMLTextAreaElement)
+        .value,
+    ).toBe(FABLE.models.join("\n"));
     expect(
       (screen.getByLabelText(/Claude directory/) as HTMLInputElement).value,
     ).toBe(FABLE.claude_dir);
@@ -244,15 +268,17 @@ describe("rewriting a profile", () => {
       ),
     );
 
-    fireEvent.input(screen.getByLabelText("Default model"), {
-      target: { value: "claude-haiku-4-5-20251001" },
+    // A line apiece, which is how the whole list is retyped: the models go over
+    // as the lines they were written on.
+    fireEvent.input(screen.getByLabelText("Models, one per line"), {
+      target: { value: "claude-haiku-4-5-20251001\nclaude-opus-5" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/profiles/${FABLE.id}`)).toEqual({
         name: FABLE.name,
-        model: "claude-haiku-4-5-20251001",
+        models: ["claude-haiku-4-5-20251001", "claude-opus-5"],
         claude_dir: FABLE.claude_dir,
         config_file: FABLE.config_file,
       }),

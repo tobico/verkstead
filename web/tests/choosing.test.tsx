@@ -89,13 +89,28 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("draws the agent's reasoning beside the choices", async () => {
     const { page } = await answering(PROPOSING);
 
-    const rationale = page.querySelector(".direction-pick .proposal");
+    const rationale = page.querySelector(".direction-pick .ask .text");
     expect(rationale, "expected the rationale on the page").toBeTruthy();
     expect(rationale!.textContent).toContain("Five changes that barely touch");
     expect(
       rationale!.querySelector("strong"),
       "and rendered, like every other piece of agent markdown",
     ).toBeTruthy();
+  });
+
+  /// The one ask on the page that is not one of the Questions, and it is asked
+  /// the way they are: the label floated in the accent beside the words, with
+  /// the human's own word for the move in place of a question number.
+  it("asks it the way a question is asked, labelled End", async () => {
+    const { page } = await answering(PROPOSING);
+
+    const label = page.querySelector(".direction-pick .ask .text .label");
+    expect(label, "expected the ask's label on the chooser").toBeTruthy();
+    expect(label!.textContent).toBe("End");
+    expect(
+      page.querySelector(".direction-pick h2"),
+      "and no heading over it, because a question carries none",
+    ).toBeNull();
   });
 
   it("says what picking one does, so the Preface does not have to", async () => {
@@ -214,6 +229,16 @@ describe("the record a picked-on Set becomes", () => {
       recommended[0]!.querySelector(".direction-name")!.textContent,
       "the ★ still says what was argued for, which was not what was picked",
     ).toBe("Break into a task list");
+  });
+
+  /// Asked as a question and read back as one: the record and the chooser draw
+  /// the same ask, out of the same component.
+  it("reads back as the question it was asked as", async () => {
+    const { page } = await answering(PROPOSED);
+
+    const label = page.querySelector(".direction-pick .ask .text .label");
+    expect(label, "expected the ask's label on the record").toBeTruthy();
+    expect(label!.textContent).toBe("End");
   });
 
   it("keeps the directions that were turned down", async () => {

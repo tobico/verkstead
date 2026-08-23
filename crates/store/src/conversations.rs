@@ -113,7 +113,7 @@ impl Lifecycle {
 /// back beside it — there is no Conversation without one, and everything done
 /// about a Conversation is done inside that repository.
 ///
-/// The two Profiles are read back the same way, because whether a Conversation
+/// The two Pairings are read back the same way, because whether a Conversation
 /// is ready to grill turns on what they are rather than on which ids they hold:
 /// a Profile whose pair has gone is not something to launch a session under, and
 /// the id alone cannot say so.
@@ -135,13 +135,14 @@ pub struct Conversation {
 
     pub state: Lifecycle,
 
-    /// The Agent Profile the grilling session runs under, once one is chosen.
-    pub grilling_profile: Option<super::Profile>,
+    /// The Profile and model the grilling session runs under, once they are
+    /// chosen.
+    pub grilling_pairing: Option<super::Pairing>,
 
-    /// And the one the implementation runs under. A separate choice because it
+    /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
     /// implementation session cannot simply carry the grilling one on.
-    pub implementation_profile: Option<super::Profile>,
+    pub implementation_pairing: Option<super::Pairing>,
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
@@ -450,13 +451,12 @@ pub enum Edited {
     NotDrafting,
 }
 
-/// What became of choosing one of a Conversation's two Agent Profiles.
+/// What became of choosing one of a Conversation's two Pairings.
 ///
-/// No drafting refusal among them, unlike the Brief and the branch name: a
-/// Profile is a setting rather than a document something has been built from,
-/// and the implementation one is used after the grilling is over — freezing it
-/// when grilling starts would take it away exactly when the human has just
-/// learned what they want it to be.
+/// A drafting refusal among them, like the Brief and the branch name and for
+/// the same reason: both Pairings are fixed when grilling starts. The
+/// implementation one is used long after that, but what it is has to be settled
+/// before the work begins rather than swapped underneath it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Chosen {
     /// Recorded.
@@ -467,6 +467,9 @@ pub enum Chosen {
 
     /// There is no Profile with that id to choose.
     NoSuchProfile,
+
+    /// It is past drafting, so both Pairings are fixed.
+    NotDrafting,
 }
 
 /// What became of starting a Conversation grilling.
@@ -677,6 +680,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the stage branches table")?;
+
+    // The model half of a Conversation's two Pairings, one row per role. A
+    // table of its own for the reason the direction is one: there is no
+    // migration machinery here and `conversations` is STRICT and left alone —
+    // so the Profile half stays in the column it has always been in and the
+    // model half arrives beside it.
+    //
+    // One row per role by the primary key, and a role with no row is one whose
+    // Pairing has no model: either nothing has been chosen for it at all, or it
+    // was chosen before pairings existed, which the Profile column tells apart.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pairing_models (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             role            TEXT NOT NULL,
+             model           TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, role)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pairing models table")?;
 
     // Which roadmap a drafting Conversation is adopting, where it is adopting
     // one. A table of its own for the reason the direction is one: there is no
@@ -1004,20 +1028,46 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_profile: chosen_profile(pool, grilling_profile_id).await?,
-        implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
+        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
+        implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
+            .await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
     }))
 }
 
-/// The Profile an id names, where there is an id at all.
-async fn chosen_profile(pool: &SqlitePool, id: Option<i64>) -> Result<Option<super::Profile>> {
-    match id {
-        None => Ok(None),
-        Some(id) => super::load_profile(pool, id).await,
-    }
+/// One of a Conversation's two Pairings: the Profile its column names, and the
+/// model paired with it where one was.
+///
+/// A role with no Profile has no Pairing at all, whatever `pairing_models`
+/// holds: the model half alone is nothing to run a session under.
+async fn pairing(
+    pool: &SqlitePool,
+    conversation: i64,
+    role: Role,
+    profile_id: Option<i64>,
+) -> Result<Option<super::Pairing>> {
+    let Some(profile_id) = profile_id else {
+        return Ok(None);
+    };
+
+    let Some(profile) = super::load_profile(pool, profile_id).await? else {
+        return Ok(None);
+    };
+
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT model FROM pairing_models WHERE conversation_id = ? AND role = ?")
+            .bind(conversation)
+            .bind(role.stored())
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the model Conversation {conversation} paired"))?;
+
+    Ok(Some(super::Pairing {
+        profile,
+        model: row.map(|(model,)| model),
+    }))
 }
 
 /// Where a Conversation's worktree was put, if it has one.
@@ -1060,61 +1110,127 @@ pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     Ok(row.map(|(roadmap,)| roadmap))
 }
 
-/// Choose the Agent Profile the grilling session will run under.
-pub async fn set_grilling_profile(pool: &SqlitePool, id: i64, profile_id: i64) -> Result<Chosen> {
-    choose(pool, id, profile_id, "grilling_profile_id").await
+/// Which of the two roles a Pairing is being chosen for.
+///
+/// The word the `pairing_models` table holds, and the column the Profile half
+/// goes in — the two halves of one choice, so the role names both rather than
+/// letting a caller pass one and forget the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Grilling,
+    Implementation,
 }
 
-/// Choose the Agent Profile the implementation will run under.
-pub async fn set_implementation_profile(
+impl Role {
+    fn stored(self) -> &'static str {
+        match self {
+            Self::Grilling => "grilling",
+            Self::Implementation => "implementation",
+        }
+    }
+
+    fn column(self) -> &'static str {
+        match self {
+            Self::Grilling => "grilling_profile_id",
+            Self::Implementation => "implementation_profile_id",
+        }
+    }
+}
+
+/// Choose the Pairing the grilling session will run under.
+pub async fn set_grilling_pairing(
     pool: &SqlitePool,
     id: i64,
     profile_id: i64,
+    model: Option<&str>,
 ) -> Result<Chosen> {
-    choose(pool, id, profile_id, "implementation_profile_id").await
+    choose(pool, id, Role::Grilling, profile_id, model).await
 }
 
-/// Record one of the two choices.
+/// Choose the Pairing the implementation will run under.
+pub async fn set_implementation_pairing(
+    pool: &SqlitePool,
+    id: i64,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    choose(pool, id, Role::Implementation, profile_id, model).await
+}
+
+/// Record one of the two choices, both halves of it.
+///
+/// Refused past drafting, which is what fixes a Pairing when grilling starts:
+/// what runs the work is settled before the work starts, alongside the branch,
+/// the base commit and the Brief.
 ///
 /// The Profile is selected from `profiles` inside the statement rather than
 /// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
 /// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching.
+/// session that fails to start with nobody watching. Whether the Profile lists
+/// the model is decided above the store, where the Profile is read as a row.
 ///
-/// `column` is one of two literals this module passes, never anything a request
-/// reached.
-async fn choose(pool: &SqlitePool, id: i64, profile_id: i64, column: &str) -> Result<Chosen> {
-    if !conversation_exists(pool, id).await? {
-        return Ok(Chosen::NoSuchConversation);
+/// `model` is `None` for the one caller that carries a Pairing across rather
+/// than making one — see [`Pairing::model`] — and it takes the model row away,
+/// so a re-choice cannot leave the model half of an earlier one behind.
+async fn choose(
+    pool: &SqlitePool,
+    id: i64,
+    role: Role,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Chosen::NoSuchConversation,
+            _ => Chosen::NotDrafting,
+        });
     }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
     let changed = sqlx::query(&format!(
         "UPDATE conversations
-         SET {column} = (SELECT id FROM profiles WHERE id = ?)
-         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)"
+         SET {} = (SELECT id FROM profiles WHERE id = ?)
+         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)",
+        role.column()
     ))
     .bind(profile_id)
     .bind(id)
     .bind(profile_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
     .rows_affected();
 
-    Ok(match changed {
-        0 => Chosen::NoSuchProfile,
-        _ => Chosen::Chosen,
-    })
-}
+    if changed == 0 {
+        return Ok(Chosen::NoSuchProfile);
+    }
 
-async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let found: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM conversations WHERE id = ?")
+    sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
-        .fetch_optional(pool)
+        .bind(role.stored())
+        .execute(&mut *tx)
         .await
-        .with_context(|| format!("looking for Conversation {id}"))?;
+        .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
 
-    Ok(found.is_some())
+    if let Some(model) = model {
+        sqlx::query("INSERT INTO pairing_models (conversation_id, role, model) VALUES (?, ?, ?)")
+            .bind(id)
+            .bind(role.stored())
+            .bind(model)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("pairing {model:?} with Conversation {id}'s Profile"))?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
+
+    Ok(Chosen::Chosen)
 }
 
 /// A Conversation's Timeline, oldest first — which is reading order, and which

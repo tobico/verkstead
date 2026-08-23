@@ -1,11 +1,25 @@
 //! The Agent Profiles a session can be run under: which account, and which
-//! model.
+//! models.
 //!
 //! A Profile is four facts and a discriminator, because that is the whole of
 //! what launching a session needs. The claude directory and config file are the
 //! pair bind-mounted over `~/.claude` and `~/.claude.json` inside the sandbox,
-//! which is what keeps one account's sessions out of another's; the model is
-//! what the session runs on unless something says otherwise.
+//! which is what keeps one account's sessions out of another's; the models are
+//! what a session may be run on.
+//!
+//! The models are a list and not one model, and the list is the Profile's own:
+//! different Profiles reach different accounts, so each names what it can
+//! actually launch rather than sharing one list nobody's account really has.
+//! There is no default and no preferred entry — the list only says what is
+//! available, and every pick made from it is explicit.
+//!
+//! They live in a table of their own, `profile_models`, hung off `profiles` the
+//! way the directions are hung off the conversations: there is no migration
+//! machinery here and `profiles` is STRICT, so a new fact arrives as a new table
+//! rather than as a column added to an old one. The old `model` column stays
+//! where it is, and a Profile written before the list existed is read as the one
+//! entry that column holds — which is what carries every saved Profile over with
+//! nothing for the human to re-enter.
 //!
 //! The paths are stored resolved, as a Repo's is and for the same reason:
 //! whoever saved the Profile had `..` and every symlink taken out of them before
@@ -18,6 +32,7 @@
 //! a second backend slots in beside `claude` rather than having to be migrated
 //! in underneath it.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -63,10 +78,60 @@ pub struct Profile {
     /// The file bind-mounted over `~/.claude.json`, resolved.
     pub config_file: PathBuf,
 
-    /// What a session runs on unless it is told otherwise.
-    pub model: String,
+    /// The models this account can run a session on, in the order they were
+    /// written. None of them is the default: the order is the human's typing
+    /// kept intact so that editing the list reads back as they left it.
+    pub models: Vec<String>,
 
     pub agent_type: AgentType,
+}
+
+impl Profile {
+    /// The model to run on where nothing paired one with it.
+    ///
+    /// The first of the list, which is a Profile's only model in the ordinary
+    /// case. Nothing picks this any more — a session runs on the model its
+    /// Pairing names — so what is left for it is the Conversation that chose a
+    /// Profile before there was a model to choose beside it: see
+    /// [`Pairing::runs_on`]. `None` is a Profile with no models at all —
+    /// refused above the store, so what it means here is a row somebody edited
+    /// by hand.
+    pub fn model(&self) -> Option<&str> {
+        self.models.first().map(String::as_str)
+    }
+}
+
+/// What a Conversation has settled about one of its two roles: a Profile, and
+/// the one of that Profile's models its sessions run on.
+///
+/// The pair rather than the Profile alone, because a Profile's list says what
+/// its account *can* launch and a session runs one thing. Both halves are
+/// chosen together, in one press, and both are fixed when grilling starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pairing {
+    pub profile: Profile,
+
+    /// The model paired with it, where one was paired.
+    ///
+    /// `None` is a choice made before pairings existed: the Profile was picked
+    /// alone and the model was whatever that Profile carried. Left as a state
+    /// to be in rather than filled in on the way out, because the two are
+    /// different things to a Conversation still drafting — an unpaired choice
+    /// is one to make again — and see [`Pairing::runs_on`] for what a
+    /// Conversation past drafting runs on instead.
+    pub model: Option<String>,
+}
+
+impl Pairing {
+    /// What a session under this Pairing is launched on.
+    ///
+    /// The paired model, and the Profile's own where nothing was paired — which
+    /// is the model that Profile would have been run on at the time the choice
+    /// was made, so a Conversation that chose before pairings existed goes on
+    /// exactly as it did.
+    pub fn runs_on(&self) -> Option<&str> {
+        self.model.as_deref().or_else(|| self.profile.model())
+    }
 }
 
 /// What a Profile is being saved as — everything but the id, which is the
@@ -76,7 +141,7 @@ pub struct ProfileFacts {
     pub name: String,
     pub claude_dir: PathBuf,
     pub config_file: PathBuf,
-    pub model: String,
+    pub models: Vec<String>,
     pub agent_type: AgentType,
 }
 
@@ -105,7 +170,7 @@ pub enum Deleting {
     InUse,
 }
 
-/// The table the Profiles live in.
+/// The tables the Profiles live in.
 ///
 /// `name` is unique, and the insert lets the index refuse a repeat rather than
 /// looking first: two tabs saving the same name would otherwise both get past
@@ -125,6 +190,26 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the profiles table")?;
 
+    // The models each Profile can run, one row apiece. A table of its own for
+    // the reason the directions are one: `profiles` is STRICT and there is no
+    // migration machinery to alter it with, so what is new hangs off what is
+    // there.
+    //
+    // `position` is the order they were written in and nothing more — no entry
+    // is preferred — kept so that a list read back into the form is the list the
+    // human typed.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS profile_models (
+             profile_id INTEGER NOT NULL REFERENCES profiles(id),
+             position   INTEGER NOT NULL,
+             model      TEXT NOT NULL,
+             PRIMARY KEY (profile_id, position)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the profile_models table")?;
+
     Ok(())
 }
 
@@ -133,6 +218,11 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 ///
 /// `None` means another Profile is called that.
 pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<Option<Profile>> {
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("saving the Profile {:?}", facts.name))?;
+
     let row: Option<(i64,)> = sqlx::query_as(
         "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
          VALUES (?, ?, ?, ?, ?)
@@ -142,18 +232,28 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
     .bind(&facts.name)
     .bind(text(&facts.claude_dir)?)
     .bind(text(&facts.config_file)?)
-    .bind(&facts.model)
+    .bind(legacy_model(facts))
     .bind(facts.agent_type.stored())
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("saving the Profile {:?}", facts.name))?;
 
-    Ok(row.map(|(id,)| Profile {
+    let Some((id,)) = row else {
+        return Ok(None);
+    };
+
+    write_models(&mut tx, id, &facts.models).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("saving the Profile {:?}", facts.name))?;
+
+    Ok(Some(Profile {
         id,
         name: facts.name.clone(),
         claude_dir: facts.claude_dir.clone(),
         config_file: facts.config_file.clone(),
-        model: facts.model.clone(),
+        models: facts.models.clone(),
         agent_type: facts.agent_type,
     }))
 }
@@ -161,6 +261,11 @@ pub async fn create_profile(pool: &SqlitePool, facts: &ProfileFacts) -> Result<O
 /// Rewrite a Profile, whole: everything about one is the human's to change, and
 /// nothing about it is an artifact that could have been built from it yet.
 pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) -> Result<Saving> {
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("rewriting Profile {id}"))?;
+
     // The name it is being given may be another Profile's. Asked as its own
     // statement rather than caught off the update, because an update that
     // changed nothing and an update that hit the index are two different
@@ -169,7 +274,7 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
         sqlx::query_as("SELECT id FROM profiles WHERE name = ? AND id <> ?")
             .bind(&facts.name)
             .bind(id)
-            .fetch_optional(pool)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("looking for another Profile called {:?}", facts.name))?;
 
@@ -185,18 +290,29 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     .bind(&facts.name)
     .bind(text(&facts.claude_dir)?)
     .bind(text(&facts.config_file)?)
-    .bind(&facts.model)
+    .bind(legacy_model(facts))
     .bind(facts.agent_type.stored())
     .bind(id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("rewriting Profile {id}"))?
     .rows_affected();
 
-    Ok(match changed {
-        0 => Saving::NoSuchProfile,
-        _ => Saving::Saved,
-    })
+    if changed == 0 {
+        return Ok(Saving::NoSuchProfile);
+    }
+
+    // The list is replaced rather than reconciled: it is a handful of lines the
+    // human retyped, and which of them happen to be the same lines as before is
+    // not a fact anything holds on to.
+    forget_models(&mut tx, id).await?;
+    write_models(&mut tx, id, &facts.models).await?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("rewriting Profile {id}"))?;
+
+    Ok(Saving::Saved)
 }
 
 /// Remove a Profile nobody is running under.
@@ -220,12 +336,23 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
         return Ok(Deleting::InUse);
     }
 
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("removing Profile {id}"))?;
+
+    forget_models(&mut tx, id).await?;
+
     let removed = sqlx::query("DELETE FROM profiles WHERE id = ?")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("removing Profile {id}"))?
         .rows_affected();
+
+    tx.commit()
+        .await
+        .with_context(|| format!("removing Profile {id}"))?;
 
     Ok(match removed {
         0 => Deleting::NoSuchProfile,
@@ -239,7 +366,7 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
 /// it is something to pick out of a short list, and the name is what it is
 /// looked for by.
 pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
-    let rows: Vec<(i64, String, String, String, String, String)> = sqlx::query_as(
+    let rows: Vec<Row> = sqlx::query_as(
         "SELECT id, name, claude_dir, config_file, model, agent_type
          FROM profiles
          ORDER BY name, id",
@@ -248,12 +375,32 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
     .await
     .context("listing the Agent Profiles")?;
 
-    rows.into_iter().map(read_row).collect()
+    // The whole of the little table at once rather than a query per Profile: the
+    // list is a handful of accounts, and reading it in one hop is the same shape
+    // as the one look at the filesystem the server takes over the lot of them.
+    let listed: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT profile_id, model FROM profile_models ORDER BY profile_id, position",
+    )
+    .fetch_all(pool)
+    .await
+    .context("listing the models the Agent Profiles run")?;
+
+    let mut models: HashMap<i64, Vec<String>> = HashMap::new();
+    for (profile_id, model) in listed {
+        models.entry(profile_id).or_default().push(model);
+    }
+
+    rows.into_iter()
+        .map(|row| {
+            let listed = models.remove(&row.0).unwrap_or_default();
+            read_row(row, listed)
+        })
+        .collect()
 }
 
 /// One Profile, or `None` if there is no such Profile.
 pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>> {
-    let row: Option<(i64, String, String, String, String, String)> = sqlx::query_as(
+    let row: Option<Row> = sqlx::query_as(
         "SELECT id, name, claude_dir, config_file, model, agent_type
          FROM profiles
          WHERE id = ?",
@@ -263,23 +410,85 @@ pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>>
     .await
     .with_context(|| format!("loading Profile {id}"))?;
 
-    row.map(read_row).transpose()
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let listed: Vec<(String,)> =
+        sqlx::query_as("SELECT model FROM profile_models WHERE profile_id = ? ORDER BY position")
+            .bind(id)
+            .fetch_all(pool)
+            .await
+            .with_context(|| format!("loading the models Profile {id} runs"))?;
+
+    read_row(row, listed.into_iter().map(|(model,)| model).collect()).map(Some)
 }
 
 /// A row of the profiles table as a [`Profile`].
 type Row = (i64, String, String, String, String, String);
 
-fn read_row(row: Row) -> Result<Profile> {
+/// One row and whatever `profile_models` holds for it.
+///
+/// An empty list is a Profile written before the list existed: what it holds is
+/// the one model in the old column, which becomes the sole entry of its list
+/// without anybody having to retype it. A Profile saved since always has its
+/// rows, so the old column is never read for one.
+fn read_row(row: Row, listed: Vec<String>) -> Result<Profile> {
     let (id, name, claude_dir, config_file, model, agent_type) = row;
+
+    let models = match (listed.is_empty(), model.is_empty()) {
+        (true, false) => vec![model],
+        _ => listed,
+    };
 
     Ok(Profile {
         id,
         name,
         claude_dir: PathBuf::from(claude_dir),
         config_file: PathBuf::from(config_file),
-        model,
+        models,
         agent_type: AgentType::read(&agent_type)?,
     })
+}
+
+/// Put a Profile's list down, in the order it was given.
+async fn write_models(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: i64,
+    models: &[String],
+) -> Result<()> {
+    for (position, model) in models.iter().enumerate() {
+        sqlx::query("INSERT INTO profile_models (profile_id, position, model) VALUES (?, ?, ?)")
+            .bind(id)
+            .bind(position as i64)
+            .bind(model)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("saving the models Profile {id} runs"))?;
+    }
+
+    Ok(())
+}
+
+/// And take it away again.
+async fn forget_models(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM profile_models WHERE profile_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("clearing the models Profile {id} runs"))?;
+
+    Ok(())
+}
+
+/// What goes in the old `model` column, which is NOT NULL and cannot be dropped
+/// from a STRICT table.
+///
+/// The first of the list, so that a database read by a Verkstead from before
+/// this change still says something true. Nothing here reads it back for a
+/// Profile that has its rows.
+fn legacy_model(facts: &ProfileFacts) -> String {
+    facts.models.first().cloned().unwrap_or_default()
 }
 
 /// A path as SQLite can hold it, which is UTF-8 or nothing.

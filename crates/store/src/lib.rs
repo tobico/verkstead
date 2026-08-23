@@ -41,11 +41,11 @@ pub use captures::{Summary, append_capture, capture, start_capture, summarise_ca
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
-    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting,
-    ask, asked_from, conversations, load_conversation, note, pick_direction, record_handoff,
-    record_manual_task, rename_branch, review_asked, save_brief, set_asked_from, set_base_commit,
-    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_adoption,
-    start_conversation, start_grilling, start_implementing, start_stage, timeline,
+    Implementing, Lifecycle, Role, SetOnTimeline, Staged, TimelineEvent, abort_conversation,
+    adopting, ask, asked_from, conversations, load_conversation, note, pick_direction,
+    record_handoff, record_manual_task, rename_branch, review_asked, save_brief, set_asked_from,
+    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
+    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
 pub use interruptions::{
@@ -53,7 +53,7 @@ pub use interruptions::{
     record_interruption, settle_interruption,
 };
 pub use profiles::{
-    AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
+    AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
 };
 pub use pull_requests::{PullRequest, Wrapping, pull_request, record_pull_request};

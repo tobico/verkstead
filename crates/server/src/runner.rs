@@ -1707,10 +1707,10 @@ async fn launch(
         }
     };
 
-    let Some(profile) = conversation.implementation_profile.clone() else {
+    let Some(pairing) = conversation.implementation_pairing.clone() else {
         tracing::error!(
             conversation_id,
-            "the implementation Profile is gone, so no session was started"
+            "the implementation Pairing is gone, so no session was started"
         );
         return None;
     };
@@ -1747,7 +1747,7 @@ async fn launch(
 
     match state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
+        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await
     {
         Ok(session) => session,

@@ -406,13 +406,18 @@ impl Grilling {
 
     /// Set a Manual Task going, the way the composer at the end of the Timeline
     /// does: the instruction, and the Profile picked beside it.
-    async fn manual(&self, instruction: &str, profile_id: i64) -> ManualTaskStarted {
+    async fn manual(
+        &self,
+        instruction: &str,
+        pairing: &verkstead_render::PairingView,
+    ) -> ManualTaskStarted {
         post(
             &self.app,
             &format!("/api/ui/conversations/{}/manual-task", self.id),
             &serde_json::json!({
                 "instruction": instruction,
-                "profile_id": profile_id,
+                "profile_id": pairing.profile.id,
+                "model": pairing.model,
             }),
         )
         .await
@@ -801,7 +806,7 @@ async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: 
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_profiles(id).await;
+    bench.under_both_pairings(id).await;
 
     let saved: BriefSaved = post(
         app,
@@ -843,15 +848,21 @@ struct Bench {
 }
 
 impl Bench {
-    /// Fix both Profiles on a Conversation, which is what every one of these
+    /// Fix both Pairings on a Conversation, which is what every one of these
     /// has to have settled before anything will start in it.
-    async fn under_both_profiles(&self, id: i64) {
+    ///
+    /// Each role gets a Profile of its own listing one model, so the model half
+    /// of the pick is the one that Profile carries — see [`profile`].
+    async fn under_both_pairings(&self, id: i64) {
         for role in ["grilling", "implementation"] {
             let profile = profile(&self.app, self.watched.path(), role).await;
             let chosen: verkstead_render::ProfileChosen = post(
                 &self.app,
-                &format!("/api/ui/conversations/{id}/{role}-profile"),
-                &serde_json::json!({ "profile_id": profile }),
+                &format!("/api/ui/conversations/{id}/{role}-pairing"),
+                &serde_json::json!({
+                    "profile_id": profile,
+                    "model": format!("claude-{role}-5"),
+                }),
             )
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
@@ -1052,7 +1063,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "model": format!("claude-{name}-5"),
+            "models": [format!("claude-{name}-5")],
         }),
     )
     .await;
@@ -5422,9 +5433,9 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     );
     assert_eq!(
         stage
-            .implementation_profile
+            .implementation_pairing
             .as_ref()
-            .map(|profile| profile.name.clone()),
+            .map(|pairing| pairing.profile.name.clone()),
         Some("implementation".to_owned()),
         "under the same Profiles, there being nobody to choose them again",
     );
@@ -5717,7 +5728,7 @@ async fn adopting_asking(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gril
         panic!("expected the Conversation to start, got {started:?}");
     };
 
-    bench.under_both_profiles(id).await;
+    bench.under_both_pairings(id).await;
 
     let adopted: Adopted = post(
         &bench.app,
@@ -7068,10 +7079,9 @@ async fn a_manual_task_runs_the_picked_profile_on_the_instruction_and_nothing_el
 
     let view = fixture.view().await;
     let picked = view
-        .grilling_profile
+        .grilling_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         fixture
@@ -7143,7 +7153,8 @@ async fn a_manual_task_runs_the_picked_profile_on_the_instruction_and_nothing_el
          pipeline",
     );
     assert_eq!(
-        view.implementation_profile.map(|profile| profile.name),
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.name),
         Some("implementation".to_owned()),
         "the pick was one-off and never became the Conversation's own",
     );
@@ -7172,10 +7183,9 @@ async fn a_manual_task_submitted_while_a_session_runs_is_refused() {
     assert!(view.working, "the grilling session is running");
 
     let profile = view
-        .implementation_profile
+        .implementation_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         fixture.manual("Rebase this onto `main`.", profile).await,
@@ -7223,7 +7233,7 @@ async fn a_manual_session_idling_on_a_question_is_not_ended() {
     fixture.quiet().await;
 
     let view = fixture.view().await;
-    let profile = view.implementation_profile.as_ref().unwrap().id;
+    let profile = view.implementation_pairing.as_ref().unwrap();
 
     assert_eq!(
         fixture
@@ -7305,7 +7315,7 @@ async fn a_driver_waits_for_a_manual_session_rather_than_ending_it() {
     fixture.quiet().await;
 
     let view = fixture.view().await;
-    let profile = view.implementation_profile.as_ref().unwrap().id;
+    let profile = view.implementation_pairing.as_ref().unwrap();
     let before = outputs(&view).len();
 
     assert_eq!(
@@ -7404,10 +7414,9 @@ async fn a_manual_session_that_fell_over_asks_the_human_what_to_do_about_it() {
 
     let view = fixture.view().await;
     let profile = view
-        .implementation_profile
+        .implementation_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
     let worktree = PathBuf::from(
         view.worktree
             .clone()
@@ -7501,10 +7510,9 @@ async fn retrying_a_manual_task_runs_the_instruction_again_under_the_implementat
 
     let view = fixture.view().await;
     let picked = view
-        .grilling_profile
+        .grilling_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         fixture.manual("Rebase this onto `main`.", picked).await,
@@ -7608,10 +7616,9 @@ async fn a_manual_task_that_committed_nothing_is_not_something_to_ask_about() {
 
     let view = fixture.view().await;
     let profile = view
-        .implementation_profile
+        .implementation_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         fixture
@@ -7792,10 +7799,9 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
 
     let view = fixture.view().await;
     let profile = view
-        .implementation_profile
+        .implementation_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         interruptions(&view),
@@ -8109,10 +8115,9 @@ async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
     // anyway.
     let view = fixture.view().await;
     let profile = view
-        .implementation_profile
+        .implementation_pairing
         .as_ref()
-        .expect("both Profiles are fixed before grilling starts")
-        .id;
+        .expect("both Pairings are fixed before grilling starts");
 
     assert_eq!(
         fixture

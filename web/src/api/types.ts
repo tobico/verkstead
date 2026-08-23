@@ -496,19 +496,20 @@ repo: RepoEntry, branch: string,
  */
 base_commit: string | null, state: Lifecycle, 
 /**
- * The Agent Profile the grilling session will run under, whole rather than
- * by id: the pane says what it is, and whether it is still runnable.
+ * The Profile and model the grilling session will run under, whole rather
+ * than by id: the pane says what they are, and whether the Profile is
+ * still runnable.
  */
-grilling_profile: ProfileEntry | null, 
+grilling_pairing: PairingView | null, 
 /**
- * And the one the implementation will run under. Chosen separately because
- * it is genuinely a separate account and model.
+ * And the ones the implementation will run under. Chosen separately
+ * because it is genuinely a separate account and model.
  */
-implementation_profile: ProfileEntry | null, 
+implementation_pairing: PairingView | null, 
 /**
  * Whether everything needed before grilling will start is settled: both
- * Profiles chosen and neither broken, a Brief with something in it, and a
- * Conversation still drafting.
+ * Pairings complete and neither Profile broken, a Brief with something in
+ * it, and a Conversation still drafting.
  *
  * The server's rule rather than something the page works out from the
  * fields around it. Every one of the refusals is checked again when the
@@ -749,7 +750,7 @@ html: string, };
  * each of them is something different for the human to go and do, and a single
  * "cannot start" would leave them guessing which.
  */
-export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NotStarted";
+export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NoSuchModel" | "NotStarted";
 
 /**
  * What the human typed into the Manual Task composer: the instruction, and the
@@ -769,7 +770,13 @@ instruction: string,
 /**
  * Which saved Profile the one-off session runs as.
  */
-profile_id: number, };
+profile_id: number, 
+/**
+ * And which of that Profile's models it runs on. The composer prefills the
+ * Conversation's implementation Pairing and otherwise demands a pick:
+ * there is no default model anywhere.
+ */
+model: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -858,6 +865,27 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
+ * One of a Conversation's two Pairings, as the page shows it: the Profile
+ * whole, and the model paired with it.
+ *
+ * The Profile whole rather than by id because the pane says what it is and
+ * whether it is still runnable — and the model beside it because a Pairing is
+ * both halves, and either half alone is not something to launch a session
+ * with.
+ */
+export type PairingView = { profile: ProfileEntry, 
+/**
+ * The model of that Profile's list this Conversation's sessions run on.
+ *
+ * `null` is a Profile chosen before pairings existed, which is not a
+ * Pairing: the page draws it as nothing chosen, because while the
+ * Conversation is drafting that is a choice to make again. One past
+ * drafting keeps running on the model its Profile carried, which nothing
+ * here has to say — its Pairings are fixed and there is no picking left.
+ */
+model: string | null, };
+
+/**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
  * A fixed set — a task list, a stage list and a PR — and no manual pin or
@@ -868,14 +896,19 @@ cells: Array<string>, };
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
- * Which Profile a Conversation is choosing for one of its two roles.
+ * Which Profile and model a Conversation is pairing for one of its two roles.
  */
-export type ProfileChoice = { profile_id: number, };
+export type ProfileChoice = { profile_id: number, 
+/**
+ * One of that Profile's models. Never absent: there is no default model
+ * anywhere, so a Pairing is picked whole or not at all.
+ */
+model: string, };
 
 /**
  * What became of choosing one.
  */
-export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile";
+export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile" | "NoSuchModel" | "NotDrafting";
 
 /**
  * What became of removing a Profile.
@@ -899,9 +932,12 @@ claude_dir: string,
  */
 config_file: string, 
 /**
- * What a session runs on unless it is told otherwise.
+ * The models this account can run a session on, in the order they were
+ * typed. The form takes them a line apiece; blank lines and repeated
+ * whitespace are the server's to drop, and a list that comes to nothing is
+ * refused.
  */
-model: string, };
+models: Array<string>, };
 
 /**
  * One row of the Profile list.
@@ -910,7 +946,13 @@ model: string, };
  * typed to save them: those are what will be bind-mounted, so those are what is
  * worth showing.
  */
-export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, model: string, agent_type: AgentType, 
+export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, 
+/**
+ * Every model this account can run a session on. At least one, and none of
+ * them preferred over the others: the list says what is available and
+ * nothing more.
+ */
+models: Array<string>, agent_type: AgentType, 
 /**
  * `null` while the pair is where it was left, which is the ordinary case.
  */
@@ -1551,6 +1593,11 @@ export type ToolResult = {
  */
 id: number, 
 /**
+ * The call this answers, by the name the backend gave it. Empty where the
+ * log gave none, which leaves the answer standing on its own.
+ */
+call: string, 
+/**
  * Whether the tool failed.
  */
 failed: boolean, 
@@ -1571,6 +1618,12 @@ id: number,
  * What the tool is called.
  */
 name: string, 
+/**
+ * The name the backend gave this call, which its answer names back. Empty
+ * where the log gave none, which leaves the call with nothing to pair it
+ * to — still a call, still shown.
+ */
+call: string, 
 /**
  * The one line about it. Empty where the call said nothing this could
  * summarise, which leaves the name standing on its own.
