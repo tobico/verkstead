@@ -9,7 +9,9 @@
 //! Above the list are the pinned Events, which are a fixed set — the backlog
 //! now, the stage list and the PR as those stages arrive. They are not on the
 //! record and do not scroll with it: each is the current state of something the
-//! work is against rather than a moment in it.
+//! work is against rather than a moment in it. More than one of them is a
+//! carousel rather than a stack, because everything pinned is held above the
+//! record and a stack of them is what the record is pushed down by.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. Three of them
@@ -67,6 +69,7 @@ import type {
   ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
+  PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
@@ -646,9 +649,11 @@ function ManualTaskComposer(props: {
 /// Pinning is the fixed set — a task list, a stage list and the pull request —
 /// so there is nothing to pin, nothing to unpin, and no control for either.
 ///
-/// One of them opens: a pull request has a full self, which is what is on it
-/// right now. Neither list does — what a details pane would show of one is what
-/// is already drawn here.
+/// One card at a time once there is more than one of them: they are held above
+/// the record, so a stack of them is a stack the record is pushed down by, and
+/// what is pinned is worth having in view rather than worth having all of at
+/// once. One of them alone is drawn exactly as it always was — a carousel of one
+/// is furniture around a card nothing can be turned to.
 function Pinned(props: {
   conversation: ConversationView;
   selected: number | null;
@@ -658,32 +663,211 @@ function Pinned(props: {
   return (
     <Show when={props.conversation.pinned.length > 0}>
       <div class="pinned">
-        <For each={props.conversation.pinned}>
-          {(event) => (
-            <Switch>
-              <Match when={"TaskList" in event && event.TaskList}>
-                {(tasks) => <TaskList tasks={tasks()} />}
-              </Match>
-              <Match when={"StageList" in event && event.StageList}>
-                {(stages) => <StageList stages={stages()} />}
-              </Match>
-              <Match when={"PullRequest" in event && event.PullRequest}>
-                {(opened) => (
-                  <PullRequest
-                    opened={opened()}
-                    selected={props.selected === opened().id}
-                    open={() => {
-                      props.select(opened().id);
-                      props.details();
-                    }}
-                  />
-                )}
-              </Match>
-            </Switch>
-          )}
-        </For>
+        <Show
+          when={props.conversation.pinned.length > 1}
+          fallback={
+            <Card
+              event={props.conversation.pinned[0]!}
+              selected={props.selected}
+              select={props.select}
+              details={props.details}
+            />
+          }
+        >
+          <Carousel
+            conversation={props.conversation}
+            selected={props.selected}
+            select={props.select}
+            details={props.details}
+          />
+        </Show>
       </div>
     </Show>
+  );
+}
+
+/// How far a finger has to travel across a card before it has swiped it, in the
+/// pixels a touch reports.
+///
+/// Far enough that a press which slid a little is still a press — a dot and a
+/// pull request's title are both pressed through this — and short enough that a
+/// flick across a card in a phone-width pane counts.
+export const SWIPE = 40;
+
+/// The carousel: one pinned card showing, and the ways to the others.
+///
+/// Dots beneath saying how many there are and which is showing, arrows over the
+/// card's edges where there is a pointer to reach them with, and a swipe across
+/// the card where there is not. All three are the same move, which is why they
+/// are one function between them.
+///
+/// It wraps: with two or three cards, an arrow that stopped at the end would be
+/// a dead control most of the time.
+///
+/// Which card fronts is [`fronting`]'s to say, and it says it once — when the
+/// conversation is opened and this is built. Nothing is remembered between
+/// visits, and nothing moves the card under a reader afterwards: a re-read that
+/// jumped the carousel back to where it started would be the page arguing with
+/// whoever is holding it.
+function Carousel(props: {
+  conversation: ConversationView;
+  selected: number | null;
+  select: (event: number) => void;
+  details: () => void;
+}): JSX.Element {
+  const cards = () => props.conversation.pinned;
+
+  const [at, setAt] = createSignal(fronting(props.conversation));
+
+  /// Never off the end of a list that shrank underneath it — a pull request is
+  /// pinned as the run finishes, and a backlog stops being pinned as its last
+  /// task file goes.
+  const showing = () => Math.min(at(), cards().length - 1);
+
+  /// Turn to a card, counting round both ends.
+  const turn = (to: number) => {
+    const many = cards().length;
+    setAt(((to % many) + many) % many);
+  };
+
+  /// Where the finger went down, in the coordinates it will come back up in.
+  let from: number | null = null;
+
+  return (
+    <div class="carousel">
+      <div
+        class="showing"
+        onTouchStart={(event) => {
+          from = event.changedTouches[0]?.clientX ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const to = event.changedTouches[0]?.clientX;
+          const went = from;
+          from = null;
+          if (went === null || to === undefined) {
+            return;
+          }
+          // Leftwards is onwards, the way a page turns.
+          if (Math.abs(to - went) >= SWIPE) {
+            turn(showing() + (to < went ? 1 : -1));
+          }
+        }}
+      >
+        <Card
+          event={cards()[showing()]!}
+          selected={props.selected}
+          select={props.select}
+          details={props.details}
+        />
+      </div>
+
+      {/* The arrows, which the stylesheet draws only where there is a pointer:
+          on a touch device the swipe is what these are, and two buttons lying
+          over the card would be two buttons in the way of it. */}
+      <button
+        type="button"
+        class="step back"
+        aria-label="Previous pinned card"
+        onClick={() => turn(showing() - 1)}
+      >
+        ‹
+      </button>
+      <button
+        type="button"
+        class="step on"
+        aria-label="Next pinned card"
+        onClick={() => turn(showing() + 1)}
+      >
+        ›
+      </button>
+
+      {/* And the dots: how many cards there are, which one is showing, and a way
+          straight to any of them. Each is named for the card it turns to rather
+          than numbered, because that is what a reader who cannot see the dots
+          needs to know about it. */}
+      <ol class="dots">
+        <For each={cards()}>
+          {(card, index) => (
+            <li>
+              <button
+                type="button"
+                aria-label={named(card)}
+                aria-current={showing() === index() ? "true" : undefined}
+                onClick={() => turn(index())}
+              />
+            </li>
+          )}
+        </For>
+      </ol>
+    </div>
+  );
+}
+
+/// Which card is showing when a conversation is opened: the one needing
+/// attention, and otherwise the first.
+///
+/// The first is the fixed order — task list, then roadmap, then pull request —
+/// because that is the order the server hands them over in, which is the order
+/// the work goes through them in.
+///
+/// Needing attention is the conversation being blocked on the card, which only a
+/// pull request can be: it is the one pinned event that is also on the record,
+/// and the two lists are read off the worktree rather than being moments
+/// anything could have stopped at. So a pull request with feedback waiting on it
+/// fronts over the backlog beside it, which is what a reader opening the
+/// conversation is being stopped for.
+function fronting(conversation: ConversationView): number {
+  const at = conversation.pinned.findIndex(
+    (event) =>
+      "PullRequest" in event && event.PullRequest.id === conversation.blocked_on,
+  );
+
+  return at === -1 ? 0 : at;
+}
+
+/// What a pinned card is called, in the words its own heading uses.
+function named(event: PinnedEvent): string {
+  if ("TaskList" in event) {
+    return "Task list";
+  }
+  if ("StageList" in event) {
+    return "Roadmap";
+  }
+  return "Pull request";
+}
+
+/// One pinned card, whichever of the three kinds it is.
+///
+/// One of them opens: a pull request has a full self, which is what is on it
+/// right now. Neither list does — what a details pane would show of one is what
+/// is already drawn here.
+function Card(props: {
+  event: PinnedEvent;
+  selected: number | null;
+  select: (event: number) => void;
+  details: () => void;
+}): JSX.Element {
+  return (
+    <Switch>
+      <Match when={"TaskList" in props.event && props.event.TaskList}>
+        {(tasks) => <TaskList tasks={tasks()} />}
+      </Match>
+      <Match when={"StageList" in props.event && props.event.StageList}>
+        {(stages) => <StageList stages={stages()} />}
+      </Match>
+      <Match when={"PullRequest" in props.event && props.event.PullRequest}>
+        {(opened) => (
+          <PullRequest
+            opened={opened()}
+            selected={props.selected === opened().id}
+            open={() => {
+              props.select(opened().id);
+              props.details();
+            }}
+          />
+        )}
+      </Match>
+    </Switch>
   );
 }
 

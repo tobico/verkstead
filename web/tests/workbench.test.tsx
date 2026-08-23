@@ -39,7 +39,11 @@ import type {
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
-import { CLAMPED_LINES, MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
+import {
+  CLAMPED_LINES,
+  MANUAL_TASK_REFUSAL,
+  SWIPE,
+} from "../src/workbench/Timeline";
 import {
   OPEN,
   PROFILES,
@@ -4326,6 +4330,216 @@ describe("the pinned pull request", () => {
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
   });
+
+/// A conversation with all three kinds pinned at once: the backlog it was built
+/// from, the roadmap the branch wrote to, and the pull request it ended on.
+///
+/// Composed rather than a fixture of its own, because what is being read here is
+/// how the timeline draws several pinned cards, and each of the three is already
+/// a golden fixture the server wrote.
+const ALL_THREE = [
+  { TaskList: BACKLOG },
+  { StageList: ROADMAP },
+  { PullRequest: OPENED },
+];
+
+/// A finger going down or coming up at a place across the card.
+///
+/// Built by hand rather than through `fireEvent`, because jsdom has no
+/// `TouchEvent` to build one with: what the handler reads is `changedTouches`,
+/// so that is what this carries. It bubbles, which is how the handler on the
+/// card hears an event dispatched on the card.
+function touching(kind: string, clientX: number): Event {
+  const event = new Event(kind, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "changedTouches", { value: [{ clientX }] });
+  return event;
+}
+
+/// A finger dragged across the showing card, from one place to another.
+function swipe(card: Element, from: number, to: number) {
+  card.dispatchEvent(touching("touchstart", from));
+  card.dispatchEvent(touching("touchend", to));
+}
+
+describe("the pinned carousel", () => {
+  it("shows one of several pinned cards at a time", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+
+    expect(
+      pinned.querySelectorAll(".task-list, .stage-list, .pull-request"),
+    ).toHaveLength(1);
+    expect(pinned.querySelector(".task-list")).not.toBeNull();
+  });
+
+  /// The dots are the whole of what the carousel says about itself: how many
+  /// there are, and which one of them is being read. Each is named for the card
+  /// it turns to, so a reader who cannot see them is told the same thing.
+  it("counts them beneath the card and marks the one showing", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(container, ".pinned .carousel > .dots");
+    const buttons = [...dots.querySelectorAll("button")];
+
+    expect(buttons.map((dot) => dot.getAttribute("aria-label"))).toEqual([
+      "Task list",
+      "Roadmap",
+      "Pull request",
+    ]);
+    expect(buttons.map((dot) => dot.getAttribute("aria-current"))).toEqual([
+      "true",
+      null,
+      null,
+    ]);
+  });
+
+  it("turns to any of them when its dot is pressed", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(container, ".pinned .carousel > .dots");
+    fireEvent.click(dots.querySelectorAll("button")[2]!);
+
+    await waitFor(() =>
+      expect(container.querySelector(".pinned .pull-request")).not.toBeNull(),
+    );
+    expect(container.querySelector(".pinned .task-list")).toBeNull();
+    expect(
+      dots.querySelectorAll("button")[2]!.getAttribute("aria-current"),
+    ).toBe("true");
+  });
+
+  /// The arrows count round both ends: with three cards, one that stopped at
+  /// the end would be a dead control most of the time.
+  it("steps between them with the arrows, and counts round the ends", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const carousel = await drawn(container, ".pinned .carousel");
+
+    fireEvent.click(carousel.querySelector(".step.on")!);
+    await waitFor(() =>
+      expect(carousel.querySelector(".stage-list")).not.toBeNull(),
+    );
+
+    // Back past the front, which is the far end of the list.
+    fireEvent.click(carousel.querySelector(".step.back")!);
+    fireEvent.click(carousel.querySelector(".step.back")!);
+    await waitFor(() =>
+      expect(carousel.querySelector(".pull-request")).not.toBeNull(),
+    );
+  });
+
+  /// Where there is no pointer to reach an arrow with there are no arrows: the
+  /// swipe is what they are, and two buttons lying over the card would be two
+  /// buttons in the way of it.
+  it("keeps the arrows for pointer devices", async () => {
+    expect(stylesheet).toContain(
+      ".pinned .carousel > .step {\n  display: none;\n}",
+    );
+    expect(stylesheet).toContain(
+      "@media (hover: hover) {\n  .pinned .carousel > .step {\n    display: grid;",
+    );
+  });
+
+  it("turns the card on a swipe across it", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const showing = await drawn(container, ".pinned .carousel > .showing");
+
+    // Leftwards is onwards, the way a page turns.
+    swipe(showing, 200, 200 - SWIPE);
+    await waitFor(() =>
+      expect(showing.querySelector(".stage-list")).not.toBeNull(),
+    );
+
+    swipe(showing, 200, 200 + SWIPE);
+    await waitFor(() =>
+      expect(showing.querySelector(".task-list")).not.toBeNull(),
+    );
+
+    // A press that slid a little is still a press, and turns nothing.
+    swipe(showing, 200, 200 - (SWIPE - 1));
+    expect(showing.querySelector(".task-list")).not.toBeNull();
+  });
+
+  /// Which card the reader is put in front of: the one the work has stopped on,
+  /// which is what they opened the conversation to deal with.
+  it("fronts the card the work is blocked on", async () => {
+    theWrapping({ pinned: ALL_THREE, blocked_on: OPENED.id });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+
+    expect(pinned.querySelector(".pull-request")).not.toBeNull();
+    expect(pinned.querySelector(".task-list")).toBeNull();
+  });
+
+  /// And with nothing stopping it, the fixed order — which is the order the
+  /// server hands them over in, and the order the work goes through them in.
+  it("otherwise fronts the first, which is the task list", async () => {
+    expect(WRAPPING.blocked_on).toBeNull();
+
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+
+    expect(pinned.querySelector(".task-list")).not.toBeNull();
+  });
+
+  /// And with no backlog to be first, the roadmap — the order is the server's,
+  /// which is the order the work goes through them in.
+  it("fronts the roadmap where there is no backlog before it", async () => {
+    theWrapping({ pinned: ALL_THREE.slice(1) });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+
+    expect(pinned.querySelector(".stage-list")).not.toBeNull();
+    expect(pinned.querySelector(".pull-request")).toBeNull();
+  });
+
+  /// One pinned card is not a carousel: there is nothing to turn to, and dots
+  /// counting to one would be furniture around a card nothing can be done with.
+  it("draws no carousel at all around a single pinned card", async () => {
+    expect(WRAPPING.pinned).toHaveLength(1);
+
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const pinned = await drawn(container, ".pinned .pull-request");
+
+    expect(pinned.closest(".carousel")).toBeNull();
+    expect(container.querySelector(".pinned .dots")).toBeNull();
+    expect(container.querySelector(".pinned .step")).toBeNull();
+  });
+
+  /// The card that is showing keeps everything a pinned card ever had: the
+  /// sticky block it travels with, and — for the pull request — the details
+  /// pane it opens.
+  it("keeps the showing card's place and its behaviour", async () => {
+    const fetching = theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const carousel = await drawn(container, ".pinned .carousel");
+    expect(carousel.closest(".pane-chrome")).not.toBeNull();
+    expect(carousel.closest(".timeline")).toBeNull();
+
+    const dots = carousel.querySelector(".dots")!;
+    fireEvent.click(dots.querySelectorAll("button")[2]!);
+
+    const opened = await drawn(container, ".pinned .pull-request");
+    fireEvent.click(opened.querySelector(".open-pull-request")!);
+
+    await drawn(container, ".details-pane .pr-commits");
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
+  });
+});
 });
 
 /// What the human asked for by hand, which the same conversation carries on the

@@ -266,7 +266,15 @@ Timeline events:
 | Notice | inline, nothing to do about it | — |
 
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
-  summary box at the top of the timeline; no manual pin/unpin.
+  summary box at the top of the timeline; no manual pin/unpin. More than one
+  pinned card is a carousel rather than a stack (*settled 2026-08-24, building
+  workbench-refit*): everything pinned is held above the record, so a stack of
+  them is what the record gets pushed down by. Dots beneath say how many there
+  are and which is showing, arrows over the card's edges turn it where there is
+  a pointer, and a swipe across it does where there is not. What fronts on
+  opening is the card the conversation is blocked on — a PR with feedback
+  waiting — and otherwise the first of the fixed order; nothing is remembered
+  between visits, and a single pinned card gets none of the furniture.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

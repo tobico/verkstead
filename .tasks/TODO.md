@@ -21,7 +21,7 @@ dependency.
 - [x] 05: Clamped markdown cards — [details](05-clamped-markdown-cards.md)
 - [x] 06: Question-set interview — [details](06-question-set-interview.md)
 - [x] 07: Record styling sweep — [details](07-record-styling-sweep.md)
-- [ ] 08: Pinned carousel — [details](08-pinned-carousel.md)
+- [x] 08: Pinned carousel — [details](08-pinned-carousel.md)
 - [ ] 09: Interruption as an answer sheet — [details](09-interruption-answer-sheet.md)
 - [ ] 10: Pane sizing — [details](10-pane-sizing.md)
 - [ ] 11: Diff contents — [details](11-diff-contents.md)

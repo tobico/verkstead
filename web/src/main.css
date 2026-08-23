@@ -1194,13 +1194,117 @@ main:has(.workbench) {
    which is the current state of something the work is against rather than a
    moment in the record. What keeps them in view is `.pane-chrome`, which sticks
    them and the header to the top edge as one block and carries the paper the
-   record passes behind; all this rule is now is how they stack, and the air they
-   keep above and below themselves. */
+   record passes behind; all this rule is now is the air they keep above and
+   below themselves.
+
+   One card is ever inside it: with more than one pinned the carousel below is
+   what is here, and the card is inside that. */
 .pinned {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
   padding: 0.75rem 0;
+}
+
+/* The carousel, which is what more than one pinned card is: they are held above
+   the record, so a stack of them is a stack the record is pushed down by — and a
+   pinned card is worth having in view rather than worth having all of at once.
+   One pinned card is not one of these at all, and is drawn exactly as it was.
+
+   Positioned, because the arrows are over the card's own edges. */
+.pinned .carousel {
+  position: relative;
+}
+
+/* The card that is showing. A sideways drag across it is the carousel's to read
+   as a swipe; an up-and-down one is still the pane's to scroll with, which is
+   what `pan-y` leaves the browser holding. */
+.pinned .carousel > .showing {
+  touch-action: pan-y;
+}
+
+/* The way between cards where there is a pointer to reach it with. Nothing at
+   all where there is not: a touch device swipes the card, and two buttons lying
+   over it would be two buttons in the way of the thing they are about. */
+.pinned .carousel > .step {
+  display: none;
+}
+
+@media (hover: hover) {
+  .pinned .carousel > .step {
+    display: grid;
+    position: absolute;
+    top: 50%;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    transform: translateY(-50%);
+    font: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--ink-soft);
+    background: var(--paper);
+    border: 1px solid var(--edge);
+    border-radius: 50%;
+    cursor: pointer;
+    /* Out of sight until the carousel is under the pointer or holding the
+       keyboard: at rest the card is whole, and an arrow is only wanted by
+       somebody already looking at what it would turn. Hidden rather than
+       faded, so what cannot be seen cannot be pressed by accident either. */
+    visibility: hidden;
+  }
+
+  .pinned .carousel:hover > .step,
+  .pinned .carousel:focus-within > .step {
+    visibility: visible;
+  }
+
+  .pinned .carousel > .back {
+    left: 0.35rem;
+  }
+
+  .pinned .carousel > .on {
+    right: 0.35rem;
+  }
+}
+
+/* And the dots beneath: how many cards there are, and which one is showing.
+   Always drawn, pointer or none — they are the whole of what the carousel says
+   about itself, and a swipe with nothing counting it is a card that came from
+   nowhere. */
+.pinned .carousel > .dots {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+/* Each is a dot's worth of ink in a finger's worth of button: what is drawn is
+   the mark, and what is pressed is the box around it. */
+.pinned .carousel .dots button {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pinned .carousel .dots button::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--edge);
+  border-radius: 50%;
+}
+
+/* The one showing, in the accent the page marks what is current with. */
+.pinned .carousel .dots button[aria-current]::before {
+  background: var(--accent);
 }
 
 /* The backlog and the roadmap: the whole list either way, because the whole
