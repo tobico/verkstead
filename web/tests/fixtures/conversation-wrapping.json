@@ -97,8 +97,16 @@
         "id": 29,
         "state": "Wrapping"
       }
+    },
+    {
+      "ManualTask": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<p>Rebase this onto <code>main</code> and force-push — the conflict is in <code>src/limits.rs</code> alone.</p>\n",
+        "id": 30
+      }
     }
   ],
+  "working": false,
   "worktree": {
     "missing": false,
     "path": "/var/lib/verkstead/worktrees/verkstead-rate-limiting"

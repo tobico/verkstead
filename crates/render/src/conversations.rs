@@ -256,6 +256,19 @@ pub struct ConversationView {
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
 
+    /// Whether a session is registered for this Conversation as of this read.
+    ///
+    /// The same fact the sidebar draws its working indicator from, said here
+    /// because the Timeline has its own use for it: the Manual Task composer is
+    /// offered exactly where nothing is running, and the states it is offered in
+    /// are the ones a session may or may not be running in.
+    ///
+    /// A question about a process rather than about the record, so it is true
+    /// only as of the moment it was read — and a restarted server has no
+    /// sessions at all, so every Conversation then reads as not working, which
+    /// is what each of them is.
+    pub working: bool,
+
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 
@@ -385,6 +398,16 @@ pub enum TimelineEvent {
     /// wrote it and no human pressed anything for it. It is how an unattended run
     /// says what it decided while nobody was watching.
     Notice(NoticeEvent),
+
+    /// A Manual Task the human set going by hand, rendered inline like the
+    /// handoff — and for the same reason: it is what they asked for, in their
+    /// own words, with nothing of it a details pane would add.
+    ///
+    /// What the session it started went on to do is not here. That lands as the
+    /// Events any work lands as — what it printed, what it asked, what it
+    /// committed — so this is the instruction alone, which is the part of a
+    /// Manual Task nothing else on the Timeline records.
+    ManualTask(ManualTaskEvent),
 }
 
 /// One of the three things the human can do about an Interruption.
@@ -758,6 +781,24 @@ pub struct NoticeEvent {
     pub id: i64,
 
     /// When it was said, RFC 3339.
+    pub at: String,
+
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// markdown on this wire is.
+    pub html: String,
+}
+
+/// A Manual Task as the page receives it: what the human asked for, and when.
+///
+/// HTML alone, like the handoff and unlike the Brief: it is a moment on the
+/// record rather than a document anybody goes back and edits — what a second
+/// thought produces is a second Manual Task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ManualTaskEvent {
+    pub id: i64,
+
+    /// When it was asked for, RFC 3339.
     pub at: String,
 
     /// Rendered and sanitized by the server on the way out, as every piece of
@@ -1255,6 +1296,16 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
     })
 }
 
+/// A Manual Task as an Event, rendered the same way and for the same reason: it
+/// is what the human asked for, written for somebody to read back.
+pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEvent {
+    TimelineEvent::ManualTask(ManualTaskEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(instruction),
+    })
+}
+
 /// Starting a Conversation: the Repo it is against, and nothing else.
 ///
 /// The branch name is not the browser's to send. It is prefilled randomly, and a
@@ -1401,6 +1452,60 @@ pub enum GrillingStarted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+}
+
+/// What the human typed into the Manual Task composer: the instruction, and the
+/// Agent Profile to run it under.
+///
+/// The Profile travels with the instruction rather than being read off the
+/// Conversation, because the pick is one-off. The composer starts on the
+/// Conversation's implementation Profile and a different choice belongs to this
+/// submission alone — it never becomes the Conversation's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ManualTaskSubmission {
+    /// What to do, in the human's own markdown. Nothing here interprets it — it
+    /// goes on the Timeline whole and into the prompt whole.
+    pub instruction: String,
+
+    /// Which saved Profile the one-off session runs as.
+    pub profile_id: i64,
+}
+
+/// What became of submitting one.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
+/// each of them is something different for the human to go and do, and a single
+/// "cannot start" would leave them guessing which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ManualTaskStarted {
+    /// The instruction is on the Timeline and a session is running on it.
+    Started,
+
+    NoSuchConversation,
+
+    /// It is drafting or aborted, so it has no Worktree for a session to run in.
+    /// The two states the composer is never offered in.
+    NowhereToWork,
+
+    /// A session was registered when this arrived, so the composer that was
+    /// pressed was stale. Nothing is queued: an instruction written against a
+    /// world that has since moved may no longer be the thing to do.
+    AlreadyRunning,
+
+    /// Nothing was typed, and an instruction is the whole of what a Manual Task
+    /// is.
+    EmptyInstruction,
+
+    /// The picked Profile has gone — deleted between the page being drawn and
+    /// the press.
+    NoSuchProfile,
+
+    /// The instruction is on the Timeline and no session could be started for
+    /// it. The reason is in the server's log, as a worktree git refused is: this
+    /// is the one refusal with nothing for the human to correct.
+    NotStarted,
 }
 
 /// What became of pressing Adopt.

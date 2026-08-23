@@ -314,6 +314,52 @@ reverts, resets or stashes anything, which is what makes taking over one at all.
 Aborting from here therefore keeps the Worktree, unlike aborting a Conversation.
 _Avoid_: action, resolution, fix, recovery option
 
+**Manual Task**:
+A free-text instruction the human types at the end of a Conversation's Timeline,
+with an Agent Profile picked beside it: submitting starts a one-off session that
+does what it says and stops. Offered wherever the Conversation has a Worktree
+and no session is registered for it — every quiet moment, in a driven state or
+out of one. The escape hatch: the way to get work moving by hand when the
+pipeline is not driving it.
+
+Outside the pipeline in every sense that matters. It moves the Conversation into
+no state and out of none, closes no open Interruption, and reopens nothing a Done
+Conversation settled; what it leaves behind is its instruction on the record,
+what its session printed, and whatever that committed. The Profile picked is for
+that submission alone and never becomes the Conversation's.
+
+Ended on quiet with no Question Set of its own still open, there being no done
+file to end it by — so a session idling on a Blocking Ask is left where it is.
+
+One whose session exits badly stops at an Interruption, with the usual three
+Remedies: the human submits from a phone and walks away, so being asked is the
+only thing that reaches them. Retry runs the same instruction again, read back
+off the Timeline, under the Conversation's implementation Profile. One that
+exits cleanly having committed nothing raises nothing — an instruction may
+legitimately change nothing.
+_Avoid_: step (the unattended unit a done file ends), task (a backlog's), hold,
+take over (the Remedy), errand, manual step
+
+**Stalled**:
+A Conversation in a driven state — Grilling, Implementing or Wrapping — with
+nothing registered as driving it and no open Interruption. Nothing is moving the
+work and nothing is asking the human to, so there is nothing they can do about
+it: the case a Manual Task is the escape hatch for, and the one condition
+Verkstead has to notice on its own account. A condition an active state can be
+in rather than a state of its own — the Conversation is still Grilling or
+Implementing or Wrapping, and that is the half of it that is wrong.
+
+The condition rather than the answer to it. A sweep raises an Interruption where
+it finds one, and the ordinary Remedies are the way back out from there.
+
+Judged by whether a driver — a grilling session, a runner loop, a wrap-up's
+watchers — is registered, rather than by how long nothing has happened. Wrapping
+idles for days under live watchers and is perfectly healthy; so are the gaps
+between an unattended run's Steps. Draft, Direction, Done and Aborted are never
+stalled, nothing being supposed to drive them.
+_Avoid_: blocked on you (the badge a stall is precisely without), interruption
+(what a stall raises, not what it is), state, stuck, hung, idle
+
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A

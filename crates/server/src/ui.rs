@@ -29,9 +29,9 @@ use time::OffsetDateTime;
 use verkstead_render::{
     Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
-    Lifecycle, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted, Subscribed,
-    Subscription, Unsubscribe, UpdateNotice,
+    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
+    RepoEntry, SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -112,6 +112,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/interruption/{event}",
             post(settle_interruption),
+        )
+        // And what the human sets going by hand, wherever nothing is running.
+        // Per Conversation rather than per Event, unlike settling an
+        // Interruption: a Manual Task answers nothing on the Timeline — it is a
+        // new thing to do, and the Event it becomes is written by this.
+        .route(
+            "/api/ui/conversations/{id}/manual-task",
+            post(start_manual_task),
         )
         .route(
             "/api/ui/conversations/{id}/grilling-profile",
@@ -662,6 +670,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        // The same reading the Events above are drawn against, said as a fact
+        // about the Conversation: the Timeline offers the Manual Task composer
+        // exactly where nothing is running, and one Event of a session's is not
+        // the question — a Conversation whose session has ended is not working,
+        // whichever Event it was writing into.
+        working: writing.is_some(),
         timeline: timeline
             .into_iter()
             // `filter_map` rather than `map`, for the one Event that is on the
@@ -748,6 +762,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // anything about.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
+                    }
+                    // And what the human asked for by hand, rendered like the
+                    // handoff and inline like it: the instruction is the whole
+                    // of what a Manual Task is on the record, and what its
+                    // session did lands beside it as its own Events.
+                    store::Event::ManualTask(instruction) => {
+                        verkstead_render::manual_task_event(event.id, event.at, &instruction)
                     }
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
@@ -1122,6 +1143,35 @@ async fn settle_interruption(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "settling an Interruption failed");
             unavailable("the interruption could not be settled")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
+///
+/// The instruction goes on the Timeline and a one-off session starts on it under
+/// the Profile the human picked beside it. Nothing about the Conversation moves:
+/// a Manual Task is outside the pipeline, and what it leaves behind is its
+/// instruction, what its session printed and whatever that committed.
+///
+/// `AlreadyRunning` is an outcome rather than an error, for the reason every
+/// other named outcome here is one: the composer that was pressed was drawn a
+/// moment ago, and an agent having started since is something to say in words
+/// rather than something to retry.
+async fn start_manual_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(submission): Json<ManualTaskSubmission>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ManualTaskStarted::NoSuchConversation).into_response();
+    };
+
+    match crate::manual::submit(&state, id, &submission.instruction, submission.profile_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
+            unavailable("the manual task could not be started")
         }
     }
 }

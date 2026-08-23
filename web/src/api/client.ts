@@ -21,6 +21,7 @@ import type {
   Direction,
   DirectionChosen,
   GrillingStarted,
+  ManualTaskStarted,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -287,6 +288,27 @@ export function settleInterruption(
   return post<RemedySettled>(
     `/api/ui/conversations/${id}/interruption/${event}`,
     { remedy, note },
+  );
+}
+
+/// Set a manual task going: this one instruction, under the profile picked
+/// beside it, in a session of its own.
+///
+/// Outside the pipeline, so nothing about the conversation moves. What it leaves
+/// behind is the instruction on the timeline, whatever the session printed, and
+/// whatever that committed.
+///
+/// The profile is sent rather than left to the server to read off the
+/// conversation, because the pick is one-off: it is what *this* task runs under
+/// and never becomes the conversation's own implementation profile.
+export function startManualTask(
+  id: number,
+  instruction: string,
+  profileId: number,
+): Promise<ManualTaskStarted> {
+  return post<ManualTaskStarted>(
+    `/api/ui/conversations/${id}/manual-task`,
+    { instruction, profile_id: profileId },
   );
 }
 

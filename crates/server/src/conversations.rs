@@ -270,6 +270,15 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         }
     }
 
+    // Taken the moment the Conversation says it is implementing, and handed to
+    // whichever driver is spawned below rather than taken again there. The
+    // Worktree is waited for before anything is launched, and what it may be
+    // waiting for is a Manual Task running for ten minutes: a registration
+    // taken at the far end of that would leave a Conversation saying it was
+    // implementing with nothing on the register to say who by — see
+    // [`crate::drivers`].
+    let driving = state.drivers.driving(id);
+
     // Read back rather than assembled from what was just recorded, for the reason
     // starting a grilling reads it back: where an agent is about to be let loose
     // is the one thing that must not be guessed at.
@@ -291,6 +300,14 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         );
         return Ok(());
     };
+
+    // Waited for before anything is launched, the way every driver waits for it:
+    // starting a session ends whatever is registered, and what may be registered
+    // here is a Manual Task the human set going in this very lull — see
+    // [`crate::manual`]. Waited for rather than tried for, because nothing else
+    // will start this implementation on its behalf; the choice is already on the
+    // record, so a browser that gave up on the wait has still had its answer.
+    let _turn = state.sessions.turn(id).await;
 
     // The grilling session ended when its proposal was accepted. Ended again
     // here because this is where it matters rather than where it happened: one
@@ -330,10 +347,15 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     // Conversation that says it is implementing with nothing implementing it.
     match (direction, started) {
         (Direction::TaskList, Some(session)) => {
-            tokio::spawn(crate::runner::follow(state.clone(), id, session));
+            tokio::spawn(crate::runner::follow(state.clone(), id, session, driving));
         }
         (Direction::Inline, Some(session)) => {
-            tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
+            tokio::spawn(crate::runner::follow_inline(
+                state.clone(),
+                id,
+                session,
+                driving,
+            ));
         }
         (Direction::Roadmap, Some(session)) => {
             // The commit the branch came off, which is what says a roadmap in the
@@ -348,6 +370,7 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
                         id,
                         base,
                         session,
+                        driving,
                     ));
                 }
                 None => tracing::error!(
