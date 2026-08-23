@@ -136,10 +136,36 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// returns, a second settling watcher finds the move already made, and a
 /// Conversation that has stopped wrapping up stops every one of them.
 pub(crate) fn watching(state: &AppState, conversation_id: i64) {
-    tokio::spawn(crate::checks::watch(state.clone(), conversation_id));
-    tokio::spawn(crate::comments::watch(state.clone(), conversation_id));
-    tokio::spawn(crate::review::run(state.clone(), conversation_id));
-    tokio::spawn(crate::settling::watch(state.clone(), conversation_id));
+    driving(state, conversation_id, crate::checks::watch);
+    driving(state, conversation_id, crate::comments::watch);
+    driving(state, conversation_id, crate::review::run);
+    driving(state, conversation_id, crate::settling::watch);
+}
+
+/// Start one of them, registered as a driver of the Conversation for as long as
+/// it runs.
+///
+/// The registration goes with the task rather than around the spawning, which
+/// is the whole of what makes it worth a function: a wrap-up is driven while
+/// any one of the four is still going, and each of them ends in its own time —
+/// the review once it has asked, the rest once the Conversation stops wrapping
+/// up. Counted rather than flagged, so a second set started over the top of the
+/// first — which is what retrying either of the wrap-up's Interruptions does —
+/// does not have the first of them to finish taking the Conversation off the
+/// register. See [`crate::drivers`].
+fn driving<W, F>(state: &AppState, conversation_id: i64, watcher: W)
+where
+    W: FnOnce(AppState, i64) -> F,
+    F: Future<Output = ()> + Send + 'static,
+{
+    let driving = state.drivers.driving(conversation_id);
+    let watching = watcher(state.clone(), conversation_id);
+
+    tokio::spawn(async move {
+        let _driving = driving;
+
+        watching.await;
+    });
 }
 
 /// Start watching every Conversation that was already wrapping up.

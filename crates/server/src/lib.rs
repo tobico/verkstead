@@ -19,6 +19,7 @@ mod comments;
 mod commits;
 mod continuing;
 mod conversations;
+mod drivers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
 /// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
@@ -126,9 +127,9 @@ const SETTLEMENT_BACKLOG: usize = 64;
 
 /// What the handlers share: the store, word of what has just moved — so held
 /// waits need not poll for a Set arriving and open pages hear about everything
-/// else — which Sets a wait is being held on, which sessions are running,
-/// whether a newer Verkstead has been released than this one, and which
-/// directories any of it may touch.
+/// else — which Sets a wait is being held on, which sessions are running, what
+/// is driving each Conversation, whether a newer Verkstead has been released
+/// than this one, and which directories any of it may touch.
 #[derive(Clone)]
 pub(crate) struct AppState {
     pool: SqlitePool,
@@ -136,6 +137,12 @@ pub(crate) struct AppState {
     settlements: Settlements,
     waits: Waits,
     sessions: sessions::Sessions,
+
+    /// And what is driving each of them, which is the other half of the same
+    /// question: a session is one agent running, and a driver is the task that
+    /// keeps starting them — see [`drivers`].
+    drivers: drivers::Drivers,
+
     updates: updates::Updates,
     watched: WatchedPaths,
 
@@ -358,6 +365,7 @@ fn routed(
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
         sessions,
+        drivers: drivers::Drivers::new(),
         updates,
         watched,
         github,
