@@ -12,8 +12,8 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, and the bundled skills over
-//!   `~/.claude/skills`
+//! - **read-only** — `/nix` and the system paths, the bundled skills over
+//!   `~/.claude/skills`, and the executable serving all this, as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //!
 //! Credentials are on none of those lists, and neither is who a session commits
@@ -73,14 +73,26 @@ const SYSTEM: [&str; 7] = [
     "/run/current-system",
 ];
 
+/// Where the server's own executable is mounted, which is what a session runs
+/// as `verkstead`.
+///
+/// In a directory of Verkstead's own rather than under a name inside one of the
+/// system binds: those are the host's and read-only, so there is nowhere in them
+/// to put a file. The directory is made by the bind itself, holds this one
+/// executable and nothing else, and goes first on [`PATH`].
+const VERKSTEAD_INSIDE: &str = "/verkstead/bin/verkstead";
+
 /// What a session's `PATH` is inside.
 ///
-/// The system profile first, then the Nix default profile, then the paths a
-/// non-NixOS `/usr` would put things in. Not inherited from the server's own
-/// environment: what a session can run should be a fact about the sandbox rather
-/// than about however the unit that started the orchestrator happened to be
-/// launched.
-const PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
+/// Verkstead's own directory first — see [`Executable`] for why a session asks
+/// with the server's own build rather than with whatever the machine has
+/// installed — then the system profile, then the Nix default profile, then the
+/// paths a non-NixOS `/usr` would put things in. Not inherited from the server's
+/// own environment: what a session can run should be a fact about the sandbox
+/// rather than about however the unit that started the orchestrator happened to
+/// be launched.
+const PATH: &str =
+    "/verkstead/bin:/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin";
 
 /// And what a session's `SHELL` is: the one path the system bind is certain to
 /// have a shell at, on NixOS and everywhere else.
@@ -122,6 +134,83 @@ impl Home {
         Some(Home {
             path: PathBuf::from(std::env::var_os("HOME")?),
         })
+    }
+}
+
+/// The Verkstead executable a session is given, which is the one serving it.
+///
+/// One binary carries both verbs — `verkstead serve` and `verkstead ask` — so a
+/// running server has on disk exactly what a session needs, and handing it that
+/// one is what keeps the two halves of an ask the same build. They share a
+/// schema, a Guide and a wire format, and two builds that have drifted apart
+/// cannot put a Question Set through together at all: the installed CLI this
+/// replaces validated a `proposal` locally against a field the running server
+/// refused as unknown, so no grilling could reach its closing move.
+///
+/// A machine's own install is therefore not a fallback. A session asking with a
+/// binary nobody chose is the failure this removes, and where the server cannot
+/// find its own image the session is not started at all, and what is logged is
+/// which session that cost.
+#[derive(Debug, Clone)]
+pub struct Executable {
+    path: PathBuf,
+}
+
+impl Executable {
+    /// The running server's own image.
+    ///
+    /// `None` where the process cannot say what it is running, and `None` too
+    /// where what it names is no longer a file: a binary replaced under a
+    /// running server is exactly that, and `/proc` answers for it with a path
+    /// marked `(deleted)` that no bind can be made from.
+    pub fn of_the_server() -> Option<Executable> {
+        Executable::at(std::env::current_exe().ok()?)
+    }
+
+    /// A named one, which is how a test puts the real CLI where the server's own
+    /// image goes — a test harness being its own executable.
+    ///
+    /// `None` for a path with nothing behind it, for the reason above: what this
+    /// is for is a bind, and a bind of nothing is a session that will not start.
+    pub fn at(path: PathBuf) -> Option<Executable> {
+        let path = unwrapped(&path);
+
+        path.is_file().then_some(Executable { path })
+    }
+
+    /// Where it is on the host, which is what a sandbox binds.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// The wrapper beside `path` where `path` is what nix's `wrapProgram` left
+/// behind one, and `path` itself everywhere else.
+///
+/// The packaged `verkstead` is a wrapper script that puts `git` on the CLI's
+/// `PATH`, with the real executable beside it under a name that begins with a
+/// dot and ends in `-wrapped`. A packaged server *is* that second one, because
+/// that is what the wrapper execed — so binding what the process says it is
+/// running would hand a session the binary without the wrapper's doing, and the
+/// CLI shells out to git for a Set's project, its branch and its Diff.
+fn unwrapped(path: &Path) -> PathBuf {
+    let Some(wrapped) = path.file_name().and_then(OsStr::to_str) else {
+        return path.to_owned();
+    };
+
+    let Some(name) = wrapped
+        .strip_prefix('.')
+        .and_then(|name| name.strip_suffix("-wrapped"))
+    else {
+        return path.to_owned();
+    };
+
+    let wrapper = path.with_file_name(name);
+
+    if wrapper.is_file() {
+        wrapper
+    } else {
+        path.to_owned()
     }
 }
 
@@ -316,6 +405,14 @@ pub struct Sandbox {
     /// rather than the account's, and why they are read-only.
     skills: PathBuf,
 
+    /// The executable a session runs as `verkstead`, mounted read-only at
+    /// [`VERKSTEAD_INSIDE`] and first on `PATH`.
+    ///
+    /// The server's own — see [`Executable`] — and read-only for the reason the
+    /// skills are: what a session asks with is the product's, and not a file the
+    /// session can rewrite mid-run.
+    verkstead: PathBuf,
+
     /// The Conversation's own directory outside the worktree, read-write, at
     /// [`handoffs::INSIDE`].
     ///
@@ -380,6 +477,7 @@ impl Sandbox {
         home: Home,
         reachable: &Reachable,
         skills: &Skills,
+        verkstead: &Executable,
         handoffs: &Handoffs,
         secrets: &Secrets,
         config: &Config,
@@ -395,6 +493,7 @@ impl Sandbox {
             claude_dir: profile.claude_dir.clone(),
             config_file: profile.config_file.clone(),
             skills: skills.path().to_owned(),
+            verkstead: verkstead.path().to_owned(),
             handoff_dir,
             home,
             github_token: secrets.github_token().map(str::to_owned),
@@ -472,6 +571,15 @@ impl Sandbox {
             .arg("--ro-bind")
             .arg(&self.skills)
             .arg(self.home.path.join(skills::INSIDE_HOME));
+
+        // And the binary the session asks with, in a directory of its own that
+        // goes first on `PATH` — see [`Executable`]. The bind makes the
+        // directory, so what is on that `PATH` entry is this one file and
+        // nothing the host put beside it.
+        bwrap
+            .arg("--ro-bind")
+            .arg(&self.verkstead)
+            .arg(VERKSTEAD_INSIDE);
 
         for extra in &self.extra {
             bwrap.arg("--bind").arg(extra).arg(extra);
@@ -687,4 +795,71 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bind puts the executable in one directory and `PATH` sends a session
+    /// looking in another, and the two have to be the same place — a `verkstead`
+    /// mounted somewhere nothing searches is a session back on the machine's
+    /// install without anything saying so.
+    #[test]
+    fn the_directory_the_binary_is_mounted_in_is_the_first_on_the_path() {
+        let mounted = Path::new(VERKSTEAD_INSIDE);
+
+        assert_eq!(
+            mounted.file_name().and_then(OsStr::to_str),
+            Some("verkstead"),
+            "the name on `PATH` is the name the skills and the Guide tell a session to run"
+        );
+        assert_eq!(
+            PATH.split(':').next().map(Path::new),
+            mounted.parent(),
+            "the server's own build has to be found before the machine's install"
+        );
+    }
+
+    /// A packaged binary is a wrapper and a dotted file beside it, and a
+    /// packaged server is the second of the two — see [`unwrapped`].
+    #[test]
+    fn a_wrapped_executable_resolves_to_the_wrapper_beside_it() {
+        let bin = tempfile::tempdir().unwrap();
+
+        std::fs::write(bin.path().join("verkstead"), "#!/bin/sh\n").unwrap();
+        std::fs::write(bin.path().join(".verkstead-wrapped"), "an ELF\n").unwrap();
+
+        let executable = Executable::at(bin.path().join(".verkstead-wrapped"))
+            .expect("the file is there to be equipped with");
+
+        assert_eq!(
+            executable.path(),
+            bin.path().join("verkstead"),
+            "the wrapper is what puts git on the CLI's PATH, so it is what a session gets"
+        );
+    }
+
+    /// And an unpackaged one is itself: a `cargo build` leaves no wrapper, and
+    /// neither does a dotted name with nothing beside it.
+    #[test]
+    fn an_unwrapped_executable_is_the_one_that_was_named() {
+        let bin = tempfile::tempdir().unwrap();
+        let path = bin.path().join("verkstead");
+        std::fs::write(&path, "an ELF\n").unwrap();
+
+        let executable = Executable::at(path.clone()).expect("the file is there");
+
+        assert_eq!(executable.path(), path);
+    }
+
+    /// A binary replaced under a running server, which is what an upgrade is:
+    /// there is nothing left to bind, and saying so is what stops a session
+    /// being equipped with the machine's install instead.
+    #[test]
+    fn an_executable_that_is_not_there_equips_nobody() {
+        let bin = tempfile::tempdir().unwrap();
+
+        assert!(Executable::at(bin.path().join("verkstead")).is_none());
+    }
 }

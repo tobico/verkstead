@@ -51,7 +51,7 @@ use verkstead_render::{
     Turn, Watching,
 };
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
+use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
@@ -72,6 +72,16 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// is half a second, and a loaded machine can take a while to get bwrap and a
 /// shell going.
 const PATIENCE: Duration = Duration::from_secs(30);
+
+/// What every sandbox here is equipped with as `verkstead`.
+///
+/// A test harness is its own executable, and what a sandbox does with one is
+/// bind it read-only — so any file that is really there will do where nothing in
+/// this file runs it. That a session asks with the *server's* build is the
+/// sandbox's own claim, and `tests/sandbox.rs` is where it is put to a session.
+fn equipped() -> Option<Executable> {
+    Executable::of_the_server()
+}
 
 /// A Conversation with a session running under a stub agent, and everything
 /// holding its directories open.
@@ -251,6 +261,7 @@ impl Grilling {
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
+                equipped(),
                 Handoffs::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
@@ -903,6 +914,7 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
+        equipped(),
         Handoffs::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
@@ -1744,6 +1756,7 @@ async fn a_capture_survives_the_server_restarting() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            equipped(),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
@@ -3316,6 +3329,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            equipped(),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )

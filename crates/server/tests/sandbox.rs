@@ -17,11 +17,14 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use verkstead_server::sandbox::{
+    Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -29,6 +32,17 @@ use verkstead_server::store;
 /// Where the server this Conversation belongs to is listening — which is what a
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
+
+/// What stands in for the server's own image: an executable that says which
+/// build it is.
+///
+/// A real server equips a session with the binary it is itself running, so that
+/// the CLI a session asks with and the server it asks cannot disagree about a
+/// schema. A test harness's own image is the test harness, which would prove
+/// nothing about *which* binary arrived — so the fixture writes one of its own
+/// and hands the sandbox that. The bind is the same either way, and this one
+/// answers in words a probe can recognise.
+const SAYS_WHICH_BUILD: &str = "#!/bin/sh\nprintf 'verkstead 0.0.0-the-servers-own\\n'\n";
 
 /// A Conversation part-way through its first grilling: a Repo inside a Watched
 /// Path, a Profile to run as, and a worktree under Verkstead's own state
@@ -62,6 +76,10 @@ struct Grilling {
     /// Data Directory, at startup.
     skills: Skills,
 
+    /// And the executable a session asks with, which for a real server is its
+    /// own image — see [`SAYS_WHICH_BUILD`] for what stands in for one here.
+    verkstead: Executable,
+
     /// And where the handoff documents go, which is a root under the same
     /// directory — one directory per Conversation, made as its sandbox is built.
     handoffs: Handoffs,
@@ -89,6 +107,7 @@ impl Grilling {
             self.home(),
             &Reachable::at(listening),
             &self.skills,
+            &self.verkstead,
             &self.handoffs,
             // Read here rather than at startup, which is where the server reads
             // them too: a sandbox carries the token and the author that were
@@ -260,6 +279,14 @@ async fn grilling() -> Grilling {
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
+    // The executable a session is equipped with, somewhere no session can reach
+    // it except through the bind — see [`SAYS_WHICH_BUILD`].
+    let image = state.path().join("bin/verkstead");
+    std::fs::create_dir_all(image.parent().unwrap()).unwrap();
+    std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
+    std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let verkstead = Executable::at(image).expect("the executable was just written");
+
     Grilling {
         watched,
         state,
@@ -270,6 +297,7 @@ async fn grilling() -> Grilling {
         profile,
         pool,
         skills,
+        verkstead,
         handoffs,
         settings,
     }
@@ -766,6 +794,57 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     assert_eq!(
         reported["ask-instruction"], "inside",
         "so the bundled skill has to carry the instruction itself"
+    );
+}
+
+/// `verkstead` inside is the executable serving the session, and it is what a
+/// bare `verkstead` finds.
+///
+/// The two halves of an ask are the CLI a session runs and the server it puts a
+/// Set to, and they have to be one build: a machine's install is a separate one,
+/// and the two have already disagreed about what a `proposal` may carry. So the
+/// server hands over its own image, in a directory holding nothing else, ahead
+/// of every path the host could have installed a `verkstead` on.
+///
+/// Asked of a shell inside rather than of the flags, like everything else here:
+/// what settles which binary a session asks with is a session looking one up and
+/// running it.
+#[tokio::test]
+async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        found=$(command -v verkstead)
+        say found "$found"
+        say version "$(verkstead)"
+        say beside "$(ls "$(dirname "$found")")"
+        say first "${PATH%%:*}"
+        file "$found" binary
+        "#,
+    );
+
+    assert_eq!(
+        reported["found"], "/verkstead/bin/verkstead",
+        "a bare `verkstead` is the one the server bound in"
+    );
+    assert_eq!(
+        reported["version"], "verkstead 0.0.0-the-servers-own",
+        "and running it runs the server's own build, not whatever the machine has"
+    );
+    assert_eq!(
+        reported["beside"], "verkstead",
+        "the directory holds the one executable the server put there and nothing else"
+    );
+    assert_eq!(
+        reported["first"], "/verkstead/bin",
+        "which is looked in before every path an install could have landed on"
+    );
+    assert_eq!(
+        reported["binary"], "read",
+        "and it is no more a session's to rewrite mid-run than the skills are"
     );
 }
 

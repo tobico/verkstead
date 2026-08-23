@@ -38,7 +38,7 @@ use crate::handoffs::Handoffs;
 use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
 use crate::runner::Pace;
-use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::Skills;
@@ -60,8 +60,9 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
 /// extra binds Sandbox Configuration asks for, the skills every sandbox is
-/// given, where a Conversation's handoff directory is made, where the settings
-/// files are read from, and what an agent is on the command line.
+/// given, the executable every sandbox asks with, where a Conversation's handoff
+/// directory is made, where the settings files are read from, and what an agent
+/// is on the command line.
 ///
 /// Resolved once at startup and shared by every session, because each of them is
 /// a fact about the machine rather than about any one Conversation — including
@@ -77,6 +78,17 @@ pub struct Agents {
     reachable: Reachable,
     config: SandboxConfig,
     skills: Skills,
+
+    /// The executable every sandbox is given as `verkstead`: this server's own
+    /// image — see [`Executable`].
+    ///
+    /// `None` where the server cannot find it, which is not a fallback to the
+    /// machine's install but a session that does not start. Resolved at startup
+    /// like everything else here, and reported per session rather than at
+    /// startup, because what it costs is a session and the log line worth having
+    /// is the one that says which — see [`Sessions::start`].
+    verkstead: Option<Executable>,
+
     handoffs: Handoffs,
     settings: Settings,
 
@@ -109,6 +121,7 @@ impl Agents {
         reachable: Reachable,
         config: SandboxConfig,
         skills: Skills,
+        verkstead: Option<Executable>,
         handoffs: Handoffs,
         settings: Settings,
     ) -> Agents {
@@ -118,18 +131,21 @@ impl Agents {
             reachable,
             config,
             skills,
+            verkstead,
             handoffs,
             settings,
         )
     }
 
     /// The same, with something else where claude goes — see [`Agents::agent`].
+    #[allow(clippy::too_many_arguments)]
     pub fn running(
         agent: Vec<String>,
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
         skills: Skills,
+        verkstead: Option<Executable>,
         handoffs: Handoffs,
         settings: Settings,
     ) -> Agents {
@@ -138,6 +154,7 @@ impl Agents {
             reachable,
             config,
             skills,
+            verkstead,
             handoffs,
             settings,
             agent,
@@ -577,11 +594,12 @@ impl Sessions {
     /// put what it prints on the Timeline as it arrives.
     ///
     /// The session that was started, for whoever is driving it — see
-    /// [`Session`]. A server with no way to run agents starts none, and a
-    /// sandbox that cannot be built — a Conversation with no worktree, or one
-    /// git will not own — is the same answer: there is nothing here to launch.
-    /// Both are logged, because both mean a Conversation that is grilling with
-    /// nothing grilling it.
+    /// [`Session`]. A server with no way to run agents starts none, a server
+    /// that cannot find its own executable to equip one with starts none either,
+    /// and a sandbox that cannot be built — a Conversation with no worktree, or
+    /// one git will not own — is the same answer: there is nothing here to
+    /// launch. All three are logged, because each of them means a Conversation
+    /// that is grilling with nothing grilling it.
     ///
     /// The Timeline Event is made after the process is, so that a session that
     /// never started leaves no Capture of nothing.
@@ -597,6 +615,21 @@ impl Sessions {
             tracing::warn!(
                 conversation_id = conversation.id,
                 "this server has no way to run an agent, so no session was started"
+            );
+            return Ok(None);
+        };
+
+        // What the session would ask with, which is the server's own image. Said
+        // here rather than let fall through to a machine's install: the two are
+        // separate builds, and a session asking one binary's Question Sets of
+        // another binary's server is the failure this refuses — see
+        // [`Executable`]. Which session it cost is the whole of what is worth
+        // logging, and this is where that is known.
+        let Some(verkstead) = agents.verkstead.clone() else {
+            tracing::error!(
+                conversation_id = conversation.id,
+                "Verkstead cannot find its own executable, so this session could not be \
+                 equipped with `verkstead` and was not started"
             );
             return Ok(None);
         };
@@ -635,6 +668,7 @@ impl Sessions {
                     home,
                     &reachable,
                     &skills,
+                    &verkstead,
                     &handoffs,
                     &secrets,
                     &config,
@@ -1226,6 +1260,10 @@ mod tests {
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             Skills::installed(state).expect("this binary carries skills"),
+            // A test harness is its own executable, and what a sandbox does with
+            // one is bind it: any file that is really there will do where nothing
+            // here runs it.
+            Executable::of_the_server(),
             Handoffs::under(state),
             Settings::in_data_dir(state),
         )

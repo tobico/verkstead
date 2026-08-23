@@ -18,7 +18,7 @@ Roadmap stage: [05: Refinement](docs/roadmaps/mvp/05-refinement.md)
 
 ## Tasks
 
-- [ ] 01: A session asks with the server's own binary — [details](01-server-binary-in-sandbox.md)
+- [x] 01: A session asks with the server's own binary — [details](01-server-binary-in-sandbox.md)
 - [ ] 02: An unreadable Set costs its own row and nothing more — [details](02-unreadable-set.md)
 - [ ] 03: Deferred asks — [details](03-deferred-asks.md)
 - [ ] 04: Usage-limit pause — [details](04-usage-limit-pause.md)
