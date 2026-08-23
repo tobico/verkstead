@@ -198,7 +198,7 @@ impl SandboxConfig {
     /// missing gh config is a machine nobody has logged in on, and a missing
     /// configured bind is a typo that would otherwise take every session in that
     /// repository down with it, weeks later, with nobody watching. Not created
-    /// either — a directory outside the State Directory is not Verkstead's to
+    /// either — a directory outside the Data Directory is not Verkstead's to
     /// make.
     pub fn resolve(binds: &[String]) -> anyhow::Result<SandboxConfig> {
         let mut config = SandboxConfig::default();

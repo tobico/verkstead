@@ -372,7 +372,7 @@ pub(crate) async fn hand_over(state: &AppState, id: i64) {
 /// leaves nothing to take, which is a thing to note and not a failure — see
 /// [`crate::handoffs::Handoffs::take`].
 async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
-    let handoffs = Handoffs::under(&state.state_dir);
+    let handoffs = Handoffs::under(&state.data_dir);
 
     let written = tokio::task::spawn_blocking(move || handoffs.take(conversation_id)).await?;
 
@@ -504,7 +504,7 @@ pub(crate) async fn set_base_commit(
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
-/// the state directory, the sessions and whoever is watching them — and a
+/// the data directory, the sessions and whoever is watching them — and a
 /// parameter list of that length says less than the one name does.
 pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<GrillingStarted> {
     let pool = &state.pool;
@@ -548,7 +548,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
-    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
+    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
@@ -737,7 +737,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // was the server's invention for a row in the sidebar, and it is discarded
     // here: a stage is worked on the branch its roadmap will annotate it with.
     let branch = stage.branch();
-    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
+    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 
     let made = tokio::task::spawn_blocking({
         let path = path.clone();
@@ -849,7 +849,7 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
     // given back for the reason the worktree is: it is somewhere a Conversation
     // was given to work, and the Conversation has stopped. Whatever it held that
     // was worth keeping is on the Timeline already.
-    let handoffs = Handoffs::under(&state.state_dir);
+    let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
 
     Ok(match store::abort_conversation(pool, id).await? {

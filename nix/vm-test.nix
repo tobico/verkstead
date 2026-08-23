@@ -3,7 +3,7 @@
 # The round trip itself — a Set submitted, a Response posted back, the CLI
 # printing it and exiting 0 — is already covered in-process by the crate tests.
 # Doing it again here is only worth the VM for what wraps around it, which no
-# in-process test can see: a unit that starts itself at boot, a state directory
+# in-process test can see: a unit that starts itself at boot, a Data Directory
 # systemd creates and hands over, a database that outlives the process that made
 # it, a server binary running from the store rather than a working tree, and the
 # CLI on `PATH` with nothing set in the environment at all.
@@ -141,7 +141,7 @@ testers.runNixOSTest {
         # would be the test agreeing with itself about it.
         worktree=$(echo /var/lib/verkstead/worktrees/*)
         if [ ! -d "$worktree" ]; then
-            echo "no worktree under the state directory" >&2
+            echo "no worktree under the data directory" >&2
             exit 1
         fi
 
@@ -256,7 +256,7 @@ testers.runNixOSTest {
               text: Did the service come up on its own?
               options:
                 - n: 1
-                  text: It did, and its database is in the state directory.
+                  text: It did, and its database is in the data directory.
                   recommended: true
                 - n: 2
                   text: It did not.
@@ -468,7 +468,7 @@ testers.runNixOSTest {
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
 
-    with subtest("the database is in the state directory, owned by the service"):
+    with subtest("the database is in the data directory, owned by the service"):
         # The server opens the database before it binds, so the open port above
         # already says the file exists; what is asserted here is where it is and
         # whose it is.
@@ -476,7 +476,7 @@ testers.runNixOSTest {
         assert owner == "verkstead:verkstead", f"the database is owned by {owner}"
 
         directory = machine.succeed("stat -c %U:%G:%a /var/lib/verkstead").strip()
-        assert directory == "verkstead:verkstead:750", f"the state directory is {directory}"
+        assert directory == "verkstead:verkstead:750", f"the data directory is {directory}"
 
     with subtest("the server run from the store serves the viewer built into it"):
         # The viewer is inside the binary rather than beside it, so there is
@@ -672,7 +672,7 @@ testers.runNixOSTest {
 
         assert "recovered its wait" in printed, f"the CLI printed:\n{printed}"
 
-    with subtest("the running service makes a worktree in its state directory"):
+    with subtest("the running service makes a worktree in its data directory"):
         # Everything a grilling needs, done through the same endpoints the
         # workbench presses — so what makes the worktree is the service, from
         # inside its own hardening, and not the test reaching around it.

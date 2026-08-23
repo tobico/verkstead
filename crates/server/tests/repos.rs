@@ -26,9 +26,9 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
         .unwrap();
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
 
-    let state_dir = dir.path().to_owned();
+    let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, state_dir))
+    (dir, router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to

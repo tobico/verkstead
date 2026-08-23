@@ -133,7 +133,7 @@ to run. Nobody presses anything for either.
   through: a Set is on the Timeline of the work it came from, and it stays
   there, answered, afterwards. Nothing leaves a Timeline.
 - **The checkout is not what gets worked in.** Every Conversation has its own
-  Worktree under the State Directory, so two pieces of work in one Repo no
+  Worktree under the Data Directory, so two pieces of work in one Repo no
   longer take turns, and the checkout you have open in an editor is not what a
   session is editing.
 - **A run that stops is a thing on a page**, not a terminal you have to find.

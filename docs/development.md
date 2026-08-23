@@ -27,7 +27,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --watched-path ~/src
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 database=verkstead.db watched=["/home/you/src"]
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
 ```
 
 `--watched-path` is the one flag with no default. It names a directory
@@ -36,6 +36,11 @@ convenience: nothing outside the paths given is touched, and a repo is
 registered only from within one. Repeat the flag for more than one, or set
 `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. The server refuses to
 start with none.
+
+Everything Verkstead makes goes in one place, the **Data Directory**: the
+database at `verkstead.db`, the worktrees, the installed skills and the handoff
+directories. `--data-dir` says where, or `VERKSTEAD_DATA_DIR`; it defaults to
+the working directory, which is what a dev run out of a checkout wants.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
@@ -207,7 +212,7 @@ server, which then says so on every page instead of serving one.
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the
 NixOS module enabled to put a Question Set through it again, for the sake of
 everything the module wraps around that round trip: a unit that starts itself
-at boot, the state directory systemd hands over, a database that survives the
+at boot, the Data Directory systemd hands over, a database that survives the
 service being stopped and started under a waiting agent, a store-path binary
 serving the viewer that was built into it, and the CLI on `PATH` with nothing
 set in the environment. The VM needs a Linux host to boot the guest on, so on

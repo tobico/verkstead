@@ -3,7 +3,7 @@
 //! A session's behaviour should be the product's rather than whatever happens
 //! to be installed on the machine it runs on. So Verkstead carries its own
 //! skills, embedded in the binary as the viewer is (ADR-0004), writes them out
-//! under the State Directory at startup, and every sandbox binds that directory
+//! under the Data Directory at startup, and every sandbox binds that directory
 //! read-only over `~/.claude/skills`. Nothing beside the executable has to be
 //! there, and nothing of the host's is bound in for a session to find — the
 //! checkout of the skills the host keeps for its own agents is not reachable at
@@ -87,14 +87,14 @@ pub struct Skills {
 }
 
 impl Skills {
-    /// Write them out under `state_dir`, replacing whatever is already there.
+    /// Write them out under `data_dir`, replacing whatever is already there.
     ///
     /// Replaced rather than written over, so that what a session finds is what
     /// this binary ships and not the union of that with every binary that ran
     /// here before: a skill withdrawn from the product should stop being a skill
     /// sessions are run under.
     ///
-    /// Under the State Directory because that is the one place Verkstead is
+    /// Under the Data Directory because that is the one place Verkstead is
     /// given to write, and beside the worktrees for the same reason they are
     /// there: this is something Verkstead made rather than something the human
     /// pointed it at.
@@ -103,8 +103,8 @@ impl Skills {
     /// grilling skill is a session that has been told to read a file that is not
     /// there, and a server that starts anyway would be one whose every
     /// Conversation fails at the far end of the button.
-    pub fn installed(state_dir: &Path) -> Result<Skills> {
-        let path = state_dir.join("skills");
+    pub fn installed(data_dir: &Path) -> Result<Skills> {
+        let path = data_dir.join("skills");
 
         match std::fs::remove_dir_all(&path) {
             Ok(()) => {}
@@ -1530,7 +1530,7 @@ mod tests {
 
     /// Installing is what puts them where a sandbox can bind them.
     #[test]
-    fn the_skills_are_written_out_under_the_state_directory() {
+    fn the_skills_are_written_out_under_the_data_directory() {
         let state = tempfile::tempdir().unwrap();
 
         let skills = Skills::installed(state.path()).expect("this binary carries skills");

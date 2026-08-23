@@ -58,7 +58,7 @@ struct Grilling {
     pool: sqlx::SqlitePool,
 
     /// The bundled skills, installed where the server installs them: under the
-    /// State Directory, at startup.
+    /// Data Directory, at startup.
     skills: Skills,
 
     /// And where the handoff documents go, which is a root under the same

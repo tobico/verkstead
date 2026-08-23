@@ -15,8 +15,10 @@ self:
 let
   cfg = config.services.verkstead;
 
-  # systemd creates and owns this, and the database defaults inside it. Named
-  # once because the sandbox, the working directory and that default all say it.
+  # systemd creates and owns this, and it is what the server is given as its
+  # Data Directory: the database and everything else Verkstead makes live in it.
+  # Named once because the sandbox, the working directory and `--data-dir` all
+  # say it.
   stateDir = "/var/lib/verkstead";
 
   # The directory half of a `sandboxBinds` entry: a plain path is the whole of
@@ -79,23 +81,6 @@ in
 
         The CLI's own default is `http://127.0.0.1:8422`, so a host that changes
         the port here has to set `VERKSTEAD_SERVER` for the agents alongside it.
-      '';
-    };
-
-    database = lib.mkOption {
-      type = lib.types.path;
-      default = "${stateDir}/verkstead.db";
-      defaultText = lib.literalExpression ''"${stateDir}/verkstead.db"'';
-      description = ''
-        SQLite file, as `VERKSTEAD_DATABASE`. Created, with its parent directory,
-        on first run; it holds the Question Sets, the Archive, the push
-        subscriptions and the VAPID keypair, so it is the whole of the service's
-        state.
-
-        The default is the server's own filename inside the service's state
-        directory. Pointing it elsewhere means the sandbox has to be opened up
-        for that path, which this module does by directory — so the directory
-        has to exist, even though the file need not.
       '';
     };
 
@@ -252,8 +237,8 @@ in
             "serve"
             "--listen"
             cfg.listen
-            "--database"
-            "${cfg.database}"
+            "--data-dir"
+            stateDir
           ]
           # One flag per directory rather than the `:`-separated form the
           # environment variable takes: a path with a colon in it would split
@@ -400,11 +385,8 @@ in
         UMask = "0077";
 
         # `ProtectSystem = "strict"` leaves the state directory writable and
-        # nothing else, so a database put elsewhere needs its directory saying
-        # so. Under the state directory this would be redundant.
-        ReadWritePaths = lib.optional (!lib.hasPrefix "${stateDir}/" "${cfg.database}") (
-          builtins.dirOf "${cfg.database}"
-        );
+        # nothing else, which is the whole of what the server writes: the Data
+        # Directory is that directory, so there is nothing else to permit.
 
         # The Watched Paths, and nothing else of the filesystem they sit in.
         #

@@ -166,19 +166,36 @@ pub(crate) struct AppState {
     /// not a Watched Path and is not meant to be: the Watched Paths bound what
     /// the human may point Verkstead at, and this is the directory Verkstead was
     /// given for its own things.
-    state_dir: PathBuf,
+    data_dir: PathBuf,
 }
 
-/// How the server is pointed at its database and its socket. There is no
+/// The one name the database is ever kept under, inside the Data Directory.
+/// Fixed rather than configurable: the directory is what an operator points
+/// Verkstead at, and a file inside it is Verkstead's own business.
+const DATABASE_NAME: &str = "verkstead.db";
+
+/// How the server is pointed at its data directory and its socket. There is no
 /// app-level auth: the tailnet is the perimeter, so the defaults keep the
 /// server on the loopback interface until told otherwise.
 #[derive(Debug, Clone, clap::Parser)]
 #[command(name = "verkstead serve", version, about = "Verkstead server")]
 pub struct Config {
-    /// Path to the SQLite database. Created, with its parent directory, if
-    /// it does not exist.
-    #[arg(long, env = "VERKSTEAD_DATABASE", default_value = "verkstead.db")]
-    pub database: PathBuf,
+    /// Where Verkstead keeps everything it makes: the database, at
+    /// `verkstead.db` inside it, the Conversations' worktrees, the installed
+    /// Skills and the handoff directories. Created if it does not exist.
+    ///
+    /// This is the Data Directory. Not a Watched Path and not one to point at a
+    /// directory the human works in: the Watched Paths bound what Verkstead may
+    /// be pointed at, and this is Verkstead's own. It defaults to the working
+    /// directory, which is what running the server out of a checkout means
+    /// everywhere else here.
+    #[arg(
+        long,
+        env = "VERKSTEAD_DATA_DIR",
+        default_value = ".",
+        value_name = "DIR"
+    )]
+    pub data_dir: PathBuf,
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
@@ -201,17 +218,6 @@ pub struct Config {
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
-
-    /// Where Verkstead keeps what it makes: the Conversations' worktrees, and
-    /// whatever later stages need to put somewhere. Created if it does not
-    /// exist.
-    ///
-    /// Not a Watched Path and not one to point at a directory the human works
-    /// in: the Watched Paths bound what Verkstead may be pointed at, and this is
-    /// its own scratch space. It defaults beside the database, because that is
-    /// the one directory a packaged unit is already given to write.
-    #[arg(long, env = "VERKSTEAD_STATE_DIR", value_name = "DIR")]
-    pub state_dir: Option<PathBuf>,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
@@ -255,22 +261,11 @@ impl Config {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
 
-    /// Where Verkstead keeps what it makes, as configured or as it falls out of
-    /// where the database is.
-    ///
-    /// The database's own directory by default, which is what "beside the
-    /// database" means. A database named with no directory at all — the bare
-    /// default, `verkstead.db` — leaves the working directory, which is what
-    /// running the server out of a directory already means everywhere else here.
-    pub fn state_dir(&self) -> PathBuf {
-        if let Some(state_dir) = &self.state_dir {
-            return state_dir.clone();
-        }
-
-        match self.database.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_owned(),
-            _ => PathBuf::from("."),
-        }
+    /// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory
+    /// and is never anywhere else: one directory is what an operator says, and
+    /// everything in it is Verkstead's to name.
+    pub fn database(&self) -> PathBuf {
+        self.data_dir.join(DATABASE_NAME)
     }
 }
 
@@ -295,17 +290,17 @@ pub fn router(pool: SqlitePool) -> Router {
 }
 
 /// The same, permitted inside `watched` — the directories a Repo may be
-/// registered from — and keeping what it makes in `state_dir`.
+/// registered from — and keeping what it makes in `data_dir`.
 ///
 /// It runs no sessions: starting a grilling makes the branch and the worktree
 /// and records that it did, and there is nothing here to launch inside them.
 /// See [`router_running_sessions`] for the one that does.
-pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathBuf) -> Router {
+pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBuf) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
     )
@@ -321,7 +316,7 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathB
 pub fn router_running_sessions(
     pool: SqlitePool,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
 ) -> Router {
@@ -329,13 +324,13 @@ pub fn router_running_sessions(
         pool,
         updates::Updates::nothing_learned(),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::under(agents),
         gh,
     )
 }
 
-/// The state directory of a router that has no use for one.
+/// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
 /// watching nothing can register no Repo, so it has no Conversation to start and
@@ -367,7 +362,7 @@ fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
@@ -382,7 +377,7 @@ fn routed(
         updates,
         watched,
         github,
-        state_dir,
+        data_dir,
     };
 
     // Before anything is served, because both are about what was already
@@ -439,7 +434,7 @@ pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
 ) -> Router {
@@ -447,7 +442,7 @@ pub fn router_with_ui(
         pool,
         updates::watching(releases),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::under(agents),
         gh,
     )
@@ -483,22 +478,22 @@ pub async fn run(config: Config) -> Result<()> {
     // Made at startup for the reason the Watched Paths are resolved at startup:
     // a directory Verkstead cannot write to is a misconfiguration to report now
     // rather than one to discover as a failed grilling weeks later.
-    let state_dir = config.state_dir();
-    std::fs::create_dir_all(&state_dir)
-        .with_context(|| format!("creating state directory {}", state_dir.display()))?;
+    let data_dir = config.data_dir.clone();
+    std::fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
     // every sandbox gets, whatever an earlier one left there.
-    let skills = skills::Skills::installed(&state_dir)
+    let skills = skills::Skills::installed(&data_dir)
         .context("installing the skills every sandbox is given")?;
 
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first
     // session starts.
-    let handoffs = handoffs::Handoffs::under(&state_dir);
+    let handoffs = handoffs::Handoffs::under(&data_dir);
 
-    let pool = open_database(&config.database).await?;
+    let pool = open_database(&config.database()).await?;
 
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
@@ -506,8 +501,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     tracing::info!(
         listen = %config.listen,
-        database = %config.database.display(),
-        state_dir = %state_dir.display(),
+        data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         home = %home.path.display(),
@@ -522,7 +516,7 @@ pub async fn run(config: Config) -> Result<()> {
             pool,
             config.releases(),
             watched,
-            state_dir,
+            data_dir,
             Agents::new(
                 home,
                 sandbox::Reachable::at(config.listen),

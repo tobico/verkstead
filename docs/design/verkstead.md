@@ -59,7 +59,7 @@ flowchart LR
   defaults to the default branch's tip at grill start and is overridable per
   conversation. Each conversation owns one branch and one worktree; the branch
   name is prefilled randomly and customizable while the brief is drafted.
-  Worktrees live under Verkstead's own state directory and are kept until the
+  Worktrees live under Verkstead's own data directory and are kept until the
   conversation is aborted — *corrected 2026-08-20, building stage 02*: this said
   "archived", and there is no archive action on a conversation. Aborting is what
   the teardown hangs off, and it leaves the branch alone.
@@ -180,7 +180,7 @@ flowchart LR
   tobico-skills set (gates removed, wrap-up added) and installs it into each
   sandbox; `~/src/tobico-skills` is no longer bound in. *How, settled
   2026-08-20 building stage 02*: they ride inside the binary as the viewer
-  does, are written out under the state directory at startup — replacing
+  does, are written out under the data directory at startup — replacing
   whatever an earlier binary left — and every sandbox binds that directory
   read-only over `~/.claude/skills`, hiding any the account itself keeps. What
   puts a session *inside* a skill is the prompt: installing one is not invoking
