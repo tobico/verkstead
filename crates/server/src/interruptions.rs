@@ -26,6 +26,7 @@ use std::path::Path;
 
 use anyhow::Result;
 use verkstead_render::{Remedy, RemedySettled};
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::repos::git;
@@ -87,7 +88,9 @@ pub(crate) async fn raise(
 
             // The Timeline has something on it that is waiting on the human, and
             // an open page should say so without being reloaded.
-            state.nudges.announce();
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
         }
         None => tracing::info!(
             conversation_id,
@@ -325,7 +328,9 @@ async fn abort(state: &AppState, conversation_id: i64) -> Result<()> {
         ),
     }
 
-    state.nudges.announce();
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
 
     Ok(())
 }

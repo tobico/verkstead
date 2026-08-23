@@ -35,6 +35,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       ../web/index.html
       ../web/package.json
       ../web/pnpm-lock.yaml
+      ../web/eslint.config.js
       ../web/tsconfig.json
       ../web/vite.config.ts
       ../web/src
@@ -56,7 +57,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     pname = "verkstead-web";
     sourceRoot = "${finalAttrs.src.name}/web";
     fetcherVersion = 2;
-    hash = "sha256-TJKYBlQlqGDY7LV4SArA8rUeUMFKbS5WPAIftREvfIs=";
+    hash = "sha256-37ClFK7yQy4RmBsej8Xt8DppFmyRGg+l0aOdJ9YmLU0=";
   };
 
   sourceRoot = "${finalAttrs.src.name}/web";
@@ -68,6 +69,12 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     pnpm build
   ''
   + lib.optionalString runTests ''
+    # The wall around the query hook first: every query goes through
+    # `useReading`, which makes it name a reconcile key or declare its payload
+    # static (ADR-0009), and this is the check that says so of the queries not
+    # yet written.
+    pnpm lint
+
     # Typecheck as well as test: a component that only compiles because vite
     # erases the types would pass vitest and fail nobody, and the generated
     # `types.ts` is only worth generating if something checks the viewer against

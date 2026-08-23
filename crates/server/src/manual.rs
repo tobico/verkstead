@@ -31,6 +31,7 @@
 //! answer, or it is left where it is.
 
 use verkstead_render::ManualTaskStarted;
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::sessions::{Session, Turn};
@@ -104,7 +105,9 @@ pub(crate) async fn submit(
         return Ok(ManualTaskStarted::NoSuchConversation);
     }
 
-    state.nudges.announce();
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
 
     let prompt = skills::manual_task(instruction);
 

@@ -149,8 +149,8 @@ describe("coming back to the app", () => {
     reopened();
 
     await waitFor(() => screen.getByText(ARRIVAL.QuestionSet.title));
-    // The clock never moved, so the ten-second poll never ran: the second read
-    // is the one coming back asked for.
+    // The clock never moved, and nothing here runs on one: the second read is
+    // the one coming back asked for.
     expect(askedFor(fetching, OPENED)).toBe(2);
   });
 

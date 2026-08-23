@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use sqlx::SqlitePool;
 use tokio::sync::oneshot;
+use verkstead_schema::Nudge;
 
 use crate::nudge::Nudges;
 use crate::repos::git;
@@ -152,7 +153,9 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
     }
 
     if recorded_any {
-        nudges.announce();
+        nudges.announce(Nudge::Commit {
+            conversation: conversation_id,
+        });
     }
 }
 

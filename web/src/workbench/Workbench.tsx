@@ -19,7 +19,6 @@
 //! restore a scroll position into.
 
 import { useNavigate, useParams } from "@solidjs/router";
-import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
 
 import { loadConversation } from "../api/client";
@@ -31,6 +30,7 @@ import type {
   PullRequestEvent,
   QuestionSetEvent,
 } from "../api/types";
+import { useReading } from "../freshness";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
@@ -39,13 +39,6 @@ import { Evidence } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
-
-/// How often the open page reads its Conversation again, in milliseconds.
-///
-/// The Timeline has to keep up with a session that is writing into it and with
-/// a Question Set that arrives while nobody is touching the page — and while the
-/// page is asking, it also brings a Set answered on another device into view.
-const REFRESH = 10_000;
 
 /// Which level of the hierarchy a narrow window is showing.
 export type Pane = "conversations" | "timeline" | "details";
@@ -170,32 +163,29 @@ export function Workbench(): JSX.Element {
     ].find((open) => open !== undefined && which(open).id === id);
   };
 
-  const conversation = useQuery(() => ({
+  const conversation = useReading(() => ({
     queryKey: ["conversation", selected()],
     queryFn: () => loadConversation(selected()),
     enabled: selected() !== "",
-    // The fallback underneath both Nudge channels (ADR-0005), which this page
-    // inherited when the pending list retired: a Timeline is where a Question
-    // Set arrives now, and where a session's output grows while it runs. The
-    // stream is instant while the page is alive and the relayed push survives
-    // an iOS PWA being suspended; neither has to work, because this is here.
-    //
-    // The query keeps the last Conversation while the next one is in flight, so
-    // a refetch every ten seconds swaps Events rather than blinking the pane
-    // through a loading state the human is trying to read past.
-    refetchInterval: REFRESH,
+
+    // Nothing polls this. What a Timeline keeps up with is the Nudges about its
+    // own Conversation — a Question Set arriving, a session's output growing,
+    // a commit landing — and what stands behind a Nudge that never arrived is
+    // the catch-up in `nudge.ts`: coming back to the page reads it whole
+    // (ADR-0009).
 
     // Merge each read into the Conversation already drawn rather than replacing
     // it, so that an Event which did not change stays the same Event and the row
     // drawn for it is left alone.
     //
     // Solid Query turns the core's structural sharing off and offers this in its
-    // place, and off is not a setting this page can live with: every ten seconds
-    // it reads a Timeline that has mostly not moved, and without this each read
-    // is a new object for every Event on it, so `For` throws away every row and
-    // builds it again. What goes with the rows is everything they were holding —
-    // the Brief being typed into above all, which is a half-written document and
-    // the only copy of itself there is.
+    // place, and off is not a setting this page can live with: a talking session
+    // has this re-read a second at a time over a Timeline that has mostly not
+    // moved, and without this each read is a new object for every Event on it,
+    // so `For` throws away every row and builds it again. What goes with the
+    // rows is everything they were holding — the Brief being typed into above
+    // all, which is a half-written document and the only copy of itself there
+    // is.
     //
     // What actually matches the rows up is position, not the key named here. A
     // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
@@ -204,7 +194,7 @@ export function Workbench(): JSX.Element {
     // index. That is sound for this array: Events are only ever appended, so
     // the prefix is stable and every row keeps its identity. The Transcript's
     // turns carry their `id` flat for exactly this reason.
-    reconcile: "id",
+    freshness: { reconcile: "id" },
   }));
 
   return (

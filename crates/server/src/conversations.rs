@@ -24,7 +24,7 @@ use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, GrillingStarted,
     ProfileEntry, Started, Worktree,
 };
-use verkstead_schema::Direction;
+use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::handoffs::Handoffs;
@@ -782,8 +782,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     );
 
     // A Conversation moved and the sidebar's notice has one roadmap fewer in it,
-    // and an open page should say so without being reloaded.
-    state.nudges.announce();
+    // and an open page should say so without being reloaded. Two things moved
+    // and they are said as two: the notice is drawn off the Repos, which is not
+    // where this Conversation is drawn from.
+    state
+        .nudges
+        .announce(Nudge::Conversation { conversation: id });
+    state.nudges.announce(Nudge::Repos);
 
     tokio::spawn(crate::runner::plan_stage(state.clone(), id, None));
 

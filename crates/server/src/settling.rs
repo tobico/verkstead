@@ -22,6 +22,8 @@
 //! for ever because one of them forgot to ask would be the failure nobody
 //! notices. Asking costs one read of a table.
 
+use verkstead_schema::Nudge;
+
 use crate::AppState;
 use crate::store;
 
@@ -43,7 +45,9 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
 
                 // The Timeline has a move on it, and an open page should say so
                 // without being reloaded.
-                state.nudges.announce();
+                state.nudges.announce(Nudge::Conversation {
+                    conversation: conversation_id,
+                });
 
                 // And a settled wrap-up is what lets the next roadmap stage
                 // start, which is the whole of what makes a staged roadmap

@@ -34,6 +34,8 @@
 
 use std::path::PathBuf;
 
+use verkstead_schema::Nudge;
+
 use crate::AppState;
 use crate::github;
 use crate::store;
@@ -96,7 +98,9 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 
             // The Timeline has a move on it and something new pinned above it, and
             // an open page should say so without being reloaded.
-            state.nudges.announce();
+            state.nudges.announce(Nudge::Conversation {
+                conversation: conversation_id,
+            });
 
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is

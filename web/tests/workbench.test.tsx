@@ -12,9 +12,7 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -28,10 +26,8 @@ import type {
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
-  ProfileEntry,
   PullRequestDetails,
   RemedySettled,
-  RepoEntry,
   Screen,
   Shown,
   SetView,
@@ -42,23 +38,28 @@ import type {
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
-import { Workbench } from "../src/workbench/Workbench";
+import {
+  OPEN,
+  PROFILES,
+  REPOS,
+  SIDEBAR,
+  drawn,
+  mount,
+  theWorkbench,
+} from "./bench";
 import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
-import conversation from "./fixtures/conversation.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
-import conversations from "./fixtures/conversations.json" with { type: "json" };
-import profiles from "./fixtures/profiles.json" with { type: "json" };
-import repos from "./fixtures/repos.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
+import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
@@ -87,15 +88,11 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
-const SIDEBAR = conversations as ConversationEntry[];
-const OPEN = conversation as ConversationView;
-const REPOS = repos as RepoEntry[];
 const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The conversation that clicking one of those roadmaps made: a draft adopting
 /// `mvp`, on the page shaped for adopting.
 const ADOPTING = adopting as ConversationView;
-const PROFILES = profiles as ProfileEntry[];
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
@@ -122,9 +119,9 @@ afterEach(() => {
 const READING = `/api/ui/conversations/${OPEN.id}`;
 
 /// The page reading everything it is showing again, provoked the way coming back
-/// to the app provokes it — the cheapest of the three ways it happens, the other
-/// two being the ten-second poll and a Nudge. What is asked here is what a read
-/// does to the page, and all three do the same one.
+/// to the app provokes it — the cheapest of the two ways it happens, the other
+/// being a Nudge. What is asked here is what a read does to the page, and both
+/// do the same one.
 function readAgain(): void {
   for (const state of ["hidden", "visible"] as const) {
     Object.defineProperty(document, "visibilityState", {
@@ -135,71 +132,9 @@ function readAgain(): void {
   }
 }
 
-/// The workbench on its own routes, so the Conversation it reads is the one the
-/// URL names — and so that opening one is a navigation, which is what it is in
-/// the app.
-///
-/// The client comes back with the render: `invalidateQueries()` on it is
-/// exactly what a Nudge does to the page — see `lookAgain` in `src/nudge.ts` —
-/// so a test about one needs no fake `EventSource`.
-function mount(at = "/") {
-  // No retries: a test that asked for a refusal should see it at once, rather
-  // than after the three attempts a real page is right to make.
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-
-  const history = createMemoryHistory();
-  history.set({ value: at });
-
-  return {
-    ...render(() => (
-      <QueryClientProvider client={client}>
-        <MemoryRouter history={history}>
-          <Route path="/" component={Workbench} />
-          <Route path="/conversations/:id" component={Workbench} />
-        </MemoryRouter>
-      </QueryClientProvider>
-    )),
-    history,
-    client,
-  };
-}
-
-/// The lists every pane of the workbench is drawn over, in whatever order a page
-/// happens to ask for them.
-function theWorkbench(...answers: Parameters<typeof serving>) {
-  return serving(
-    whenever("/api/ui/conversations", json(SIDEBAR)),
-    whenever("/api/ui/repos", json(REPOS)),
-    whenever("/api/ui/profiles", json(PROFILES)),
-    whenever("/api/ui/abandoned-roadmaps", json([])),
-    whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
-    ...answers,
-  );
-}
-
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
   return container.querySelector(".workbench")!;
-}
-
-/// Wait for an element to be drawn, by selector.
-///
-/// Throwing rather than returning null when it is not there yet, because that is
-/// what `waitFor` retries on — a callback that hands back null has answered, and
-/// the wait ends on the first try with nothing.
-function drawn<T extends Element>(
-  container: ParentNode,
-  selector: string,
-): Promise<T> {
-  return waitFor(() => {
-    const found = container.querySelector<T>(selector);
-    if (!found) {
-      throw new Error(`nothing matching ${selector} has been drawn`);
-    }
-    return found;
-  });
 }
 
 /// Open the conversation's action menu, the way a click on its summary does.
@@ -965,10 +900,10 @@ describe("writing the brief", () => {
     expect(fetching).toHaveBeenCalled();
   });
 
-  /// The page reads its Conversation again every ten seconds, on every Nudge and
-  /// on every return to it, and a field being typed into has to live through all
-  /// of them: a Brief half written is the only copy of it there is, and one that
-  /// went every time the world was read again could never be finished.
+  /// The page reads its Conversation again on every Nudge about it and on every
+  /// return to the page, and a field being typed into has to live through both:
+  /// a Brief half written is the only copy of it there is, and one that went
+  /// every time the world was read again could never be finished.
   it("lives through the page reading the conversation again", async () => {
     // The read that lands while the field is open comes back with something
     // else about the Conversation changed — the branch renamed from another
@@ -1421,7 +1356,24 @@ function attached(): Promise<Attached> {
 /// A session that kept no record of its own conversation, which is what the
 /// server says for every stub agent and every backend that writes no log — and
 /// what sends the pane to the Capture.
-const SAID_NOTHING: TranscriptView = { turns: [], bookkeeping: [] };
+const SAID_NOTHING: TranscriptView = {
+  turns: [],
+  bookkeeping: [],
+  whole: true,
+  cursor: "0.0.0",
+};
+
+/// What the same session said after that, as the server hands it to a pane that
+/// already has the record above: the new turns alone, numbered on from where
+/// that reading stopped (ADR 0009).
+const MORE = more as TranscriptView;
+
+/// And where the pane asks for it — the cursor the whole reading ended at, which
+/// the fixture carries because the server wrote it there. Opaque to the page,
+/// and to this test: what a reader does with one is hand it back.
+const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
+  TRANSCRIPT.cursor,
+)}`;
 
 /// The workbench with the grilling conversation open instead of the drafting
 /// one.
@@ -1899,8 +1851,74 @@ describe("a session's output on the timeline", () => {
   /// nowhere else. The turns reconcile by `id` now, so a row that did not
   /// change is left alone, folds and all.
   it("keeps a fold open across a Nudge, while new turns arrive beneath it", async () => {
-    // The transcript again, one turn longer: a session still talking.
-    const GROWN: TranscriptView = {
+    // Running, so the Transcript is live and read again on every Nudge —
+    // which is exactly when a fold has to hold.
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(MORE)),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    const reasoning = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.reasoning details",
+    );
+    reasoning.open = true;
+
+    await client.invalidateQueries();
+
+    // What the session has said since has been drawn under the fold, added to
+    // what was already there rather than replacing it…
+    await waitFor(() =>
+      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+        TRANSCRIPT.turns.length + MORE.turns.length,
+      ),
+    );
+    // …and the fold is the same element it was, still open.
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane .turn.reasoning details",
+      ),
+    ).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+  });
+
+  /// The other half of an accumulated record. The backend's bookkeeping is
+  /// folded into one group at the end however it arrived, so a line of it that
+  /// came in a later batch joins the group rather than starting a second one.
+  it("gathers bookkeeping that arrived in pieces into the one group", async () => {
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(MORE)),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .bookkeeping");
+
+    await client.invalidateQueries();
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(".details-pane .bookkeeping li"),
+      ).toHaveLength(TRANSCRIPT.bookkeeping.length + MORE.bookkeeping.length),
+    );
+    expect(
+      container.querySelectorAll(".details-pane .bookkeeping"),
+    ).toHaveLength(1);
+  });
+
+  /// The server reads the record whole whenever it cannot carry on from the
+  /// cursor it was given, and says so. A page that added one of those to what it
+  /// already had would draw the beginning of the session twice.
+  it("replaces the record rather than doubling it when a whole one arrives", async () => {
+    // The record read whole again, a turn longer than it was — a cursor the
+    // server could not carry on from, which is every failure of an incremental
+    // read and always a correct answer to one.
+    const WHOLE_AGAIN: TranscriptView = {
       ...TRANSCRIPT,
       turns: [
         ...TRANSCRIPT.turns,
@@ -1912,38 +1930,25 @@ describe("a session's output on the timeline", () => {
       ],
     };
 
-    let grown = false;
-    // Running, so the Transcript is live and read again on every Nudge —
-    // which is exactly when a fold has to hold.
     theGrillingOutput(
       { running: true },
-      whenever(TRANSCRIPT_OF_IT, () => json(grown ? GROWN : TRANSCRIPT)()),
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(WHOLE_AGAIN)),
     );
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    const reasoning = await drawn<HTMLDetailsElement>(
-      container,
-      ".details-pane .turn.reasoning details",
-    );
-    reasoning.open = true;
+    await drawn(container, ".details-pane .turn");
 
-    grown = true;
     await client.invalidateQueries();
 
-    // The new turn has been drawn under the fold…
+    // What was read whole is the record, not something to add to it: the
+    // session's beginning is drawn once.
     await waitFor(() =>
       expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
-        GROWN.turns.length,
+        WHOLE_AGAIN.turns.length,
       ),
     );
-    // …and the fold is the same element it was, still open.
-    expect(
-      container.querySelector<HTMLDetailsElement>(
-        ".details-pane .turn.reasoning details",
-      ),
-    ).toBe(reasoning);
-    expect(reasoning.open).toBe(true);
   });
 
   /// A session already over when the pane opened is over for good, so its
@@ -3527,8 +3532,9 @@ describe("the pinned pull request", () => {
     expect(error.textContent).toContain("is not logged in");
   });
 
-  /// Nothing is fetched until somebody opens it: reading this is an API call,
-  /// and the conversation is read again every ten seconds.
+  /// Nothing is fetched until somebody opens it: reading this is an API call
+  /// GitHub answers, and the conversation around it is read again on every
+  /// Nudge about it.
   it("asks GitHub nothing until it is opened", async () => {
     const fetching = theWrapping();
     mount(`/conversations/${WRAPPING.id}`);

@@ -24,7 +24,7 @@
 //! bottom of it rather than a page of their own to find.
 
 import { A } from "@solidjs/router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
@@ -35,6 +35,8 @@ import {
   startConversation,
 } from "../api/client";
 import type { ConversationEntry, Started } from "../api/types";
+import { useReading } from "../freshness";
+import { Picker } from "../picking";
 
 export function Conversations(props: {
   selected: string;
@@ -42,17 +44,27 @@ export function Conversations(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
-  const conversations = useQuery(() => ({
+  const conversations = useReading(() => ({
     queryKey: ["conversations"],
     queryFn: listConversations,
+
+    // Merged by the id each row carries flat, because this list is re-read
+    // constantly — a session talking moves the *working* badge on one row of
+    // it — and a rebuilt row is a row whose spinner starts its animation again.
+    freshness: { reconcile: "id" },
   }));
 
   // The Repos are the sidebar's business only because starting a Conversation
   // needs one picked. Read here rather than passed down, so the picker is whole
   // wherever it is drawn.
-  const repos = useQuery(() => ({
+  const repos = useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,
+
+    // Merged, and for the picker below rather than for the list: a rebuilt
+    // `<option>` is a new element in a `<select>` the human may have open, and
+    // the choice they were part-way through goes with the old one.
+    freshness: { reconcile: "id" },
   }));
 
   // Which Repo the next Conversation is against. Empty until the list has
@@ -108,15 +120,21 @@ export function Conversations(props: {
             >
               <label for="against">New conversation in</label>
               <div class="start-conversation-line">
-                <select
+                {/* A [`Picker`] rather than a `<select>`, so what this shows and
+                    what the press below sends are the same repository even when
+                    the list moved under it — see `src/picking.tsx`. */}
+                <Picker
                   id="against"
-                  value={chosen()}
-                  onChange={(ev) => setAgainst(ev.currentTarget.value)}
-                >
-                  <For each={registered()}>
-                    {(repo) => <option value={repo.id}>{repo.name}</option>}
-                  </For>
-                </select>
+                  options={registered()}
+                  value={(repo) => String(repo.id)}
+                  label={(repo) => repo.name}
+                  chosen={chosen()}
+                  pick={setAgainst}
+                  // The Repo that was picked is gone from the list: the choice
+                  // goes with it, and `chosen` falls back to the first row that
+                  // is left — which is the state this box opened in.
+                  gone={() => setAgainst("")}
+                />
                 <button type="submit" disabled={start.isPending}>
                   Start
                 </button>
@@ -198,9 +216,15 @@ export function Conversations(props: {
 function Abandoned(props: { open: (id: number) => void }): JSX.Element {
   const queries = useQueryClient();
 
-  const abandoned = useQuery(() => ({
+  const abandoned = useReading(() => ({
     queryKey: ["abandoned-roadmaps"],
     queryFn: listAbandonedRoadmaps,
+
+    // Keyed by `repo_id` and not `id`: this list is Repos rather than records
+    // of its own, so what identifies a row is which Repo it is about. The
+    // roadmaps nested under each one carry no key at all and are matched by
+    // position, which is what the server sorts them into.
+    freshness: { reconcile: "repo_id" },
   }));
 
   const adopt = useMutation(() => ({

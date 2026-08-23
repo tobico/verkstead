@@ -163,12 +163,23 @@ export function loadCapture(id: number, event: number): Promise<Capture> {
 /// this is what it was saying, parsed and rendered by the server out of the
 /// lines its own backend wrote. A session that left no such record comes back
 /// with nothing in it, which is what sends the pane to the Capture.
+///
+/// `after` is the cursor a previous reading ended at, and asks for only what the
+/// session has said since — which is what an open pane wants on every one of the
+/// Nudges a running session sends it, rather than the hour of talking it already
+/// has. The cursor is the server's own and means nothing here: what a reader does
+/// with one is hand it back. Reading without one reads the record whole, and so
+/// does the server whenever it cannot carry on from the one it was given — which
+/// is why what comes back says which of the two it is.
 export function loadTranscript(
   id: number,
   event: number,
+  after?: string,
 ): Promise<TranscriptView> {
+  const from = after === undefined ? "" : `?after=${encodeURIComponent(after)}`;
+
   return get<TranscriptView>(
-    `/api/ui/conversations/${id}/transcript/${event}`,
+    `/api/ui/conversations/${id}/transcript/${event}${from}`,
   );
 }
 
@@ -220,8 +231,10 @@ export function loadCommitDiff(
 ///
 /// Fetched by the pane that shows it for a stronger version of the diff's
 /// reason: the server reads this by asking GitHub through the host's `gh`, so a
-/// conversation that carried it would make an API call every ten seconds. A
-/// server that cannot ask refuses with the reason, which is what the pane shows.
+/// conversation that carried it would make an API call every time the page heard
+/// anything at all had moved. Fetched here, it is read on a commit landing and
+/// on nothing else (ADR-0009). A server that cannot ask refuses with the reason,
+/// which is what the pane shows.
 export function loadPullRequest(
   id: number,
   event: number,

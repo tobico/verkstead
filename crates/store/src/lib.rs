@@ -63,7 +63,7 @@ pub use push::{
 };
 pub use repos::{Repo, register_repo, registered_repos};
 pub use session_names::session_id;
-pub use transcripts::{append_transcript, transcript};
+pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
@@ -107,6 +107,21 @@ pub struct SetArchived {
     pub archived_at: String,
 }
 
+/// A Set that has just been settled: which Set, and the Conversation it was
+/// asked from.
+///
+/// The Conversation rides along because the other listener is the viewer's Nudge
+/// stream, which has to say where the change happened (ADR-0009) and would
+/// otherwise ask the store the question the store had just answered for itself.
+/// It is optional for the one case that should never happen — a Set with no
+/// Timeline Event behind it — rather than because a Set can be asked from
+/// nowhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettledSet {
+    pub set_id: i64,
+    pub conversation_id: Option<i64>,
+}
+
 /// Word that a Set has just been settled — answered, or archived unanswered —
 /// so a wait held on it can end without going back to the store to look.
 ///
@@ -115,7 +130,7 @@ pub struct SetArchived {
 /// in different crates, and they have to meet at the same channel or a browser
 /// would leave a waiting agent hanging until its hold window closed.
 #[derive(Debug, Clone)]
-pub struct Settlements(broadcast::Sender<i64>);
+pub struct Settlements(broadcast::Sender<SettledSet>);
 
 impl Settlements {
     /// A channel that will hold `backlog` announcements for a listener that
@@ -128,15 +143,15 @@ impl Settlements {
     /// Hear about Sets settled from now on. Subscribe before reading the store,
     /// so a Response landing between the two wakes the wait instead of slipping
     /// past it.
-    pub fn subscribe(&self) -> broadcast::Receiver<i64> {
+    pub fn subscribe(&self) -> broadcast::Receiver<SettledSet> {
         self.0.subscribe()
     }
 
     /// Tell whoever is listening that this Set is settled. A send error means
     /// nobody is, which is the ordinary case — the agent may well be between
     /// polls.
-    fn announce(&self, set_id: i64) {
-        let _ = self.0.send(set_id);
+    fn announce(&self, settled: SettledSet) {
+        let _ = self.0.send(settled);
     }
 }
 
@@ -309,7 +324,7 @@ pub async fn submit_response(
         None => None,
     };
 
-    settlements.announce(set_id);
+    settlements.announce(settled_set(pool, set_id).await?);
 
     Ok(Submission::Accepted(Taken {
         accepted,
@@ -426,9 +441,23 @@ pub async fn archive_set(
         });
     };
 
-    settlements.announce(set_id);
+    settlements.announce(settled_set(pool, set_id).await?);
 
     Ok(Archiving::Archived(archived))
+}
+
+/// What to announce about a Set that has just settled: the Set, and where it was
+/// asked from.
+///
+/// The Conversation is looked up rather than carried down from the caller
+/// because both settling paths are reached with a Set id and nothing else — the
+/// browser's archiving has only the id in its route, and the agent's Response
+/// only the id it was told to answer.
+async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
+    Ok(SettledSet {
+        set_id,
+        conversation_id: asked_from(pool, set_id).await?,
+    })
 }
 
 /// Open the SQLite database at `path`, creating the file if it is absent and

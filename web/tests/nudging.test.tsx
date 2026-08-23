@@ -1,34 +1,47 @@
-//! The Nudge: the open page being told the pending world moved, and looking
-//! again because of it — over the server's stream, and relayed by the service
-//! worker off a push (ADR-0005).
+//! The Nudge: the open page being told what moved, and looking again because of
+//! it — over the server's stream, and relayed by the service worker off a push
+//! (ADR-0009).
+//!
+//! What a page does about a Nudge is what its kind stands for, which is one
+//! table in `src/nudge.ts` — so most of what is below is about which reads a
+//! kind causes and, at least as much, which it does not.
 //!
 //! Driven through `App` for the same reason `resuming` is — what the Nudge acts
 //! on is the app's own query client, and a test that built a client of its own
 //! would be asserting its own arrangement rather than the app's.
 //!
-//! The clock is held still throughout, except where the poll is the thing being
-//! asked about: anything a page learns here it learned from a Nudge, because the
-//! fallback underneath never ran.
+//! The clock is held still throughout, and there is no longer anything for it to
+//! run: the ten-second poll is gone (ADR-0009), so every read a page makes here
+//! is one something told it to make.
 
-import { render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 import type {
+  AgentOutputEvent,
   ConversationEntry,
   ConversationView,
+  Nudge,
   ProfileEntry,
+  PullRequestDetails,
   QuestionSetEvent,
   RepoEntry,
   SetView,
   TimelineEvent,
+  TranscriptView,
 } from "../src/api/types";
+import { drawn } from "./bench";
 import { askedFor, json, serving, whenever } from "./serving";
 import { worker } from "./worker";
+import kinds from "./fixtures/nudges.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
+import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
+import said from "./fixtures/transcript.json" with { type: "json" };
+import saidSince from "./fixtures/transcript-more.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -41,19 +54,31 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 /// them.
 const CONVERSATION = grilling as ConversationView;
 
-/// The read a Nudge is meant to cause, and the only one worth counting.
+/// The Conversation the workbench reads, which is what most of this file
+/// counts.
 const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 
-/// What the app fetches alongside the Conversation it is about — the sidebar,
-/// the Repos the picker on it needs, the Agent Profiles the details pane picks
-/// from, the roadmaps nothing is driving, and the release check. Held to their own paths and out of the counting:
-/// a Nudge is never about a release, and which test pays for the rest is not
-/// something any of them is about.
+/// The four lists the workbench draws its panes over: the sidebar, the Repos the
+/// picker on it needs, the roadmaps nothing is driving beside them, and the
+/// Agent Profiles the details pane picks from.
+///
+/// Named because they are counted. Which of them a Nudge moves is the whole
+/// question of what a kind stands for, and the reason the tests below can tell
+/// a narrow reaction from the widest one.
+const SIDEBAR = "/api/ui/conversations";
+const REPOS = "/api/ui/repos";
+const ROADMAPS = "/api/ui/abandoned-roadmaps";
+const PROFILES = "/api/ui/profiles";
+
+/// What the app fetches alongside the Conversation it is about, held to their
+/// own paths so no test has to say what order a page asks in. The release check
+/// is among them and out of every count: a Nudge is never about a release, and
+/// nothing on the workbench asks for one.
 const BESIDE = [
-  whenever("/api/ui/conversations", json(conversations as ConversationEntry[])),
-  whenever("/api/ui/repos", json(repos as RepoEntry[])),
-  whenever("/api/ui/profiles", json(profiles as ProfileEntry[])),
-  whenever("/api/ui/abandoned-roadmaps", json([])),
+  whenever(SIDEBAR, json(conversations as ConversationEntry[])),
+  whenever(REPOS, json(repos as RepoEntry[])),
+  whenever(PROFILES, json(profiles as ProfileEntry[])),
+  whenever(ROADMAPS, json([])),
   whenever("/api/ui/update", json("Current")),
 ];
 
@@ -99,6 +124,18 @@ const MOVED_ON: ConversationView = {
   timeline: [...CONVERSATION.timeline, { QuestionSet: ARRIVAL } as TimelineEvent],
 };
 
+/// Every kind of Nudge the server writes, off the fixture the server's own
+/// tests leave behind — so what these drive the stream with is what really goes
+/// down it rather than a guess at it.
+const KINDS = kinds as Nudge[];
+
+/// What a Nudge says by default here: a Question Set moved in a Conversation,
+/// which is what nearly every test in this file makes happen.
+const SET_ARRIVED: Nudge = {
+  kind: "set",
+  conversation: CONVERSATION.id,
+};
+
 /// A stand-in for the browser's `EventSource`, which jsdom has none of — and
 /// which a test would want its own of anyway, having no other way to put a
 /// Nudge on the wire or to sever the connection carrying it.
@@ -128,10 +165,15 @@ class Streaming {
     this.fire("open");
   }
 
-  /// One Nudge, as the server writes it: a named event carrying nothing worth
-  /// reading.
-  nudges(): void {
-    this.fire("nudge");
+  /// One Nudge, as the server writes it: a named event whose data says what
+  /// moved. `said` is passed through untouched, so a test may put something
+  /// down the wire that no page could read.
+  nudges(said: unknown = SET_ARRIVED): void {
+    const data = typeof said === "string" ? said : JSON.stringify(said);
+
+    for (const listener of this.listeners.get("nudge") ?? []) {
+      listener(new MessageEvent("nudge", { data }));
+    }
   }
 
   private fire(name: string): void {
@@ -213,6 +255,20 @@ async function pushed(container: Container): Promise<void> {
   }
 }
 
+/// The document going away and coming back, which is what an iOS PWA being
+/// suspended and reopened looks like from inside the page.
+///
+/// `visibilityState` is read-only here as it is in a browser, so it is redefined
+/// for as long as the test needs it — and taken away again after, like the
+/// worker container above.
+function away(state: "visible" | "hidden"): void {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value: state,
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   Streaming.opened = [];
@@ -222,6 +278,8 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  // Back to the state jsdom's own document reports.
+  delete (document as { visibilityState?: unknown }).visibilityState;
   // The property is this test's own, over a navigator every other test shares.
   delete (navigator as { serviceWorker?: unknown }).serviceWorker;
 });
@@ -240,7 +298,7 @@ describe("the Nudge stream", () => {
     expect(stream().closed).toBe(true);
   });
 
-  it("shows the Set a Nudge is about without waiting on the poll", async () => {
+  it("shows the Set a Nudge is about, the moment it is told", async () => {
     window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
     const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
     render(() => <App />);
@@ -250,8 +308,8 @@ describe("the Nudge stream", () => {
     stream().nudges();
 
     await waitFor(() => screen.getByText(ARRIVAL.title));
-    // The clock never moved, so the ten-second poll never ran: the second read
-    // is the Nudge's doing and nothing else's.
+    // The clock never moved and nothing here runs on one: the second read is
+    // the Nudge's doing and nothing else's.
     expect(askedFor(fetching, OPENED)).toBe(2);
   });
 
@@ -284,18 +342,354 @@ describe("the Nudge stream", () => {
     expect(askedFor(fetching, OPENED)).toBe(1);
   });
 
-  it("leaves the poll running underneath it", async () => {
+  it.each([
+    ["a kind this page has never heard of", { kind: "weather", conversation: 1 }],
+    ["a Nudge that is not JSON at all", "nudge"],
+    ["a Nudge with nothing in it", ""],
+  ])("reads everything back for %s", async (_what, wire) => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    const lists = [SIDEBAR, REPOS, ROADMAPS, PROFILES].map((path) =>
+      askedFor(fetching, path),
+    );
+    stream().opens();
+
+    stream().nudges(wire);
+
+    // A page against a server newer than itself, which is every page between a
+    // deploy and a reload: what it cannot read it treats as everything having
+    // moved, which is what it used to do about everything.
+    await waitFor(() => screen.getByText(ARRIVAL.title));
+    expect(askedFor(fetching, OPENED)).toBe(2);
+    [SIDEBAR, REPOS, ROADMAPS, PROFILES].forEach((path, at) => {
+      expect(askedFor(fetching, path), `${path} was not read again`).toBe(
+        lists[at]! + 1,
+      );
+    });
+  });
+
+  it("asks for nothing on a timer", async () => {
     window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
     const fetching = serving(...BESIDE, json(CONVERSATION));
     render(() => <App />);
     await waitFor(() => screen.getByText(ALREADY_THERE));
     stream().opens();
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
 
-    // The stream is the fast path, never the only one: a page that cannot have
-    // one at all still keeps up, ten seconds at a time.
-    expect(askedFor(fetching, OPENED)).toBe(2);
+    // The poll this page used to keep up on is gone (ADR-0009). Ten minutes of
+    // it: what stands behind a Nudge that never arrived is the catch-up on
+    // coming back, not a clock.
+    expect(askedFor(fetching, OPENED)).toBe(1);
+  });
+});
+
+/// The session's output on the Conversation the fixtures open.
+const OUTPUT: AgentOutputEvent = (() => {
+  const found = CONVERSATION.timeline.find((event) => "AgentOutput" in event);
+  if (!found || !("AgentOutput" in found)) {
+    throw new Error("the fixture's Timeline should carry a session's output");
+  }
+  return found.AgentOutput;
+})();
+
+/// The same Conversation with that session still talking — which is the moment
+/// this whole file is about, and one no fixture holds: a fixture is a payload
+/// rather than a moment.
+const TALKING: ConversationView = {
+  ...CONVERSATION,
+  timeline: CONVERSATION.timeline.map((event) =>
+    "AgentOutput" in event
+      ? { AgentOutput: { ...event.AgentOutput, running: true } }
+      : event,
+  ),
+};
+
+/// Where the open pane reads what that session has been saying.
+const TRANSCRIPT_OF_IT = `/api/ui/conversations/${CONVERSATION.id}/transcript/${OUTPUT.id}`;
+
+/// The record itself, and what the session said after it.
+const SAID = said as TranscriptView;
+const SAID_SINCE = saidSince as TranscriptView;
+
+/// And where the pane asks for the second of those: the cursor the first
+/// reading ended at, handed back as the server wrote it.
+const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
+  SAID.cursor,
+)}`;
+
+/// The workbench with that session's output open, its Transcript to hand — and
+/// the rest of it for the reading the next Nudge sets off.
+function theTalking() {
+  return serving(
+    ...BESIDE,
+    whenever(OPENED, json(TALKING)),
+    whenever(TRANSCRIPT_OF_IT, json(SAID)),
+    whenever(REST_OF_IT, json(SAID_SINCE)),
+  );
+}
+
+/// The Conversation that has a pull request, and what is on it.
+const WRAPPED = wrapping as ConversationView;
+const WRAPPED_UP = `/api/ui/conversations/${WRAPPED.id}`;
+
+const PULL_REQUEST = (() => {
+  const found = WRAPPED.pinned.find((event) => "PullRequest" in event);
+  if (!found || !("PullRequest" in found)) {
+    throw new Error("the fixture should carry a pull request");
+  }
+  return found.PullRequest;
+})();
+
+/// Where the open pane asks GitHub, through the server, what is on it.
+const WHAT_IS_ON_IT = `/api/ui/conversations/${WRAPPED.id}/pull-request/${PULL_REQUEST.id}`;
+
+const CARRIED: PullRequestDetails = {
+  commits: [{ sha: "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8", subject: "chore: finish" }],
+  comments: [],
+};
+
+/// The workbench with that pull request to hand.
+function theWrapping() {
+  return serving(
+    ...BESIDE,
+    whenever(WRAPPED_UP, json(WRAPPED)),
+    whenever(WHAT_IS_ON_IT, json(CARRIED)),
+  );
+}
+
+/// The five reads every kind is judged against below.
+const COUNTED = [OPENED, SIDEBAR, REPOS, ROADMAPS, PROFILES];
+
+/// How many times each of them has been made.
+function reads(fetching: ReturnType<typeof serving>): Record<string, number> {
+  return Object.fromEntries(
+    COUNTED.map((path) => [path, askedFor(fetching, path)]),
+  );
+}
+
+/// Which of them each kind of Nudge is about: the viewer's side of the
+/// vocabulary, written out where a reader can see the whole of it at once.
+///
+/// A kind the server writes and this leaves out fails the sweep below rather
+/// than quietly reading everything, which is what an unrecognised kind does at
+/// runtime and is not something to discover from a fixture.
+const ABOUT: Record<string, readonly string[]> = {
+  // The kind that arrives twice a second while a session talks: it moves the
+  // Transcript alone, and the Transcript is not among the five.
+  transcript: [],
+  screen: [OPENED],
+  commit: [OPENED],
+  set: [OPENED, SIDEBAR],
+  liveness: [OPENED],
+  conversation: [OPENED, SIDEBAR],
+  conversations: [SIDEBAR],
+  repos: [REPOS, ROADMAPS],
+  profiles: [PROFILES],
+};
+
+describe("what a Nudge is about", () => {
+  it.each(KINDS.map((moved) => [moved.kind, moved] as const))(
+    "reads back what a Nudge of kind %s names, and nothing else",
+    async (kind, moved) => {
+      const about = ABOUT[kind];
+      expect(
+        about,
+        `the server writes a Nudge of kind ${kind} and this page has no reaction for it`,
+      ).toBeDefined();
+
+      // Pointed at the Conversation this page has open. The fixture scopes its
+      // Nudges to a Conversation of its own, which is what the sweep after this
+      // one is about.
+      const here =
+        "conversation" in moved
+          ? { ...moved, conversation: CONVERSATION.id }
+          : moved;
+
+      window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+      const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+      render(() => <App />);
+      await waitFor(() => screen.getByText(ALREADY_THERE));
+      stream().opens();
+      const before = reads(fetching);
+
+      stream().nudges(here);
+      await vi.advanceTimersByTimeAsync(0);
+
+      await waitFor(() => {
+        for (const path of COUNTED) {
+          expect(askedFor(fetching, path), path).toBe(
+            before[path]! + (about!.includes(path) ? 1 : 0),
+          );
+        }
+      });
+    },
+  );
+
+  it.each(
+    KINDS.filter((moved) => "conversation" in moved).map(
+      (moved) => [moved.kind, moved] as const,
+    ),
+  )("leaves another Conversation alone on a Nudge of kind %s", async (_kind, moved) => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = askedFor(fetching, OPENED);
+
+    // The fixture's own scope, which is a Conversation nobody here is looking
+    // at: a page open on one Conversation hears about every other one, and a
+    // scoped kind is what keeps that from costing it a read.
+    stream().nudges(moved);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(askedFor(fetching, OPENED)).toBe(before);
+  });
+
+  it("reads a talking session's Transcript back, and nothing beside it", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = theTalking();
+    const { container } = render(() => <App />);
+    // Opened once the row says the session is still going, which is what the
+    // pane reads to decide whether the record can still move: a Transcript
+    // opened over a session that had already stopped is read once and never
+    // again, whatever any Nudge says.
+    await drawn(container, ".agent-output .live");
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .turn");
+    stream().opens();
+    const before = { ...reads(fetching), [REST_OF_IT]: askedFor(fetching, REST_OF_IT) };
+
+    stream().nudges({ kind: "transcript", conversation: CONVERSATION.id });
+
+    // The one read a batch of lines is worth, and it asks for the batch rather
+    // than for the hour before it. This is the Nudge that arrives twice a
+    // second while a session talks, and what it used to cost was the whole
+    // record plus every one of the five below — the Repos and the Profiles
+    // among them, which nothing a session says can move.
+    await waitFor(() =>
+      expect(askedFor(fetching, REST_OF_IT)).toBe(before[REST_OF_IT]! + 1),
+    );
+    for (const path of COUNTED) {
+      expect(askedFor(fetching, path), path).toBe(before[path]);
+    }
+  });
+
+  it("asks GitHub nothing while a session talks", async () => {
+    window.history.pushState({}, "", `/conversations/${WRAPPED.id}`);
+    const fetching = theWrapping();
+    const { container } = render(() => <App />);
+    const pinned = await drawn(container, ".pinned .pull-request");
+    fireEvent.click(pinned.querySelector(".open-pull-request")!);
+    await drawn(container, ".details-pane .pr-commits");
+    stream().opens();
+    const before = askedFor(fetching, WHAT_IS_ON_IT);
+
+    for (const kind of ["transcript", "screen", "set", "conversation"]) {
+      stream().nudges({ kind, conversation: WRAPPED.id });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+
+    // This is the read the server answers by asking GitHub through the host's
+    // `gh`, and it used to be made on every Nudge of any kind — which, while a
+    // session talked, was an API call about twice a second.
+    expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(before);
+  });
+
+  it("asks GitHub again when a commit lands on its Conversation", async () => {
+    window.history.pushState({}, "", `/conversations/${WRAPPED.id}`);
+    const fetching = theWrapping();
+    const { container } = render(() => <App />);
+    const pinned = await drawn(container, ".pinned .pull-request");
+    fireEvent.click(pinned.querySelector(".open-pull-request")!);
+    await drawn(container, ".details-pane .pr-commits");
+    stream().opens();
+    const before = askedFor(fetching, WHAT_IS_ON_IT);
+
+    stream().nudges({ kind: "commit", conversation: WRAPPED.id });
+
+    // A commit landing is what puts a commit on a pull request, so this is the
+    // one thing that moves what the pane is showing.
+    await waitFor(() =>
+      expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(before + 1),
+    );
+  });
+
+  it("moves the badge on a waiting Set when its agent goes", async () => {
+    const DISCONNECTED: SetView = {
+      ...WAITING,
+      standing: { Waiting: "disconnected" },
+    };
+
+    window.history.pushState({}, "", `/sets/${WAITING.id}`);
+    const fetching = serving(...BESIDE, json(WAITING), json(DISCONNECTED));
+    const { container } = render(() => <App />);
+    await drawn(container, ".liveness.waiting");
+    stream().opens();
+
+    // Scoped to a Conversation, and the Set is keyed by its own id: what a page
+    // showing one Set does about a Set moving somewhere is read the Set it is
+    // showing, which is one read at most.
+    stream().nudges({ kind: "liveness", conversation: WAITING.conversation });
+
+    // The verdict used to cycle with the ten-second poll. The poll is gone, so
+    // the agent letting go of its wait is a Nudge of its own (ADR-0009).
+    await drawn(container, ".liveness.disconnected");
+    expect(askedFor(fetching, `/api/ui/sets/${WAITING.id}`)).toBe(2);
+  });
+});
+
+describe("coming back to a page that was away", () => {
+  it("reads everything back when the document becomes visible again", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    // Moved on while the page was away, with no Nudge to say so: a suspended
+    // PWA hears nothing at all, which is the whole reason this is here.
+    serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+
+    away("visible");
+
+    await waitFor(() => screen.getByText(ARRIVAL.title));
+  });
+
+  it("asks for nothing when the document goes away", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = reads(fetching);
+
+    away("hidden");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The same event fires both ways round. A page on its way out has nothing
+    // to catch up on.
+    for (const path of COUNTED) {
+      expect(askedFor(fetching, path), path).toBe(before[path]);
+    }
+  });
+
+  it("stops watching for it when the app goes", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    const { unmount } = render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    const before = reads(fetching);
+
+    unmount();
+    away("visible");
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Nothing is left holding a query client that has no page to refresh.
+    for (const path of COUNTED) {
+      expect(askedFor(fetching, path), path).toBe(before[path]);
+    }
   });
 });
 
@@ -317,8 +711,8 @@ describe("a Nudge relayed by the worker", () => {
     await waitFor(() => screen.getByText(ARRIVAL.title));
     // One read more than the page had already done, and not one beyond it: the
     // stream never opened — which is what a suspended PWA leaves behind — and
-    // the clock never moved, so the poll never ran either. The push is the whole
-    // of how this page found out.
+    // the page never came back into view either. The push is the whole of how
+    // this page found out.
     expect(askedFor(fetching, OPENED)).toBe(read + 1);
   });
 
@@ -333,10 +727,9 @@ describe("a Nudge relayed by the worker", () => {
 
     await pushed(container);
 
-    // A relayed Nudge is as contentless as a streamed one — it says a Set
-    // arrived, not which — so the reaction is the same either way: everything
-    // this page is showing, which here is a Set answered elsewhere in the
-    // meantime.
+    // A relayed Nudge says nothing at all where a streamed one says a kind, and
+    // gets the reaction a kind nobody recognises gets: everything this page is
+    // showing, which here is a Set answered elsewhere in the meantime.
     await waitFor(() => expect(page.querySelector(".answered-at")).toBeTruthy());
   });
 

@@ -6,19 +6,19 @@
 //! the id comes out of the URL, and there is a list to go back to.
 
 import { A, useParams } from "@solidjs/router";
-import { useQuery } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { Match, Switch } from "solid-js";
 
 import { RefusedError, loadSet } from "../api/client";
 import type { SetView } from "../api/types";
+import { useReading } from "../freshness";
 import { Sheet } from "./Sheet";
 
 /// One Question Set, as the URL names it.
 export function SetPage(): JSX.Element {
   const params = useParams<{ id: string }>();
 
-  const set = useQuery(() => ({
+  const set = useReading(() => ({
     queryKey: ["set", params.id],
     queryFn: () => loadSet(params.id),
 
@@ -30,7 +30,7 @@ export function SetPage(): JSX.Element {
     // unguarded effect over the query's data, and reassigning it would close
     // every per-file fold. Merged, an unchanged string is left alone and the
     // folds stand.
-    reconcile: "id",
+    freshness: { reconcile: "id" },
   }));
 
   return (

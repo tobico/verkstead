@@ -1,0 +1,18 @@
+{
+  "bookkeeping": [
+    {
+      "id": 2,
+      "kind": "attachment",
+      "line": "{\n  \"attachment\": {\n    \"content\": \"one thing still to do\",\n    \"type\": \"todos\"\n  },\n  \"type\": \"attachment\"\n}"
+    }
+  ],
+  "cursor": "9.7.2",
+  "turns": [
+    {
+      "html": "<p>Forty attempts is a <em>loop</em>, not a policy.</p>\n",
+      "id": 7,
+      "kind": "Prose"
+    }
+  ],
+  "whole": false
+}

@@ -20,7 +20,7 @@
 //! a session may be run under is settled once and then left alone, which is the
 //! same kind of thing as everything else on it.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { createProfile, deleteProfile, editProfile, listProfiles } from "../api/client";
@@ -31,6 +31,7 @@ import type {
   ProfileEntry,
   ProfileSaved,
 } from "../api/types";
+import { useReading } from "../freshness";
 
 /// What each way of being refused a save says, once, wherever it is met.
 ///
@@ -85,9 +86,15 @@ export function ProfileList(): JSX.Element {
 
   // Read once when the page opens, like the Repos under it: nothing here
   // changes on its own, and what does change is this section's own doing.
-  const profiles = useQuery(() => ({
+  const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
+
+    // Merged by the id each row carries flat. The server asks the filesystem
+    // about every pair on every read, so a profile whose directory has been
+    // moved changes underneath a page nobody has touched — and the form below
+    // is open over the row it is rewriting while that happens.
+    freshness: { reconcile: "id" },
   }));
 
   // Which profile the form is about: `null` for a new one, an id for the one

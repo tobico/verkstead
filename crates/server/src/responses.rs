@@ -15,9 +15,10 @@ use serde::Deserialize;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::{Instant, timeout};
-use verkstead_schema::{ApiError, Response};
-use verkstead_store::{Settlement, Submission};
+use verkstead_schema::{ApiError, Nudge, Response};
+use verkstead_store::{Settlement, Submission, WaitHeld};
 
+use crate::nudge::Nudges;
 use crate::reply::yaml;
 use crate::{AppState, MAX_HOLD, store};
 
@@ -132,7 +133,7 @@ pub(crate) async fn wait_for_response(
     // vanishes mid-hold has its future dropped rather than returned, and the
     // guard is what both endings have in common. Display only — nothing below
     // consults it, and no Set is withdrawn for want of one.
-    let _held = state.waits.hold(id);
+    let _held = Watched::over(&state, conversation_id, id);
 
     let deadline = Instant::now() + hold;
 
@@ -163,12 +164,64 @@ pub(crate) async fn wait_for_response(
     }
 }
 
+/// A wait held on a Set, with the open pages told at both ends of it.
+///
+/// The badge a waiting Set carries is read off the registry underneath, and the
+/// two moments it can move are an agent taking a slot and the last slot going —
+/// so those are the two moments a page is told to look. Nothing durable has
+/// happened at either, which is why this is a kind of its own: it used to be
+/// carried by the viewer's ten-second poll, and the poll is gone (ADR-0009).
+///
+/// The far end is a `Drop`, for the same reason the slot's release is one: a
+/// client that vanishes mid-hold has this future dropped rather than returned,
+/// and dropping is the one thing every ending has in common.
+///
+/// A badge that reads *waiting* for a grace period after the last release is
+/// still the registry's business, so the Nudge sent as this goes is one the
+/// verdict may not have moved on yet — a page reads back a badge that has not
+/// changed, which costs one small request. What it buys is the reconnect a
+/// second later being seen at once.
+struct Watched {
+    /// The slot itself, released as this is dropped.
+    _held: WaitHeld,
+
+    /// Kept rather than reached for through the state, because `Drop` runs
+    /// wherever the future was dropped and has nothing else to hand.
+    nudges: Nudges,
+    conversation_id: i64,
+}
+
+impl Watched {
+    /// Take a slot on `set_id` and say so.
+    fn over(state: &AppState, conversation_id: i64, set_id: i64) -> Self {
+        let watched = Self {
+            _held: state.waits.hold(set_id),
+            nudges: state.nudges.clone(),
+            conversation_id,
+        };
+        watched.announce();
+        watched
+    }
+
+    fn announce(&self) {
+        self.nudges.announce(Nudge::Liveness {
+            conversation: self.conversation_id,
+        });
+    }
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        self.announce();
+    }
+}
+
 /// Wait until this Set is settled, one way or the other. `false` when the
 /// channel is gone, which only happens as the server itself does.
-async fn settled(settlements: &mut broadcast::Receiver<i64>, id: i64) -> bool {
+async fn settled(settlements: &mut broadcast::Receiver<store::SettledSet>, id: i64) -> bool {
     loop {
         match settlements.recv().await {
-            Ok(settled) if settled == id => return true,
+            Ok(settled) if settled.set_id == id => return true,
             Ok(_) => continue,
             // Overtaken by a burst of settlements: ours may have been among
             // them, so go back and look at the store.

@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use verkstead_schema::Nudge;
 
 use crate::nudge::Nudges;
 use crate::store;
@@ -40,6 +41,11 @@ use crate::store;
 /// appended to while a session runs, and each poll takes what has arrived since
 /// the last one.
 pub(crate) struct Tail {
+    /// Whose session it is. Kept because what a Nudge about the Transcript has
+    /// to say is where it moved (ADR-0009), and the log itself says nothing
+    /// about that.
+    conversation: i64,
+
     /// Where the Agent Profile keeps its logs, one directory per project.
     projects: PathBuf,
 
@@ -82,9 +88,11 @@ pub(crate) struct Tail {
 }
 
 impl Tail {
-    /// Follow the log of the session named `session`, run under `profile`.
-    pub(crate) fn of(profile: &store::Profile, session: &str) -> Tail {
+    /// Follow the log of the session named `session`, run under `profile` for
+    /// `conversation`.
+    pub(crate) fn of(conversation: i64, profile: &store::Profile, session: &str) -> Tail {
         Tail {
+            conversation,
             projects: profile.claude_dir.join("projects"),
             session: session.to_owned(),
             log: None,
@@ -191,9 +199,9 @@ impl Tail {
     /// Put the finished lines on the Transcript, and tell whoever is watching
     /// that they are there.
     ///
-    /// One contentless Nudge for the batch, because that is all there is to say:
-    /// an open pane's answer to being nudged is to read everything again (ADR
-    /// 0005), so nothing finer would change what it does.
+    /// One Nudge for the batch, because that is all there is to say: it names
+    /// the Transcript and the Conversation it moved in, and a second one would
+    /// name the same two things again.
     ///
     /// Whether the batch carried something the agent said, which is what tells
     /// the caller the summary has moved. A batch of tool calls has not.
@@ -216,7 +224,9 @@ impl Tail {
                 }
 
                 self.pending.clear();
-                nudges.announce();
+                nudges.announce(Nudge::Transcript {
+                    conversation: self.conversation,
+                });
 
                 moved
             }

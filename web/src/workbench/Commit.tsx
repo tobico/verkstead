@@ -15,13 +15,13 @@
 //! The diff arrives headerless on purpose: the renderer splits on `diff --git`,
 //! so a commit header above the first file would be dropped rather than shown.
 
-import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { Switch as Toggle } from "../Switch";
 import { loadCommitDiff } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
+import { useReading } from "../freshness";
 import { ABBREVIATED } from "./Timeline";
 
 export function Commit(props: {
@@ -30,7 +30,7 @@ export function Commit(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const diff = useQuery(() => ({
+  const diff = useReading(() => ({
     // The event is in the key, so opening another commit is another query
     // rather than the same one showing the wrong diff for a moment.
     queryKey: ["commit", props.conversation.id, props.commit.id],
@@ -42,7 +42,7 @@ export function Commit(props: {
     // would reassign the `innerHTML` below whether or not a byte changed —
     // that assignment compiles to an unguarded effect over the query's data —
     // and close every per-file fold the reader had opened with it.
-    staleTime: "static",
+    freshness: "static",
   }));
 
   // How this device wants diffs drawn — the same setting a question set's

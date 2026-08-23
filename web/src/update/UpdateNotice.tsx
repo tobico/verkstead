@@ -12,11 +12,11 @@
 //! been said. A page that cannot reach the endpoint is the Repo list exactly
 //! as it was.
 
-import { useQuery } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
 import { updateNotice } from "../api/client";
+import { useReading } from "../freshness";
 
 /// Where the human is told how to update: the README's own section, which is
 /// the one place the instructions are kept current.
@@ -24,22 +24,29 @@ const UPDATING = "https://github.com/tobico/verkstead#updating";
 
 /// How often the open page asks whether a release has appeared, in milliseconds.
 ///
-/// Hourly, where a Conversation asks every ten seconds: a Question Set can
-/// arrive at any moment and a release cannot. The server polls GitHub once a day
-/// and holds the verdict, so asking oftener would only be reading the same memory
-/// again.
+/// Hourly, and on an interval where everything else on the page is read on
+/// being told to: a release is the one thing here nothing announces, and it is
+/// also the one thing nobody is waiting on. The server polls GitHub once a day
+/// and holds the verdict, so asking oftener would only be reading the same
+/// memory again.
 const REFRESH = 60 * 60 * 1000;
 
 /// The banner, when there is a release to name.
 export function UpdateNotice(): JSX.Element {
-  const notice = useQuery(() => ({
+  const notice = useReading(() => ({
     queryKey: ["update"],
     queryFn: updateNotice,
     refetchInterval: REFRESH,
     // Coming back to the Repo list from somewhere else is not new information
     // about what has been released, so a fresh mount reads what the last one
-    // learned.
+    // learned. Which is a staleness and not the freshness below: a Nudge
+    // invalidates this either way, and an hour is what a *mount* is worth.
     staleTime: REFRESH,
+
+    // Merged, and keyed by the version because that is the whole of what the
+    // payload says: a server that has learned nothing new answers with the
+    // same version, and the banner is then left exactly as it stands.
+    freshness: { reconcile: "version" },
   }));
 
   // The version waiting, and `null` for every other answer there is — including

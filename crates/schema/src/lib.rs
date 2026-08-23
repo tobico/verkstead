@@ -9,12 +9,14 @@
 
 mod api;
 mod liveness;
+mod nudge;
 mod response;
 mod set;
 mod validate;
 
 pub use api::{ApiError, ResponseAccepted, SetCreated};
 pub use liveness::Liveness;
+pub use nudge::Nudge;
 pub use response::{Answer, Response};
 pub use set::{
     Direction, Finding, Proposal, Question, QuestionOption, QuestionSet, Review, Subquestion,

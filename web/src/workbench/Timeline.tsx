@@ -29,7 +29,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
@@ -58,6 +58,8 @@ import type {
   StageListEvent,
   TaskListEvent,
 } from "../api/types";
+import { useReading } from "../freshness";
+import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 
@@ -323,9 +325,14 @@ function ManualTaskComposer(props: {
 
   /// The profile list, read here rather than passed down, the way the details
   /// pane's pickers read it: the control is whole wherever it is drawn.
-  const profiles = useQuery(() => ({
+  const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
+
+    // And the same merge, for the same picker — see the details pane. This one
+    // sits under a half-typed instruction while a session is talking above it,
+    // which is the loudest a Nudge ever gets.
+    freshness: { reconcile: "id" },
   }));
 
   /// Which profile is selected: whatever the human picked, and the
@@ -400,28 +407,23 @@ function ManualTaskComposer(props: {
             }
           >
             {(saved) => (
-              <select
+              /* A [`Picker`] rather than a `<select>`, the way the details
+                 pane's pickers are: what this shows and what the press below
+                 runs the task as are the same profile, list or no list — see
+                 `src/picking.tsx`. */
+              <Picker
                 id="manual-task-profile"
-                value={running() === null ? "" : String(running())}
+                options={saved()}
+                value={(profile) => String(profile.id)}
+                label={(profile) => `${profile.name} — ${profile.model}`}
+                chosen={running() === null ? "" : String(running())}
+                pick={(chosen) => setPicked(Number(chosen))}
+                // The one-off pick is gone from the list: it is dropped, and
+                // `running` falls back to the conversation's own implementation
+                // profile — which is where the composer opened.
+                gone={() => setPicked(null)}
                 disabled={submit.isPending}
-                onChange={(ev) => {
-                  const chosen = Number(ev.currentTarget.value);
-                  if (chosen) {
-                    setPicked(chosen);
-                  }
-                }}
-              >
-                <Show when={running() === null}>
-                  <option value="">Not chosen</option>
-                </Show>
-                <For each={saved()}>
-                  {(profile) => (
-                    <option value={profile.id}>
-                      {profile.name} — {profile.model}
-                    </option>
-                  )}
-                </For>
-              </select>
+              />
             )}
           </Show>
         </div>

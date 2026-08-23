@@ -21,8 +21,8 @@
 //! this pane being what the third one says when no Event is open.
 
 import { A } from "@solidjs/router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
   chooseGrillingProfile,
@@ -38,6 +38,8 @@ import type {
   ProfileChosen,
   ProfileEntry,
 } from "../api/types";
+import { useReading } from "../freshness";
+import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 
 /// What each way of being refused a branch name says.
@@ -141,9 +143,14 @@ function Worktree(props: { conversation: ConversationView }): JSX.Element {
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos.
 function Profiles(props: { conversation: ConversationView }): JSX.Element {
-  const profiles = useQuery(() => ({
+  const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
+
+    // Merged by the id each row carries flat, for the pickers below: a rebuilt
+    // `<option>` is a new element in a `<select>` the human may have open, and
+    // a list re-read while they were choosing would take the choice with it.
+    freshness: { reconcile: "id" },
   }));
 
   return (
@@ -265,31 +272,25 @@ function ProfilePicker(props: {
   return (
     <div class="profile-choice">
       <label for={`${props.role}-profile`}>{props.label}</label>
-      <select
+      {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
+          profile while the mutation below would choose another — see
+          `src/picking.tsx`.
+
+          The empty value is the state of having chosen nothing, and it is not
+          an option to go back to: a conversation with no profile is one that
+          will not grill, so the placeholder disappears once one is picked. It
+          comes back if the profile that was picked is deleted, which is the
+          honest reading of it — and nothing is said upwards about that, the
+          choice being the server's record rather than this pane's to clear. */}
+      <Picker
         id={`${props.role}-profile`}
-        // The empty value is the state of having chosen nothing, and it is not
-        // an option to go back to: a conversation with no profile is one that
-        // will not grill, so the placeholder disappears once one is picked.
-        value={props.chosen ? String(props.chosen.id) : ""}
+        options={props.saved}
+        value={(profile) => String(profile.id)}
+        label={(profile) => `${profile.name} — ${profile.model}`}
+        chosen={props.chosen ? String(props.chosen.id) : ""}
+        pick={(picked) => choose.mutate(Number(picked))}
         disabled={choose.isPending}
-        onChange={(ev) => {
-          const picked = Number(ev.currentTarget.value);
-          if (picked) {
-            choose.mutate(picked);
-          }
-        }}
-      >
-        <Show when={!props.chosen}>
-          <option value="">Not chosen</option>
-        </Show>
-        <For each={props.saved}>
-          {(profile) => (
-            <option value={profile.id}>
-              {profile.name} — {profile.model}
-            </option>
-          )}
-        </For>
-      </select>
+      />
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
       <Show when={props.chosen?.broken}>

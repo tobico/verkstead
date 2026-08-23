@@ -16,11 +16,12 @@
 //! repositories Verkstead may touch is settled once and then left alone, which
 //! is the same kind of thing as everything else on it.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal } from "solid-js";
 
 import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
+import { useReading } from "../freshness";
 
 /// What each way of being refused says, once, wherever it is met.
 ///
@@ -46,9 +47,15 @@ export function RepoList() {
 
   // Read once when the page opens, like the Profiles above it: nothing here
   // changes on its own, and what does change is this section's own doing.
-  const repos = useQuery(() => ({
+  const repos = useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,
+
+    // Merged by the id each row carries flat, and not frozen: registering one
+    // reads the list again, and a frozen query is one invalidation cannot
+    // reach — the new repo would never appear underneath the form that added
+    // it.
+    freshness: { reconcile: "id" },
   }));
 
   const [path, setPath] = createSignal("");

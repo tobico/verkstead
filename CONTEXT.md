@@ -507,13 +507,16 @@ automatic withdrawal.
 _Avoid_: connection status, presence
 
 **Nudge**:
-The contentless signal telling an open viewer page that the pending world
-changed — a Set arrived, was answered, or was archived — so the page should
-look again. It says nothing about what changed; the page refetches everything
-it is showing. A query whose rendering holds reader state must therefore
-reconcile its re-reads, or be `static` where its payload cannot change
-(ADR-0005).
-_Avoid_: tick, refresh signal, ping, change event
+The data-free signal telling an open viewer page where the world moved — what
+kind of thing changed, and which Conversation it belongs to where one does —
+so the page re-reads only what it shows of that. It points and never carries:
+what changed rides no Nudge, and the page fetches it the ordinary way. A Nudge
+of a kind the page does not know, a reconnected stream, and a page returning
+to visibility each fall back to re-reading everything — which is also the
+whole meaning of the push-relayed Nudge. A query whose rendering holds reader
+state must still reconcile its re-reads, or be `static` where its payload
+cannot change (ADR-0005).
+_Avoid_: tick, refresh signal, ping, change event, notification
 
 **Update Notice**:
 The banner the viewer shows when the server has learned that a newer release

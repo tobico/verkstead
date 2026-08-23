@@ -46,7 +46,7 @@
 //! that decided the repaint. A reader who wants everything the session printed
 //! wants the Transcript beside this, or the Capture underneath it.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -69,6 +69,7 @@ import type {
   Shown,
   Watching,
 } from "../api/types";
+import { useReading } from "../freshness";
 
 export function Screen(props: {
   conversation: ConversationView;
@@ -85,7 +86,7 @@ export function Screen(props: {
   /// has to be able to see and hand back.
   const held = () => props.conversation.held === props.output.id;
 
-  const screen = useQuery(() => ({
+  const screen = useReading(() => ({
     // The Event is in the key for the reason it is in the Transcript's: opening
     // another session's Screen is another query rather than this one showing
     // the wrong session's grid for a moment.
@@ -95,6 +96,13 @@ export function Screen(props: {
     // store last had it would be a request for something a repaint is about to
     // replace.
     enabled: !live(),
+
+    // Which is why this one is frozen rather than merged: it is only ever
+    // fetched for a session that has stopped, and a stopped session's Screen is
+    // the grid it last stood on and nothing after it. A session running when
+    // the pane opened is watched over the socket until it ends, and the one
+    // read that follows is the read of a record that cannot move again.
+    freshness: "static",
   }));
 
   const queries = useQueryClient();

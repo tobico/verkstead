@@ -24,10 +24,11 @@
 //! email address leaves the credentials alone. Clearing is its own press for the
 //! same reason — an empty write-only field means nothing was typed.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { loadSettings, saveSettings } from "../api/client";
+import { useReading } from "../freshness";
 import type {
   SettingsEdit,
   SettingsSaved,
@@ -44,9 +45,16 @@ export function Credentials(): JSX.Element {
   // Read once when the page opens, like the Repos and the Profiles under it:
   // the files are read afresh on every request, and what changes them is this
   // form.
-  const settings = useQuery(() => ({
+  const settings = useReading(() => ({
     queryKey: ["settings"],
     queryFn: loadSettings,
+
+    // Merged rather than frozen, because this is not a payload that cannot
+    // change: another device may write the same two files, and a frozen query
+    // is one the catch-up read on reconnect could never reach. There is no list
+    // in it for the key to match by — what the merge does here is leave the
+    // fields that did not change alone, and the form above them with them.
+    freshness: { reconcile: "id" },
   }));
 
   // What has been typed, or `null` while nothing has — the fields follow the

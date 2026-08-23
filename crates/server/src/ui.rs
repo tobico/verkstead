@@ -21,7 +21,7 @@
 //! differently.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
@@ -29,13 +29,13 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit,
-    TokenSaved, Unsubscribe, UpdateNotice, Verified,
+    ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed,
+    Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
 };
-use verkstead_schema::{ApiError, Response};
+use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::settings::{Config, GitAuthor, Secrets};
 use crate::{AppState, store};
@@ -811,12 +811,34 @@ async fn capture(
     }
 }
 
+/// Where a reading of a Transcript is carrying on from, where it is carrying on
+/// from anywhere.
+#[derive(Debug, serde::Deserialize)]
+struct Resuming {
+    /// The cursor the reader's last reading ended at. Absent on the first one,
+    /// which is what makes a whole read the default rather than something to
+    /// ask for.
+    after: Option<String>,
+}
+
 /// `GET /api/ui/conversations/{id}/transcript/{event}` — what one session
-/// said, as a conversation.
+/// said, as a conversation. With `?after=<cursor>`, only what it has said since
+/// that reading stopped.
 ///
 /// Its own request rather than a field on the Conversation, for the Capture's
 /// reason and to the same size: this is an hour of talking, and the Timeline is
 /// re-read every time an open page hears the world moved.
+///
+/// And incremental for the same reason one step further on. An open pane
+/// re-reads a running session's record on every batch of lines, which is twice
+/// a second while it talks — so a reading says where it stopped and the next one
+/// begins there, and what crosses the wire is the new turns rather than the hour
+/// before them (ADR 0009).
+///
+/// Every way of failing to carry on ends in the whole record: a cursor that was
+/// never written here, one naming a place this Transcript has not reached, and
+/// a reader that names none at all. The whole record is always a correct answer
+/// to any of them, and a gap in what somebody is reading never is.
 ///
 /// The lines were stored verbatim and are read here, on the way out, which is
 /// what keeps the coupling to somebody else's file format to the one crate that
@@ -826,12 +848,29 @@ async fn capture(
 async fn transcript(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
+    Query(resuming): Query<Resuming>,
 ) -> HttpResponse {
     // Read as permissively as every other pair of ids here: neither of them
     // naming a number cannot name a Transcript.
     let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
         return no_such_transcript();
     };
+
+    if let Some(from) = resuming.after.and_then(|at| at.parse::<Cursor>().ok()) {
+        match store::transcript_after(&state.pool, id, event, i64::from(from.lines)).await {
+            Ok(Some(lines)) => {
+                return Json(verkstead_render::transcript_after(from, &lines)).into_response();
+            }
+            // The cursor names a place this record has not been, or there is no
+            // such Transcript at all. Which of the two is settled by reading it
+            // whole, below.
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading the rest of a Transcript failed");
+                return unavailable("the Transcript could not be read");
+            }
+        }
+    }
 
     match store::transcript(&state.pool, id, event).await {
         Ok(Some(lines)) => Json(verkstead_render::transcript_view(&lines)).into_response(),
@@ -1236,7 +1275,9 @@ async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> Htt
     );
 
     // The badge goes with it, and it is drawn off the Conversation.
-    state.nudges.announce();
+    state
+        .nudges
+        .announce(Nudge::Conversation { conversation: id });
 
     Json(HandedBack::HandedBack).into_response()
 }

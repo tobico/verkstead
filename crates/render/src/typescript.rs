@@ -175,4 +175,9 @@ fn the_viewers_types_are_written_from_these() {
     // How every one of them refuses. The same shape the agents' half refuses in,
     // so the viewer has one thing to read whichever half answered.
     verkstead_schema::ApiError::export_all(&config).unwrap();
+
+    // And the one thing the viewer is told rather than asked for over HTTP: what
+    // moved, which is what decides which of the reads above is worth making
+    // again. It hands over nothing itself — see `Nudge`.
+    verkstead_schema::Nudge::export_all(&config).unwrap();
 }

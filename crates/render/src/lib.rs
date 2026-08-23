@@ -55,8 +55,8 @@ pub use settings::{
     Author, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified,
 };
 pub use transcript::{
-    Bookkeeping, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    statements, transcript_view,
+    Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
+    statements, transcript_after, transcript_view,
 };
 pub use update::UpdateNotice;
 pub use view::{Answered, AskView, DiffView, OptionView, QuestionView, SetView, Standing};
