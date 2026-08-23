@@ -1259,6 +1259,23 @@ describe("the panes on a narrow window", () => {
         "  z-index: 1;\n",
     );
   });
+
+  /// And the record goes under it rather than being cut off against it: a rem of
+  /// paper fading to nothing, hung in the gap the header already kept below
+  /// itself so that at rest it covers no part of the first thing in the pane.
+  it("fades the record out under whatever is stuck", () => {
+    expect(stylesheet).toContain(
+      ".pane > .pane-head::after,\n.pane > .pane-chrome::after {\n" +
+        '  content: "";\n' +
+        "  position: absolute;\n" +
+        "  top: 100%;\n" +
+        "  right: 0;\n" +
+        "  left: 0;\n" +
+        "  height: 1rem;\n" +
+        "  background: linear-gradient(var(--paper), transparent);\n" +
+        "  pointer-events: none;\n}",
+    );
+  });
 });
 
 /// The other shape the middle pane draws: a conversation that has been started,

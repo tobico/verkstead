@@ -833,6 +833,29 @@ main:has(.workbench) {
   padding-top: 0;
 }
 
+/* The record thins out into what is stuck rather than being cut off against it.
+   The gradient hangs in the gap that was already below the chrome — the rem the
+   header keeps under itself — which is why it costs nothing at rest: paper drawn
+   over paper, with nothing of the first event covered until the record is
+   actually passing beneath. So there is no scroll listener and no `scrolled`
+   flag, and nothing that would have to be answered twice over for the two ways a
+   pane scrolls.
+
+   Deaf to the pointer, because for most of a pane's life this is a rem of the
+   record it is lying over, and a fade that swallowed the presses meant for what
+   shows through it would be worse than the abrupt edge it replaced. */
+.pane > .pane-head::after,
+.pane > .pane-chrome::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 1rem;
+  background: linear-gradient(var(--paper), transparent);
+  pointer-events: none;
+}
+
 /* Inside the wrapper the header takes the layer over the pinned block below it,
    which is what lets the ⋯ menu come down over the pinned items rather than
    behind them, where it could not be pressed. The layer belongs to the header
