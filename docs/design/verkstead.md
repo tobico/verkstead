@@ -145,9 +145,10 @@ flowchart LR
   building workbench-refit*): the field is always there, it grows with what is
   in it, and it keeps itself on a pause in the typing and on the way out of
   the field.
-- **Interruptions** (crash, hang) become timeline events with retry /
-  take-over-manually / abort actions in the GUI — roadrunner's remedies,
-  GUI-native.
+- **Interruptions** (crash, hang) become timeline events offering retry /
+  take-over-manually / abort — roadrunner's remedies, GUI-native. The event is
+  a plain openable card and the three are answered in the details pane, like a
+  question set (*settled 2026-08-24, building workbench-refit*).
 - **Usage limits.** When a claude account exhausts its window mid-run, the
   conversation pauses and push-notifies; it resumes on the human's say-so or
   when the window resets.
@@ -262,9 +263,17 @@ Timeline events:
 | Task list | inline, pinned | — |
 | Stage list | inline, pinned | — |
 | PR | name + id, pinned | fetched commit list and comments |
-| Interruption | inline with remedy actions | session tail / evidence |
+| Interruption | what stopped, badge or chosen remedy | evidence, then the remedies as a sheet |
 | Notice | inline, nothing to do about it | — |
 
+- **An interruption is answered like a question set** (*settled 2026-08-24,
+  building workbench-refit*): its card is a plain button carrying what stopped
+  and either the *blocked on you* badge or the remedy chosen, and pressing
+  anywhere on it opens the pane. The pane reads as an answer sheet — the
+  evidence above, the three remedies as option rows under it, one note field and
+  one submit — so nothing acts on a stray tap, which matters most for aborting
+  and is anyway how answering already works. A settled one reads back the same
+  way: the evidence, the remedy taken, and what was written alongside it.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin. More than one
   pinned card is a carousel rather than a stack (*settled 2026-08-24, building

@@ -424,7 +424,6 @@ export function Timeline(props: {
                 <Match when={"Interruption" in event && event.Interruption}>
                   {(stopped) => (
                     <Interruption
-                      conversation={props.conversation}
                       stopped={stopped()}
                       selected={props.selected === stopped().id}
                       open={() => {

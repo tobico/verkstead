@@ -29,6 +29,7 @@ import type {
   ManualTaskStarted,
   ProfileEntry,
   PullRequestDetails,
+  Remedy,
   RemedySettled,
   Screen,
   Shown,
@@ -3930,6 +3931,30 @@ function theStopped(
 /// Where the human answers a run that stopped.
 const REMEDY_PATH = `/api/ui/conversations/${STOPPED.id}/interruption/${HALTED.id}`;
 
+/// A conversation whose run has stopped, settled the way the human settled it.
+function theSettled(settled: {
+  remedy: Remedy;
+  note: string;
+  at: string;
+}) {
+  return theStopped({
+    blocked_on: null,
+    timeline: STOPPED.timeline.map((entry) =>
+      "Interruption" in entry
+        ? { Interruption: { ...entry.Interruption, settled } }
+        : entry,
+    ),
+  });
+}
+
+/// Open the interruption's pane by pressing its card, which is the whole of
+/// what the card does.
+async function theSheet(container: HTMLElement) {
+  const stopped = await drawn(container, ".timeline .interruption");
+  fireEvent.click(stopped);
+  return await drawn(container, ".details-pane .interruption-summary");
+}
+
 describe("an interruption on the timeline", () => {
   it("says which step failed and how it ended", async () => {
     theStopped();
@@ -3941,120 +3966,52 @@ describe("an interruption on the timeline", () => {
     expect(stopped.querySelector(".how")!.textContent).toBe(HALTED.how);
   });
 
-  /// The three remedies are on the event itself. Roadrunner asked this over
-  /// askance because nobody was at its terminal; here the timeline is where the
-  /// human looks, so the question is put where they are already looking.
-  it("offers all three remedies on the event", async () => {
+  /// A plain openable card, like a question set's: the remedies used to be on
+  /// the event itself, and a run is not ended by a tap that landed on a
+  /// timeline.
+  it("opens the details pane from anywhere on the card, and holds nothing to press", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const stopped = await drawn(container, ".timeline .interruption");
+    expect(stopped.querySelector(".remedy")).toBeNull();
+    expect(stopped.querySelector(".open-event")).toBeNull();
+
+    fireEvent.click(stopped);
+
+    await drawn(container, ".details-pane .remedy-pick");
+    expect(frame(container).dataset.pane).toBe("details");
+  });
+
+  /// The badge stays on the card while nothing has been decided: this is the
+  /// other thing on a timeline that is waiting on the human.
+  it("says it is blocked on you while it is unsettled", async () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const stopped = await drawn(container, ".timeline .interruption");
 
-    expect(
-      [...stopped.querySelectorAll(".remedy")].map((it) => it.textContent),
-    ).toEqual(["Retry", "Take over manually", "Abort the run"]);
-  });
-
-  /// Nothing any of the three does touches the repo, and the human is told so
-  /// before they choose rather than after.
-  it("says the repo is left as the session left it", async () => {
-    theStopped();
-    const { container } = mount(`/conversations/${STOPPED.id}`);
-
-    const stopped = await drawn(container, ".timeline .interruption");
-
-    expect(stopped.textContent).toContain(
-      "the repo is left exactly as the session left it",
-    );
-  });
-
-  it("sends the remedy with whatever was written alongside it", async () => {
-    const fetching = theStopped(
-      {},
-      whenever(REMEDY_PATH, json("Settled" satisfies RemedySettled), "POST"),
-    );
-    const { container } = mount(`/conversations/${STOPPED.id}`);
-
-    const stopped = await drawn(container, ".timeline .interruption");
-
-    const note = stopped.querySelector("textarea")!;
-    fireEvent.input(note, {
-      target: { value: "try again but leave the migration alone" },
-    });
-
-    const retry = [...stopped.querySelectorAll(".remedy")].find(
-      (it) => it.textContent === "Retry",
-    )!;
-    fireEvent.click(retry);
-
-    await waitFor(() =>
-      expect(sent(fetching, REMEDY_PATH)).toEqual({
-        remedy: "Retry",
-        note: "try again but leave the migration alone",
-      }),
-    );
-
-    // And nothing is said about a remedy that worked: the event reading back
-    // settled is what says it.
-    expect(stopped.querySelector(".error")).toBeNull();
+    expect(stopped.querySelector(".live")!.textContent).toBe("blocked on you");
+    expect(stopped.classList.contains("open")).toBe(true);
   });
 
   /// The record is what a timeline is: a run that was retried and stopped again
-  /// has both stops on it, each saying what was decided.
-  it("shows what was chosen once it has been settled, and stops asking", async () => {
-    theStopped({
-      blocked_on: null,
-      timeline: STOPPED.timeline.map((entry) =>
-        "Interruption" in entry
-          ? {
-              Interruption: {
-                ...entry.Interruption,
-                settled: {
-                  remedy: "TakeOver" as const,
-                  note: "I'll finish this one myself",
-                  at: "2026-08-03T10:14:02.000Z",
-                },
-              },
-            }
-          : entry,
-      ),
+  /// has both stops on it, each naming what was decided.
+  it("names the remedy chosen once it has been settled", async () => {
+    theSettled({
+      remedy: "TakeOver",
+      note: "I'll finish this one myself",
+      at: "2026-08-03T10:14:02.000Z",
     });
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const stopped = await drawn(container, ".timeline .interruption");
 
-    expect(stopped.querySelector(".settled")!.textContent).toContain(
+    expect(stopped.querySelector(".settled")!.textContent).toBe(
       "Take over manually",
     );
-    expect(stopped.querySelector(".settled .note")!.textContent).toBe(
-      "I'll finish this one myself",
-    );
-    expect(stopped.querySelector(".remedies")).toBeNull();
+    expect(stopped.querySelector(".live")).toBeNull();
     expect(stopped.classList.contains("open")).toBe(false);
-  });
-
-  /// Answered from another device, or by a second press. Not an error, and said
-  /// in words rather than retried.
-  it("says so when it was already answered", async () => {
-    theStopped(
-      {},
-      whenever(
-        REMEDY_PATH,
-        json("AlreadySettled" satisfies RemedySettled),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${STOPPED.id}`);
-
-    const stopped = await drawn(container, ".timeline .interruption");
-
-    fireEvent.click(stopped.querySelector(".remedy")!);
-
-    await waitFor(() =>
-      expect(stopped.querySelector(".error")!.textContent).toContain(
-        "The first choice stands",
-      ),
-    );
   });
 });
 
@@ -4097,15 +4054,12 @@ describe("a conversation blocked on the human", () => {
 describe("an interruption's evidence", () => {
   /// It rides on the event rather than being fetched, unlike a Capture or a
   /// diff: it is what the remedies are chosen against, and a pane that had to
-  /// fetch it could draw the buttons before it could say what they were for.
+  /// fetch it could draw the sheet before it could say what it was about.
   it("shows the worktree and the session's last words without another request", async () => {
     const fetching = theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const stopped = await drawn(container, ".timeline .interruption");
-    fireEvent.click(stopped.querySelector(".open-event")!);
-
-    const pane = await drawn(container, ".details-pane .interruption-summary");
+    const pane = await theSheet(container);
     expect(pane.textContent).toContain(HALTED.what);
 
     const status = await drawn(container, ".details-pane .git-status");
@@ -4132,8 +4086,7 @@ describe("an interruption's evidence", () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const stopped = await drawn(container, ".timeline .interruption");
-    fireEvent.click(stopped.querySelector(".open-event")!);
+    await theSheet(container);
 
     const status = await drawn(container, ".details-pane .git-status");
     expect(status.tagName).toBe("PRE");
@@ -4148,13 +4101,181 @@ describe("an interruption's evidence", () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const stopped = await drawn(container, ".timeline .interruption");
-    fireEvent.click(stopped.querySelector(".open-event")!);
+    const pane = await theSheet(container);
 
-    const pane = await drawn(container, ".details-pane .evidence");
     expect(pane.closest(".details-pane")!.textContent).toContain(
       "The whole capture is the session's own event",
     );
+  });
+
+  /// The evidence is read before the choice is made, the way a Set's preface
+  /// and diff are read before it is answered — so it is above the remedies and
+  /// not beside them.
+  it("reads above the remedies", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+
+    const pane = await drawn(container, ".details-pane");
+    const evidence = pane.querySelector(".evidence")!;
+    const remedies = pane.querySelector(".remedy-pick")!;
+
+    expect(
+      evidence.compareDocumentPosition(remedies) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+describe("the sheet an interruption is settled on", () => {
+  it("offers all three remedies", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+    const sheet = await drawn(container, ".details-pane .remedy-pick");
+
+    expect(
+      [...sheet.querySelectorAll(".remedy-name")].map((it) => it.textContent),
+    ).toEqual(["Retry", "Take over manually", "Abort the run"]);
+  });
+
+  /// Nothing any of the three does touches the repo, and the human is told so
+  /// before they choose rather than after.
+  it("says the repo is left as the session left it", async () => {
+    theStopped();
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+    const sheet = await drawn(container, ".details-pane .remedy-pick");
+
+    expect(sheet.textContent).toContain(
+      "the repo is left exactly as the session left it",
+    );
+  });
+
+  /// The whole reason the remedies moved out of the timeline: aborting a run is
+  /// a decision that cannot be taken back, and a decision is picked and
+  /// submitted rather than tapped.
+  it("acts on nothing until a remedy is picked and submitted", async () => {
+    const fetching = theStopped(
+      {},
+      whenever(REMEDY_PATH, json("Settled" satisfies RemedySettled), "POST"),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+    const sheet = await drawn(container, ".details-pane .remedy-pick");
+
+    // Nothing picked: there is nothing to submit.
+    const submit = sheet.querySelector<HTMLButtonElement>(".submit button")!;
+    expect(submit.disabled).toBe(true);
+
+    const abort = sheet.querySelector<HTMLInputElement>(
+      ".remedy.Abort input",
+    )!;
+    fireEvent.click(abort);
+
+    // Picked, and still nothing has happened to the run.
+    expect(writes(fetching, REMEDY_PATH)).toBe(0);
+    expect(submit.disabled).toBe(false);
+
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(sent(fetching, REMEDY_PATH)).toEqual({
+        remedy: "Abort",
+        note: "",
+      }),
+    );
+  });
+
+  it("sends the remedy with whatever was written alongside it", async () => {
+    const fetching = theStopped(
+      {},
+      whenever(REMEDY_PATH, json("Settled" satisfies RemedySettled), "POST"),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+    const sheet = await drawn(container, ".details-pane .remedy-pick");
+
+    fireEvent.click(sheet.querySelector(".remedy.Retry input")!);
+
+    const note = sheet.querySelector("textarea")!;
+    fireEvent.input(note, {
+      target: { value: "try again but leave the migration alone" },
+    });
+
+    fireEvent.click(sheet.querySelector(".submit button")!);
+
+    await waitFor(() =>
+      expect(sent(fetching, REMEDY_PATH)).toEqual({
+        remedy: "Retry",
+        note: "try again but leave the migration alone",
+      }),
+    );
+
+    // And nothing is said about a remedy that worked: the event reading back
+    // settled is what says it.
+    expect(sheet.querySelector(".error")).toBeNull();
+  });
+
+  /// Answered from another device, or by a second press. Not an error, and said
+  /// in words rather than retried.
+  it("says so when it was already answered", async () => {
+    theStopped(
+      {},
+      whenever(
+        REMEDY_PATH,
+        json("AlreadySettled" satisfies RemedySettled),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    await theSheet(container);
+    const sheet = await drawn(container, ".details-pane .remedy-pick");
+
+    fireEvent.click(sheet.querySelector(".remedy.Retry input")!);
+    fireEvent.click(sheet.querySelector(".submit button")!);
+
+    await waitFor(() =>
+      expect(sheet.querySelector(".error")!.textContent).toContain(
+        "The first choice stands",
+      ),
+    );
+  });
+
+  /// A settled interruption reads as an answered Set does: the material it was
+  /// decided from above, and the decision under it — which of the three was
+  /// taken, and what was written alongside.
+  it("reads as an answered sheet once it has been settled", async () => {
+    theSettled({
+      remedy: "TakeOver",
+      note: "I'll finish this one myself",
+      at: "2026-08-03T10:14:02.000Z",
+    });
+    const { container } = mount(`/conversations/${STOPPED.id}`);
+
+    const pane = await theSheet(container);
+    expect(pane.textContent).toContain(HALTED.what);
+    await drawn(container, ".details-pane .evidence");
+
+    const record = await drawn(container, ".details-pane .remedy-pick.decided");
+
+    const chosen = record.querySelector(".remedy.chosen")!;
+    expect(chosen.querySelector(".remedy-name")!.textContent).toBe(
+      "Take over manually",
+    );
+    expect(record.querySelector(".note-said")!.textContent).toBe(
+      "I'll finish this one myself",
+    );
+
+    // Read rather than filled in: there is nothing left to press.
+    expect(record.querySelector("input")).toBeNull();
+    expect(record.querySelector(".submit")).toBeNull();
   });
 });
 

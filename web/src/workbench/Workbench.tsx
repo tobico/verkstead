@@ -40,7 +40,7 @@ import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
-import { Evidence } from "./Interruption";
+import { Interrupted } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
@@ -330,7 +330,8 @@ export function Workbench(): JSX.Element {
                   </Match>
                   <Match when={stoppedIn(open())}>
                     {(stopped) => (
-                      <Evidence
+                      <Interrupted
+                        conversation={conversation()}
                         stopped={stopped()}
                         back={() => setPane("timeline")}
                         close={close}
