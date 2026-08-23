@@ -216,7 +216,11 @@ flowchart LR
   2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
   the sandbox for push/PR as today.
 - **Full Captures** are stored per session; the timeline event summarizes
-  (line count + latest statement), the details pane shows everything.
+  (turn count + latest statement), the details pane shows everything. The turns
+  are the session's own Transcript, counted as the pane draws them, and a
+  session that keeps no log shows no count at all — a line count off the
+  terminal read 0 for every session whose interface redraws itself (*refined
+  2026-08-23, building agent-output-polish*).
 
 ## UI
 
@@ -228,7 +232,7 @@ Timeline events:
 | Event | In timeline | In details pane |
 |---|---|---|
 | Brief | inline, always | — |
-| Agent output | line count + latest statement | Transcript or Screen |
+| Agent output | turn count + latest statement | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |

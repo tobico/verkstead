@@ -184,12 +184,22 @@ export function Output(props: {
         </button>
       </div>
 
-      <p class="capture-summary">
-        {props.output.lines} {props.output.lines === 1 ? "line" : "lines"}
-        <Show when={props.output.running}>
-          <span class="live">running</span>
-        </Show>
-      </p>
+      {/* The same metric the Timeline row shows, and absent for the same
+          reason: a session with no Transcript has no turns to count. A finished
+          session with none has nothing to say here at all, so the line itself
+          goes rather than standing empty above the record. */}
+      <Show when={props.output.turns !== null || props.output.running}>
+        <p class="capture-summary">
+          <Show when={props.output.turns !== null}>
+            <span class="turns">
+              {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
+            </span>
+          </Show>
+          <Show when={props.output.running}>
+            <span class="live">running</span>
+          </Show>
+        </p>
+      </Show>
 
       {/* The two ways of reading the one session. Buttons that say which they
           are rather than tabs: there are two of them, both are always there,

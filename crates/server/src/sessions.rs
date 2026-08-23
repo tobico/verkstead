@@ -33,7 +33,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
-use crate::capture::Reading;
+use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
@@ -1051,8 +1051,7 @@ async fn relay(
                 }
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
-                let said = tail.as_ref().and_then(Tail::latest);
-                flush(pool, nudges, printing, &mut pending, &reading, said).await;
+                flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1060,10 +1059,10 @@ async fn relay(
                 // the next flush: an agent that has stopped to think is one
                 // whose terminal has gone quiet, and that is exactly when the
                 // row saying what it last said is being read.
-                if let Some(tail) = tail.as_mut()
-                    && tail.poll(pool, nudges, event_id).await
+                if let Some(followed) = tail.as_mut()
+                    && followed.poll(pool, nudges, event_id).await
                 {
-                    summarise(pool, nudges, printing, &reading, tail.latest()).await;
+                    summarise(pool, nudges, printing, &reading, told(&tail)).await;
                 }
 
                 tailed = Instant::now();
@@ -1085,8 +1084,7 @@ async fn relay(
     screen.printed(&last);
     pending.push_str(&last);
 
-    let said = tail.as_ref().and_then(Tail::latest);
-    flush(pool, nudges, printing, &mut pending, &reading, said).await;
+    flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1119,28 +1117,40 @@ async fn relay(
     // Which is also why the summary is written again here. Those final lines
     // are ordinarily the whole point of the row — an agent says what it did as
     // it goes — and by now there is no output left to carry them.
-    if let Some(tail) = tail.as_mut()
-        && tail.poll(pool, nudges, event_id).await
+    if let Some(followed) = tail.as_mut()
+        && followed.poll(pool, nudges, event_id).await
     {
-        summarise(pool, nudges, printing, &reading, tail.latest()).await;
+        summarise(pool, nudges, printing, &reading, told(&tail)).await;
     }
 
     ended
 }
 
+/// What the session's log says of it, for the summary the Timeline reads —
+/// nothing at all where there is no log to follow.
+fn told(tail: &Option<Tail>) -> Told<'_> {
+    match tail {
+        Some(tail) => Told {
+            turns: tail.turns(),
+            said: tail.latest(),
+        },
+        None => Told::default(),
+    }
+}
+
 /// Put what has been printed since last time in the store, and tell whoever is
 /// watching that it is there.
 ///
-/// `said` is the last thing the session's agent said in its own log, which is
-/// what the Timeline row is summarised by where there is one — see
-/// [`Reading::summary`].
+/// `told` is what the session's agent has said and how many turns it has taken,
+/// off the log it keeps of its own conversation — which is what the Timeline row
+/// is summarised by where there is one, see [`Reading::summary`].
 async fn flush(
     pool: &SqlitePool,
     nudges: &Nudges,
     printing: Printing,
     pending: &mut String,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     if pending.is_empty() {
         return;
@@ -1151,7 +1161,7 @@ async fn flush(
         event_id,
     } = printing;
 
-    match store::append_capture(pool, event_id, pending, &reading.summary(said)).await {
+    match store::append_capture(pool, event_id, pending, &reading.summary(told)).await {
         // Kept rather than dropped: the next flush carries it, and a store that
         // is briefly unwritable should cost latency rather than a hole in a
         // record nothing can go back and fill.
@@ -1181,14 +1191,14 @@ async fn summarise(
     nudges: &Nudges,
     printing: Printing,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     let Printing {
         conversation_id,
         event_id,
     } = printing;
 
-    match store::summarise_capture(pool, event_id, &reading.summary(said)).await {
+    match store::summarise_capture(pool, event_id, &reading.summary(told)).await {
         Err(error) => {
             tracing::error!(error = ?error, event_id, "summarising a session failed")
         }

@@ -16,7 +16,7 @@ auto-shutdown.
 
 ## Tasks
 
-- [ ] 01: Turns for lines — [details](01-turns-for-lines.md)
+- [x] 01: Turns for lines — [details](01-turns-for-lines.md)
 - [ ] 02: The idle mark — [details](02-idle-mark.md)
 - [ ] 03: The idle mark on the sidebar card — [details](03-idle-mark-on-card.md)
 - [ ] 04: The switcher into the header — [details](04-switcher-into-header.md)

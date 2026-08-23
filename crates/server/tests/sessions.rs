@@ -1434,13 +1434,19 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 async fn a_session_that_keeps_no_log_leaves_no_transcript() {
     let fixture = grilling(r#"printf 'Nothing to say.\n'"#).await;
 
-    let event = fixture
-        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
         .await;
+    let event = summary.id;
 
     assert!(
         fixture.transcript(event).await.is_empty(),
         "a session that wrote no log should have left no Transcript behind"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric at all rather than a count of none: there is \
+         no conversation here to have taken turns"
     );
     assert_eq!(
         fixture.capture(event).await,
@@ -1501,6 +1507,76 @@ async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
     assert!(
         drawn.contains("esc to interrupt"),
         "the interface was drawing something else the whole time: {drawn:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the row's metric is how far that conversation has got: the turns on the
+/// Transcript, counted as the log is followed.
+///
+/// The line count it replaced was a count of newlines off the terminal, and a
+/// full-screen interface redraws itself with cursor moves — so it read 0 for
+/// every real session. The turns are the Transcript's own, which is where a
+/// session's conversation actually is.
+///
+/// Counted as the pane draws them, so the backend's own bookkeeping — about a
+/// third of every log — is none of them. The stub writes one of those beside
+/// the three turns to say so.
+#[tokio::test]
+async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
+        printf '{"type":"attachment","attachment":{"type":"todos"}}\n' >> "$log"
+        printf 'Reading the brief.\n'
+        sleep 1
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}\n' >> "$log"
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"limiter.md"}]}}\n' >> "$log"
+        printf 'Looking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let counted = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.turns == Some(1))
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        counted.running,
+        "the session is still sitting on its `sleep`, so the count moved while it ran"
+    );
+
+    // And it goes on moving: the tool call and its answer are two more turns,
+    // and the bookkeeping line beside them is none.
+    let grown = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.turns == Some(3))
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        grown.turns,
+        Some(3),
+        "the prose, the call and the answer — and not the backend's own line"
     );
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);

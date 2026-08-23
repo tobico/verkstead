@@ -823,8 +823,8 @@ pub struct BriefEvent {
     pub html: String,
 }
 
-/// A session's output as the Timeline shows it: how much there is, the last
-/// thing that was said, and whether more is coming.
+/// A session's output as the Timeline shows it: how far its conversation has
+/// got, the last thing that was said, and whether more is coming.
 ///
 /// The summary and not the Capture. A grilling session prints megabytes over
 /// an hour, and the Timeline is re-read every time an open page hears the world
@@ -840,6 +840,15 @@ pub struct AgentOutputEvent {
 
     /// How many lines it has printed.
     pub lines: i64,
+
+    /// How many turns its conversation has taken, as the Transcript pane draws
+    /// them — which is the metric the row and the pane show.
+    ///
+    /// `null` where the session keeps no log, and the two places that show this
+    /// show nothing at all rather than a zero: a session with no Transcript has
+    /// no turns to be wrong about. Not the same as a count of none, which is a
+    /// session that has a log and has not said anything into it yet.
+    pub turns: Option<i64>,
 
     /// The last thing the agent said, off its own log — or, where it kept none,
     /// the last line it printed with the terminal's control sequences taken
@@ -1054,6 +1063,7 @@ pub fn agent_output_event(
     id: i64,
     at: String,
     lines: i64,
+    turns: Option<i64>,
     latest: String,
     running: bool,
 ) -> TimelineEvent {
@@ -1061,6 +1071,7 @@ pub fn agent_output_event(
         id,
         at,
         lines,
+        turns,
         latest,
         running,
     })

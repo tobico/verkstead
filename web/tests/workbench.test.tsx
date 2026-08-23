@@ -1614,22 +1614,52 @@ describe("a move on the timeline", () => {
 });
 
 describe("a session's output on the timeline", () => {
-  /// The design's summary: a line count and the last thing the agent said. An
-  /// hour of terminal output does not go in the middle pane.
-  it("summarises as a line count and the latest statement", async () => {
+  /// The design's summary: how far the conversation has got, and the last thing
+  /// the agent said. An hour of terminal output does not go in the middle pane.
+  ///
+  /// Turns rather than the lines it printed. A full-screen interface redraws
+  /// itself with cursor moves rather than newlines, so a line count read 0 for
+  /// every real session — and what a reader wanted from it was how much of a
+  /// conversation there is to open, which is what a turn is.
+  it("summarises as a turn count and the latest statement", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, ".timeline-event .agent-output");
 
-    expect(output.querySelector(".lines")!.textContent).toBe(
-      `${OUTPUT.lines} lines`,
+    expect(OUTPUT.turns).not.toBeNull();
+    expect(output.querySelector(".turns")!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
     );
     expect(output.querySelector(".latest")!.textContent).toBe(OUTPUT.latest);
 
     // Nothing of the Capture itself: it is fetched by the pane that shows
     // it, and only once one is opened.
     expect(output.textContent).not.toContain("Reading the brief");
+  });
+
+  /// A session whose backend keeps no log has no Transcript to count, and its
+  /// row says nothing rather than saying none: every stub agent is one, and a
+  /// `0 turns` on it would be a claim about a conversation nothing can see.
+  it("shows no metric at all for a session with no transcript", async () => {
+    theGrillingOutput({ turns: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".turns")).toBeNull();
+    expect(output.textContent).not.toContain("0 turns");
+  });
+
+  /// And one turn is a turn. The count is read off a running session, so it
+  /// passes through 1 on its way to the rest of them.
+  it("says `1 turn` of a conversation that has taken one", async () => {
+    theGrillingOutput({ turns: 1 });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".turns")!.textContent).toBe("1 turn");
   });
 
   it("says so while the session is still running", async () => {
@@ -1653,6 +1683,37 @@ describe("a session's output on the timeline", () => {
     expect(OUTPUT.running).toBe(false);
     expect(output.classList).not.toContain("running");
     expect(output.querySelector(".live")).toBeNull();
+  });
+
+  /// The details pane says the same metric as the row it was opened from, and
+  /// leaves it out for the same session — the two are one summary shown twice,
+  /// and a pane disagreeing with the row it opened from would be two answers to
+  /// the one question.
+  it("says the same turn count in the details pane", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const summary = await drawn(container, ".details-pane .capture-summary");
+
+    expect(summary.querySelector(".turns")!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
+    );
+  });
+
+  /// And a session that has ended with no Transcript has nothing to say up
+  /// there at all, so the pane draws no summary line rather than an empty one.
+  it("says nothing there either for a session with no transcript", async () => {
+    theGrillingOutput({ turns: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    // The record itself, which says the pane is drawn and it is this session's.
+    await drawn(container, ".details-pane .record-switch");
+
+    expect(container.querySelector(".details-pane .capture-summary")).toBeNull();
   });
 
   /// The fallback, and the whole details-pane story for a session whose backend

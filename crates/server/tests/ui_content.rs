@@ -1429,6 +1429,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
          What should happen to a delivery that has failed forty times?\r\n",
         &store::Summary {
             lines: 3,
+            // The turns of the Transcript written just below, which is what the
+            // relay would have counted as it followed the log: everything there
+            // but the one line of the backend's own bookkeeping.
+            turns: Some(6),
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
     )

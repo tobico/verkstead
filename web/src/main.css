@@ -1626,7 +1626,7 @@ main:has(.workbench) {
   font-weight: 600;
 }
 
-.agent-output .lines {
+.agent-output .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }

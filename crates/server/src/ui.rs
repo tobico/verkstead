@@ -701,6 +701,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         event.id,
                         event.at,
                         summary.lines,
+                        summary.turns,
                         summary.latest,
                         writing == Some(event.id),
                     ),

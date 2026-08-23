@@ -12,10 +12,15 @@
 //! Lines go to the store exactly as they were written, and nothing here parses
 //! one. That is what holds the coupling to somebody else's file format down to
 //! whoever renders it: a format that changes can leave a line nothing knows how
-//! to draw, and it can never lose what was said. The one thing read back out of
-//! a batch on its way past is the last thing the agent said, which the Timeline
-//! row is summarised by — and even that is read by the crate with the parser in
-//! it rather than here.
+//! to draw, and it can never lose what was said. What is read back out of a
+//! batch on its way past is the two things the Timeline row is summarised by —
+//! the last thing the agent said, and how many turns the batch was — and both
+//! are read by the crate with the parser in it rather than here.
+//!
+//! Both are kept as the log is followed rather than worked out when the row is
+//! read. A Timeline is read every time an open page hears the world moved, and
+//! a count taken then would be every line of every session's log parsed to draw
+//! one row of it.
 //!
 //! Following is plain polling, on the cadence the byte relay already flushes on
 //! — the relay is awake on that interval anyway, and a file watcher would be a
@@ -85,6 +90,20 @@ pub(crate) struct Tail {
     /// `None` until it says something, which is most of a session's first
     /// minute and the whole of a session whose backend keeps no log.
     latest: Option<String>,
+
+    /// How many turns the conversation has taken, as far as the log has been
+    /// followed — the other half of what the row reads.
+    ///
+    /// Kept as it goes rather than counted on the way out, for the reason the
+    /// line count is: a Timeline is read every time an open page hears the
+    /// world moved, and a count worked out then would be every line of every
+    /// session's log parsed to draw one row. Each batch is read once, here, by
+    /// the loop that was following the log anyway.
+    ///
+    /// `None` until a line reaches the Transcript, which is what says there is
+    /// no Transcript to count: a session whose backend keeps no log stays at
+    /// `None` for its whole life, and its row shows no metric at all.
+    turns: Option<i64>,
 }
 
 impl Tail {
@@ -100,12 +119,19 @@ impl Tail {
             partial: Vec::new(),
             pending: Vec::new(),
             latest: None,
+            turns: None,
         }
     }
 
     /// The last thing the agent said, for whoever is summarising the session.
     pub(crate) fn latest(&self) -> Option<&str> {
         self.latest.as_deref()
+    }
+
+    /// How many turns are on the Transcript, for the same summary — `None`
+    /// where there is no Transcript at all.
+    pub(crate) fn turns(&self) -> Option<i64> {
+        self.turns
     }
 
     /// Take whatever the session has written since the last poll, and put the
@@ -203,8 +229,9 @@ impl Tail {
     /// the Transcript and the Conversation it moved in, and a second one would
     /// name the same two things again.
     ///
-    /// Whether the batch carried something the agent said, which is what tells
-    /// the caller the summary has moved. A batch of tool calls has not.
+    /// Whether the batch moved what the Timeline row shows — something the
+    /// agent said, or turns to add to the count. A batch of nothing but the
+    /// backend's own bookkeeping has moved neither.
     async fn store(&mut self, pool: &SqlitePool, nudges: &Nudges, event_id: i64) -> bool {
         if self.pending.is_empty() {
             return false;
@@ -217,9 +244,16 @@ impl Tail {
             }
             Ok(()) => {
                 let said = latest(&self.pending);
-                let moved = said.is_some();
+                let counted = verkstead_render::turns(&self.pending) as i64;
 
-                if moved {
+                // The count starts at the first batch that lands rather than at
+                // the Tail: what `Some` says is that there is a Transcript, and
+                // there is one from the moment a line is on it.
+                *self.turns.get_or_insert(0) += counted;
+
+                let moved = said.is_some() || counted > 0;
+
+                if said.is_some() {
                     self.latest = said;
                 }
 
