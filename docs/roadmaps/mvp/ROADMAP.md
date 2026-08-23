@@ -27,4 +27,4 @@ up by one.
 - [x] 02: Grilling — [brief](02-grilling.md)
 - [x] 03: Implementation — [brief](03-implementation.md)
 - [x] 04: Wrap-up — [brief](04-wrap-up.md)
-- [ ] 05: Refinement — [brief](05-refinement.md)
+- [ ] 05: Refinement — [brief](05-refinement.md) *(in progress: `refinement`)*
