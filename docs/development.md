@@ -264,3 +264,13 @@ by, or says `"static"` where the payload cannot change. There is no default —
 a query that says neither does not typecheck — and `web/eslint.config.js` is
 the other half of the same rule, refusing the raw hook everywhere but the
 wrapper's own module. That is the whole of what `pnpm lint` checks.
+
+Which queries a Nudge invalidates is one table in `web/src/nudge.ts`, keyed by
+the kind the server sent. The kinds themselves are a Rust enum in
+`crates/schema/src/nudge.rs`, so adding one is two edits — the variant and the
+announce site on the server, and a row in that table on the viewer. A kind with
+no row falls back to reading everything, which is what an older page does
+against a newer server; `web/tests/nudging.test.tsx` sweeps the generated
+fixture and fails on a kind the table has forgotten. Nothing polls: what stands
+behind a Nudge that never landed is the catch-up on reconnect and on the page
+becoming visible again.

@@ -118,9 +118,9 @@ afterEach(() => {
 const READING = `/api/ui/conversations/${OPEN.id}`;
 
 /// The page reading everything it is showing again, provoked the way coming back
-/// to the app provokes it — the cheapest of the three ways it happens, the other
-/// two being the ten-second poll and a Nudge. What is asked here is what a read
-/// does to the page, and all three do the same one.
+/// to the app provokes it — the cheapest of the two ways it happens, the other
+/// being a Nudge. What is asked here is what a read does to the page, and both
+/// do the same one.
 function readAgain(): void {
   for (const state of ["hidden", "visible"] as const) {
     Object.defineProperty(document, "visibilityState", {
@@ -898,10 +898,10 @@ describe("writing the brief", () => {
     expect(fetching).toHaveBeenCalled();
   });
 
-  /// The page reads its Conversation again every ten seconds, on every Nudge and
-  /// on every return to it, and a field being typed into has to live through all
-  /// of them: a Brief half written is the only copy of it there is, and one that
-  /// went every time the world was read again could never be finished.
+  /// The page reads its Conversation again on every Nudge about it and on every
+  /// return to the page, and a field being typed into has to live through both:
+  /// a Brief half written is the only copy of it there is, and one that went
+  /// every time the world was read again could never be finished.
   it("lives through the page reading the conversation again", async () => {
     // The read that lands while the field is open comes back with something
     // else about the Conversation changed — the branch renamed from another
@@ -3460,8 +3460,9 @@ describe("the pinned pull request", () => {
     expect(error.textContent).toContain("is not logged in");
   });
 
-  /// Nothing is fetched until somebody opens it: reading this is an API call,
-  /// and the conversation is read again every ten seconds.
+  /// Nothing is fetched until somebody opens it: reading this is an API call
+  /// GitHub answers, and the conversation around it is read again on every
+  /// Nudge about it.
   it("asks GitHub nothing until it is opened", async () => {
     const fetching = theWrapping();
     mount(`/conversations/${WRAPPING.id}`);

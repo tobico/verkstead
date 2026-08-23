@@ -314,14 +314,15 @@ async fn a_set_archived_unanswered_nudges_the_open_pages() {
 }
 
 #[tokio::test]
-async fn an_agents_wait_opening_and_closing_nudges_nobody() {
+async fn an_agents_wait_opening_and_closing_nudges_the_open_pages() {
     let (_dir, app) = fresh_app().await;
     let id = post_set(&app).await;
     let mut page = Listening::open(&app).await;
 
     // A whole wait, from the agent taking its slot in the registry to the hold
-    // window closing on it: the Liveness badge moves twice and the pending
-    // world does not move at all.
+    // window closing on it. Nothing durable moved and the badge moved twice,
+    // which is the whole of what a page is told here: the verdict used to cycle
+    // with the viewer's own poll, and the poll is gone (ADR-0009).
     let held = app
         .clone()
         .oneshot(
@@ -336,6 +337,36 @@ async fn an_agents_wait_opening_and_closing_nudges_nobody() {
         .unwrap();
     assert_eq!(held.status(), StatusCode::NO_CONTENT);
 
+    let moved = Nudge::Liveness {
+        conversation: ASKING_FROM,
+    };
+    assert_eq!(page.nudge().await, moved, "the wait was taken up");
+    assert_eq!(page.nudge().await, moved, "the wait was let go");
+    page.nothing_more().await;
+}
+
+#[tokio::test]
+async fn a_wait_on_a_set_that_is_not_there_nudges_nobody() {
+    let (_dir, app) = fresh_app().await;
+    let mut page = Listening::open(&app).await;
+
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/conversations/{ASKING_FROM}/api/v1/sets/404/response?hold=1"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    // No slot was taken, so there is no badge anywhere to have moved: the
+    // registry is left without a trace of a Set that does not exist, and so is
+    // the stream.
     page.nothing_more().await;
 }
 
@@ -391,7 +422,7 @@ const SCOPED_TO: i64 = 7;
 ///
 /// One of each rather than one per file: this is a vocabulary rather than a set
 /// of payloads, and what a reader of it wants to see is the whole of it at once.
-const KINDS: [Nudge; 8] = [
+const KINDS: [Nudge; 9] = [
     Nudge::Transcript {
         conversation: SCOPED_TO,
     },
@@ -402,6 +433,9 @@ const KINDS: [Nudge; 8] = [
         conversation: SCOPED_TO,
     },
     Nudge::Set {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Liveness {
         conversation: SCOPED_TO,
     },
     Nudge::Conversation {

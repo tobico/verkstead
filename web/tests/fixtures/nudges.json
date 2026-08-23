@@ -16,6 +16,10 @@
     "conversation": 7
   },
   {
+    "kind": "liveness",
+    "conversation": 7
+  },
+  {
     "kind": "conversation",
     "conversation": 7
   },

@@ -217,8 +217,10 @@ export function loadCommitDiff(
 ///
 /// Fetched by the pane that shows it for a stronger version of the diff's
 /// reason: the server reads this by asking GitHub through the host's `gh`, so a
-/// conversation that carried it would make an API call every ten seconds. A
-/// server that cannot ask refuses with the reason, which is what the pane shows.
+/// conversation that carried it would make an API call every time the page heard
+/// anything at all had moved. Fetched here, it is read on a commit landing and
+/// on nothing else (ADR-0009). A server that cannot ask refuses with the reason,
+/// which is what the pane shows.
 export function loadPullRequest(
   id: number,
   event: number,

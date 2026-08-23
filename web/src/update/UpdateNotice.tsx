@@ -24,10 +24,11 @@ const UPDATING = "https://github.com/tobico/verkstead#updating";
 
 /// How often the open page asks whether a release has appeared, in milliseconds.
 ///
-/// Hourly, where a Conversation asks every ten seconds: a Question Set can
-/// arrive at any moment and a release cannot. The server polls GitHub once a day
-/// and holds the verdict, so asking oftener would only be reading the same memory
-/// again.
+/// Hourly, and on an interval where everything else on the page is read on
+/// being told to: a release is the one thing here nothing announces, and it is
+/// also the one thing nobody is waiting on. The server polls GitHub once a day
+/// and holds the verdict, so asking oftener would only be reading the same
+/// memory again.
 const REFRESH = 60 * 60 * 1000;
 
 /// The banner, when there is a release to name.

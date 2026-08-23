@@ -39,6 +39,14 @@ pub enum Nudge {
     /// unanswered.
     Set { conversation: i64 },
 
+    /// An agent took up or let go of the wait on a Question Set, so the badge
+    /// saying whether anybody is listening has moved.
+    ///
+    /// Nothing durable changed and nothing is asked of the human: this is the
+    /// one kind that is purely about a display. It exists because the verdict
+    /// used to cycle with the viewer's poll, and the poll is gone (ADR-0009).
+    Liveness { conversation: i64 },
+
     /// One Conversation moved in some other way: an Event on its Timeline, its
     /// lifecycle, the Hold on its keyboard.
     ///

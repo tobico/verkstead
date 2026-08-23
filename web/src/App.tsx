@@ -13,16 +13,17 @@ import { Workbench } from "./workbench/Workbench";
 /// One client for the whole app, made once rather than per render: it is where
 /// the cache lives, and a page that rebuilt it would have no cache at all.
 ///
-/// Coming back reads everything afresh. The document becoming visible again is
-/// what the setting means here — the PWA reopened, the phone unlocked, the tab
-/// refocused — and it is the one signal an iOS PWA reliably fires on resume.
+/// Coming back reads afresh whatever has gone stale, which is half of what
+/// stands in for the poll that used to (ADR-0009). The other half is the
+/// catch-up in `nudge.ts`, on the same moment and wider: this setting re-reads
+/// what a staleTime has let go, and the catch-up re-reads everything, because a
+/// page that was away cannot know what it missed.
 ///
 /// Said out loud though it is the default, because it used to be off, on the
 /// reasoning that coming back to a tab is not new information about a Set. For
-/// an installed app it is precisely that: the phone was away, the interval poll
-/// was suspended with it, and the list the human is now looking at stopped
-/// being true while they were gone. The extra fetch is what ADR-0005 buys with
-/// it, and the poll stays underneath as the fallback.
+/// an installed app it is precisely that: the phone was away, nothing was
+/// listening while it was, and the list the human is now looking at stopped
+/// being true while they were gone.
 const queries = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: true } },
 });

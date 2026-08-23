@@ -16,5 +16,5 @@ re-downloads its whole record on every batch.
 - [x] 01: Query wrapper and lint wall — [details](01-query-wrapper-and-lint-wall.md)
 - [x] 02: Controlled selects and DOM-identity tests — [details](02-controlled-selects-and-dom-identity-tests.md)
 - [x] 03: Typed Nudge on the wire — [details](03-typed-nudge-on-the-wire.md)
-- [ ] 04: Scoped invalidation, catch-up, poll retired — [details](04-scoped-invalidation-catch-up-poll-retired.md)
+- [x] 04: Scoped invalidation, catch-up, poll retired — [details](04-scoped-invalidation-catch-up-poll-retired.md)
 - [ ] 05: Incremental transcript fetch — [details](05-incremental-transcript-fetch.md)

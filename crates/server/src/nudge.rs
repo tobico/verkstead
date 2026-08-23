@@ -17,9 +17,10 @@
 //! [`Nudges`], which is the channel for what the store has no reason to know has
 //! happened. Both come out of the merge as the same typed [`Nudge`].
 //!
-//! Liveness stays out of it, and so stays with the poll: the
-//! waiting/disconnected verdict cycles with the agent's long-poll rather than
-//! changing at clean moments, so there is no moment here to broadcast.
+//! Liveness is in it now that the viewer's poll is gone. The
+//! waiting/disconnected verdict used to cycle with that poll; what it cycles
+//! with here is the agent's long-poll itself, announced as it is taken up and
+//! as it is let go — see [`crate::responses`], which is what holds it.
 
 use std::convert::Infallible;
 use std::time::Duration;
