@@ -778,15 +778,16 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // Who a session commits as, which every sandbox reads out of the home of
-    // whoever runs the server.
+    // Who a session commits as: a settings file in the Data Directory, which is
+    // where every sandbox is configured out of.
     std::fs::write(
-        home.path().join(".gitconfig"),
-        "[user]\n\tname = Verkstead Test\n\temail = test@verkstead.invalid\n",
+        state.path().join("config.yaml"),
+        "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
     )
     .unwrap();
 
     let database = state.path().join("verkstead.db");
+
     let pool = open_database(&database).await.unwrap();
 
     let agents = Agents::running(

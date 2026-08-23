@@ -43,18 +43,30 @@ directories and the settings files. `--data-dir` says where, or
 `VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
 run out of a checkout wants.
 
-A session's GitHub auth is one of those settings rather than anything found in
-a home directory. Put a token in `secrets.yaml` beside the database:
+A session's GitHub auth and the author of its commits are two of those settings
+rather than anything found in a home directory. Put a token in `secrets.yaml`
+beside the database, and who you are in `config.yaml`:
 
 ```yaml
 # secrets.yaml
 github_token: ghp_...
 ```
 
-Every session started after that gets it as `GH_TOKEN`, which `gh` honours
-without being told to. There is no file to write and nothing to log in to
-inside a sandbox. With no token — no file, an empty one, one that will not
-parse — sessions start anyway and `gh` inside says it is not logged in.
+```yaml
+# config.yaml
+git_author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+```
+
+Every session started after that gets the token as `GH_TOKEN`, which `gh`
+honours without being told to, and gets git configured through the
+environment — the author, `gh auth git-credential` as the credential helper for
+GitHub, and SSH GitHub remotes rewritten to HTTPS so a `git push` inside
+authenticates with the token. There is no file to write and nothing to log in
+to inside a sandbox. With no token — no file, an empty one, one that will not
+parse — sessions start anyway and `gh` inside says it is not logged in; with no
+author, git inside asks to be told who you are.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory

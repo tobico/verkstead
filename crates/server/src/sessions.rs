@@ -527,9 +527,11 @@ impl Sessions {
 
             move || {
                 // Read here rather than held from startup: this is the moment a
-                // session's credentials are decided, and it is already on a
-                // blocking thread because git is asked about the worktree below.
+                // session's credentials and identity are decided, and it is
+                // already on a blocking thread because git is asked about the
+                // worktree below.
                 let secrets = settings.secrets();
+                let config = settings.config();
 
                 let sandbox = Sandbox::for_conversation(
                     &conversation,
@@ -539,6 +541,7 @@ impl Sessions {
                     &skills,
                     &handoffs,
                     &secrets,
+                    &config,
                     extra,
                 )?;
                 let worktree = conversation.worktree.clone()?;

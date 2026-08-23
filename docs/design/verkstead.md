@@ -143,22 +143,29 @@ flowchart LR
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
   - **rw:** the conversation's worktree; the repo's common `.git` directory;
     the profile's claude pair at `~/.claude` and `~/.claude.json`
-  - **ro:** `/nix` and system paths, `~/.gitconfig`
+  - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
-  - `~` inside is the home of whoever runs the server, at the same path — which
-    is where that gitconfig is read from (*settled 2026-08-20, building stage
-    02*), so the packaged unit says outright what that home is:
-    `services.verkstead.home`, defaulting to `/var/lib/verkstead/home`, because
-    systemd would otherwise derive `/var/empty` from the service user's passwd
-    entry and every commit inside a sandbox would be unattributed (*settled
-    2026-08-20, building stage 02*)
-  - **GitHub auth is said rather than found** (*settled 2026-08-23, building
-    intentional-credentials*): a token in `secrets.yaml` in the Data Directory,
-    handed to each session as `GH_TOKEN`, which `gh` honours natively — so no
-    gh files are inside a sandbox at all and the host's `~/.config/gh` is no
-    longer bound in. The file is read at every session spawn, so a rotated token
-    applies from the next session; a missing, empty or unparseable file is no
-    token rather than a session that will not start.
+  - `~` inside is the home of whoever runs the server, at the same path — the
+    packaged unit says outright what that home is, `services.verkstead.home`,
+    defaulting to `/var/lib/verkstead/home`, because systemd would otherwise
+    derive `/var/empty` from the service user's passwd entry (*settled
+    2026-08-20, building stage 02*). Nothing is read out of it any more
+    (*refined 2026-08-23, building intentional-credentials*)
+  - **Credentials and identity are said rather than found** (*settled
+    2026-08-23, building intentional-credentials*): a token in `secrets.yaml`
+    in the Data Directory, handed to each session as `GH_TOKEN`, which `gh`
+    honours natively — so no gh files are inside a sandbox at all and the host's
+    `~/.config/gh` is no longer bound in — and a `git_author` in `config.yaml`
+    beside it, handed over as `GIT_CONFIG_COUNT` and the pairs it counts, which
+    is also how the sandbox sets `gh auth git-credential` as the credential
+    helper for `https://github.com` and rewrites SSH GitHub remotes to HTTPS so
+    a push authenticates with the token instead of failing on absent keys, with
+    `GIT_TERMINAL_PROMPT=0` so one that still cannot authenticate says so
+    instead of asking a terminal nobody is at. The host's `~/.gitconfig` is no
+    longer bound in either. Both files are read at every session spawn, so
+    anything rotated applies from the next session; a missing, empty or
+    unparseable file configures nothing rather than refusing to start, and with
+    no author git's own "tell me who you are" stands.
   - per-repo extra binds from sandbox configuration
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)

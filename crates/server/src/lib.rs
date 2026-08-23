@@ -55,12 +55,12 @@ mod runner;
 pub mod sandbox;
 mod sessions;
 mod sets;
-/// What Verkstead was told about the human's credentials: the settings files
-/// under the Data Directory.
+/// What Verkstead was told about the human's credentials and identity: the
+/// settings files under the Data Directory.
 ///
-/// Public for the reason the sandbox is — what a session authenticates as is the
-/// product's business rather than an endpoint's, and standing a router up that
-/// runs sessions means saying where its credentials are read from.
+/// Public for the reason the sandbox is — what a session authenticates and
+/// commits as is the product's business rather than an endpoint's, and standing
+/// a router up that runs sessions means saying where both are read from.
 pub mod settings;
 mod settling;
 /// What a session is grilled by: the skills Verkstead ships and installs into

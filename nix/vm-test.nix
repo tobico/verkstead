@@ -29,8 +29,9 @@ let
   grillingRepo = "/srv/repos/grilling";
   account = "/srv/repos/account";
 
-  # The service's home, which is the module's default and where a session reads
-  # the machine's git identity and gh login from.
+  # The service's home, which is the module's default. Nothing is read out of it
+  # any more — the git identity and the gh login are settings files now — so what
+  # it holds here is what has to stay outside a sandbox.
   home = "/var/lib/verkstead/home";
 in
 
@@ -158,7 +159,6 @@ testers.runNixOSTest {
             --bind ${grillingRepo}/.git ${grillingRepo}/.git \
             --bind ${account}/.claude "$HOME/.claude" \
             --bind ${account}/.claude.json "$HOME/.claude.json" \
-            --ro-bind "$HOME/.gitconfig" "$HOME/.gitconfig" \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
             --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
@@ -286,19 +286,18 @@ testers.runNixOSTest {
           comment = "Posted through the same API the web UI posts through.\n";
         };
 
-        # What the human puts in the service's home, and the one thing a session
-        # reads out of it: who a commit is by. What `gh` is logged in as is not
-        # among them any more — that is a token in the settings file, and it
-        # reaches a session as `GH_TOKEN`.
+        # A gitconfig and a gh login of the machine's own, neither of which a
+        # session has any business seeing: who a commit is by and what `gh` is
+        # logged in as are settings files in the Data Directory now, and reach a
+        # session in its environment. Both are here so that "no credentials of
+        # the host's inside" is a claim about files that exist rather than about
+        # ones nobody made.
         "verkstead-vm-test/gitconfig".text = ''
           [user]
-          	name = Verkstead VM
-          	email = vm@verkstead.invalid
+          	name = Whoever The Host Is
+          	email = host@verkstead.invalid
         '';
 
-        # A gh login of the machine's own, which no session has any business
-        # seeing: it is here so that "no gh files inside" is a claim about a
-        # directory that exists rather than about one nobody made.
         "verkstead-vm-test/gh-hosts.yml".text = ''
           github.com:
               user: nobody
@@ -759,9 +758,9 @@ testers.runNixOSTest {
         )
 
     with subtest("a sandbox starts under the service's own hardening"):
-        # The service's home as the human would leave it: the one file a session
-        # reads out of it, and two things of the machine's that are none of a
-        # session's business — the gh login, and a private key.
+        # The service's home with the machine's own credentials left lying in
+        # it — a gitconfig, a gh login and a private key — none of which a
+        # session has any business seeing.
         machine.succeed("mkdir -p ${home}/.config/gh")
         machine.succeed(
             "install -m 0644 /etc/verkstead-vm-test/gitconfig ${home}/.gitconfig"
@@ -798,14 +797,15 @@ testers.runNixOSTest {
         assert reported["claude-dir"] == "write"
         assert reported["claude-config"] == "write"
         assert reported["nix"] == "read"
-        assert reported["gitconfig"] == "read", (
-            "who a session commits as is the human's to set, not the session's to change"
+        assert reported["gitconfig"] == "absent", (
+            "nothing of the host's git identity comes in: who a session commits as "
+            "is the configured author, handed to it as GIT_CONFIG_* — which is the "
+            "sandbox tests' to check, an environment variable being nothing this "
+            "unit's hardening can reach"
         )
         assert reported["gh"] == "absent", (
-            "nothing of the host's gh login comes in: GitHub auth is the configured "
-            "token, handed to a session as `GH_TOKEN` — which is the sandbox tests' "
-            "to check, an environment variable being nothing this unit's hardening "
-            "can reach"
+            "and nothing of the host's gh login either: GitHub auth is the "
+            "configured token, handed to a session as `GH_TOKEN`"
         )
         # The two listings come back without the separator the probe put after
         # the last entry, because the journal trims a line's trailing
@@ -817,7 +817,7 @@ testers.runNixOSTest {
         assert reported["sibling"] == "absent", (
             "another repository under the same Watched Path is another Conversation's"
         )
-        assert reported["home"] == ".claude .claude.json .gitconfig", (
+        assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"
         )
 

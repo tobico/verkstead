@@ -92,26 +92,22 @@ in
         The home directory the service runs with, as `HOME`, and what `~` means
         inside a session's sandbox.
 
-        One file is read out of it and mounted into every sandbox read-only:
-        `.gitconfig`, which is who a commit is by. It is the machine's,
-        configured once here rather than per Conversation. Nothing else of this
-        directory is ever exposed to a session, and the service itself only ever
-        reads it.
-
-        What `gh` is logged in as is *not* read from here. That is a token in
-        `secrets.yaml` in the service's data directory, handed to each session
-        as `GH_TOKEN` — said deliberately rather than found lying about in a
-        home directory.
+        Nothing is read out of it and nothing of it is mounted into a sandbox.
+        Credentials and identity are said rather than found: the GitHub token is
+        `github_token` in `secrets.yaml` in the service's data directory, and who
+        a commit is by is `git_author` in `config.yaml` beside it. Each reaches a
+        session in its environment — `GH_TOKEN`, and git's own `GIT_CONFIG_*` —
+        so there is nothing to provision here, and a credential left in this
+        directory stays outside every sandbox.
 
         Said outright because systemd would otherwise derive it from the
-        `verkstead` user's passwd entry, which is `/var/empty`: a session there
-        commits as nobody.
+        `verkstead` user's passwd entry, which is `/var/empty`: a home that is
+        not writable is one a tool with a cache of its own trips over.
 
         The default is a directory under the state directory, which systemd
-        creates and hands over — put the gitconfig there and every session gets
-        it. Pointing this at a human's own home works too, as long as the
-        `verkstead` user can read it; it is bound in read-only, so it has to
-        exist.
+        creates and hands over. Pointing this at a human's own home works too, as
+        long as the `verkstead` user can read it; it is bound in read-only, so it
+        has to exist.
       '';
     };
 
@@ -411,9 +407,11 @@ in
 
         # A home the human named somewhere of their own, bound in for the reason
         # a Watched Path is: it is usually under `/home`, which `ProtectHome`
-        # replaces with an empty tmpfs. Read-only, because the two files read
-        # out of it are the two the service only ever reads. Under the state
-        # directory there is nothing to bind — systemd made it.
+        # replaces with an empty tmpfs, and a HOME that is not there is what a
+        # tool reaching for one fails obscurely on. Read-only, because nothing is
+        # read out of it any more and a service writing into somebody's own home
+        # is not what naming one here asks for. Under the state directory there
+        # is nothing to bind — systemd made it, and it is the service's own.
         BindReadOnlyPaths = lib.optional (!homeIsOurs) "${cfg.home}";
       };
     };

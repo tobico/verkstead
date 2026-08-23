@@ -46,7 +46,7 @@ install. On a NixOS host, import it and enable the service:
 services.verkstead = {
   enable = true;
   watchedPaths = [ "/home/you/src" ];
-  home = "/home/you";                 # for .gitconfig
+  home = "/home/you";                 # optional; the service's own by default
   sandboxBinds = [ "verkstead=/var/cache/verkstead-cargo" ];
 };
 ```
@@ -57,10 +57,11 @@ each is a boundary rather than a convenience:
 - **`watchedPaths`** is what Verkstead may operate inside. There is no default
   and no scan; a **Repo** is registered only from within one, and a path that
   merely reads as inside one is refused.
-- **`home`** is where `.gitconfig` is read from, and it is mounted read-only
-  into every Sandbox. Without it a session commits as nobody. What `gh` is
-  logged in as does *not* come from here: that is a token in `secrets.yaml` in
-  the data directory, handed to each session as `GH_TOKEN`.
+- **`home`** is only what `HOME` means for the service; nothing is read out of
+  it and nothing of it reaches a Sandbox. Credentials and identity are said
+  instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
+  in the data directory, reaching each session as `GH_TOKEN` and git's own
+  `GIT_CONFIG_*`.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why it is set here and not anywhere the workbench
   can reach. A bare path goes to every session; `name=path` goes only to
