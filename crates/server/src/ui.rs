@@ -377,6 +377,13 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
+///
+/// Two facts ride out on every row beyond what the store holds: whether a
+/// session is running on it, and whether it is waiting on the human. Both are
+/// read here at the moment the list is drawn, and neither is stored — a running
+/// session is a process this server holds, and what is waiting is an `OR` the
+/// store computes over rows that move on their own. Which mark either one comes
+/// out as is the viewer's, and the rule there is one line: waiting wins.
 async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
@@ -386,6 +393,12 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
+    // Read once for the whole list rather than per row: which Conversations are
+    // running is one lock away, and asking it per row would take that lock as
+    // many times as there are Conversations for an answer that cannot change
+    // between them any more meaningfully than it changes between reads.
+    let working = state.sessions.working();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| ConversationEntry {
@@ -393,6 +406,8 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
             branch: conversation.branch,
             repo: conversation.repo,
             state: lifecycle(conversation.state),
+            working: working.contains(&conversation.id),
+            waiting: conversation.waiting,
         })
         .collect();
 

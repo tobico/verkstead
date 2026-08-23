@@ -187,6 +187,14 @@ pub struct ConversationRow {
     pub repo: String,
 
     pub state: Lifecycle,
+
+    /// Whether anything about this Conversation is waiting on the human.
+    ///
+    /// One fact folded from every source there is, rather than a list the row's
+    /// reader is left to weigh: what the sidebar says is *this one wants you*,
+    /// and which source said so is the Conversation's own page to show. The
+    /// sources are [`conversations`]'s, all of them in the one query.
+    pub waiting: bool,
 }
 
 /// The word the `kind` column holds for a Question Set.
@@ -805,15 +813,54 @@ async fn started(
     Ok(Some(id))
 }
 
-/// Every Conversation, newest first.
+/// Every Conversation, newest first, and whether each is waiting on the human.
 ///
 /// Newest first like the Set lists, and for the same reason: what was started
 /// last is what is being worked on. The design gives the sidebar a manual order
 /// eventually; until there is one, the order a Conversation was started in is
 /// the one order that means anything.
+///
+/// `waiting` is an `OR` over the sources, computed here rather than by the
+/// caller, because every one of them is a read of this database and the sidebar
+/// is one list: a caller folding them itself would be issuing a query per row
+/// for facts a subselect already has. A new source is one more clause — which is
+/// how the Hold will arrive, once there is one to ask about.
+///
+/// The sources, in the order they appear below:
+///
+/// - A **Question Set with no Response and no archiving** — an ask left open.
+///   Blocking and Deferred alike: what draws the human is that there is
+///   something answerable, not whether the asking session is idling on it.
+/// - An **open Interruption**, which is a run stopped on a choice only they can
+///   make. Read off the table rather than off the Timeline, so the whole list
+///   costs one query.
+/// - The **Direction** state, which is the Conversation sitting on a proposal
+///   the human has to pick a direction from.
+///
+/// A **Draft** is none of them, whatever else is true of it: it is waiting on
+/// the human in the ordinary sense, and the sidebar says so by drawing it as a
+/// draft rather than by marking it as an ask.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
-    let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
-        "SELECT c.id, c.branch, r.name, c.state
+    let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
+        "SELECT c.id, c.branch, r.name, c.state,
+                c.state <> 'draft' AND (
+                    c.state = 'direction'
+                    OR EXISTS (
+                        SELECT 1 FROM set_events s
+                        JOIN timeline_events e ON e.id = s.event_id
+                        WHERE e.conversation_id = c.id
+                          AND NOT EXISTS (
+                              SELECT 1 FROM responses p WHERE p.set_id = s.set_id
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
+                          )
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM interruptions i
+                        WHERE i.conversation_id = c.id AND i.remedy IS NULL
+                    )
+                ) AS waiting
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          ORDER BY c.id DESC",
@@ -823,12 +870,13 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     .context("listing the Conversations")?;
 
     rows.into_iter()
-        .map(|(id, branch, repo, state)| {
+        .map(|(id, branch, repo, state, waiting)| {
             Ok(ConversationRow {
                 id,
                 branch,
                 repo,
                 state: Lifecycle::read(&state)?,
+                waiting,
             })
         })
         .collect()

@@ -238,7 +238,7 @@ describe("the workbench", () => {
     ).toEqual(SIDEBAR.map((entry) => entry.branch));
   });
 
-  it("says of each conversation which repo it is in and where it has got to", async () => {
+  it("says of each conversation which repo it is in", async () => {
     theWorkbench();
     mount();
 
@@ -247,7 +247,10 @@ describe("the workbench", () => {
     )!;
 
     expect(row.querySelector(".repo")!.textContent).toBe(DRAFTING.repo);
-    expect(row.querySelector(".state")!.textContent).toBe(DRAFTING.state);
+
+    // And nothing about where it has got to, in words: that is drawn now — see
+    // *how a card says where its conversation has got to*.
+    expect(row.querySelector(".state")).toBeNull();
   });
 
   it("says so plainly when nothing is being worked on", async () => {
@@ -284,6 +287,175 @@ describe("the workbench", () => {
     expect(container.querySelector(".start-conversation")).toBeNull();
     expect(screen.getByText("register one").getAttribute("href")).toBe(
       "/repos",
+    );
+  });
+});
+
+/// The sidebar drawn over a sidebar of this test's own making, so that a row can
+/// be given facts no fixture happens to carry.
+///
+/// The rows are the fixture's, altered: what is being asked here is what a card
+/// does with `state`, `working` and `waiting`, and everything else about a row
+/// should stay whatever the server really said.
+function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
+  return theWorkbench(
+    whenever(
+      "/api/ui/conversations",
+      json(
+        rows.map((row, n) => ({
+          ...SIDEBAR[0]!,
+          id: n + 1,
+          branch: `b${n}`,
+          ...row,
+        })),
+      ),
+    ),
+  );
+}
+
+/// The cards of a sidebar drawn that way, in the order they were given.
+async function cards(container: ParentNode): Promise<HTMLElement[]> {
+  await drawn(container, ".conversation-row");
+  return [...container.querySelectorAll<HTMLElement>(".conversation-row")];
+}
+
+/// How a card says where its Conversation has got to, now that it no longer says
+/// it in words: a mark at the right edge for what is happening to it now, and
+/// the card's own treatment for a draft and for work that has stopped.
+///
+/// Which specific active state it is in — grilling, implementing, wrapping — is
+/// deliberately not drawn. What the sidebar is for is finding the Conversation to
+/// look at, and all three of those are *this one is under way*.
+describe("how a card says where its conversation has got to", () => {
+  it("turns a spinner on a conversation whose session is running", async () => {
+    theSidebar({ state: "Implementing", working: true, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.working")).toBeTruthy();
+    expect(card!.querySelector(".mark.waiting")).toBeNull();
+  });
+
+  it("shows a dot on a conversation waiting on the human", async () => {
+    theSidebar({ state: "Grilling", working: false, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  /// A Blocking Ask is exactly this: the session that asked is still alive and
+  /// idling on the answer. Of the two things true of it, the one the human can do
+  /// something about is the ask.
+  it("shows the dot and not the spinner when it is both", async () => {
+    theSidebar({ state: "Grilling", working: true, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  it("marks nothing on a conversation that is neither", async () => {
+    theSidebar({ state: "Implementing", working: false, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark")).toBeNull();
+  });
+
+  it("draws a draft as a draft, and marks nothing on it", async () => {
+    theSidebar({ state: "Draft", working: false, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.classList.contains("draft")).toBe(true);
+    expect(card!.querySelector(".mark")).toBeNull();
+
+    // What "draft" means is the stylesheet's, and jsdom lays nothing out.
+    expect(stylesheet).toContain(
+      ".conversation-row.draft button {\n  border-style: dotted;\n}",
+    );
+  });
+
+  /// Which of the two it was is the details pane's to say. The sidebar's business
+  /// is that there is nothing here to do.
+  it("dims finished and aborted work identically", async () => {
+    theSidebar({ state: "Done" }, { state: "Aborted" }, { state: "Wrapping" });
+    const { container } = mount();
+
+    expect((await cards(container)).map((card) => card.className)).toEqual([
+      "conversation-row ended",
+      "conversation-row ended",
+      "conversation-row",
+    ]);
+  });
+
+  /// Dimmed and still a row to press: a Done Conversation can be reopened.
+  it("opens a dimmed conversation like any other", async () => {
+    theSidebar({ state: "Done" });
+    const { container, history } = mount();
+
+    const [card] = await cards(container);
+    fireEvent.click(card!.querySelector("button")!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/1"));
+  });
+
+  /// The marks are nothing to a screen reader, so the whole of what the card says
+  /// goes on the button's label — including the state that used to be written
+  /// under the name.
+  it("keeps every one of them readable aloud", async () => {
+    theSidebar(
+      {
+        branch: "spinning",
+        repo: "verkstead",
+        state: "Implementing",
+        working: true,
+        waiting: false,
+      },
+      {
+        branch: "asking",
+        repo: "askance",
+        state: "Grilling",
+        working: true,
+        waiting: true,
+      },
+      {
+        branch: "quiet",
+        repo: "verkstead",
+        state: "Done",
+        working: false,
+        waiting: false,
+      },
+    );
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector("button")!.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "spinning, verkstead, Implementing, a session is running",
+      "asking, askance, Grilling, waiting on you",
+      "quiet, verkstead, Done",
+    ]);
+  });
+
+  /// The spinner is motion, and motion is something to be able to turn off.
+  it("holds the spinner still where motion is unwelcome", () => {
+    expect(stylesheet).toContain(
+      "@media (prefers-reduced-motion: reduce) {\n" +
+        "  .conversation-row .mark.working {\n" +
+        "    animation: none;\n" +
+        "  }\n" +
+        "}",
     );
   });
 });

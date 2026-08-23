@@ -1225,6 +1225,115 @@ async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
     );
 }
 
+/// The one row of the sidebar, for the tests about what a row says of itself.
+async fn only_row(app: &Router) -> ConversationEntry {
+    let sidebar = sidebar(app).await;
+    assert_eq!(sidebar.len(), 1, "these tests keep one Conversation");
+    sidebar[0].clone()
+}
+
+/// Archive a Set the way the human does with one nobody is waiting on.
+async fn archive(app: &Router, set_id: i64) -> verkstead_render::Archived {
+    post(
+        app,
+        &format!("/api/ui/sets/{set_id}/archive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// The sidebar says a Conversation is waiting on the human for as long as there
+/// is a Set on its Timeline nobody has settled — and stops the moment one is,
+/// whichever way it was settled.
+///
+/// Nothing here asks how the Set was put: a Blocking Ask and a Deferred Ask are
+/// the same row in the same table, and what draws the human is that there is
+/// something answerable rather than whether a session is idling on the answer.
+#[tokio::test]
+async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    assert!(!only_row(&app).await.waiting, "nothing has been asked yet");
+
+    let set = ask(&app, id, ORDINARY).await;
+    assert!(only_row(&app).await.waiting);
+
+    answer(&app, set).await;
+    assert!(
+        !only_row(&app).await.waiting,
+        "an answered Set is a decision taken, not one outstanding",
+    );
+}
+
+#[tokio::test]
+async fn a_set_that_was_archived_unanswered_stops_drawing_the_human_too() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let set = ask(&app, id, ORDINARY).await;
+    assert!(only_row(&app).await.waiting);
+
+    archive(&app, set).await;
+    assert!(!only_row(&app).await.waiting);
+}
+
+/// The grilling wrapped and the human has to pick a direction, which is the one
+/// source of *waiting* that is the Conversation's own state rather than something
+/// on its Timeline.
+#[tokio::test]
+async fn a_conversation_choosing_its_direction_is_waiting_on_the_human() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    // Accepting the proposal answers the Set as it moves the Conversation, so
+    // what is left waiting is the Direction and nothing else.
+    answer(&app, ask(&app, id, PROPOSING).await).await;
+
+    let row = only_row(&app).await;
+    assert_eq!(row.state, Lifecycle::Direction);
+    assert!(row.waiting);
+
+    direct(&app, id, "inline").await;
+    assert!(
+        !only_row(&app).await.waiting,
+        "the direction is chosen; there is nothing left to pick",
+    );
+}
+
+/// A Draft is waiting on the human in the ordinary sense — nobody has written its
+/// Brief — and the sidebar says so by drawing it as a draft rather than by
+/// marking it as an ask. So the flag stays off, whatever else is true of it.
+#[tokio::test]
+async fn a_draft_is_never_marked_as_waiting() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    let set = ask(&app, id, ORDINARY).await;
+    let row = only_row(&app).await;
+
+    assert_eq!(row.state, Lifecycle::Draft);
+    assert!(!row.waiting);
+
+    // And the Set is genuinely unanswered: what is being read here is the draft
+    // rule and not an empty Timeline.
+    assert_eq!(
+        answer(&app, set).await,
+        verkstead_render::Submitted::Accepted
+    );
+}
+
+/// A server running no sessions at all — which is every one of these — has none
+/// to report. What a running one does to the row is `sessions.rs`'s to say, being
+/// the file with an agent in it.
+#[tokio::test]
+async fn a_conversation_with_no_session_running_is_not_working() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    grilling(&app, watched.path(), repo_id).await;
+
+    assert!(!only_row(&app).await.working);
+}
+
 /// The other half of the closing move: the document the grilling wrote before it
 /// proposed. Verkstead takes it as the proposal is accepted, and from then on the
 /// Timeline holds it — which is what the human reads and what the implementation

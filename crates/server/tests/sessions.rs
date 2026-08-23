@@ -79,6 +79,44 @@ impl Grilling {
         get(&self.app, &format!("/api/ui/conversations/{}", self.id)).await
     }
 
+    /// And as the sidebar reads it, which is where what is happening to it right
+    /// now is drawn: a spinner while a session runs, a dot while something is
+    /// waiting on the human.
+    ///
+    /// The one row, because these fixtures keep one Conversation.
+    async fn row(&self) -> verkstead_render::ConversationEntry {
+        let sidebar: Vec<verkstead_render::ConversationEntry> =
+            get(&self.app, "/api/ui/conversations").await;
+
+        sidebar
+            .into_iter()
+            .find(|row| row.id == self.id)
+            .expect("this Conversation is on the sidebar")
+    }
+
+    /// Read the row back until it says something, or give up.
+    async fn row_until<T>(
+        &self,
+        reached: impl Fn(&verkstead_render::ConversationEntry) -> Option<T>,
+    ) -> T {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let row = self.row().await;
+
+            if let Some(reached) = reached(&row) {
+                return reached;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the row never got there. It says: {row:?}"
+            );
+
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     /// Read it back until the session has got somewhere, or give up.
     async fn until<T>(&self, reached: impl Fn(&ConversationView) -> Option<T>) -> T {
         let deadline = Instant::now() + PATIENCE;
@@ -1324,6 +1362,89 @@ async fn a_session_that_exits_leaves_a_conversation_that_says_so() {
         Lifecycle::Grilling,
         "where the work has got to is not what the session's ending decides"
     );
+}
+
+/// The sidebar's spinner: a Conversation reports that it is working for as long
+/// as it has a session in it, and stops the moment that session is over.
+///
+/// Read off the register of running processes rather than off anything stored,
+/// which is what makes the second half of this true at all — nothing writes a
+/// row saying the session ended, because there was never one saying it began.
+#[tokio::test]
+async fn a_conversation_reports_that_it_is_working_while_its_session_runs() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let row = fixture
+        .row_until(|row| row.working.then(|| row.clone()))
+        .await;
+    assert!(
+        !row.waiting,
+        "nothing is being asked, so the card turns rather than marks",
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+
+    fixture.row_until(|row| (!row.working).then_some(())).await;
+}
+
+/// And the sidebar's dot, for the source a Conversation can only get to by
+/// really running: a run that stopped on an Interruption is waiting on the human
+/// until a Remedy is chosen.
+///
+/// It is waiting and not working by then — the session that failed is gone — so
+/// this is also the plainest case of the two facts being separate things.
+#[tokio::test]
+async fn a_run_stopped_on_an_interruption_is_waiting_on_the_human() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            sleep 300
+            ;;
+        *)
+            printf 'error: unresolved import crate::window\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    // The grilling session is still sitting on its `sleep`, and its Set is the
+    // proposal — so what the row says here is that the human is being asked.
+    let set = fixture.ask(PROPOSING).await;
+    assert!(fixture.row().await.waiting, "a Set nobody has answered");
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    // Which the implementation session then fails, and the run stops.
+    let stopped = fixture.stopped().await;
+
+    // Waited on together rather than asserted off one snapshot: the session's
+    // relay leaves the register and the runner records the Interruption at much
+    // the same moment, and what matters is where the row settles.
+    fixture
+        .row_until(|row| (row.waiting && !row.working).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.settle(stopped.id, "Abort", "").await,
+        RemedySettled::Settled,
+    );
+
+    fixture.row_until(|row| (!row.waiting).then_some(())).await;
 }
 
 /// The record is the record. A server that has been restarted has no sessions

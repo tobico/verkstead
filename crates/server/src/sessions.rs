@@ -23,7 +23,7 @@
 //! at all, and that is exactly what a Conversation should then say rather than
 //! reading back a live one out of a database.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -402,6 +402,21 @@ impl Sessions {
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
             .map(|running| running.event_id)
+    }
+
+    /// Which Conversations have a session running right now.
+    ///
+    /// The whole set at once rather than a question per Conversation, because
+    /// the one thing that asks is the sidebar and the sidebar is a list: taking
+    /// the lock once and reading it once is what keeps drawing a list of
+    /// Conversations from being a list of lock acquisitions.
+    pub(crate) fn working(&self) -> HashSet<i64> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .keys()
+            .copied()
+            .collect()
     }
 
     /// The pace the runner works a backlog at — see [`Agents::pace`].
