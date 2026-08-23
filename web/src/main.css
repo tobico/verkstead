@@ -2108,23 +2108,46 @@ main:has(.workbench) {
   }
 }
 
-/* The Screen: the grid the session left, drawn as a terminal. The terminal
-   sizes itself from the grid it was handed, so this only has to give it a card
-   to sit on and somewhere to scroll sideways on a phone — a repaint is a
-   hundred columns wide whatever the pane is. */
+/* The Screen: the grid the session is showing, drawn as a terminal — and the
+   one thing this pane ever holds that is sized by the pane rather than by what
+   is in it. A column down the pane's whole height: the terminal takes the room
+   left under the header and the switcher, and the note or the Hold bar under it
+   keeps its own. What makes the pane a column to fill is the rule at the end of
+   this section.
+
+   The grid a session left behind cannot be redrawn at all — it is fixed at the
+   size it was printed for — so it is shown at its own size and scrolls in the
+   card it sits on: sideways on a phone, as it always did, and downwards where
+   the pane is the shorter of the two. */
 .screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin: 0;
 }
 
 .screen .terminal-host {
+  flex: 1;
+  min-height: 0;
   padding: 0.5rem;
-  overflow-x: auto;
+  overflow: auto;
   background: #000;
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* A live one is redrawn at whatever size this pane has, so there is nothing here
+   to scroll to — and a scrollbar would be worse than useless: it takes a strip
+   off the pane, the strip changes what fits, and what fits is what goes up the
+   socket. Two watchers would trade sizes until one of them closed, with the
+   smaller of the two always winning, which is the opposite of the rule. */
+.screen.live .terminal-host {
+  overflow: hidden;
+}
+
 .screen .read-only {
+  flex: none;
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -2136,6 +2159,7 @@ main:has(.workbench) {
    work is waiting — the accent means something is happening. */
 .screen .holding {
   display: flex;
+  flex: none;
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
@@ -2534,6 +2558,50 @@ main:has(.workbench) {
   .pane-back,
   .pane-forward {
     display: none;
+  }
+}
+
+/* The pane with a Screen in it, which is the one pane here that ends where the
+   window does rather than running on down the page. A column: the header and
+   the turn count keep their size and the Screen takes the rest, so the terminal
+   is given a height to fit itself to — and a live session's terminal is told
+   what it was given, which is why nothing scrolls under one.
+
+   Here rather than beside the Screen's own rules because of what it has to
+   agree with: the three rules above are what decide which panes are drawn, and
+   all this does to one of them is make a block into a column.
+
+   Only where a Screen is showing. The Transcript is a column of the page and
+   scrolls like everything else this pane holds, which is what switching back to
+   it puts back.
+
+   The window's height at every width: above the first breakpoint the grid has
+   already given the pane exactly that, and below it the pane is the whole page
+   with nothing standing above it. And the room a scrolling pane leaves under
+   its last line goes, because a pane that does not scroll has no use for it. */
+.workbench > .details-pane:has(.screen) {
+  flex-direction: column;
+  height: 100dvh;
+  padding-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.workbench > .details-pane:has(.screen) > :not(.screen) {
+  flex: none;
+}
+
+/* And that it is a column at all, said twice, because the pane is shown by two
+   different rules: by name below the last breakpoint, and along with every
+   other pane above it. What must not happen is either of them turning into a
+   `display` for a pane that is meant to be hidden — so each is answered where
+   it is made rather than once over the top of both. */
+.workbench[data-pane="details"] > .details-pane:has(.screen) {
+  display: flex;
+}
+
+@media (min-width: 80rem) {
+  .workbench > .details-pane:has(.screen) {
+    display: flex;
   }
 }
 

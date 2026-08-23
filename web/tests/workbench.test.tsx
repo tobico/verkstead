@@ -2329,9 +2329,14 @@ describe("watching a live session's screen", () => {
     expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
   });
 
-  /// How wide the pane is goes back up, and the server decides what to do with
+  /// How big the pane is goes back up, and the server decides what to do with
   /// it: the size that comes back is a repaint, not this side's own guess.
-  it("says how wide the pane it is drawn in is", async () => {
+  ///
+  /// Both dimensions of it. The rows used to be the server's own count echoed
+  /// back, which left the grid whatever height the session was started at; the
+  /// pane gives the terminal a height now, so the rows that fit are this
+  /// window's answer exactly as the columns are.
+  it("says how big the pane it is drawn in is", async () => {
     watching();
     const { socket } = await watched();
 
@@ -2340,29 +2345,126 @@ describe("watching a live session's screen", () => {
     await waitFor(() => expect(socket.sent.length).toBeGreaterThan(0));
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
-      Resized: { columns: FITS.cols, rows: SCREEN.rows },
+      Resized: { columns: FITS.cols, rows: FITS.rows },
     });
+
+    // Which is the pane's measurement rather than the grid it was handed: the
+    // fixture's Screen is neither of those numbers.
+    expect(FITS.rows).not.toBe(SCREEN.rows);
   });
 
   /// Two watchers of different sizes must not argue. A repaint arriving at a
-  /// width this pane never asked for is the latest window having won, and this
+  /// size this pane never asked for is the latest window having won, and this
   /// one asking for its own back would be the two of them trading repaints for
   /// as long as both stayed open.
-  it("does not ask for its width back when somebody else resizes", async () => {
+  it("does not ask for its size back when somebody else resizes", async () => {
     watching();
     const { socket } = await watched();
 
     socket.says(PAINTED);
     await waitFor(() => expect(socket.sent).toHaveLength(1));
 
-    // The server's answer to that, and then a repaint at a width nothing here
-    // asked for: another device, watching the same Screen on a smaller one.
-    socket.says({ Painted: { ...SCREEN, columns: FITS.cols } });
-    socket.says({ Painted: { ...SCREEN, columns: 60 } });
+    // The server's answer to that, and then repaints at a width and a height
+    // nothing here asked for: another device, watching the same Screen in a
+    // smaller window.
+    socket.says({ Painted: { ...SCREEN, columns: FITS.cols, rows: FITS.rows } });
+    socket.says({ Painted: { ...SCREEN, columns: 60, rows: FITS.rows } });
+    socket.says({ Painted: { ...SCREEN, columns: FITS.cols, rows: 20 } });
 
     // Said synchronously if it were said at all — the handler measures the pane
     // the moment it has painted the repaint.
     expect(socket.sent).toHaveLength(1);
+  });
+
+  /// And the pane it is measuring is a pane with a height: the stylesheet ends
+  /// it where the window ends and gives the terminal what is left under the
+  /// header, rather than letting it run on down a page that scrolls. Read off
+  /// the stylesheet, because jsdom lays nothing out.
+  it("gives the Screen the pane's height rather than the page's", () => {
+    expect(stylesheet).toContain(
+      ".workbench > .details-pane:has(.screen) {\n" +
+        "  flex-direction: column;\n" +
+        "  height: 100dvh;\n" +
+        "  padding-bottom: 1.25rem;\n" +
+        "  overflow: hidden;\n" +
+        "}",
+    );
+
+    // What is above the terminal keeps its size; the Screen takes the rest.
+    expect(stylesheet).toContain(
+      ".workbench > .details-pane:has(.screen) > :not(.screen) {\n" +
+        "  flex: none;\n" +
+        "}",
+    );
+    expect(stylesheet).toContain(
+      ".screen {\n" +
+        "  display: flex;\n" +
+        "  flex: 1;\n" +
+        "  flex-direction: column;\n" +
+        "  min-height: 0;\n",
+    );
+
+    // And the grid a session left behind, which nothing can resize: at its own
+    // size, scrolling in the card it sits on rather than scrolling the pane.
+    expect(stylesheet).toContain(
+      ".screen .terminal-host {\n" +
+        "  flex: 1;\n" +
+        "  min-height: 0;\n" +
+        "  padding: 0.5rem;\n" +
+        "  overflow: auto;\n",
+    );
+  });
+
+  /// A live terminal is the one that must not scroll, and the rule that says so
+  /// is doing more than tidying: a scrollbar takes a strip off the pane, the
+  /// strip changes what fits, and what fits is what goes up the socket — so a
+  /// watcher shown a bigger window's grid would ask for its own back through
+  /// the scrollbar, and the smaller of the two would always win.
+  it("clips a live terminal rather than letting it scroll", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+
+    const screen = await drawn(container, ".details-pane .screen");
+    expect(screen.classList).toContain("live");
+
+    expect(stylesheet).toContain(
+      ".screen.live .terminal-host {\n  overflow: hidden;\n}",
+    );
+  });
+
+  /// And the grid of a session that has ended does not carry it: nothing will
+  /// resize that one, so scrolling is the only way to the rest of it.
+  it("leaves the grid of an ended session scrolling", async () => {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    theSpeaking();
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const screen = await drawn(container, ".details-pane .screen");
+    expect(screen.classList).not.toContain("live");
+  });
+
+  /// The height belongs to the Screen and not to the pane: switching back to the
+  /// Transcript takes the element the rule hangs off away with it, which is what
+  /// puts the pane's ordinary scrolling back.
+  it("stops binding the pane's height once the Transcript is showing", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+    await drawn(container, ".details-pane .screen");
+
+    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+
+    await waitFor(() =>
+      expect(container.querySelector(".details-pane .screen")).toBeNull(),
+    );
   });
 
   /// Closing the pane lets the socket go. Watching commits the human to nothing

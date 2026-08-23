@@ -17,12 +17,24 @@
 //! ended is fetched**, because its Screen is the one it last stood on and
 //! nothing will move it again.
 //!
-//! **How wide the pane is goes back up the socket**, and the latest window wins
+//! **How big the pane is goes back up the socket**, and the latest window wins
 //! for everybody: there is one Screen however many devices are watching it, and
 //! the size reaches the session's own terminal, so its interface redraws to fit.
 //! What comes back is a repaint, which is the only thing that says how big the
 //! grid now is — so the size is the server's answer rather than this one's
 //! guess, exactly as the contents are.
+//!
+//! **Both dimensions of it.** The rows were the server's to choose and the
+//! columns this side's, on the reasoning that the pane was a column of a page
+//! that scrolled and so had no height of its own to speak of. It has one now:
+//! the Screen takes the pane whole, the terminal takes the room left under the
+//! header, and nothing scrolls under it — so how many rows fit is as much a fact
+//! about this window as how many columns are, and a session's interface lays
+//! itself out against both.
+//!
+//! A session that has ended is where that stops. Its grid is the one it last
+//! stood on and nothing will resize it again, so it is drawn at its own size and
+//! scrolls inside the pane where the pane is the shorter of the two.
 //!
 //! **And so does what is typed into it.** The first keystroke takes the Hold:
 //! the human is at the keyboard, Verkstead stops ending sessions and advancing
@@ -67,6 +79,7 @@ import type {
   ConversationView,
   Screen as Painted,
   Shown,
+  Size,
   Watching,
 } from "../api/types";
 import { useReading } from "../freshness";
@@ -118,7 +131,7 @@ export function Screen(props: {
   }));
 
   /// Where the terminal is mounted, the terminal itself, and the addon that
-  /// measures how many columns fit in the pane.
+  /// measures how much of a grid fits in the pane.
   let host: HTMLDivElement | undefined;
   let terminal: Terminal | undefined;
   let fit: FitAddon | undefined;
@@ -239,22 +252,22 @@ export function Screen(props: {
     // moves the pane over to the fetch.
     socket.addEventListener("error", () => setLost(true));
 
-    /// How wide this watcher has said its pane is. Nothing yet, until it has
+    /// How big this watcher has said its pane is. Nothing yet, until it has
     /// been measured — see [`measure`].
-    let asked = 0;
+    let asked: Size | undefined;
 
-    /// How wide the pane is, in characters, said up the socket.
+    /// How big the pane is, in characters, said up the socket.
     ///
-    /// The columns and not the rows: the pane is a column of the page that
-    /// scrolls, so its height is the reader's window rather than the Screen's,
-    /// and the grid keeps however many rows the server says it has. What a
-    /// terminal application lays itself out against is the width.
+    /// Columns and rows both, because the pane gives the terminal the room left
+    /// under the header and no more — see the note at the top. The addon
+    /// measures the element the terminal was opened in, which is the element the
+    /// stylesheet has just sized, so both numbers are this window's own answer.
     ///
     /// Said only when *this pane* has changed shape, which is what `asked`
-    /// remembers. Measured against the terminal's own width instead, two
-    /// watchers of different sizes would argue: each would see the other's
-    /// repaint arrive at the wrong width and ask for its own back, forever. The
-    /// latest window wins by nobody re-asserting an older one.
+    /// remembers. Measured against the terminal's own size instead, two watchers
+    /// of different shapes would argue: each would see the other's repaint arrive
+    /// at the wrong size and ask for its own back, forever. The latest window
+    /// wins by nobody re-asserting an older one.
     const measure = () => {
       if (!terminal || !fit || socket.readyState !== WebSocket.OPEN) {
         return;
@@ -262,15 +275,17 @@ export function Screen(props: {
 
       const fits = fit.proposeDimensions();
 
-      if (!fits?.cols || fits.cols === asked) {
+      if (!fits?.cols || !fits.rows) {
         return;
       }
 
-      asked = fits.cols;
+      if (fits.cols === asked?.columns && fits.rows === asked.rows) {
+        return;
+      }
 
-      const resized: Watching = {
-        Resized: { columns: fits.cols, rows: terminal.rows },
-      };
+      asked = { columns: fits.cols, rows: fits.rows };
+
+      const resized: Watching = { Resized: asked };
 
       socket.send(JSON.stringify(resized));
     };
@@ -308,7 +323,12 @@ export function Screen(props: {
         </p>
       </Match>
       <Match when={live() || screen.data}>
-        <div class="screen">
+        {/* Whether the session is still printing, said on the element as well as
+            asked in here: it is what decides whether the terminal scrolls. One
+            still running is redrawn at whatever size this pane is, so there is
+            nothing to scroll to; the grid one left behind is fixed at the size
+            it was printed for. */}
+        <div class="screen" classList={{ live: live() }}>
           <div class="terminal-host" ref={host} />
           {/* What the human may do with this Screen, said under it. A Hold
               outranks everything else there is to say: it is the one thing here
