@@ -5880,3 +5880,372 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
         "with nothing about the Conversation moved by any of it",
     );
 }
+
+/// Retry on a stall means *start driving it again*, and what that is, is the
+/// state's to say: an inline run is one session, so what it is, is a fresh one.
+///
+/// The note is the whole point of the remedy taking one — a dead session leaves
+/// half-done work behind, and "the counter is written, do the middleware" is
+/// only worth typing if it reaches the agent that can act on it — so what this
+/// reads back is the relaunched session's own prompt.
+///
+/// And then it stalls again, which is the other half of what a relaunch has to
+/// leave behind: the session lands its work, nothing follows it, and the
+/// Conversation is standing still once more. A relaunch that registered no
+/// driver would have made the second one undetectable.
+#[tokio::test]
+async fn retrying_a_stalled_inline_run_starts_a_fresh_session_told_what_the_human_wrote() {
+    let fixture = grilling_swept(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'prompt was: %s\n' "$2"
+            printf 'a limiter\n' >> limiter.md
+            git add limiter.md
+            git commit --quiet -m 'feat: rate limiting'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    // The session committed its work and exited, so nothing was left to ask the
+    // human about — and nothing was left driving the Conversation either, which
+    // is the stall.
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(
+        stalled.what, "implementing the work",
+        "the Conversation says it is implementing and nothing is: {stalled:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture
+            .settle(
+                stalled.id,
+                "Retry",
+                "the counter is written, do the middleware"
+            )
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("the counter is written, do the middleware"),
+        "what the human wrote reaches the agent that can act on it: {printed:?}",
+    );
+    assert!(
+        printed.contains("~/.claude/skills/implementing/SKILL.md"),
+        "and it is the inline run started again, which is what the state said: {printed:?}",
+    );
+
+    let again = stopped_again(&fixture, stalled.id).await;
+
+    assert_eq!(
+        again.what, "implementing the work",
+        "the relaunched session landed its work and nothing followed it, so the \
+         Conversation is standing still again — and being asked about again",
+    );
+
+    let settled = interruptions(&fixture.view().await)
+        .into_iter()
+        .find(|stopped| stopped.id == stalled.id)
+        .and_then(|stopped| stopped.settled.clone())
+        .expect("the first stall was answered");
+
+    assert_eq!(settled.remedy, Remedy::Retry);
+    assert_eq!(
+        settled.note, "the counter is written, do the middleware",
+        "the first stall is settled, which is what leaves room for the second",
+    );
+}
+
+/// And on a backlog run it means the runner picks the backlog up again, reading
+/// what is next off `.tasks/` exactly as it always does.
+///
+/// What is next is the repository's to say and has not changed on account of
+/// nothing having been running: the task whose session died is still there, so
+/// that is the task the relaunched session is started on.
+///
+/// Taking over manually is what leaves this Conversation standing still — the
+/// human said they would do it themselves and then did not — which is the
+/// ordinary way a run in a live server ends up with nothing driving it.
+#[tokio::test]
+async fn retrying_a_stalled_backlog_run_takes_the_next_task_off_the_repository() {
+    let fixture = grilling_swept(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ ! -f .tasks/TODO.md ]; then
+                mkdir -p .tasks
+                printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+                printf '# 01. Count the requests\n' > .tasks/01-count.md
+                git add .tasks
+                git commit --quiet -m 'chore: plan the rate limiter'
+                printf 'the backlog is written\n'
+                sleep 300
+            elif [ ! -f TRIED ]; then
+                printf 'once\n' > TRIED
+                printf 'this task is beyond me\n'
+                exit 1
+            else
+                printf 'prompt was: %s\n' "$2"
+                sleep 300
+            fi
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+
+    let died = fixture.stopped().await;
+
+    assert_eq!(
+        died.what, "the task in .tasks/01-count.md",
+        "the run stopped at the task whose session died: {died:?}",
+    );
+    assert_eq!(
+        fixture.settle(died.id, "TakeOver", "").await,
+        RemedySettled::Settled
+    );
+
+    // Verkstead has stopped driving and the human has not started: the run is
+    // over with the work half done and nothing on the page to press, which is
+    // exactly what the sweep is for.
+    let stalled = stopped_again(&fixture, died.id).await;
+
+    assert_eq!(stalled.what, "implementing the work");
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture
+            .settle(stalled.id, "Retry", "the counter belongs in its own module")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the run picks the backlog up again, which is the fork that reads it: {printed:?}",
+    );
+    assert!(
+        printed.contains("the counter belongs in its own module"),
+        "told what the human wrote alongside the retry: {printed:?}",
+    );
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "and it is the same task, because nothing reverted anything",
+    );
+}
+
+/// And on a wrap-up it means the watchers started again — the set of them, the
+/// way a restarting server takes an interrupted wrap-up up again.
+///
+/// A wrap-up starts no session of its own, so there is nothing here to read a
+/// prompt back off: what says it is being driven again is that the pull request
+/// gets asked about, the branch gets read, and the Conversation reaches the end
+/// of wrapping up on its own.
+///
+/// The condition is arranged rather than provoked. Every route into Wrapping
+/// starts the watchers, so the only way to have a wrap-up nothing is watching is
+/// to make the move the way the store makes it and leave them unstarted — which
+/// is precisely what a wrap-up whose watchers have all died looks like.
+#[tokio::test]
+async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
+    let fixture = grilling_asking(
+        r#"
+        case "$2" in
+        *reviewing/SKILL.md*)
+            printf 'I read the whole branch and found nothing worth raising\n'
+            ;;
+        *manual-task/SKILL.md*)
+            printf 'nothing of the sort in here\n'
+            ;;
+        *implementing/SKILL.md*)
+            printf 'a limiter\n' > limiter.md
+            git add limiter.md
+            git commit --quiet -m 'feat: rate limiting'
+            ;;
+        *)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            ;;
+        esac
+        "#,
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+
+    fixture
+        .until(|view| (commits(view).len() == 1).then_some(()))
+        .await;
+    fixture.quiet().await;
+
+    wrapping_unwatched(&fixture).await;
+
+    // This server sweeps too slowly to look by itself, so what looks is the
+    // manual task ending — which is the moment the human wants the answer
+    // anyway.
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_profile
+        .as_ref()
+        .expect("both Profiles are fixed before grilling starts")
+        .id;
+
+    assert_eq!(
+        fixture
+            .manual("Has anything come back on the pull request?", profile)
+            .await,
+        ManualTaskStarted::Started,
+    );
+
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(
+        stalled.what, "wrapping the work up",
+        "the Conversation says it is wrapping up and nothing is watching it: {stalled:?}",
+    );
+
+    assert_eq!(
+        fixture
+            .settle(stalled.id, "Retry", "have another look at it")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    // The whole of a wrap-up, run again from nothing: the checks asked about and
+    // green, the branch read and nothing raised, and nothing said on the pull
+    // request left outstanding.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        interruptions(&fixture.view().await).len(),
+        1,
+        "and the stall was the only thing anybody was asked about: {:?}",
+        interruptions(&fixture.view().await),
+    );
+}
+
+/// Wait until something other than `answered` has stopped the run, and hand back
+/// what it stopped at.
+///
+/// A Conversation that stalls twice is answered twice, and the second answer is
+/// the interesting one: at most one Interruption is open at a time, so a second
+/// one existing at all is what says the first was settled and the Conversation
+/// went on to stand still again.
+async fn stopped_again(fixture: &Grilling, answered: i64) -> InterruptionEvent {
+    fixture
+        .until(|view| {
+            interruptions(view)
+                .into_iter()
+                .find(|stopped| stopped.id != answered)
+                .cloned()
+        })
+        .await
+}
+
+/// Move a Conversation into Wrapping the way its finish step's pull request
+/// does, and start none of the watchers that ordinarily follow.
+///
+/// The store's own move, which is the half [`crate::wrapping::opened`] does
+/// before it starts watching anything — so what this leaves behind is a
+/// Conversation wrapping up with nothing watching it, which is what a wrap-up
+/// whose watchers have all died is.
+async fn wrapping_unwatched(fixture: &Grilling) {
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    let recorded = verkstead_server::store::record_pull_request(
+        &pool,
+        fixture.id,
+        &verkstead_server::store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    assert_eq!(recorded, verkstead_server::store::Wrapping::Started);
+}

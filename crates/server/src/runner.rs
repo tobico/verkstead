@@ -36,6 +36,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use verkstead_schema::Direction;
+
 use crate::AppState;
 use crate::drivers::Driving;
 use crate::repos::git;
@@ -306,51 +308,13 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             }
             step => (step, Prompt::NextTask),
         },
-        store::Step::Inline => {
-            let Some(session) =
-                launch_in_turn(&state, conversation_id, Prompt::Implementing, &note).await
-            else {
-                return;
-            };
-
-            return follow_inline(state, conversation_id, session, driving).await;
-        }
+        store::Step::Inline => return inline_again(state, conversation_id, note, driving).await,
         // Nor is this one. A roadmap Conversation has one step of its own, so a
         // retry is that step again — unless the roadmap already landed, which is
         // the same case a retried finish has: what failed was finding the pull
         // request it opened, and the retry is that question asked again.
         store::Step::Roadmap => {
-            let Some(base) = base(&state, conversation_id).await else {
-                return;
-            };
-
-            let staged = {
-                let worktree = working_in.clone();
-                let base = base.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    !crate::stages::touched(&worktree, &base).is_empty()
-                })
-                .await
-                .unwrap_or(false)
-            };
-
-            if staged {
-                tracing::info!(
-                    conversation_id,
-                    "the roadmap is written, so the retry looks for the pull request again"
-                );
-
-                return crate::wrapping::opened(&state, conversation_id, None).await;
-            }
-
-            let Some(session) =
-                launch_in_turn(&state, conversation_id, Prompt::Staging, &note).await
-            else {
-                return;
-            };
-
-            return follow_roadmap(state, conversation_id, base, session, driving).await;
+            return roadmap_again(state, conversation_id, note, &working_in, driving).await;
         }
         // Not a backlog step at all: the backlog was finished before this
         // Conversation ever had a pull request to have checks on. Retrying it is
@@ -373,16 +337,11 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         }
         // Nor is this one, and it is the one that is not a session at all: a
         // stall is raised about a Conversation nothing was driving, so what a
-        // retry means is *start driving it again*, which the state it is in
-        // decides and no step word can. Recorded and nothing launched until the
-        // relaunches land.
+        // retry means is *start driving it again* — which the state it is in
+        // decides and no step word can, so the reading is done where the stall
+        // was noticed. See [`crate::stalls::retried`].
         store::Step::Stalled => {
-            tracing::info!(
-                conversation_id,
-                "a stalled Conversation was retried, and relaunching what drives one is not \
-                 written yet"
-            );
-            return;
+            return crate::stalls::retried(state, conversation_id, note, driving).await;
         }
     };
 
@@ -393,6 +352,159 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
     };
 
     work(state, conversation_id, step, session, driving).await
+}
+
+/// Start driving a stalled implementation again, from wherever the repository
+/// now stands.
+///
+/// What Retry means where the Conversation it was pressed on is Implementing —
+/// see [`crate::stalls::retried`], which reads that off the state and hands it
+/// here. Which run stopped is the direction's to say, and each of the three
+/// picks up exactly where its own retry would: the backlog off `.tasks/`, an
+/// inline run in a fresh session, a roadmap off what the branch has written.
+///
+/// Nothing is decided from the stall itself, because a stall knows nothing: it
+/// was raised about a Conversation with nothing running, so there is no step to
+/// read and no session's last words to go on. What there is, is the repository,
+/// which is the same thing every other retry asks.
+///
+/// The registration is handed on rather than taken again, so a Conversation the
+/// human has just pressed Retry on is driven from that moment rather than from
+/// whenever the launch gets round to it — see [`crate::drivers`].
+pub(crate) async fn implementing_again(
+    state: AppState,
+    conversation_id: i64,
+    note: String,
+    driving: Driving,
+) {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left to work in");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to work in failed");
+            return;
+        }
+    };
+
+    // A Conversation is implementing because a direction was chosen, so a
+    // missing one is a record that cannot be true — and the one thing that says
+    // which run it is that stopped.
+    let Some(direction) = conversation.direction else {
+        tracing::error!(
+            conversation_id,
+            "a Conversation that says it is implementing has no direction recorded, \
+             so there is nothing to say what stalled"
+        );
+        return;
+    };
+
+    let Some(working_in) = conversation.worktree else {
+        tracing::info!(
+            conversation_id,
+            "the Conversation has no Worktree left, so nothing was started again"
+        );
+        return;
+    };
+
+    match direction {
+        Direction::Inline => inline_again(state, conversation_id, note, driving).await,
+        Direction::Roadmap => {
+            roadmap_again(state, conversation_id, note, &working_in, driving).await
+        }
+        // The backlog's own answer to what is next, asked of `.tasks/` exactly
+        // as every other turn of the run asks it — a stage's backlog included,
+        // it being a backlog like any other by the time there is one. What is
+        // next has not changed on account of nothing having been running.
+        Direction::TaskList => {
+            let step = decide(&working_in).await;
+
+            if step == Step::Nothing {
+                // Either the breakdown never landed one or the finish took the
+                // last of it away, and a stall cannot tell those apart: there is
+                // no step word on it and no session to have left a reason. So
+                // nothing is launched, the way a retried task whose backlog has
+                // gone launches nothing, and what the human has instead is the
+                // other two remedies and the composer.
+                tracing::info!(
+                    conversation_id,
+                    "there is no backlog left to work, so nothing was started again"
+                );
+                return;
+            }
+
+            tracing::info!(conversation_id, step = ?step, "a stalled run is being taken up again");
+
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::NextTask, &note).await
+            else {
+                return;
+            };
+
+            work(state, conversation_id, step, session, driving).await
+        }
+    }
+}
+
+/// Run an inline implementation again, in a fresh session told what the human
+/// wrote.
+///
+/// The whole of the work in one session, so there is nothing to read off the
+/// repository first: what the last one left behind is on the branch, and the
+/// note is what tells the new one about it.
+async fn inline_again(state: AppState, conversation_id: i64, note: String, driving: Driving) {
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing, &note).await
+    else {
+        return;
+    };
+
+    follow_inline(state, conversation_id, session, driving).await
+}
+
+/// Write the roadmap again — or, where the branch already has one, look for the
+/// pull request it opened.
+///
+/// The same two cases a retried finish has, one phase earlier: a roadmap
+/// Conversation's own work is one session, and a run that stopped after it had
+/// written the roadmap stopped on the question of what became of it rather than
+/// on the writing.
+async fn roadmap_again(
+    state: AppState,
+    conversation_id: i64,
+    note: String,
+    working_in: &Path,
+    driving: Driving,
+) {
+    let Some(base) = base(&state, conversation_id).await else {
+        return;
+    };
+
+    let staged = {
+        let worktree = working_in.to_owned();
+        let base = base.clone();
+
+        tokio::task::spawn_blocking(move || !crate::stages::touched(&worktree, &base).is_empty())
+            .await
+            .unwrap_or(false)
+    };
+
+    if staged {
+        tracing::info!(
+            conversation_id,
+            "the roadmap is written, so the retry looks for the pull request again"
+        );
+
+        return crate::wrapping::opened(&state, conversation_id, None).await;
+    }
+
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging, &note).await
+    else {
+        return;
+    };
+
+    follow_roadmap(state, conversation_id, base, session, driving).await
 }
 
 /// Plan a roadmap stage and then work the backlog it writes, from the first task

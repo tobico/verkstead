@@ -19,6 +19,13 @@
 //! about a session that is not there — so nothing failed, nothing exited, and
 //! the evidence reads as a report of a Conversation standing still.
 //!
+//! **What the Remedies mean here.** *Take over manually* and *Abort* mean
+//! exactly what they mean everywhere — Verkstead stops driving, or the run ends
+//! where it stands. Retry is the one that has to be read differently: every
+//! other Interruption names the step a session was launched for, and this one
+//! names no session at all, so what to start again is decided from the state the
+//! Conversation is in. See [`retried`].
+//!
 //! **When it looks.** At startup, every [`crate::Pace::stalls`] while the server
 //! runs, and the moment a Manual Task's session ends. Startup is the one that
 //! matters most: no driver survives the process, so a server coming back holds
@@ -32,6 +39,7 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 use crate::AppState;
+use crate::drivers::Driving;
 use crate::store::{self, Lifecycle};
 
 /// How often every Conversation is looked over, as [`crate::Pace`] has it by
@@ -149,6 +157,87 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
             conversation_id,
             "a Conversation has stalled and the Interruption saying so could not be raised"
         );
+    }
+}
+
+/// Start driving the Conversation again, because the human pressed Retry on the
+/// stall that said nothing was.
+///
+/// The one Retry that is not a step run again. Every other Interruption is
+/// raised by a session launched for something, so the record names what to
+/// launch; this one is raised about a Conversation with no session at all, and
+/// what ought to be driving it is the state's to say. So the state is read —
+/// now rather than when the stall was raised, because the human answers when
+/// they get to it and a Conversation moves on in the meantime.
+///
+/// `note` is what they wrote alongside, and it reaches the session the relaunch
+/// starts, exactly where a retried step's note goes. A wrap-up starts no session
+/// of its own — its watchers dispatch whatever the pull request turns out to
+/// need — so there the note has nowhere to go and is left on the record beside
+/// the Remedy.
+///
+/// `driving` is the registration [`crate::runner::retry`] took as the press
+/// arrived, handed on rather than taken again at the far end: the whole of what
+/// a relaunch fixes is a Conversation nothing is registered against, and a gap
+/// in the middle of fixing it would be a second stall raised about the very
+/// thing that was putting the first one right.
+pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String, driving: Driving) {
+    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state,
+        Ok(None) => {
+            tracing::error!(
+                conversation_id,
+                "there is no Conversation left to start driving again"
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to start driving again failed");
+            return;
+        }
+    };
+
+    match lifecycle {
+        // Whichever run it was that stopped, taken up from where the repository
+        // now stands — see [`crate::runner::implementing_again`].
+        Lifecycle::Implementing => {
+            crate::runner::implementing_again(state, conversation_id, note, driving).await;
+        }
+        // The watcher set started over the top of nothing, which is what a
+        // restarting server does with a Conversation it left wrapping up. Each
+        // of the four decides for itself whether there is anything left to do,
+        // so respawning them asks the pull request the same questions again
+        // rather than doing anything twice — see [`crate::wrapping::watching`].
+        Lifecycle::Wrapping => {
+            tracing::info!(
+                conversation_id,
+                "a stalled wrap-up was retried, so what watches one is started again"
+            );
+
+            // Registered before this one is let go, the four of them taking
+            // registrations of their own as they are spawned: the handover is
+            // the point, and dropping first would leave a moment where a sweep
+            // could find the Conversation undriven all over again.
+            crate::wrapping::watching(&state, conversation_id);
+            drop(driving);
+        }
+        Lifecycle::Grilling => {
+            tracing::info!(
+                conversation_id,
+                "a stalled grilling was retried, and relaunching one is not written yet"
+            );
+        }
+        // None of these is a state anything was supposed to be driving, so none
+        // of them is one a stall was raised about — this is a Conversation that
+        // moved between the stall and the human getting to it, which the move
+        // itself has already answered.
+        Lifecycle::Draft | Lifecycle::Direction | Lifecycle::Done | Lifecycle::Aborted => {
+            tracing::info!(
+                conversation_id,
+                state = ?lifecycle,
+                "the Conversation has moved on since it stalled, so nothing was started again",
+            );
+        }
     }
 }
 
