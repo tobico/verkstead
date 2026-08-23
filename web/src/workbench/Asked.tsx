@@ -17,11 +17,11 @@
 //! it on a phone does — both go through the one endpoint, and the Nudge that
 //! follows is what brings this pane back saying what was decided.
 
-import { useQuery } from "@tanstack/solid-query";
 import { Match, Switch, type JSX } from "solid-js";
 
 import { loadSet } from "../api/client";
 import type { QuestionSetEvent } from "../api/types";
+import { useReading } from "../freshness";
 import { Sheet } from "../set/Sheet";
 
 export function Asked(props: {
@@ -29,7 +29,7 @@ export function Asked(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const set = useQuery(() => ({
+  const set = useReading(() => ({
     // The same key the standalone page reads a Set under, so answering it in
     // either place puts the other right.
     queryKey: ["set", String(props.asked.set_id)],
@@ -37,7 +37,7 @@ export function Asked(props: {
 
     // And the same merge, for the same fold: this pane draws the same Sheet,
     // attached Diff and all — see the standalone page.
-    reconcile: "id",
+    freshness: { reconcile: "id" },
   }));
 
   const head = (

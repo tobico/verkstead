@@ -21,7 +21,7 @@
 //! this pane being what the third one says when no Event is open.
 
 import { A } from "@solidjs/router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
@@ -38,6 +38,7 @@ import type {
   ProfileChosen,
   ProfileEntry,
 } from "../api/types";
+import { useReading } from "../freshness";
 import { BROKEN } from "../profiles/ProfileList";
 
 /// What each way of being refused a branch name says.
@@ -141,9 +142,14 @@ function Worktree(props: { conversation: ConversationView }): JSX.Element {
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos.
 function Profiles(props: { conversation: ConversationView }): JSX.Element {
-  const profiles = useQuery(() => ({
+  const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
+
+    // Merged by the id each row carries flat, for the pickers below: a rebuilt
+    // `<option>` is a new element in a `<select>` the human may have open, and
+    // a list re-read while they were choosing would take the choice with it.
+    freshness: { reconcile: "id" },
   }));
 
   return (

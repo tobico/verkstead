@@ -14,11 +14,11 @@
 //! markdown from whoever can reach the repository, which is the strongest reason
 //! on this page for the rendering to happen on the other side of the wire.
 
-import { useQuery } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 
 import { loadPullRequest } from "../api/client";
 import type { ConversationView, PullRequestEvent } from "../api/types";
+import { useReading } from "../freshness";
 import { utcStamp } from "../set/when";
 import { ABBREVIATED } from "./Timeline";
 
@@ -28,12 +28,21 @@ export function PullRequest(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const carried = useQuery(() => ({
+  const carried = useReading(() => ({
     // The event is in the key, as a commit's diff is: opening another
     // conversation's pull request is another query rather than this one showing
     // the wrong commits for a moment.
     queryKey: ["pull-request", props.conversation.id, props.opened.id],
     queryFn: () => loadPullRequest(props.conversation.id, props.opened.id),
+
+    // Merged rather than frozen: a pull request is the one payload here that
+    // somebody else is still writing, so an open pane has to follow commits
+    // landing and comments arriving. Keyed by the commit's `sha`, the only
+    // identifier either list carries — a comment has none, so comments are
+    // matched by position, which holds for a list only ever appended to. What
+    // the merge saves is the `innerHTML` below: a comment whose markup did not
+    // change keeps the node it was rendered into.
+    freshness: { reconcile: "sha" },
   }));
 
   return (

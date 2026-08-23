@@ -189,6 +189,7 @@ $ pnpm install
 $ pnpm dev                # the viewer on :5173, /api proxied to the server
 $ pnpm test               # the vitest suite
 $ pnpm typecheck          # tsc, which the tests do not run
+$ pnpm lint               # the wall around the query hook, and nothing else
 $ pnpm build              # static assets, into web/dist
 ```
 
@@ -254,3 +255,12 @@ declares no shape of its own, so the two languages cannot come to disagree about
 a field. `web/tests/fixtures/` holds a payload of each kind, rendered by the real
 `/api/ui/` endpoints, which is what the vitest suite is fed: a component test
 against a hand-written mock proves only that the mock and the component agree.
+
+Every query in the viewer is made with `useReading` from `web/src/freshness.ts`
+rather than with the hook underneath it. A Nudge invalidates what the page is
+showing ([ADR 0009](adr/0009-scoped-nudges.md)), so each query has to say what a
+re-read does to what is drawn: `freshness` names the key the re-read is merged
+by, or says `"static"` where the payload cannot change. There is no default —
+a query that says neither does not typecheck — and `web/eslint.config.js` is
+the other half of the same rule, refusing the raw hook everywhere but the
+wrapper's own module. That is the whole of what `pnpm lint` checks.

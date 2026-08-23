@@ -19,7 +19,6 @@
 //! restore a scroll position into.
 
 import { useNavigate, useParams } from "@solidjs/router";
-import { useQuery } from "@tanstack/solid-query";
 import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
 
 import { loadConversation } from "../api/client";
@@ -31,6 +30,7 @@ import type {
   PullRequestEvent,
   QuestionSetEvent,
 } from "../api/types";
+import { useReading } from "../freshness";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
@@ -170,7 +170,7 @@ export function Workbench(): JSX.Element {
     ].find((open) => open !== undefined && which(open).id === id);
   };
 
-  const conversation = useQuery(() => ({
+  const conversation = useReading(() => ({
     queryKey: ["conversation", selected()],
     queryFn: () => loadConversation(selected()),
     enabled: selected() !== "",
@@ -204,7 +204,7 @@ export function Workbench(): JSX.Element {
     // index. That is sound for this array: Events are only ever appended, so
     // the prefix is stable and every row keeps its identity. The Transcript's
     // turns carry their `id` flat for exactly this reason.
-    reconcile: "id",
+    freshness: { reconcile: "id" },
   }));
 
   return (

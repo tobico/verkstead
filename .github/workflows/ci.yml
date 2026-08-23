@@ -122,6 +122,13 @@ jobs:
       - name: Set up the viewer
         uses: ./.github/actions/setup-viewer
 
+      # One rule, and it is the wall around the query hook: every query in the
+      # viewer goes through `useReading`, which makes it name a reconcile key
+      # or declare its payload static (ADR-0009). First because it is the
+      # cheapest of the three and fails in a line naming the import.
+      - name: Lint
+        run: pnpm lint
+
       # Typecheck as well as test, for the reason `nix/web.nix` gives: a
       # component that only compiles because vite erases the types would pass
       # vitest and fail nobody, and the generated `web/src/api/types.ts` is only

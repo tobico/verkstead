@@ -20,11 +20,12 @@
 //! once and then left alone.
 
 import { A } from "@solidjs/router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal } from "solid-js";
 
 import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
+import { useReading } from "../freshness";
 import { Notifications } from "../push/Notifications";
 import { UpdateNotice } from "../update/UpdateNotice";
 
@@ -53,9 +54,15 @@ export function RepoList() {
   // Read once when the page opens, like the Archive and unlike the pending
   // list: nothing here changes on its own, and what does change is this page's
   // own doing.
-  const repos = useQuery(() => ({
+  const repos = useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,
+
+    // Merged by the id each row carries flat, and not frozen: registering one
+    // reads the list again, and a frozen query is one invalidation cannot
+    // reach — the new repo would never appear underneath the form that added
+    // it.
+    freshness: { reconcile: "id" },
   }));
 
   const [path, setPath] = createSignal("");

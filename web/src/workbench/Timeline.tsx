@@ -29,7 +29,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
@@ -58,6 +58,7 @@ import type {
   StageListEvent,
   TaskListEvent,
 } from "../api/types";
+import { useReading } from "../freshness";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 
@@ -323,9 +324,14 @@ function ManualTaskComposer(props: {
 
   /// The profile list, read here rather than passed down, the way the details
   /// pane's pickers read it: the control is whole wherever it is drawn.
-  const profiles = useQuery(() => ({
+  const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
+
+    // And the same merge, for the same picker — see the details pane. This one
+    // sits under a half-typed instruction while a session is talking above it,
+    // which is the loudest a Nudge ever gets.
+    freshness: { reconcile: "id" },
   }));
 
   /// Which profile is selected: whatever the human picked, and the
