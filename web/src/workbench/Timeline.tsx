@@ -62,6 +62,7 @@ import { useReading } from "../freshness";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
+import { Mark } from "./Mark";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -730,9 +731,9 @@ function AgentOutput(props: {
             {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
           </span>
         </Show>
-        <Show when={props.output.running}>
-          <span class="live">running</span>
-        </Show>
+        {/* And whether anything is still writing it, at the right edge — the
+            same mark a sidebar card says the same thing with. */}
+        <Mark running={props.output.running} idle={props.output.idle} />
       </span>
       <span class="latest">
         <Show

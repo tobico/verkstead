@@ -410,16 +410,19 @@ describe("how a card says where its conversation has got to", () => {
     ]);
   });
 
-  /// The spinner is motion, and motion is something to be able to turn off.
+  /// The spinner is motion, and motion is something to be able to turn off —
+  /// everywhere it is drawn, which is every mark on the page rather than the
+  /// sidebar's alone.
   it("holds the spinner still where motion is unwelcome", () => {
     expect(stylesheet).toContain(
       "@media (prefers-reduced-motion: reduce) {\n" +
-        "  .conversation-row .mark.working {\n" +
+        "  .mark.working {\n" +
         "    animation: none;\n" +
         "  }\n" +
         "}",
     );
   });
+
 });
 
 describe("starting a conversation", () => {
@@ -1662,18 +1665,37 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(".turns")!.textContent).toBe("1 turn");
   });
 
-  it("says so while the session is still running", async () => {
-    theGrillingOutput({ running: true });
+  /// A session getting on with it: the turning ring at the right edge, which is
+  /// the mark the sidebar's card already says the same thing with. The word
+  /// `running` it replaced said it once and said nothing about a session that
+  /// had stopped talking an hour ago.
+  it("turns the ring while the session is still working", async () => {
+    theGrillingOutput({ running: true, idle: false });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, ".timeline-event .agent-output");
 
-    expect(output.classList).toContain("running");
-    expect(output.querySelector(".live")!.textContent).toBe("running");
+    expect(output.querySelector(".mark.working")).toBeTruthy();
+    expect(output.querySelector(".mark.idle")).toBeNull();
+    expect(output.textContent).not.toContain("running");
+  });
+
+  /// And one that is running and has gone quiet: the same ring, empty. What it
+  /// exists for is the grilling sitting on a blocking ask for hours, which the
+  /// turning ring would have drawn as busy the whole time.
+  it("empties the ring while the session is idle", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".mark.idle")).toBeTruthy();
+    expect(output.querySelector(".mark.working")).toBeNull();
   });
 
   /// A session that has ended is a conversation with a Capture, not one with
-  /// an agent in it — and the fixture is exactly that.
+  /// an agent in it — and the fixture is exactly that. Nothing is happening to
+  /// it, so there is no mark for one to be about.
   it("says nothing about running when the session has ended", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -1681,9 +1703,10 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, ".timeline-event .agent-output");
 
     expect(OUTPUT.running).toBe(false);
-    expect(output.classList).not.toContain("running");
-    expect(output.querySelector(".live")).toBeNull();
+    expect(output.querySelector(".mark")).toBeNull();
+    expect(output.textContent).not.toContain("running");
   });
+
 
   /// The details pane says the same metric as the row it was opened from, and
   /// leaves it out for the same session — the two are one summary shown twice,
@@ -1701,6 +1724,21 @@ describe("a session's output on the timeline", () => {
       `${OUTPUT.turns} turns`,
     );
   });
+
+  /// And it says the same liveness with the same mark, for the same reason: the
+  /// row and the pane are one summary shown twice.
+  it("carries the same mark in the details pane", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const summary = await drawn(container, ".details-pane .capture-summary");
+
+    expect(summary.querySelector(".mark.idle")).toBeTruthy();
+    expect(summary.textContent).not.toContain("running");
+  });
+
 
   /// And a session that has ended with no Transcript has nothing to say up
   /// there at all, so the pane draws no summary line rather than an empty one.

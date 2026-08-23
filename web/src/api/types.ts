@@ -164,7 +164,21 @@ latest: string,
  * restarted has no sessions, which is why this is read off what is running
  * rather than off what was written.
  */
-running: boolean, };
+running: boolean, 
+/**
+ * And whether that session has stopped printing — quiet long enough for
+ * the mark to say it is sitting there rather than working.
+ *
+ * Beside `running` rather than instead of it, because the two are
+ * different questions and a page draws three answers from them: no mark,
+ * a turning ring, and a still one. Always `false` where nothing is
+ * running, which is what makes those three the only ones there are.
+ *
+ * Computed on every read, off the same clock that ends a session that has
+ * gone quiet — so a page opened onto a session that has been idle for an
+ * hour says so at once rather than waiting to be told.
+ */
+idle: boolean, };
 
 /**
  * Which coding agent a Profile runs.

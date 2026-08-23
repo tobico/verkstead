@@ -557,7 +557,8 @@ describe("what a Nudge is about", () => {
     // pane reads to decide whether the record can still move: a Transcript
     // opened over a session that had already stopped is read once and never
     // again, whatever any Nudge says.
-    await drawn(container, ".agent-output .live");
+    await drawn(container, ".agent-output .mark");
+
     fireEvent.click(await drawn(container, ".agent-output"));
     await drawn(container, ".details-pane .turn");
     stream().opens();

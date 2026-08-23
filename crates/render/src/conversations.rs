@@ -862,6 +862,19 @@ pub struct AgentOutputEvent {
     /// restarted has no sessions, which is why this is read off what is running
     /// rather than off what was written.
     pub running: bool,
+
+    /// And whether that session has stopped printing — quiet long enough for
+    /// the mark to say it is sitting there rather than working.
+    ///
+    /// Beside `running` rather than instead of it, because the two are
+    /// different questions and a page draws three answers from them: no mark,
+    /// a turning ring, and a still one. Always `false` where nothing is
+    /// running, which is what makes those three the only ones there are.
+    ///
+    /// Computed on every read, off the same clock that ends a session that has
+    /// gone quiet — so a page opened onto a session that has been idle for an
+    /// hour says so at once rather than waiting to be told.
+    pub idle: bool,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1066,6 +1079,7 @@ pub fn agent_output_event(
     turns: Option<i64>,
     latest: String,
     running: bool,
+    idle: bool,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1074,6 +1088,10 @@ pub fn agent_output_event(
         turns,
         latest,
         running,
+        // Idle is a thing a running session is, and the caller reads the two
+        // off different places — so the pair is made consistent here rather
+        // than at each of them.
+        idle: running && idle,
     })
 }
 

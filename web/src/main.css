@@ -1032,22 +1032,25 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The mark at the right edge, which is how a card says what is happening to it
-   now that the state is no longer written under the name. One size for both, so
-   a card does not resize when a session finishes and leaves an ask behind it. */
-.conversation-row .mark {
+/* The mark at the right edge, which is how anything a session may be running on
+   says what is happening to it now that the state is no longer written in
+   words: a card in the sidebar, a session's row on the Timeline, and the
+   details pane that row opens. One size for every kind, so nothing resizes when
+   a session finishes and leaves an ask behind it. */
+.mark {
   flex: none;
+  align-self: center;
   width: 0.75rem;
   height: 0.75rem;
   border-radius: 50%;
 }
 
 /* Something is waiting on the human: an ask left open, a run stopped on an
-   Interruption, or a direction to choose. The ember, filled — the one mark on
-   this card that is about them rather than about the work, and the reason it is
-   the accent rather than the `--stopped` red is that not one of the three is
+   Interruption, or a direction to choose. The ember, filled — the one mark
+   that is about them rather than about the work, and the reason it is the
+   accent rather than the `--stopped` red is that not one of the three is
    anything going wrong. */
-.conversation-row .mark.waiting {
+.mark.waiting {
   background: var(--accent);
 }
 
@@ -1055,10 +1058,18 @@ main:has(.workbench) {
    Low contrast on purpose — it is there to be caught out of the corner of an
    eye rather than watched, and a sidebar of them should not be a sidebar of
    things demanding to be read. */
-.conversation-row .mark.working {
+.mark.working {
   border: 1.5px solid var(--edge);
   border-top-color: var(--ink-soft);
   animation: turning 1.4s linear infinite;
+}
+
+/* And one that is running and has stopped talking: the same ring with no lit
+   arc at all, which is an empty circle. Quieter than the turning one on purpose
+   — a session sitting on an ask is not doing anything, and the mark that says
+   so should not be the one that catches an eye. */
+.mark.idle {
+  border: 1.5px solid var(--edge);
 }
 
 @keyframes turning {
@@ -1069,9 +1080,11 @@ main:has(.workbench) {
 
 /* Held still where motion is unwelcome. What is left is a ring with a mark on
    one side of it, which says a session is running as plainly as a turning one
-   does — all it loses is the liveliness. */
+   does — all it loses is the liveliness. And it is still told apart from the
+   idle ring, because the lit arc is what the two differ by rather than the
+   turning. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-row .mark.working {
+  .mark.working {
     animation: none;
   }
 }
@@ -1621,6 +1634,14 @@ main:has(.workbench) {
   justify-content: flex-start;
 }
 
+/* The mark at the right edge of the line rather than beside the metric: what it
+   says is about the row as a whole, and the right edge is where every other
+   thing that says it lives. */
+.agent-output .event-head .mark,
+.capture-summary .mark {
+  margin-left: auto;
+}
+
 .agent-output .what {
   font-size: 1.1rem;
   font-weight: 600;
@@ -1631,9 +1652,12 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* A session that is still talking. The colour the accent already is, because
-   what this says is that something is happening here rather than that something
-   is wrong. */
+/* A liveness said in words, which is now the Interruption's badge alone: a
+   session's own is the mark above, because a Timeline of rows shouting
+   `RUNNING` is a Timeline nobody reads. The colour the accent already is,
+   because what a badge like this ordinarily says is that something is happening
+   here rather than that something is wrong — and the Interruption, which means
+   the opposite, says so by overriding it below. */
 .live {
   font-size: 0.8rem;
   font-weight: 600;

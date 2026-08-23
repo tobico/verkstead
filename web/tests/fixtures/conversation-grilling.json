@@ -53,6 +53,7 @@
       "AgentOutput": {
         "at": "2026-08-03T09:07:11.000Z",
         "id": 5,
+        "idle": false,
         "latest": "What should happen to a delivery that has failed forty times?",
         "lines": 3,
         "running": false,

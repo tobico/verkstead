@@ -49,6 +49,7 @@ import {
 
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { Mark } from "./Mark";
 import { Screen } from "./Screen";
 import type {
   AgentOutputEvent,
@@ -195,9 +196,9 @@ export function Output(props: {
               {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
             </span>
           </Show>
-          <Show when={props.output.running}>
-            <span class="live">running</span>
-          </Show>
+          {/* And the same mark the row this was opened from carries: one
+              session's liveness, said the one way. */}
+          <Mark running={props.output.running} idle={props.output.idle} />
         </p>
       </Show>
 

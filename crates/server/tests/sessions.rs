@@ -50,6 +50,7 @@ use verkstead_render::{
     RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
     Turn, Watching,
 };
+use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -1577,6 +1578,125 @@ async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
         grown.turns,
         Some(3),
         "the prose, the call and the answer — and not the backend's own line"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And beside the metric, whether that session is still talking — which is a
+/// different question from whether it is running, and the one the mark on the
+/// row draws.
+///
+/// Idle is the server's judgement rather than the page's, because what it is
+/// measuring is a terminal: claude repaints its spinner many times a second
+/// while it works, so a session that has printed nothing for three seconds is
+/// one that has stopped. The case it exists for is a grilling sitting on a
+/// blocking ask for hours with the Timeline saying it is busy.
+///
+/// And it goes back on speaking, which is the other half: the flag is computed
+/// on every read rather than latched, so nothing has to remember to clear it.
+#[tokio::test]
+async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
+    let fixture = grilling(
+        r#"
+        printf 'Reading the brief.\n'
+        sleep 5
+        printf 'What should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let talking = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty())
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        talking.running && !talking.idle,
+        "a session that has just printed is working, not idle: {talking:?}"
+    );
+
+    // And three seconds later it has said nothing more, which is what the empty
+    // circle is for.
+    let quiet = fixture
+        .until(|view| output(view).filter(|output| output.idle).cloned())
+        .await;
+
+    assert!(
+        quiet.running,
+        "idle is a thing a running session is, so the two travel together"
+    );
+
+    // Then it speaks again, and the row says so without anything having had to
+    // remember to put it back.
+    let woken = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.running && !output.idle)
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        woken.latest, "What should happen when the queue is full?",
+        "the statement that woke it is the one the row now reads"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the crossing is announced, because it is the one change a session makes
+/// by doing nothing.
+///
+/// Every other thing a Timeline says moves because a session printed, and
+/// printing is what nudges an open page into reading it back. A session going
+/// quiet is exactly when that stops — so an open page would sit on a turning
+/// ring until something else happened to the Conversation, which for a grilling
+/// on a blocking ask is the human answering it.
+#[tokio::test]
+async fn a_session_falling_quiet_is_announced_to_the_open_pages() {
+    let fixture = grilling(
+        r#"
+        printf 'Reading the brief.\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // Opened over a session that has said its piece and is now sitting there:
+    // what it printed has already been flushed and announced, so the next Nudge
+    // down this stream is the one this test is about.
+    fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty() && !output.idle)
+                .map(|_| ())
+        })
+        .await;
+
+    let mut page = Listening::open(&fixture.app).await;
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Conversation {
+            conversation: fixture.id
+        },
+        "the session printed nothing more, so the only thing that moved is that \
+         it stopped — announced on the Conversation's own kind, which is what \
+         reaches the Timeline row and the sidebar card alike"
+    );
+
+    let quiet = output(&fixture.view().await)
+        .expect("the session's Event is on the Timeline")
+        .clone();
+
+    assert!(
+        quiet.running && quiet.idle,
+        "and the page reading it back on that Nudge finds it idle: {quiet:?}"
     );
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
@@ -3541,6 +3661,86 @@ async fn review_settled(fixture: &Grilling) -> bool {
     pool.close().await;
 
     settled.contains(&verkstead_server::store::WaitingOn::Review)
+}
+
+/// An open page, listening on the Nudge stream.
+///
+/// The stream's own tests are in `nudges.rs`, which is where what a Nudge says
+/// and when belongs. This is the one thing they cannot ask: a Nudge that is
+/// sent because a *session* did nothing, which needs a session to be running.
+struct Listening {
+    body: Body,
+
+    /// What has been read off the stream and is not a whole frame yet. SSE
+    /// frames are not the chunks they arrive in.
+    buffered: String,
+}
+
+impl Listening {
+    /// Open the stream the way a page does. Returns once the response is in
+    /// hand, which is after the handler has subscribed — so anything that
+    /// happens next is something this page is listening for.
+    async fn open(app: &Router) -> Self {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/nudges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        Self {
+            body: response.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next Nudge, past the keep-alives that are the stream's other
+    /// traffic, as the page reads it: the JSON of the `data` line.
+    async fn nudge(&mut self) -> verkstead_schema::Nudge {
+        let waited_for = tokio::time::timeout(PATIENCE, async {
+            loop {
+                let frame = self.frame().await;
+
+                if let Some(data) = frame
+                    .starts_with("event: nudge")
+                    .then(|| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+                    .flatten()
+                {
+                    return serde_json::from_str(data).unwrap_or_else(|error| {
+                        panic!("a Nudge should be readable as one: {data:?} — {error}")
+                    });
+                }
+            }
+        });
+
+        waited_for.await.expect("waited for a Nudge in vain")
+    }
+
+    /// The next whole frame off the stream, whatever kind it is.
+    async fn frame(&mut self) -> String {
+        loop {
+            if let Some(end) = self.buffered.find("\n\n") {
+                return self.buffered.drain(..end + 2).collect();
+            }
+
+            let chunk = self
+                .body
+                .frame()
+                .await
+                .expect("the stream ended")
+                .unwrap()
+                .into_data()
+                .expect("the stream carries data frames");
+
+            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
 }
 
 /// Wait until a session has written its prompt down, and hand back what is

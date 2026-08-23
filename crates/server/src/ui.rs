@@ -503,6 +503,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // stopped is right again on the next read, a second later.
     let writing = state.sessions.writing(id);
 
+    // And whether that session has stopped printing, which is the other half of
+    // what the mark on its row says. Read here beside the register above rather
+    // than per Event: there is at most one session running on a Conversation,
+    // so the answer cannot differ between the Events it is drawn against.
+    let idling = state.sessions.idling(id);
+
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -704,6 +710,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         summary.turns,
                         summary.latest,
                         writing == Some(event.id),
+                        idling,
                     ),
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,

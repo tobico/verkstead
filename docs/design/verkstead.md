@@ -232,7 +232,7 @@ Timeline events:
 | Event | In timeline | In details pane |
 |---|---|---|
 | Brief | inline, always | — |
-| Agent output | turn count + latest statement | Transcript or Screen |
+| Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |
@@ -243,6 +243,15 @@ Timeline events:
 
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin.
+- **A session's liveness is a mark rather than a word**, and the same mark
+  everywhere it is said — the sidebar card, the agent-output row and the
+  details pane above the record. A slowly turning ring while the session is
+  working, the same ring empty once it has gone quiet, and nothing at all once
+  it is over; `prefers-reduced-motion` holds it still. Quiet is the server's
+  judgement, three seconds with nothing printed, computed on every read and
+  announced as it is crossed — a session going quiet is exactly when it stops
+  producing the nudges that would carry the news (*settled 2026-08-23, building
+  agent-output-polish*).
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,
