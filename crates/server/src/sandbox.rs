@@ -12,9 +12,14 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, `~/.gitconfig`, the gh config,
-//!   and the bundled skills over `~/.claude/skills`
+//! - **read-only** — `/nix` and the system paths, `~/.gitconfig`, and the
+//!   bundled skills over `~/.claude/skills`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
+//!
+//! GitHub auth is on none of those lists. It arrives as `GH_TOKEN` in the
+//! environment, out of the settings file the human filled in — see
+//! [`crate::settings`] — so there are no gh files inside a sandbox at all, and
+//! no question of which account a session turned out to be running as.
 //!
 //! The network is not a boundary here: it is shared with the host, whole and
 //! unfiltered. An agent has to reach GitHub, the npm registry, the model's API
@@ -30,6 +35,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::handoffs::{self, Handoffs};
+use crate::settings::Secrets;
 use crate::skills::{self, Skills};
 use crate::store;
 
@@ -80,24 +86,22 @@ const SHELL: &str = "/bin/sh";
 /// The host directory `~` means, and what is read out of it.
 ///
 /// A session's HOME is the server's own, at the same path inside the sandbox.
-/// The two things read out of it are the two a coding agent cannot work without
-/// — who git commits as, and what `gh` is authenticated as — and both are the
-/// human's, configured once for the machine rather than per Conversation.
+/// One thing is read out of it — `~/.gitconfig`, who git commits as — and it is
+/// the human's, configured once for the machine rather than per Conversation.
+///
+/// It used to be two, the other being what `gh` was authenticated as. That one
+/// is now said rather than found: a token in the settings file, handed to the
+/// session as `GH_TOKEN`. What is left here is a home directory, not a place
+/// credentials are collected from.
 ///
 /// Nothing else of it comes through. HOME inside is an empty directory with the
-/// Profile's pair and these two mounted into it, which is what makes one
+/// Profile's pair and that one file mounted into it, which is what makes one
 /// account's sessions invisible to another's.
 #[derive(Debug, Clone)]
 pub struct Home {
-    /// The directory itself, which is both where these are read from and what
-    /// `~` resolves to inside.
+    /// The directory itself, which is both where that is read from and what `~`
+    /// resolves to inside.
     pub path: PathBuf,
-
-    /// Where `gh` keeps its hosts file on the host, which is
-    /// `$XDG_CONFIG_HOME/gh` where that is set and `~/.config/gh` where it is
-    /// not. Inside the sandbox it is always the latter — see
-    /// [`Sandbox::command`].
-    pub gh_config: PathBuf,
 }
 
 impl Home {
@@ -108,14 +112,9 @@ impl Home {
     /// the packaged unit it is what the module sets, and in a development shell
     /// it is the human's own.
     pub fn of_the_server() -> Option<Home> {
-        let path = PathBuf::from(std::env::var_os("HOME")?);
-
-        let gh_config = match std::env::var_os("XDG_CONFIG_HOME") {
-            Some(config) if !config.is_empty() => PathBuf::from(config).join("gh"),
-            _ => path.join(".config/gh"),
-        };
-
-        Some(Home { path, gh_config })
+        Some(Home {
+            path: PathBuf::from(std::env::var_os("HOME")?),
+        })
     }
 }
 
@@ -194,8 +193,8 @@ impl SandboxConfig {
     /// can be called anything without a spelling of it turning into a path.
     ///
     /// A bind that is not there is refused rather than skipped, which is where
-    /// this parts company with the two host files in [`Sandbox::command`]: a
-    /// missing gh config is a machine nobody has logged in on, and a missing
+    /// this parts company with the host's gitconfig in [`Sandbox::command`]: a
+    /// missing gitconfig is a machine nobody has told who they are, and a missing
     /// configured bind is a typo that would otherwise take every session in that
     /// repository down with it, weeks later, with nobody watching. Not created
     /// either — a directory outside the Data Directory is not Verkstead's to
@@ -324,6 +323,14 @@ pub struct Sandbox {
 
     home: Home,
 
+    /// What `gh` inside authenticates as, or `None` where nothing is configured.
+    ///
+    /// Taken as the sandbox is built rather than held from startup, so a token
+    /// the human rotates applies from the next session — and a session already
+    /// running keeps the one it started with, which is the only thing an
+    /// environment variable could mean.
+    github_token: Option<String>,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
@@ -348,6 +355,12 @@ impl Sandbox {
     /// answer: a bind with nothing behind it is a sandbox that will not start.
     ///
     /// Git is asked here and the filesystem is written to, so this blocks.
+    ///
+    /// The parameter list is the surface: every one of these is something the
+    /// session gets, and spelling them out is what lets a reader of a call site
+    /// see the whole of what one is given. A struct grouping them would hide
+    /// exactly the thing worth reading.
+    #[allow(clippy::too_many_arguments)]
     pub fn for_conversation(
         conversation: &store::Conversation,
         profile: &store::Profile,
@@ -355,6 +368,7 @@ impl Sandbox {
         reachable: &Reachable,
         skills: &Skills,
         handoffs: &Handoffs,
+        secrets: &Secrets,
         extra: Vec<PathBuf>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
@@ -369,6 +383,7 @@ impl Sandbox {
             skills: skills.path().to_owned(),
             handoff_dir,
             home,
+            github_token: secrets.github_token().map(str::to_owned),
             server: reachable.asking_from(conversation.id),
             extra,
         })
@@ -443,31 +458,17 @@ impl Sandbox {
             .arg(&self.skills)
             .arg(self.home.path.join(skills::INSIDE_HOME));
 
-        // The two host things a session reads and never writes.
+        // The one host file a session reads and never writes: who it commits as.
         //
-        // The gh config lands at `~/.config/gh` whatever it is called outside,
-        // because inside there is no `XDG_CONFIG_HOME` to say otherwise — the
-        // environment is cleared, and a config bound where nothing looks for it
-        // is a session that quietly has no GitHub login.
-        //
-        // Absent is not an error: a machine nobody has logged in on is one where
-        // `gh` will say so, which is a better failure than a sandbox that
-        // refuses to start.
-        for (outside, inside) in [
-            (
-                self.home.path.join(".gitconfig"),
-                self.home.path.join(".gitconfig"),
-            ),
-            (
-                self.home.gh_config.clone(),
-                self.home.path.join(".config/gh"),
-            ),
-        ] {
-            if outside.exists() {
-                bwrap.arg("--ro-bind").arg(&outside).arg(&inside);
-            } else {
-                tracing::debug!(path = %outside.display(), "nothing to bind into the sandbox");
-            }
+        // Absent is not an error: a machine with no gitconfig is one where git
+        // will say so, which is a better failure than a sandbox that refuses to
+        // start.
+        let gitconfig = self.home.path.join(".gitconfig");
+
+        if gitconfig.exists() {
+            bwrap.arg("--ro-bind").arg(&gitconfig).arg(&gitconfig);
+        } else {
+            tracing::debug!(path = %gitconfig.display(), "nothing to bind into the sandbox");
         }
 
         for extra in &self.extra {
@@ -498,8 +499,17 @@ impl Sandbox {
             // either.
             .arg("--setenv")
             .arg("VERKSTEAD_SERVER")
-            .arg(&self.server)
-            .args(argv);
+            .arg(&self.server);
+
+        // What `gh` inside authenticates as, which it reads from here without
+        // being told to and without a file anywhere. Set only where there is one
+        // to set: `GH_TOKEN` present and empty is a login `gh` fails on obscurely
+        // where its absence is a login it says plainly it does not have.
+        if let Some(token) = &self.github_token {
+            bwrap.arg("--setenv").arg("GH_TOKEN").arg(token);
+        }
+
+        bwrap.args(argv);
 
         bwrap
     }

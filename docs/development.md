@@ -38,9 +38,23 @@ registered only from within one. Repeat the flag for more than one, or set
 start with none.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
-database at `verkstead.db`, the worktrees, the installed skills and the handoff
-directories. `--data-dir` says where, or `VERKSTEAD_DATA_DIR`; it defaults to
-the working directory, which is what a dev run out of a checkout wants.
+database at `verkstead.db`, the worktrees, the installed skills, the handoff
+directories and the settings files. `--data-dir` says where, or
+`VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
+run out of a checkout wants.
+
+A session's GitHub auth is one of those settings rather than anything found in
+a home directory. Put a token in `secrets.yaml` beside the database:
+
+```yaml
+# secrets.yaml
+github_token: ghp_...
+```
+
+Every session started after that gets it as `GH_TOKEN`, which `gh` honours
+without being told to. There is no file to write and nothing to log in to
+inside a sandbox. With no token — no file, an empty one, one that will not
+parse — sessions start anyway and `gh` inside says it is not logged in.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory

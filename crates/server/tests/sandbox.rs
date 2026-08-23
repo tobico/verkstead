@@ -22,6 +22,7 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
@@ -64,6 +65,11 @@ struct Grilling {
     /// And where the handoff documents go, which is a root under the same
     /// directory — one directory per Conversation, made as its sandbox is built.
     handoffs: Handoffs,
+
+    /// The settings files, in that directory again. Nothing is in them until a
+    /// test says so — see [`Grilling::configure_github_token`] — which is what
+    /// an installation nobody has been to the settings page of looks like.
+    settings: Settings,
 }
 
 impl Grilling {
@@ -83,22 +89,26 @@ impl Grilling {
             &Reachable::at(listening),
             &self.skills,
             &self.handoffs,
+            // Read here rather than at startup, which is where the server reads
+            // it too: a sandbox carries the token that was configured when it
+            // was built.
+            &self.settings.secrets(),
             extra,
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
     }
 
+    /// Write `secrets.yaml` as the settings page would, so that the sandboxes
+    /// built after this carry the token.
+    fn configure_github_token(&self, yaml: &str) {
+        std::fs::write(self.settings.secrets_path(), yaml).unwrap();
+    }
+
     /// The host home the sandbox reads out of — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
-    ///
-    /// The gh config is deliberately not at `~/.config/gh`, which is what an
-    /// `XDG_CONFIG_HOME` set to anything else means: inside the sandbox it has
-    /// to arrive where `gh` looks regardless, because there is no
-    /// `XDG_CONFIG_HOME` in there to point it anywhere else.
     fn home(&self) -> Home {
         Home {
             path: self.home.path().to_owned(),
-            gh_config: self.home.path().join(".xdg-config/gh"),
         }
     }
 
@@ -121,18 +131,23 @@ async fn grilling() -> Grilling {
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // The two host files every sandbox reads and never writes.
+    // The one host file every sandbox reads and never writes.
     std::fs::write(
         home.path().join(".gitconfig"),
         "[user]\n\tname = Verkstead Test\n",
     )
     .unwrap();
-    std::fs::create_dir_all(home.path().join(".xdg-config/gh")).unwrap();
-    std::fs::write(
-        home.path().join(".xdg-config/gh/hosts.yml"),
-        "github.com:\n    user: nobody\n",
-    )
-    .unwrap();
+
+    // And a gh login of the machine's, in both the places gh keeps one: no
+    // session has any business seeing either, whatever the host is logged in as.
+    for config in [".config/gh", ".xdg-config/gh"] {
+        std::fs::create_dir_all(home.path().join(config)).unwrap();
+        std::fs::write(
+            home.path().join(config).join("hosts.yml"),
+            "github.com:\n    user: nobody\n",
+        )
+        .unwrap();
+    }
 
     // Something in HOME that is none of the sandbox's business, so that "the
     // rest of HOME is absent" is a claim about this run rather than about an
@@ -234,6 +249,7 @@ async fn grilling() -> Grilling {
 
     let skills = Skills::installed(state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
+    let settings = Settings::in_data_dir(state.path());
 
     Grilling {
         watched,
@@ -246,6 +262,7 @@ async fn grilling() -> Grilling {
         pool,
         skills,
         handoffs,
+        settings,
     }
 }
 
@@ -416,7 +433,7 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
 }
 
 #[tokio::test]
-async fn the_system_and_the_hosts_two_files_come_in_read_only() {
+async fn the_system_and_the_hosts_gitconfig_come_in_read_only() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
@@ -426,11 +443,8 @@ async fn the_system_and_the_hosts_two_files_come_in_read_only() {
             r#"
             dir /nix nix
             file {gitconfig} gitconfig
-            file "$HOME/.config/gh/hosts.yml" gh
-            dir {outside} gh-where-the-host-keeps-it
             "#,
             gitconfig = quoted(&fixture.home_path().join(".gitconfig")),
-            outside = quoted(&fixture.home_path().join(".xdg-config")),
         ),
     );
 
@@ -439,14 +453,64 @@ async fn the_system_and_the_hosts_two_files_come_in_read_only() {
         reported["gitconfig"], "read",
         "who a session commits as is the human's to set, not the session's to change"
     );
+}
+
+/// GitHub auth is said rather than found: the token the human configured, in
+/// the environment `gh` reads it out of, and no gh files anywhere.
+#[tokio::test]
+async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_not_inside() {
+    let fixture = grilling().await;
+    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            say token "${{GH_TOKEN-unset}}"
+            file "$HOME/.config/gh/hosts.yml" gh
+            dir "$HOME/.config/gh" gh-dir
+            dir {outside} gh-where-the-host-might-keep-it
+            "#,
+            outside = quoted(&fixture.home_path().join(".xdg-config")),
+        ),
+    );
+
     assert_eq!(
-        reported["gh"], "read",
-        "the gh login arrives where gh looks for it, there being no XDG_CONFIG_HOME inside"
+        reported["token"], "ghp_theconfiguredone",
+        "`gh` inside authenticates as whoever the settings file says"
     );
     assert_eq!(
-        reported["gh-where-the-host-keeps-it"], "absent",
-        "and nowhere else: what the host calls it is the host's business"
+        reported["gh"], "absent",
+        "nothing of the host's gh login comes in: the token is the whole of it"
     );
+    assert_eq!(reported["gh-dir"], "absent");
+    assert_eq!(
+        reported["gh-where-the-host-might-keep-it"], "absent",
+        "and not under whatever the host's XDG_CONFIG_HOME called it either"
+    );
+}
+
+/// The three ways there is no token — no file, an empty one, and one nothing
+/// can parse — are one answer: a session that starts, with `gh` inside saying
+/// for itself that it is not logged in.
+#[tokio::test]
+async fn no_token_configured_is_a_session_that_starts_with_no_gh_token() {
+    for configured in [None, Some(""), Some("github_token: [oh\n")] {
+        let fixture = grilling().await;
+
+        if let Some(yaml) = configured {
+            fixture.configure_github_token(yaml);
+        }
+
+        let reported = probe(&fixture.sandbox(vec![]), r#"say token "${GH_TOKEN-unset}""#);
+
+        assert_eq!(
+            reported["token"], "unset",
+            "with {configured:?} in secrets.yaml the variable should not be there at all: \
+             an empty GH_TOKEN is a login gh fails on obscurely"
+        );
+    }
 }
 
 #[tokio::test]
@@ -475,7 +539,7 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(reported["private-key"], "absent");
     assert_eq!(reported["history"], "absent");
     assert_eq!(
-        reported["home"], ".claude .claude.json .config .gitconfig ",
+        reported["home"], ".claude .claude.json .gitconfig ",
         "everything else in HOME is simply not there"
     );
 }

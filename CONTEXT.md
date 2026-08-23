@@ -48,7 +48,8 @@ _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 **Data Directory**:
 The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
-directories, and whatever later stages need to put somewhere. Said once, as
+directories, the settings files it is told the human's credentials and identity
+in, and whatever later stages need to put somewhere. Said once, as
 `--data-dir`, and the working directory when nothing says otherwise; everything
 in it is named by Verkstead rather than by whoever started it. Not a Watched
 Path and not the same kind of thing: a Watched Path bounds what the human may

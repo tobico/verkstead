@@ -92,21 +92,25 @@ in
         The home directory the service runs with, as `HOME`, and what `~` means
         inside a session's sandbox.
 
-        Two files are read out of it and mounted into every sandbox read-only:
-        `.gitconfig` and `.config/gh`. They are the two things a coding agent
-        cannot work without — who a commit is by, and what `gh` is logged in as
-        — and they are the machine's, configured once here rather than per
-        Conversation. Nothing else of this directory is ever exposed to a
-        session, and the service itself only ever reads it.
+        One file is read out of it and mounted into every sandbox read-only:
+        `.gitconfig`, which is who a commit is by. It is the machine's,
+        configured once here rather than per Conversation. Nothing else of this
+        directory is ever exposed to a session, and the service itself only ever
+        reads it.
+
+        What `gh` is logged in as is *not* read from here. That is a token in
+        `secrets.yaml` in the service's data directory, handed to each session
+        as `GH_TOKEN` — said deliberately rather than found lying about in a
+        home directory.
 
         Said outright because systemd would otherwise derive it from the
         `verkstead` user's passwd entry, which is `/var/empty`: a session there
-        commits as nobody and has no GitHub login.
+        commits as nobody.
 
         The default is a directory under the state directory, which systemd
-        creates and hands over — put the two there and every session gets them.
-        Pointing this at a human's own home works too, as long as the
-        `verkstead` user can read them; it is bound in read-only, so it has to
+        creates and hands over — put the gitconfig there and every session gets
+        it. Pointing this at a human's own home works too, as long as the
+        `verkstead` user can read it; it is bound in read-only, so it has to
         exist.
       '';
     };

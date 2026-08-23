@@ -55,6 +55,13 @@ mod runner;
 pub mod sandbox;
 mod sessions;
 mod sets;
+/// What Verkstead was told about the human's credentials: the settings files
+/// under the Data Directory.
+///
+/// Public for the reason the sandbox is — what a session authenticates as is the
+/// product's business rather than an endpoint's, and standing a router up that
+/// runs sessions means saying where its credentials are read from.
+pub mod settings;
 mod settling;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
@@ -182,7 +189,8 @@ const DATABASE_NAME: &str = "verkstead.db";
 pub struct Config {
     /// Where Verkstead keeps everything it makes: the database, at
     /// `verkstead.db` inside it, the Conversations' worktrees, the installed
-    /// Skills and the handoff directories. Created if it does not exist.
+    /// Skills, the handoff directories and the settings files. Created if it
+    /// does not exist.
     ///
     /// This is the Data Directory. Not a Watched Path and not one to point at a
     /// directory the human works in: the Watched Paths bound what Verkstead may
@@ -467,12 +475,13 @@ pub async fn run(config: Config) -> Result<()> {
     // Both resolved at startup for the reason the Watched Paths are: a bind that
     // names nothing, and a HOME the unit never said, are misconfigurations to
     // report now rather than sessions that fail to start weeks later with nobody
-    // watching. The home is where a sandbox reads who git commits as and what
-    // `gh` is logged in as, so a server without one can run no session at all.
+    // watching. The home is where a sandbox reads who git commits as, and it is
+    // what `~` means inside one, so a server without one can run no session at
+    // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
     let home = sandbox::Home::of_the_server().context(
-        "no HOME is set: a session reads the machine's git identity and gh login out of \
-         the home directory of whoever runs Verkstead, so the unit has to say what it is",
+        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
+         and the machine's git identity is read out of it, so the unit has to say what it is",
     )?;
 
     // Made at startup for the reason the Watched Paths are resolved at startup:
@@ -492,6 +501,12 @@ pub async fn run(config: Config) -> Result<()> {
     // under the same directory: each Conversation's own is made as its first
     // session starts.
     let handoffs = handoffs::Handoffs::under(&data_dir);
+
+    // And where the credentials a session runs with are read from, which is the
+    // same directory again. Nothing is read here: the files are read as each
+    // session is spawned, so what the human saves through the settings page
+    // applies without a restart — see [`settings`].
+    let settings = settings::Settings::in_data_dir(&data_dir);
 
     let pool = open_database(&config.database()).await?;
 
@@ -523,6 +538,7 @@ pub async fn run(config: Config) -> Result<()> {
                 binds,
                 skills,
                 handoffs,
+                settings,
             ),
             // Whatever `gh` this machine has, logged in as whoever it is logged
             // in as: Verkstead keeps no token of its own.

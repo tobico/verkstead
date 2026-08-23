@@ -143,15 +143,22 @@ flowchart LR
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
   - **rw:** the conversation's worktree; the repo's common `.git` directory;
     the profile's claude pair at `~/.claude` and `~/.claude.json`
-  - **ro:** `/nix` and system paths, `~/.gitconfig`, gh config
+  - **ro:** `/nix` and system paths, `~/.gitconfig`
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — which
-    is where that gitconfig and gh config are read from (*settled 2026-08-20,
-    building stage 02*), so the packaged unit says outright what that home is:
+    is where that gitconfig is read from (*settled 2026-08-20, building stage
+    02*), so the packaged unit says outright what that home is:
     `services.verkstead.home`, defaulting to `/var/lib/verkstead/home`, because
     systemd would otherwise derive `/var/empty` from the service user's passwd
     entry and every commit inside a sandbox would be unattributed (*settled
     2026-08-20, building stage 02*)
+  - **GitHub auth is said rather than found** (*settled 2026-08-23, building
+    intentional-credentials*): a token in `secrets.yaml` in the Data Directory,
+    handed to each session as `GH_TOKEN`, which `gh` honours natively — so no
+    gh files are inside a sandbox at all and the host's `~/.config/gh` is no
+    longer bound in. The file is read at every session spawn, so a rotated token
+    applies from the next session; a missing, empty or unparseable file is no
+    token rather than a session that will not start.
   - per-repo extra binds from sandbox configuration
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)
