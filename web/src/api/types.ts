@@ -1474,7 +1474,8 @@ about: string,
 input: string, };
 
 /**
- * One session's Transcript as the details pane receives it.
+ * One session's Transcript as the details pane receives it — the whole of it,
+ * or whatever of it lies past where the pane's last reading stopped.
  */
 export type TranscriptView = { 
 /**
@@ -1484,7 +1485,23 @@ turns: Array<Turn>,
 /**
  * Everything that was not the conversation.
  */
-bookkeeping: Array<Bookkeeping>, };
+bookkeeping: Array<Bookkeeping>, 
+/**
+ * Whether this is the record from its beginning, rather than a piece of it
+ * to add to what the reader already has.
+ *
+ * The reader cannot tell from the payload and must not guess: a reading
+ * that was asked to carry on from a cursor and could not falls back to the
+ * whole record, which is always a correct answer — and appending one of
+ * those to what was already drawn would be drawing the beginning twice.
+ */
+whole: boolean, 
+/**
+ * Where this reading stopped, to be handed back to ask for what comes
+ * after it. Opaque to whoever holds it: it is the server's own bookmark,
+ * and the shape of it is [`Cursor`]'s business alone.
+ */
+cursor: string, };
 
 /**
  * One thing that was said, or done, or put.

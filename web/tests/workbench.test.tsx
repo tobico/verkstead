@@ -59,6 +59,7 @@ import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" }
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
+import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
@@ -1354,7 +1355,24 @@ function attached(): Promise<Attached> {
 /// A session that kept no record of its own conversation, which is what the
 /// server says for every stub agent and every backend that writes no log — and
 /// what sends the pane to the Capture.
-const SAID_NOTHING: TranscriptView = { turns: [], bookkeeping: [] };
+const SAID_NOTHING: TranscriptView = {
+  turns: [],
+  bookkeeping: [],
+  whole: true,
+  cursor: "0.0.0",
+};
+
+/// What the same session said after that, as the server hands it to a pane that
+/// already has the record above: the new turns alone, numbered on from where
+/// that reading stopped (ADR 0009).
+const MORE = more as TranscriptView;
+
+/// And where the pane asks for it — the cursor the whole reading ended at, which
+/// the fixture carries because the server wrote it there. Opaque to the page,
+/// and to this test: what a reader does with one is hand it back.
+const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
+  TRANSCRIPT.cursor,
+)}`;
 
 /// The workbench with the grilling conversation open instead of the drafting
 /// one.
@@ -1832,8 +1850,74 @@ describe("a session's output on the timeline", () => {
   /// nowhere else. The turns reconcile by `id` now, so a row that did not
   /// change is left alone, folds and all.
   it("keeps a fold open across a Nudge, while new turns arrive beneath it", async () => {
-    // The transcript again, one turn longer: a session still talking.
-    const GROWN: TranscriptView = {
+    // Running, so the Transcript is live and read again on every Nudge —
+    // which is exactly when a fold has to hold.
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(MORE)),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    const reasoning = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.reasoning details",
+    );
+    reasoning.open = true;
+
+    await client.invalidateQueries();
+
+    // What the session has said since has been drawn under the fold, added to
+    // what was already there rather than replacing it…
+    await waitFor(() =>
+      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+        TRANSCRIPT.turns.length + MORE.turns.length,
+      ),
+    );
+    // …and the fold is the same element it was, still open.
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane .turn.reasoning details",
+      ),
+    ).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+  });
+
+  /// The other half of an accumulated record. The backend's bookkeeping is
+  /// folded into one group at the end however it arrived, so a line of it that
+  /// came in a later batch joins the group rather than starting a second one.
+  it("gathers bookkeeping that arrived in pieces into the one group", async () => {
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(MORE)),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .bookkeeping");
+
+    await client.invalidateQueries();
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(".details-pane .bookkeeping li"),
+      ).toHaveLength(TRANSCRIPT.bookkeeping.length + MORE.bookkeeping.length),
+    );
+    expect(
+      container.querySelectorAll(".details-pane .bookkeeping"),
+    ).toHaveLength(1);
+  });
+
+  /// The server reads the record whole whenever it cannot carry on from the
+  /// cursor it was given, and says so. A page that added one of those to what it
+  /// already had would draw the beginning of the session twice.
+  it("replaces the record rather than doubling it when a whole one arrives", async () => {
+    // The record read whole again, a turn longer than it was — a cursor the
+    // server could not carry on from, which is every failure of an incremental
+    // read and always a correct answer to one.
+    const WHOLE_AGAIN: TranscriptView = {
       ...TRANSCRIPT,
       turns: [
         ...TRANSCRIPT.turns,
@@ -1845,38 +1929,25 @@ describe("a session's output on the timeline", () => {
       ],
     };
 
-    let grown = false;
-    // Running, so the Transcript is live and read again on every Nudge —
-    // which is exactly when a fold has to hold.
     theGrillingOutput(
       { running: true },
-      whenever(TRANSCRIPT_OF_IT, () => json(grown ? GROWN : TRANSCRIPT)()),
+      whenever(TRANSCRIPT_OF_IT, json(TRANSCRIPT)),
+      whenever(REST_OF_IT, json(WHOLE_AGAIN)),
     );
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    const reasoning = await drawn<HTMLDetailsElement>(
-      container,
-      ".details-pane .turn.reasoning details",
-    );
-    reasoning.open = true;
+    await drawn(container, ".details-pane .turn");
 
-    grown = true;
     await client.invalidateQueries();
 
-    // The new turn has been drawn under the fold…
+    // What was read whole is the record, not something to add to it: the
+    // session's beginning is drawn once.
     await waitFor(() =>
       expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
-        GROWN.turns.length,
+        WHOLE_AGAIN.turns.length,
       ),
     );
-    // …and the fold is the same element it was, still open.
-    expect(
-      container.querySelector<HTMLDetailsElement>(
-        ".details-pane .turn.reasoning details",
-      ),
-    ).toBe(reasoning);
-    expect(reasoning.open).toBe(true);
   });
 
   /// A session already over when the pane opened is over for good, so its

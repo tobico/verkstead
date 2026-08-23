@@ -19,13 +19,24 @@
 //! nothing is hidden and nothing is in the way. Only a line that is neither the
 //! conversation nor known bookkeeping is unrecognised, and those get ADR 0006's
 //! treatment.
+//!
+//! **A reading can be carried on.** A running session's Transcript is re-read
+//! every time it says anything, which late in a session is megabytes twice a
+//! second — so a reading says where it got to, and the next one begins there
+//! (ADR 0009). What that takes is a [`Cursor`], because the numbering cannot be
+//! worked out from the lines: one line is any number of turns, so how far the
+//! count had got is a thing to remember rather than a thing to derive.
+
+use std::fmt::{self, Display, Formatter};
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-/// One session's Transcript as the details pane receives it.
+/// One session's Transcript as the details pane receives it — the whole of it,
+/// or whatever of it lies past where the pane's last reading stopped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TranscriptView {
@@ -34,6 +45,73 @@ pub struct TranscriptView {
 
     /// Everything that was not the conversation.
     pub bookkeeping: Vec<Bookkeeping>,
+
+    /// Whether this is the record from its beginning, rather than a piece of it
+    /// to add to what the reader already has.
+    ///
+    /// The reader cannot tell from the payload and must not guess: a reading
+    /// that was asked to carry on from a cursor and could not falls back to the
+    /// whole record, which is always a correct answer — and appending one of
+    /// those to what was already drawn would be drawing the beginning twice.
+    pub whole: bool,
+
+    /// Where this reading stopped, to be handed back to ask for what comes
+    /// after it. Opaque to whoever holds it: it is the server's own bookmark,
+    /// and the shape of it is [`Cursor`]'s business alone.
+    pub cursor: String,
+}
+
+/// How far a reading of a Transcript got.
+///
+/// Three counts rather than one, because a reading has to be resumed as well as
+/// stopped: the lines say where to start reading again, and the two numberings
+/// say what to call the first turn and the first bookkeeping line found there.
+/// None of the three follows from the others — one log line is any number of
+/// turns — so all three are remembered.
+///
+/// Written as a string on the wire and read back here, which is what makes it
+/// opaque to the viewer: what the viewer does with one is hand it back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Cursor {
+    /// How many of the Transcript's lines the reading consumed, which is also
+    /// the sequence number of the last of them.
+    pub lines: u32,
+
+    /// How many turns it had numbered by the end.
+    turns: u32,
+
+    /// And how many lines of the backend's own bookkeeping.
+    bookkeeping: u32,
+}
+
+impl Display for Cursor {
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        write!(out, "{}.{}.{}", self.lines, self.turns, self.bookkeeping)
+    }
+}
+
+impl FromStr for Cursor {
+    type Err = ();
+
+    /// A cursor this wrote, read back — or nothing, for anything else.
+    ///
+    /// Nothing rather than a guess: a cursor is a URL parameter, which is to say
+    /// something anybody can type, and one that was not written here says
+    /// nothing about where a reading should carry on from. The caller's answer
+    /// to that is to read the record whole, which is always correct.
+    fn from_str(text: &str) -> Result<Cursor, ()> {
+        let counts: Vec<&str> = text.split('.').collect();
+
+        let [lines, turns, bookkeeping] = counts[..] else {
+            return Err(());
+        };
+
+        Ok(Cursor {
+            lines: lines.parse().map_err(|_| ())?,
+            turns: turns.parse().map_err(|_| ())?,
+            bookkeeping: bookkeeping.parse().map_err(|_| ())?,
+        })
+    }
 }
 
 /// One thing that was said, or done, or put.
@@ -235,30 +313,56 @@ pub fn statements(lines: &[String]) -> Vec<String> {
 /// called two tools wrote all three into a single line — so what comes back is
 /// longer than what went in as often as not.
 pub fn transcript_view(lines: &[String]) -> TranscriptView {
-    let mut view = TranscriptView {
+    transcript_after(Cursor::default(), lines)
+}
+
+/// The same, carried on from where a reading stopped: `lines` are the ones past
+/// `from`, and what comes back is numbered as though the whole record had been
+/// read in one go.
+///
+/// Which is the property the two halves of an incremental read rest on. Nothing
+/// here looks back at what came before — every line is read on its own, and the
+/// numbering is the only thing carried across — so a record accumulated a batch
+/// at a time is the record read whole, turn for turn.
+pub fn transcript_after(from: Cursor, lines: &[String]) -> TranscriptView {
+    let mut reading = Reading {
+        from,
         turns: Vec::new(),
         bookkeeping: Vec::new(),
     };
 
     for line in lines {
-        read(line, &mut view);
+        read(line, &mut reading);
     }
 
-    view
+    reading.into_view(lines.len() as u32)
 }
 
 /// The id every turn is built with, and none keeps: the real one is stamped by
-/// [`TranscriptView::take`] as the view takes the turn.
+/// [`Reading::take`] as the reading takes the turn.
 const UNPLACED: u32 = 0;
 
-impl TranscriptView {
+/// One reading of a Transcript being made: what it has found, and where it
+/// began.
+struct Reading {
+    /// Where the reading before this one stopped, which is what everything
+    /// found here is numbered on from. All zeroes for a reading of the whole
+    /// record, which is the same thing said of a record nothing has read yet.
+    from: Cursor,
+
+    turns: Vec<Turn>,
+    bookkeeping: Vec<Bookkeeping>,
+}
+
+impl Reading {
     /// The conversation taking one more turn, numbered as it is taken.
     ///
     /// The `id` is the turn's place in the conversation, and it is counted
-    /// here because the view is the one thing that knows how far that has got:
-    /// one log line can be several turns, so no count over the lines could say.
+    /// here because the reading is the one thing that knows how far that has
+    /// got: one log line can be several turns, so no count over the lines
+    /// could say.
     fn take(&mut self, mut turn: Turn) {
-        *turn.place() = self.turns.len() as u32 + 1;
+        *turn.place() = self.from.turns + self.turns.len() as u32 + 1;
         self.turns.push(turn);
     }
 
@@ -266,10 +370,29 @@ impl TranscriptView {
     /// since it was never part of the conversation.
     fn keep(&mut self, kind: String, line: String) {
         self.bookkeeping.push(Bookkeeping {
-            id: self.bookkeeping.len() as u32 + 1,
+            id: self.from.bookkeeping + self.bookkeeping.len() as u32 + 1,
             kind,
             line,
         });
+    }
+
+    /// The reading finished, with the cursor whoever asks for the rest hands
+    /// back.
+    fn into_view(self, read: u32) -> TranscriptView {
+        let at = Cursor {
+            lines: self.from.lines + read,
+            turns: self.from.turns + self.turns.len() as u32,
+            bookkeeping: self.from.bookkeeping + self.bookkeeping.len() as u32,
+        };
+
+        TranscriptView {
+            turns: self.turns,
+            bookkeeping: self.bookkeeping,
+            // A reading that began at the beginning is the record itself, and
+            // there is nothing for the reader to add it to.
+            whole: self.from == Cursor::default(),
+            cursor: at.to_string(),
+        }
     }
 }
 
@@ -289,12 +412,12 @@ impl Turn {
 }
 
 /// One line, put wherever it belongs.
-fn read(line: &str, view: &mut TranscriptView) {
+fn read(line: &str, into: &mut Reading) {
     let Ok(entry) = serde_json::from_str::<Value>(line) else {
         // Not JSON at all, which is a line torn by something or a format that
         // has stopped being JSONL. Either way it is what the session wrote, so
         // it is shown as it stands.
-        view.take(Turn::Unread(Unread {
+        into.take(Turn::Unread(Unread {
             id: UNPLACED,
             line: line.to_owned(),
         }));
@@ -302,17 +425,17 @@ fn read(line: &str, view: &mut TranscriptView) {
     };
 
     match entry["type"].as_str() {
-        Some("assistant") => said(&entry, view),
-        Some("user") => put(&entry, view),
-        Some(kind) if BOOKKEEPING.contains(&kind) => view.keep(kind.to_owned(), raw(&entry)),
-        _ => view.take(unread(&entry)),
+        Some("assistant") => said(&entry, into),
+        Some("user") => put(&entry, into),
+        Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry)),
+        _ => into.take(unread(&entry)),
     }
 }
 
 /// What the agent said: its prose, its reasoning, and the tools it called.
-fn said(entry: &Value, view: &mut TranscriptView) {
+fn said(entry: &Value, into: &mut Reading) {
     let Some(blocks) = entry["message"]["content"].as_array() else {
-        view.take(unread(entry));
+        into.take(unread(entry));
         return;
     };
 
@@ -320,16 +443,16 @@ fn said(entry: &Value, view: &mut TranscriptView) {
         match block["type"].as_str() {
             Some("text") => {
                 if let Some(prose) = prose(block, "text") {
-                    view.take(Turn::Prose(prose));
+                    into.take(Turn::Prose(prose));
                 }
             }
             Some("thinking") => {
                 if let Some(Prose { html, .. }) = prose(block, "thinking") {
-                    view.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
+                    into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
                 }
             }
-            Some("tool_use") => view.take(Turn::ToolUse(called(block))),
-            _ => view.take(unread(block)),
+            Some("tool_use") => into.take(Turn::ToolUse(called(block))),
+            _ => into.take(unread(block)),
         }
     }
 }
@@ -341,9 +464,9 @@ fn said(entry: &Value, view: &mut TranscriptView) {
 /// line's own — see the module's own documentation. `isMeta` is the third
 /// thing arriving under it: a line the backend wrote to itself in the human's
 /// voice, which is bookkeeping wearing a turn's clothes.
-fn put(entry: &Value, view: &mut TranscriptView) {
+fn put(entry: &Value, into: &mut Reading) {
     if entry["isMeta"].as_bool().unwrap_or(false) {
-        view.keep("user".to_owned(), raw(entry));
+        into.keep("user".to_owned(), raw(entry));
         return;
     }
 
@@ -351,7 +474,7 @@ fn put(entry: &Value, view: &mut TranscriptView) {
         // A turn typed by the human arrives as the words themselves.
         Value::String(said) => {
             if let Some(html) = rendered(said) {
-                view.take(Turn::Put(Put { id: UNPLACED, html }));
+                into.take(Turn::Put(Put { id: UNPLACED, html }));
             }
         }
         Value::Array(blocks) => {
@@ -359,15 +482,15 @@ fn put(entry: &Value, view: &mut TranscriptView) {
                 match block["type"].as_str() {
                     Some("text") => {
                         if let Some(Prose { html, .. }) = prose(block, "text") {
-                            view.take(Turn::Put(Put { id: UNPLACED, html }));
+                            into.take(Turn::Put(Put { id: UNPLACED, html }));
                         }
                     }
-                    Some("tool_result") => view.take(Turn::ToolResult(answered(block))),
-                    _ => view.take(unread(block)),
+                    Some("tool_result") => into.take(Turn::ToolResult(answered(block))),
+                    _ => into.take(unread(block)),
                 }
             }
         }
-        _ => view.take(unread(entry)),
+        _ => into.take(unread(entry)),
     }
 }
 
@@ -714,6 +837,66 @@ mod tests {
 
         assert!(view.turns.is_empty());
         assert!(view.bookkeeping.is_empty());
+    }
+
+    /// The whole of what an incremental read rests on: a record accumulated a
+    /// batch at a time is the record read in one go, turn for turn and
+    /// numbering included — the ending among them, since the fixture's last
+    /// line falls in the second half.
+    #[test]
+    fn a_record_read_in_two_goes_is_the_record_read_whole() {
+        let lines: Vec<String> = FIXTURE.iter().map(|line| (*line).to_owned()).collect();
+
+        let whole = transcript_view(&lines);
+        let first = transcript_view(&lines[..3]);
+        let rest = transcript_after(first.cursor.parse().unwrap(), &lines[3..]);
+
+        assert_eq!(
+            [first.turns.clone(), rest.turns].concat(),
+            whole.turns,
+            "the turns of the two readings, in order, are the turns of the one"
+        );
+        assert_eq!(
+            [first.bookkeeping.clone(), rest.bookkeeping].concat(),
+            whole.bookkeeping,
+            "and the bookkeeping goes on being numbered across the join, so it \
+             folds into the one group at the end"
+        );
+        assert_eq!(
+            rest.cursor, whole.cursor,
+            "and the two readings have got to the same place"
+        );
+    }
+
+    /// Which reading arrived is the server's to say rather than the reader's to
+    /// work out: appending a whole record to what was already drawn would draw
+    /// the beginning of it twice.
+    #[test]
+    fn a_reading_says_whether_it_is_the_record_or_a_piece_of_one() {
+        let lines: Vec<String> = FIXTURE.iter().map(|line| (*line).to_owned()).collect();
+
+        assert!(transcript_view(&lines).whole);
+        assert!(!transcript_after("3.3.0".parse().unwrap(), &lines[3..]).whole);
+    }
+
+    /// A cursor is a URL parameter, which is to say something anybody can type.
+    /// One that was not written here says nothing about where to carry on from,
+    /// and the caller's answer to that is to read the record whole.
+    #[test]
+    fn a_cursor_this_did_not_write_is_refused() {
+        assert_eq!(
+            "7.4.2".parse(),
+            Ok(Cursor {
+                lines: 7,
+                turns: 4,
+                bookkeeping: 2
+            }),
+            "and one it did write is read back as it was written"
+        );
+
+        for typed in ["", "7", "7.4", "7.4.2.1", "7.4.x", "-1.0.0", "7 . 4 . 2"] {
+            assert_eq!(typed.parse::<Cursor>(), Err(()), "{typed:?}");
+        }
     }
 
     /// The prose and nothing else. A summary of a session is what the session

@@ -1946,11 +1946,40 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And what that pane draws instead wherever the session left a record of its
     // own conversation, which is the same Event read the other way.
+    let said = get(
+        &app,
+        &format!("/api/ui/conversations/{grilling}/transcript/{capture}"),
+    )
+    .await;
+    write("transcript.json", &said);
+
+    // And the same record read again by a pane that already has that much of it:
+    // the session said two more things, and what crosses the wire is the two
+    // (ADR 0009). Written from the cursor the reading above ended at, because
+    // that is the whole of what a reader does with one — the shape of it is the
+    // server's, and a fixture that spelled one out would be the viewer having an
+    // opinion about it.
+    let cursor = serde_json::from_str::<serde_json::Value>(&said).unwrap()["cursor"]
+        .as_str()
+        .expect("a reading of a Transcript says where it got to")
+        .to_owned();
+
+    store::append_transcript(
+        &pool,
+        capture,
+        &[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Forty attempts is a *loop*, not a policy."}]}}"#.to_owned(),
+            r#"{"type":"attachment","attachment":{"type":"todos","content":"one thing still to do"}}"#.to_owned(),
+        ],
+    )
+    .await
+    .unwrap();
+
     write(
-        "transcript.json",
+        "transcript-more.json",
         &get(
             &app,
-            &format!("/api/ui/conversations/{grilling}/transcript/{capture}"),
+            &format!("/api/ui/conversations/{grilling}/transcript/{capture}?after={cursor}"),
         )
         .await,
     );

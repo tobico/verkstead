@@ -63,7 +63,7 @@ pub use push::{
 };
 pub use repos::{Repo, register_repo, registered_repos};
 pub use session_names::session_id;
-pub use transcripts::{append_transcript, transcript};
+pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,

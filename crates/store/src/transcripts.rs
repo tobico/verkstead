@@ -94,6 +94,28 @@ pub async fn transcript(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<Vec<String>>> {
+    transcript_after(pool, conversation_id, event_id, 0).await
+}
+
+/// The same Transcript from `after` onwards: the lines whose sequence number is
+/// past it, which is everything written since a reader that had got that far
+/// last looked.
+///
+/// What a running session's open pane reads on every batch, rather than the
+/// whole record again — an hour of talking, twice a second, over the network
+/// this tool is used across (ADR 0009).
+///
+/// `None` for the Event that is not this Conversation's, and for an `after`
+/// this Transcript has never reached. The second is a reader holding a cursor
+/// this record cannot answer from, which is a thing to say rather than an empty
+/// answer to give: what the caller does about it is read the record whole,
+/// which is always correct.
+pub async fn transcript_after(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    event_id: i64,
+    after: i64,
+) -> Result<Option<Vec<String>>> {
     // Against the Timeline rather than against the lines, because there is no
     // row here until a session has said something — a Transcript with nothing on
     // it is an ordinary answer, and an Event on somebody else's Conversation is
@@ -110,12 +132,28 @@ pub async fn transcript(
         return Ok(None);
     }
 
-    let lines: Vec<(String,)> =
-        sqlx::query_as("SELECT line FROM transcript_lines WHERE event_id = ? ORDER BY seq")
+    // The sequence numbers run from 1 without gaps — they are counted on from
+    // whatever was there — so the last of them is how far this record goes, and
+    // a cursor past it is one no reading of this record ever handed out.
+    let (end,): (i64,) =
+        sqlx::query_as("SELECT COALESCE(MAX(seq), 0) FROM transcript_lines WHERE event_id = ?")
             .bind(event_id)
-            .fetch_all(pool)
+            .fetch_one(pool)
             .await
-            .with_context(|| format!("reading the Transcript of Event {event_id}"))?;
+            .with_context(|| format!("finding the end of the Transcript of Event {event_id}"))?;
+
+    if after > end {
+        return Ok(None);
+    }
+
+    let lines: Vec<(String,)> = sqlx::query_as(
+        "SELECT line FROM transcript_lines WHERE event_id = ? AND seq > ? ORDER BY seq",
+    )
+    .bind(event_id)
+    .bind(after)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the Transcript of Event {event_id}"))?;
 
     Ok(Some(lines.into_iter().map(|(line,)| line).collect()))
 }

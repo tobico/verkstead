@@ -41,6 +41,7 @@ import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
 import said from "./fixtures/transcript.json" with { type: "json" };
+import saidSince from "./fixtures/transcript-more.json" with { type: "json" };
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -409,12 +410,24 @@ const TALKING: ConversationView = {
 /// Where the open pane reads what that session has been saying.
 const TRANSCRIPT_OF_IT = `/api/ui/conversations/${CONVERSATION.id}/transcript/${OUTPUT.id}`;
 
-/// The workbench with that session's output open, its Transcript to hand.
+/// The record itself, and what the session said after it.
+const SAID = said as TranscriptView;
+const SAID_SINCE = saidSince as TranscriptView;
+
+/// And where the pane asks for the second of those: the cursor the first
+/// reading ended at, handed back as the server wrote it.
+const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
+  SAID.cursor,
+)}`;
+
+/// The workbench with that session's output open, its Transcript to hand — and
+/// the rest of it for the reading the next Nudge sets off.
 function theTalking() {
   return serving(
     ...BESIDE,
     whenever(OPENED, json(TALKING)),
-    whenever(TRANSCRIPT_OF_IT, json(said as TranscriptView)),
+    whenever(TRANSCRIPT_OF_IT, json(SAID)),
+    whenever(REST_OF_IT, json(SAID_SINCE)),
   );
 }
 
@@ -548,18 +561,17 @@ describe("what a Nudge is about", () => {
     fireEvent.click(await drawn(container, ".agent-output"));
     await drawn(container, ".details-pane .turn");
     stream().opens();
-    const before = { ...reads(fetching), [TRANSCRIPT_OF_IT]: askedFor(fetching, TRANSCRIPT_OF_IT) };
+    const before = { ...reads(fetching), [REST_OF_IT]: askedFor(fetching, REST_OF_IT) };
 
     stream().nudges({ kind: "transcript", conversation: CONVERSATION.id });
 
-    // The one read a batch of lines is worth. This is the Nudge that arrives
-    // twice a second while a session talks, and what it used to cost was every
-    // one of the five below — the Repos and the Profiles among them, which
-    // nothing a session says can move.
+    // The one read a batch of lines is worth, and it asks for the batch rather
+    // than for the hour before it. This is the Nudge that arrives twice a
+    // second while a session talks, and what it used to cost was the whole
+    // record plus every one of the five below — the Repos and the Profiles
+    // among them, which nothing a session says can move.
     await waitFor(() =>
-      expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(
-        before[TRANSCRIPT_OF_IT]! + 1,
-      ),
+      expect(askedFor(fetching, REST_OF_IT)).toBe(before[REST_OF_IT]! + 1),
     );
     for (const path of COUNTED) {
       expect(askedFor(fetching, path), path).toBe(before[path]);

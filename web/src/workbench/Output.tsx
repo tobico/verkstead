@@ -17,6 +17,13 @@
 //! somebody opens the one Event it belongs to — and then again on every Nudge,
 //! which is what makes an open pane follow a running session.
 //!
+//! And the Transcript is read on from where it got to rather than from the
+//! start, because that following is twice a second while a session talks: what
+//! the pane holds is the cursor its last reading ended at, what arrives is what
+//! has been said since, and the two are added together here (ADR-0009). The
+//! Capture is not — it stands in only for the sessions that kept no log, and
+//! incremental reads stop at the Transcript until that pane hurts.
+//!
 //! Nothing here parses anything. The lines a backend wrote are read on the
 //! server, in the crate that has the parsers in it, and what arrives is the
 //! turns already rendered — so no markdown parser and no reader of somebody
@@ -47,6 +54,7 @@ import type {
   AgentOutputEvent,
   Bookkeeping,
   ConversationView,
+  TranscriptView,
   Turn,
 } from "../api/types";
 
@@ -64,11 +72,47 @@ export function Output(props: {
   // quietly missing its ending.
   const over = !props.output.running;
 
+  /// The record as far as this pane has read it, and whose it is.
+  ///
+  /// Kept beside the query rather than read back out of it, because what the
+  /// next read needs is the cursor the last one ended at — and the query holds
+  /// the drawn record, which reconcile owns and rewrites in place. Which
+  /// session's it is, because a pane is pointed at another output without being
+  /// built again, and a cursor belongs to the record it was read from.
+  let read: { of: number; record: TranscriptView } | undefined;
+
   const transcript = useReading(() => ({
     // The Event is in the key, so opening another session's output is another
     // query rather than the same one showing the wrong session for a moment.
     queryKey: ["transcript", props.conversation.id, props.output.id],
-    queryFn: () => loadTranscript(props.conversation.id, props.output.id),
+
+    // Only what the session has said since this pane last looked, which while
+    // it is talking is a line or two against an hour of them (ADR 0009). The
+    // first read of a session asks for no such thing and gets the record; so
+    // does every read the server cannot carry on from, which is why it is the
+    // arriving payload that says whether to add or to replace.
+    queryFn: async () => {
+      const before = read?.of === props.output.id ? read.record : undefined;
+      const arrived = await loadTranscript(
+        props.conversation.id,
+        props.output.id,
+        before?.cursor,
+      );
+
+      const record =
+        before && !arrived.whole
+          ? {
+              turns: [...before.turns, ...arrived.turns],
+              bookkeeping: [...before.bookkeeping, ...arrived.bookkeeping],
+              // What the accumulation is: the record from its beginning.
+              whole: true,
+              cursor: arrived.cursor,
+            }
+          : arrived;
+
+      read = { of: props.output.id, record };
+      return record;
+    },
 
     // A finished session's record cannot change, so it is read once and never
     // again. While the session is still talking it is re-read on every Nudge,
@@ -77,7 +121,10 @@ export function Output(props: {
     // every turn comes back as a new object, `For` rebuilds every row, and any
     // fold the reader had opened snaps shut with the element it was DOM state
     // on. Keyed by `id`, which is the turn's place in the conversation — and
-    // flat on the turn itself, because reconcile does not look inside.
+    // flat on the turn itself, because reconcile does not look inside. Which is
+    // also what makes the accumulation above cost nothing: the turns it carries
+    // over are the turns already drawn, so the merge leaves every one of them
+    // and its element alone.
     freshness: over ? "static" : { reconcile: "id" },
   }));
 
