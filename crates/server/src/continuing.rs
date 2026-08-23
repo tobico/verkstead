@@ -38,6 +38,8 @@
 
 use std::path::Path;
 
+use verkstead_schema::Nudge;
+
 use crate::AppState;
 use crate::stages::{self, Next, Stage};
 use crate::store;
@@ -300,9 +302,11 @@ async fn start(
         "the next stage of the roadmap has started",
     );
 
-    // Two Timelines moved and a Conversation appeared in the sidebar, and an open
-    // page should say so without being reloaded.
-    state.nudges.announce();
+    // Both Timelines were said by the notices above, each on its own. What is
+    // left to say is the sidebar: there is a Conversation in the list that was
+    // not there a moment ago, and an open page should show it without being
+    // reloaded.
+    state.nudges.announce(Nudge::Conversations);
 
     tokio::spawn(crate::runner::plan_stage(state.clone(), id, stacked_on));
 }
@@ -402,7 +406,9 @@ async fn taken(repo: &Path, branch: &str) -> bool {
 /// line in the log and no more.
 async fn say(state: &AppState, conversation_id: i64, markdown: &str) {
     match store::note(&state.pool, conversation_id, markdown).await {
-        Ok(true) => state.nudges.announce(),
+        Ok(true) => state.nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
         Ok(false) => tracing::error!(
             conversation_id,
             "there is no Conversation left to say anything on"

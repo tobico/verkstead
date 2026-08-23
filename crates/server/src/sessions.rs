@@ -31,6 +31,7 @@ use sqlx::SqlitePool;
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
+use verkstead_schema::Nudge;
 
 use crate::capture::Reading;
 use crate::handoffs::Handoffs;
@@ -683,7 +684,9 @@ impl Sessions {
         // gave the session, inside the directory of the Profile it is running
         // under. A session with no name has no log to look for — see
         // [`crate::transcript`].
-        let tail = session.as_deref().map(|session| Tail::of(profile, session));
+        let tail = session
+            .as_deref()
+            .map(|session| Tail::of(conversation_id, profile, session));
 
         let (stop, stopping) = oneshot::channel();
 
@@ -753,7 +756,10 @@ impl Sessions {
                     let ended = relay(
                         &pool,
                         &nudges,
-                        event_id,
+                        Printing {
+                            conversation_id,
+                            event_id,
+                        },
                         &mut launched,
                         &quiet,
                         tail,
@@ -778,7 +784,9 @@ impl Sessions {
                     // reading the Conversation back reads a session that has
                     // ended.
                     sessions.forget(conversation_id, event_id);
-                    nudges.announce();
+                    nudges.announce(Nudge::Conversation {
+                        conversation: conversation_id,
+                    });
 
                     // Last of all, for the reason the drop it replaced was last:
                     // whoever is driving acts on this — it raises Interruptions
@@ -810,7 +818,9 @@ impl Sessions {
         // The Event is on the Timeline as of now, empty. Whoever is watching
         // should see the session appear rather than see it once it says
         // something.
-        nudges.announce();
+        nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        });
 
         tracing::info!(conversation_id, event_id, "a grilling session is running");
 
@@ -939,6 +949,18 @@ fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
     command
 }
 
+/// Where a running session's output goes: the Timeline Event it is written into,
+/// and the Conversation that Event is on.
+///
+/// The two travel together everywhere below, because both are needed at every
+/// write: the store is written by the Event, and the Nudge saying so is scoped
+/// by the Conversation (ADR-0009).
+#[derive(Debug, Clone, Copy)]
+struct Printing {
+    conversation_id: i64,
+    event_id: i64,
+}
+
 /// Follow a session until it is over, putting what it prints on the Timeline as
 /// it arrives — and, where it keeps a log of its own conversation, following
 /// that too.
@@ -963,12 +985,17 @@ fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
-    event_id: i64,
+    printing: Printing,
     session: &mut Launched,
     quiet: &Quiet,
     mut tail: Option<Tail>,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
+    // The Event alone here: what this loop says for itself it says in the log,
+    // and everything it writes down is written by [`flush`] and [`summarise`],
+    // which take the whole of `printing` because a Nudge needs the other half.
+    let Printing { event_id, .. } = printing;
+
     let Launched {
         terminal,
         child,
@@ -1005,7 +1032,7 @@ async fn relay(
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 let said = tail.as_ref().and_then(Tail::latest);
-                flush(pool, nudges, event_id, &mut pending, &reading, said).await;
+                flush(pool, nudges, printing, &mut pending, &reading, said).await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1016,7 +1043,7 @@ async fn relay(
                 if let Some(tail) = tail.as_mut()
                     && tail.poll(pool, nudges, event_id).await
                 {
-                    summarise(pool, nudges, event_id, &reading, tail.latest()).await;
+                    summarise(pool, nudges, printing, &reading, tail.latest()).await;
                 }
 
                 tailed = Instant::now();
@@ -1039,7 +1066,7 @@ async fn relay(
     pending.push_str(&last);
 
     let said = tail.as_ref().and_then(Tail::latest);
-    flush(pool, nudges, event_id, &mut pending, &reading, said).await;
+    flush(pool, nudges, printing, &mut pending, &reading, said).await;
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1075,7 +1102,7 @@ async fn relay(
     if let Some(tail) = tail.as_mut()
         && tail.poll(pool, nudges, event_id).await
     {
-        summarise(pool, nudges, event_id, &reading, tail.latest()).await;
+        summarise(pool, nudges, printing, &reading, tail.latest()).await;
     }
 
     ended
@@ -1090,7 +1117,7 @@ async fn relay(
 async fn flush(
     pool: &SqlitePool,
     nudges: &Nudges,
-    event_id: i64,
+    printing: Printing,
     pending: &mut String,
     reading: &Reading,
     said: Option<&str>,
@@ -1098,6 +1125,11 @@ async fn flush(
     if pending.is_empty() {
         return;
     }
+
+    let Printing {
+        conversation_id,
+        event_id,
+    } = printing;
 
     match store::append_capture(pool, event_id, pending, &reading.summary(said)).await {
         // Kept rather than dropped: the next flush carries it, and a store that
@@ -1108,7 +1140,11 @@ async fn flush(
         }
         Ok(()) => {
             pending.clear();
-            nudges.announce();
+            // What the session printed, which is what both the Capture and the
+            // Screen painted from it are read back off.
+            nudges.announce(Nudge::Screen {
+                conversation: conversation_id,
+            });
         }
     }
 }
@@ -1123,15 +1159,24 @@ async fn flush(
 async fn summarise(
     pool: &SqlitePool,
     nudges: &Nudges,
-    event_id: i64,
+    printing: Printing,
     reading: &Reading,
     said: Option<&str>,
 ) {
+    let Printing {
+        conversation_id,
+        event_id,
+    } = printing;
+
     match store::summarise_capture(pool, event_id, &reading.summary(said)).await {
         Err(error) => {
             tracing::error!(error = ?error, event_id, "summarising a session failed")
         }
-        Ok(()) => nudges.announce(),
+        // The row on the Timeline and nothing under it: what moved is the line
+        // saying what the session is doing, which is the Conversation's own.
+        Ok(()) => nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
     }
 }
 

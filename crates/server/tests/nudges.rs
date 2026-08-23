@@ -1,11 +1,11 @@
-//! The Nudge stream: telling the open viewer pages that the pending world
-//! moved.
+//! The Nudge stream: telling the open viewer pages what moved.
 //!
 //! Read off the wire rather than off the channel behind it, because what has to
-//! hold is that a page listening over HTTP hears each durable change — the
-//! three that settle a Set or put a new one to the human, and nothing else. A Nudge
-//! is contentless, so every assertion here is about *how many* arrived and
-//! *when*, never about what one said.
+//! hold is that a page listening over HTTP hears each change — the three that
+//! settle a Set or put a new one to the human, and nothing else. A Nudge now
+//! says which kind of thing moved and where (ADR-0009), so the assertions are
+//! about *how many* arrived, *when*, and *what each said* — the last of which is
+//! the wire shape the viewer's own tests are fed from, below.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,7 +15,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_schema::SetCreated;
+use verkstead_schema::{Nudge, SetCreated};
 use verkstead_server::{open_database, router, store};
 
 /// The Conversation every Set in this file is asked from, made by [`fresh_app`]
@@ -136,18 +136,18 @@ impl Listening {
     }
 
     /// The next Nudge, past the keep-alives that are the stream's other
-    /// traffic.
-    async fn nudge(&mut self) {
+    /// traffic, as the page reads it: the JSON of the `data` line.
+    async fn nudge(&mut self) -> Nudge {
         let waited_for = tokio::time::timeout(PATIENCE, async {
             loop {
                 let frame = self.frame().await;
                 if frame.starts_with("event: nudge") {
-                    return;
+                    return said(&frame);
                 }
             }
         });
 
-        waited_for.await.expect("waited for a Nudge in vain");
+        waited_for.await.expect("waited for a Nudge in vain")
     }
 
     /// Insist that nothing more is coming.
@@ -164,6 +164,21 @@ impl Listening {
 
         assert!(arrived.is_err(), "an unwanted Nudge arrived: {arrived:?}");
     }
+}
+
+/// What one SSE frame said, read the way the viewer reads it — off the `data`
+/// line and through the type generated from `Nudge`.
+///
+/// Deserialising rather than comparing text is the whole assertion: a Nudge that
+/// came out as something this cannot parse is one no page could act on.
+fn said(frame: &str) -> Nudge {
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .unwrap_or_else(|| panic!("a Nudge frame carries a data line, not {frame:?}"));
+
+    serde_json::from_str(data)
+        .unwrap_or_else(|error| panic!("a Nudge should be readable as one: {data:?} — {error}"))
 }
 
 async fn body_text(response: axum::response::Response) -> String {
@@ -216,7 +231,12 @@ async fn a_set_arriving_nudges_the_open_pages() {
 
     post_set(&app).await;
 
-    page.nudge().await;
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Set {
+            conversation: ASKING_FROM
+        },
+    );
     page.nothing_more().await;
 }
 
@@ -231,7 +251,12 @@ async fn a_response_landing_nudges_the_open_pages() {
 
     post(&app, &format!("/api/ui/sets/{id}/response"), decided()).await;
 
-    page.nudge().await;
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Set {
+            conversation: ASKING_FROM
+        },
+    );
     page.nothing_more().await;
 }
 
@@ -257,7 +282,12 @@ async fn a_response_from_the_agents_half_nudges_the_open_pages_too() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
 
-    page.nudge().await;
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Set {
+            conversation: ASKING_FROM
+        },
+    );
     page.nothing_more().await;
 }
 
@@ -274,7 +304,12 @@ async fn a_set_archived_unanswered_nudges_the_open_pages() {
     )
     .await;
 
-    page.nudge().await;
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Set {
+            conversation: ASKING_FROM
+        },
+    );
     page.nothing_more().await;
 }
 
@@ -314,9 +349,16 @@ async fn every_open_page_hears_every_nudge() {
     let id = post_set(&app).await;
     post(&app, &format!("/api/ui/sets/{id}/response"), decided()).await;
 
+    // The same two Nudges, saying the same two things, on both connections: the
+    // arrival off the Nudges channel and the answering off the store's, which
+    // this is what proves come out of the merge as one kind of thing.
     for page in [&mut phone, &mut laptop] {
-        page.nudge().await;
-        page.nudge().await;
+        let asked = Nudge::Set {
+            conversation: ASKING_FROM,
+        };
+
+        assert_eq!(page.nudge().await, asked);
+        assert_eq!(page.nudge().await, asked);
         page.nothing_more().await;
     }
 }
@@ -338,4 +380,77 @@ async fn the_stream_says_something_while_nothing_is_happening() {
         frame.starts_with(':'),
         "a quiet stream should have carried a keep-alive, not {frame:?}",
     );
+}
+
+/// The Conversation the fixture's scoped Nudges point at. Not [`ASKING_FROM`]:
+/// what a fixture is for is being read by a test that made its own world, and a
+/// number that means something here would read as a coincidence there.
+const SCOPED_TO: i64 = 7;
+
+/// Every kind of Nudge, as one array in the order they are declared in.
+///
+/// One of each rather than one per file: this is a vocabulary rather than a set
+/// of payloads, and what a reader of it wants to see is the whole of it at once.
+const KINDS: [Nudge; 8] = [
+    Nudge::Transcript {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Screen {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Commit {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Set {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Conversation {
+        conversation: SCOPED_TO,
+    },
+    Nudge::Conversations,
+    Nudge::Repos,
+    Nudge::Profiles,
+];
+
+/// Where the golden fixtures are written, relative to this crate — the same
+/// directory `ui_content` writes the endpoints' payloads to.
+const FIXTURES: &str = "../../web/tests/fixtures";
+
+/// Leave the viewer's own tests one Nudge of every kind, exactly as this server
+/// writes one.
+///
+/// Committed, and rewritten by every run of this test: the diff is the review.
+/// The viewer drives its stream off these rather than off a hand-written string,
+/// so a kind added on this side that nobody carried across shows up as a failing
+/// fixture rather than as a page that quietly stops reacting.
+#[test]
+fn the_viewers_own_tests_are_fed_from_here() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURES);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut pretty = serde_json::to_string_pretty(&KINDS).unwrap();
+    pretty.push('\n');
+
+    std::fs::write(dir.join("nudges.json"), pretty).unwrap();
+}
+
+#[tokio::test]
+async fn what_goes_down_the_wire_is_what_the_fixture_says() {
+    let (_dir, app) = fresh_app().await;
+    let mut page = Listening::open(&app).await;
+
+    post_set(&app).await;
+
+    // The fixture is written from the enum and the stream is written from the
+    // same enum, and this is the one place the two are put side by side: a Set
+    // arriving is the one kind an integration test can reach the whole way, so
+    // it is the one that ties the vocabulary to the wire.
+    let scoped = serde_json::to_value(page.nudge().await).unwrap();
+    let fixture = serde_json::to_value(Nudge::Set {
+        conversation: SCOPED_TO,
+    })
+    .unwrap();
+
+    assert_eq!(scoped["kind"], fixture["kind"]);
+    assert_eq!(scoped["conversation"], serde_json::json!(ASKING_FROM));
 }

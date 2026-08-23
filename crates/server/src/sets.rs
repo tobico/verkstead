@@ -10,7 +10,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::Response;
-use verkstead_schema::{ApiError, QuestionSet};
+use verkstead_schema::{ApiError, Nudge, QuestionSet};
 
 use crate::reply::yaml;
 use crate::{AppState, store};
@@ -59,7 +59,9 @@ pub(crate) async fn create_set(
             // than the long way round through a push service. This is what puts
             // the Set in front of a human watching the Timeline it just landed
             // on.
-            state.nudges.announce();
+            state.nudges.announce(Nudge::Set {
+                conversation: conversation_id,
+            });
 
             yaml(StatusCode::CREATED, &created)
         }

@@ -33,7 +33,7 @@ use verkstead_render::{
     PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted,
     Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
-use verkstead_schema::{ApiError, Response};
+use verkstead_schema::{ApiError, Nudge, Response};
 
 use crate::{AppState, store};
 
@@ -1229,7 +1229,9 @@ async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> Htt
     );
 
     // The badge goes with it, and it is drawn off the Conversation.
-    state.nudges.announce();
+    state
+        .nudges
+        .announce(Nudge::Conversation { conversation: id });
 
     Json(HandedBack::HandedBack).into_response()
 }

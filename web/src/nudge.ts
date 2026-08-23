@@ -1,15 +1,23 @@
-//! Listening for the Nudge: the contentless word that the pending world moved
-//! (ADR-0005).
+//! Listening for the Nudge: the word that something moved, and what it was
+//! (ADR-0009).
 //!
-//! There is one reaction and it never varies — look again at everything the
-//! page is showing. A Nudge says a Set arrived, was answered or was archived
-//! without saying which, because the page would do the same thing either way,
-//! and so nothing here has to decide anything.
+//! A Nudge names a kind and, where the change belongs to one, the Conversation
+//! it happened in. It carries nothing else — no payload rides an event, and
+//! what the page does about one is an ordinary read of the server.
+//!
+//! There is still one reaction and it is the widest there is: look again at
+//! everything the page is showing. Reading a kind narrowly is what the kinds
+//! are *for* and is not written yet; until it is, every kind takes the path an
+//! unrecognised kind will always take, which is also what makes a page safe
+//! against a server newer than itself.
 //!
 //! It arrives two ways, and they are not alternatives. The server's stream is
 //! instant while the page is alive but dies when iOS suspends the PWA; the
 //! service worker relays every push it is woken by, which survives exactly that
 //! suspension but needs notifications on and Apple's delivery to happen at all.
+//! What the worker relays says nothing at all — a push is a rare, human-facing
+//! moment, and reading everything back at one is no waste worth typing a kind
+//! for.
 //!
 //! Nothing here has to work, either. Every Nudge is latency saved off the
 //! ten-second poll underneath, and a page that gets none of them stays correct
@@ -18,6 +26,8 @@
 //! that is being restarted.
 
 import type { QueryClient } from "@tanstack/solid-query";
+
+import type { Nudge } from "./api/types";
 
 /// The server's stream — see the `nudge` module on the other side of it.
 const STREAM = "/api/ui/nudges";
@@ -66,9 +76,42 @@ function overTheStream(queries: QueryClient): () => void {
 
   // Named, so that whatever else may one day come down this stream is not
   // mistaken for a Nudge by a page too old to know about it.
-  stream.addEventListener("nudge", () => lookAgain(queries));
+  stream.addEventListener("nudge", (event) =>
+    lookAgainAt(queries, whatMoved((event as MessageEvent<unknown>).data)),
+  );
 
   return () => stream.close();
+}
+
+/// What the server said moved, or `null` where this page could not make a Nudge
+/// of it.
+///
+/// Unreadable and unrecognised come to the same thing here and are meant to:
+/// both are a page that does not know what happened, and what a page that does
+/// not know does is read everything back.
+function whatMoved(data: unknown): Nudge | null {
+  if (typeof data !== "string") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(data) as Nudge;
+  } catch {
+    return null;
+  }
+}
+
+/// Read back what the Nudge was about.
+///
+/// One case, and it is the one an unrecognised kind takes: everything. Cases
+/// that read back less are what this is here to grow — and they belong here
+/// rather than on the server, so that renaming a query key stays the viewer's
+/// own business (ADR-0009).
+function lookAgainAt(queries: QueryClient, moved: Nudge | null): void {
+  switch (moved?.kind) {
+    default:
+      lookAgain(queries);
+  }
 }
 
 /// Hear out the service worker, which posts a Nudge to every open window on
@@ -100,10 +143,8 @@ function throughTheWorker(queries: QueryClient): () => void {
 
 /// Read back everything the app is showing.
 ///
-/// Every active query at once, rather than the ones a change was about: the
-/// page listening is whichever page is open, and a Nudge does not say enough to
-/// narrow it down even if it wanted to. What is not on screen is left to be
-/// refetched when something mounts it.
+/// Every active query at once. What is not on screen is left to be refetched
+/// when something mounts it.
 function lookAgain(queries: QueryClient): void {
   void queries.invalidateQueries();
 }

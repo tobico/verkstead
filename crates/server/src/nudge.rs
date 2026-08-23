@@ -1,20 +1,21 @@
 //! The Nudge: telling the open viewer pages that the pending world moved.
 //!
-//! A Nudge is contentless (ADR-0005). It says that a Set arrived, was answered
-//! or was archived, and never which of the three, because the page's reaction
-//! is the same either way — look again at everything it is showing. Nothing
-//! here has to be got right for correctness: a Nudge that never lands costs
-//! latency, and the ten-second poll underneath collects the change anyway.
+//! A Nudge is notify-only (ADR-0009). It names a kind — a Transcript grew, a
+//! commit landed, a Set settled — and, where the change belongs to one, the
+//! Conversation it happened in. It never carries what changed: the page is told
+//! to look, and looking is an ordinary HTTP read. Nothing here has to be got
+//! right for correctness either; a Nudge that never lands costs latency, and
+//! the page's catch-up on reconnect collects the change anyway.
 //!
-//! The durable changes reach this stream over two channels rather than one. A
-//! settlement — a Response taken, or a Set closed unanswered — is already
-//! announced on [`Settlements`](verkstead_store::Settlements) from inside the
-//! store, on the single path the browser's submit and the agent's both take, so
-//! listening to it here is what makes it impossible to Nudge about a settlement
-//! from one namespace and silently not from the other. Everything else that
-//! moves — a Set arriving, a session printing another line of its Capture —
-//! is announced on [`Nudges`], which is the channel for what the store has no
-//! reason to know has happened.
+//! The changes reach this stream over two channels rather than one. A settlement
+//! — a Response taken, or a Set closed unanswered — is already announced on
+//! [`Settlements`](verkstead_store::Settlements) from inside the store, on the
+//! single path the browser's submit and the agent's both take, so listening to it
+//! here is what makes it impossible to Nudge about a settlement from one
+//! namespace and silently not from the other. Everything else that moves — a Set
+//! arriving, a session printing another line of its Capture — is announced on
+//! [`Nudges`], which is the channel for what the store has no reason to know has
+//! happened. Both come out of the merge as the same typed [`Nudge`].
 //!
 //! Liveness stays out of it, and so stays with the poll: the
 //! waiting/disconnected verdict cycles with the agent's long-poll rather than
@@ -29,13 +30,14 @@ use axum::response::sse::{Event, KeepAlive};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
+use verkstead_schema::Nudge;
+use verkstead_store::SettledSet;
 
 use crate::AppState;
 
-/// How much may happen before a page that is behind is told it is. It costs
-/// nothing to be told: a Nudge carries nothing, so a page that missed a burst of
-/// them is nudged once for the whole burst and reads the world back as it now
-/// is.
+/// How much may happen before a page that is behind is told it is. Falling
+/// behind costs precision rather than correctness: a page that missed a burst is
+/// told it missed one, and reads back everything it is showing.
 const NUDGE_BACKLOG: usize = 16;
 
 /// How often the stream says something into the quiet. Anything between the
@@ -52,7 +54,7 @@ const KEEP_ALIVE: Duration = Duration::from_secs(15);
 /// on a Capture growing, so until the viewer wanted to hear about them there
 /// was nobody to tell.
 #[derive(Debug, Clone)]
-pub(crate) struct Nudges(broadcast::Sender<()>);
+pub(crate) struct Nudges(broadcast::Sender<Nudge>);
 
 impl Nudges {
     pub(crate) fn new() -> Self {
@@ -60,14 +62,18 @@ impl Nudges {
         Self(moves)
     }
 
-    /// Tell the open pages to look again. A send error means none are open,
-    /// which is the ordinary case — there is usually no browser pointed at this
-    /// at all.
-    pub(crate) fn announce(&self) {
-        let _ = self.0.send(());
+    /// Tell the open pages what moved. A send error means none are open, which
+    /// is the ordinary case — there is usually no browser pointed at this at
+    /// all.
+    ///
+    /// The kind is not optional and has no default: what a caller knows about
+    /// what it just changed is knowledge that exists nowhere else, and a Nudge
+    /// that shrugged would put every page back to reading everything.
+    pub(crate) fn announce(&self, moved: Nudge) {
+        let _ = self.0.send(moved);
     }
 
-    fn subscribe(&self) -> broadcast::Receiver<()> {
+    fn subscribe(&self) -> broadcast::Receiver<Nudge> {
         self.0.subscribe()
     }
 }
@@ -82,22 +88,50 @@ pub(crate) async fn nudges(
     let moved = BroadcastStream::new(state.nudges.subscribe());
     let settled = BroadcastStream::new(state.settlements.subscribe());
 
-    // Falling behind is folded in with everything else rather than handled: a
-    // page cannot miss what a Nudge said, because a Nudge says nothing. Being
-    // overtaken and being told are the same event here.
+    // A page that fell behind is told nothing narrower, because there is nothing
+    // narrow enough to tell it: what it missed is a burst it saw the middle of
+    // none of. The stream ends instead, the browser reconnects, and the
+    // reconnect is what reads the world back whole — the same catch-up a
+    // dropped connection gets, which is the one this already relies on.
     let nudges = moved
-        .map(|_| ())
-        .merge(settled.map(|_| ()))
-        .map(|()| Ok(nudge()));
+        .merge(settled.map(|settled| settled.map(settlement)))
+        .take_while(Result::is_ok)
+        .map(|moved| {
+            Ok(frame(
+                moved.expect("a Nudge that was not one ended the stream above"),
+            ))
+        });
 
     Sse::new(nudges).keep_alive(KeepAlive::new().interval(KEEP_ALIVE))
 }
 
+/// What a settlement off the store's channel says on this one.
+///
+/// A Set that settled without a Conversation behind it is a record that has been
+/// got at, rather than something a Set can be: every Set is asked from a
+/// Conversation, on one path, in one transaction. The list of Conversations is
+/// the widest thing there is to point a page at when it has happened anyway.
+fn settlement(settled: SettledSet) -> Nudge {
+    match settled.conversation_id {
+        Some(conversation) => Nudge::Set { conversation },
+        None => {
+            tracing::error!(
+                set_id = settled.set_id,
+                "a Question Set settled that is on no Conversation's Timeline",
+            );
+            Nudge::Conversations
+        }
+    }
+}
+
 /// One Nudge on the wire.
 ///
-/// The event name is the whole of the message. The data field is there only
-/// because a browser drops an event that has none, so it repeats the name
-/// rather than saying anything a page is meant to read.
-fn nudge() -> Event {
-    Event::default().event("nudge").data("nudge")
+/// The event stays named, so that whatever else may one day come down this
+/// stream is not mistaken for a Nudge by a page too old to know about it. What
+/// it says is in the data now, as the JSON the viewer's `Nudge` type is
+/// generated from.
+fn frame(moved: Nudge) -> Event {
+    Event::default().event("nudge").json_data(moved).expect(
+        "a Nudge is a tagged enum of integers and unit variants, which serialises without fail",
+    )
 }

@@ -20,7 +20,7 @@
 //! So the relaunch archives it unanswered first — the same archiving the human
 //! reaches by hand for a Set whose agent has gone.
 
-use verkstead_schema::{QuestionOption, QuestionSet, Response};
+use verkstead_schema::{Nudge, QuestionOption, QuestionSet, Response};
 
 use crate::AppState;
 use crate::drivers::Driving;
@@ -180,7 +180,9 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
     // what has just changed there is that it no longer is. Only where something
     // did change: a nudge is every open page going back to the store.
     if archived {
-        state.nudges.announce();
+        state.nudges.announce(Nudge::Set {
+            conversation: conversation_id,
+        });
     }
 }
 

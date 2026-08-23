@@ -47,6 +47,7 @@ use axum::extract::{Path, State};
 use axum::response::Response as HttpResponse;
 use tokio::sync::broadcast;
 use verkstead_render::{Shown, Size, Watching};
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::terminal::{COLUMNS, ROWS, Terminal};
@@ -411,7 +412,9 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
 
                                 // The badge is drawn off the Conversation, so
                                 // every open page is told to read it again.
-                                state.nudges.announce();
+                                state.nudges.announce(Nudge::Conversation {
+                                    conversation: conversation_id,
+                                });
 
                                 // And if they walk away from it, their devices
                                 // hear about it — once, and only while it is

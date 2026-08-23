@@ -1,6 +1,11 @@
-//! The Nudge: the open page being told the pending world moved, and looking
-//! again because of it — over the server's stream, and relayed by the service
-//! worker off a push (ADR-0005).
+//! The Nudge: the open page being told what moved, and looking again because of
+//! it — over the server's stream, and relayed by the service worker off a push
+//! (ADR-0009).
+//!
+//! What a page does about a Nudge is the same whatever it says, and that is the
+//! point of the tests below rather than an omission in them: reading a kind
+//! narrowly is the next thing to be written, and until it is, every kind takes
+//! the path an unrecognised kind will always take.
 //!
 //! Driven through `App` for the same reason `resuming` is — what the Nudge acts
 //! on is the app's own query client, and a test that built a client of its own
@@ -17,6 +22,7 @@ import { App } from "../src/App";
 import type {
   ConversationEntry,
   ConversationView,
+  Nudge,
   ProfileEntry,
   QuestionSetEvent,
   RepoEntry,
@@ -25,6 +31,7 @@ import type {
 } from "../src/api/types";
 import { askedFor, json, serving, whenever } from "./serving";
 import { worker } from "./worker";
+import kinds from "./fixtures/nudges.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -99,6 +106,18 @@ const MOVED_ON: ConversationView = {
   timeline: [...CONVERSATION.timeline, { QuestionSet: ARRIVAL } as TimelineEvent],
 };
 
+/// Every kind of Nudge the server writes, off the fixture the server's own
+/// tests leave behind — so what these drive the stream with is what really goes
+/// down it rather than a guess at it.
+const KINDS = kinds as Nudge[];
+
+/// What a Nudge says by default here: a Question Set moved in a Conversation,
+/// which is what nearly every test in this file makes happen.
+const SET_ARRIVED: Nudge = {
+  kind: "set",
+  conversation: CONVERSATION.id,
+};
+
 /// A stand-in for the browser's `EventSource`, which jsdom has none of — and
 /// which a test would want its own of anyway, having no other way to put a
 /// Nudge on the wire or to sever the connection carrying it.
@@ -128,10 +147,15 @@ class Streaming {
     this.fire("open");
   }
 
-  /// One Nudge, as the server writes it: a named event carrying nothing worth
-  /// reading.
-  nudges(): void {
-    this.fire("nudge");
+  /// One Nudge, as the server writes it: a named event whose data says what
+  /// moved. `said` is passed through untouched, so a test may put something
+  /// down the wire that no page could read.
+  nudges(said: unknown = SET_ARRIVED): void {
+    const data = typeof said === "string" ? said : JSON.stringify(said);
+
+    for (const listener of this.listeners.get("nudge") ?? []) {
+      listener(new MessageEvent("nudge", { data }));
+    }
   }
 
   private fire(name: string): void {
@@ -284,6 +308,46 @@ describe("the Nudge stream", () => {
     expect(askedFor(fetching, OPENED)).toBe(1);
   });
 
+  it.each(KINDS.map((moved) => [moved.kind, moved] as const))(
+    "reads everything back for a Nudge of kind %s",
+    async (_kind, moved) => {
+      window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+      const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
+      render(() => <App />);
+      await waitFor(() => screen.getByText(ALREADY_THERE));
+      stream().opens();
+
+      stream().nudges(moved);
+
+      // Every kind, whatever it names and wherever it points: what a page does
+      // about one is read back everything it is showing (ADR-0009). Reading
+      // back less is what the kinds are for and is not written yet, and this is
+      // the test that will say so when it is.
+      await waitFor(() => screen.getByText(ARRIVAL.title));
+      expect(askedFor(fetching, OPENED)).toBe(2);
+    },
+  );
+
+  it.each([
+    ["a kind this page has never heard of", { kind: "liveness", conversation: 1 }],
+    ["a Nudge that is not JSON at all", "nudge"],
+    ["a Nudge with nothing in it", ""],
+  ])("reads everything back for %s", async (_what, said) => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+
+    stream().nudges(said);
+
+    // A page against a server newer than itself, which is every page between a
+    // deploy and a reload: what it cannot read it treats as everything having
+    // moved, which is exactly the reaction it gives what it can.
+    await waitFor(() => screen.getByText(ARRIVAL.title));
+    expect(askedFor(fetching, OPENED)).toBe(2);
+  });
+
   it("leaves the poll running underneath it", async () => {
     window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
     const fetching = serving(...BESIDE, json(CONVERSATION));
@@ -333,10 +397,9 @@ describe("a Nudge relayed by the worker", () => {
 
     await pushed(container);
 
-    // A relayed Nudge is as contentless as a streamed one — it says a Set
-    // arrived, not which — so the reaction is the same either way: everything
-    // this page is showing, which here is a Set answered elsewhere in the
-    // meantime.
+    // A relayed Nudge says nothing at all where a streamed one says a kind, and
+    // gets the reaction a kind nobody recognises gets: everything this page is
+    // showing, which here is a Set answered elsewhere in the meantime.
     await waitFor(() => expect(page.querySelector(".answered-at")).toBeTruthy());
   });
 

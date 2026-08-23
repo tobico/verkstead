@@ -165,10 +165,10 @@ pub(crate) async fn wait_for_response(
 
 /// Wait until this Set is settled, one way or the other. `false` when the
 /// channel is gone, which only happens as the server itself does.
-async fn settled(settlements: &mut broadcast::Receiver<i64>, id: i64) -> bool {
+async fn settled(settlements: &mut broadcast::Receiver<store::SettledSet>, id: i64) -> bool {
     loop {
         match settlements.recv().await {
-            Ok(settled) if settled == id => return true,
+            Ok(settled) if settled.set_id == id => return true,
             Ok(_) => continue,
             // Overtaken by a burst of settlements: ours may have been among
             // them, so go back and look at the store.
