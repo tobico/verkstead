@@ -17,7 +17,7 @@ dependency.
 - [x] 01: Profile model lists — [details](01-profile-model-lists.md)
 - [x] 02: Pairing choice — [details](02-pairing-choice.md)
 - [x] 03: Setup on the brief card — [details](03-setup-on-the-brief-card.md)
-- [ ] 04: Directly editable brief — [details](04-directly-editable-brief.md)
+- [x] 04: Directly editable brief — [details](04-directly-editable-brief.md)
 - [ ] 05: Clamped markdown cards — [details](05-clamped-markdown-cards.md)
 - [ ] 06: Question-set interview — [details](06-question-set-interview.md)
 - [ ] 07: Record styling sweep — [details](07-record-styling-sweep.md)

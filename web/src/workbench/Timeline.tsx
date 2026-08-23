@@ -14,8 +14,9 @@
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. The Brief has
 //! no full self beyond what is already drawn, so it is the one Event nothing
-//! opens — and it is the one that carries a Conversation's setup instead, while
-//! there is still a draft to set up.
+//! opens — and it is the one that is written here as well as read: while the
+//! Conversation is drafting it is a field that saves itself, and it carries a
+//! Conversation's setup under it for as long as there is a draft to set up.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
@@ -31,7 +32,15 @@
 //! answered on and land here as the answered Set.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  onCleanup,
+  type JSX,
+} from "solid-js";
 
 import {
   abortConversation,
@@ -77,15 +86,22 @@ export const ABBREVIATED = 7;
 
 /// What each way of being refused a Brief says.
 ///
-/// `Saved` is here for completeness of the mapping and never drawn: nothing is
-/// said about an edit that worked, because the Brief reading back as what was
-/// written is what says it.
+/// `Saved` is here for completeness of the mapping and never drawn: a save that
+/// worked is said by the indicator on the card, in one word.
 export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
   Saved: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
+
+/// How long a pause in typing is, before what is in the Brief field is kept.
+///
+/// Long enough that a sentence is one save rather than a save a word, and short
+/// enough that a human who typed and then sat back has a saved brief by the time
+/// they have read it over. Leaving the field saves it whatever the timer was
+/// about to do.
+const SETTLE = 800;
 
 /// And each way of being refused a start.
 ///
@@ -1026,9 +1042,17 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 /// Inline in the Timeline rather than in the details pane, because there is
 /// nothing of it the Timeline does not already show — it *is* its own summary.
 ///
-/// Read as the server rendered it and written as it was typed. The two are one
-/// field's worth of markdown either way, and the Brief is the one document on
-/// this wire that travels both ways for exactly that reason.
+/// While the Conversation is drafting the Brief *is* a field: raw markdown in a
+/// textarea that is always there, growing with what is typed into it, saving
+/// itself on a pause and on the way out of it. There is no Edit and no Save,
+/// because a document that is only ever written in one state does not need a
+/// mode to be written in — and a card that swapped a rendering for a field
+/// would cost a tap before every correction.
+///
+/// Once grilling starts it freezes, and from then on it is read as the server
+/// rendered it. The two are one field's worth of markdown either way, and the
+/// Brief is the one document on this wire that travels both ways for exactly
+/// that reason.
 ///
 /// The setup rides under it while the Conversation is still drafting — the
 /// branch, the base commit and the two pairings — because setting the work up
@@ -1041,75 +1065,115 @@ function Brief(props: {
 }): JSX.Element {
   const queries = useQueryClient();
 
-  /// Whether this conversation is adopting a roadmap, in which case the brief
-  /// is nobody here to write: it is the stage brief, and it arrives when the
-  /// stage is adopted. So there is no editor, and nothing to open one on.
-  const adopting = () => props.conversation.adopting !== null;
+  /// Whether the Brief is the human's to write here.
+  ///
+  /// While it is a draft, and never where the Conversation is adopting a
+  /// roadmap: that Brief is the stage's, and it arrives with the adoption
+  /// rather than from anyone at this keyboard.
+  const writing = () =>
+    props.conversation.state === "Draft" && props.conversation.adopting === null;
 
-  // Whether the Brief is being written rather than read. Its own signal and not
-  // "is there a draft": an empty Brief is a perfectly ordinary thing to open the
-  // field on, and it is the first thing anyone does with a new Conversation.
-  const [editing, setEditing] = createSignal(false);
+  // What has been typed, or nothing if nothing has been. The field follows the
+  // Event until the first keystroke and follows itself after it, so a read of
+  // the Conversation landing mid-sentence cannot take the sentence with it.
+  const [typed, setTyped] = createSignal<string | null>(null);
+  const text = () => typed() ?? props.brief.markdown;
 
-  // What is being typed. Seeded from the Brief when editing starts rather than
-  // kept in step with it, so a Brief that changed underneath is the one that
-  // opens in the field.
-  const [draft, setDraft] = createSignal("");
+  // What the record has, as far as this card knows: what came down with the
+  // Event, until a save of its own puts something else there.
+  const [kept, setKept] = createSignal<string | null>(null);
+  const recorded = () => kept() ?? props.brief.markdown;
 
   const [refused, setRefused] = createSignal<BriefSaved | null>(null);
 
-  const write = () => {
-    setDraft(props.brief.markdown);
-    setEditing(true);
-  };
-
-  const stop = () => {
-    setEditing(false);
-    setRefused(null);
-  };
+  /// Whether the field is ahead of the record, which is the whole of what there
+  /// is to save.
+  const unsaved = () => text() !== recorded();
 
   const save = useMutation(() => ({
     mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
-    onSuccess: (outcome: BriefSaved) => {
+    onSuccess: (outcome: BriefSaved, markdown: string) => {
       if (outcome !== "Saved") {
-        // The draft stands: it is the only copy of what was written, and the
-        // human is owed the chance to take it somewhere else.
+        // What was typed stands: it is the only copy of it there is, and the
+        // human is owed the chance to take it somewhere else. The commonest
+        // refusal is the freeze landing mid-edit, which is why it is said in
+        // words rather than left to a field that quietly stopped keeping up.
         setRefused(outcome);
         return;
       }
 
       setRefused(null);
-      setEditing(false);
+      setKept(markdown);
+      // The readiness verdict under this card is a fact about the Brief, so it
+      // is read again every time the Brief moves.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
+
+      // Typed into while that was in flight, so the record is behind again.
+      if (unsaved()) keep();
     },
   }));
+
+  // The pause: one timer, restarted by every keystroke and cancelled by
+  // whatever saves before it comes round.
+  let pause: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    clearTimeout(pause);
+    pause = setTimeout(keep, SETTLE);
+  };
+
+  /// Keep what is in the field, if the record does not have it already.
+  ///
+  /// One save at a time: another started while one is in flight could land in
+  /// either order, and the loser would be the record. What was typed meanwhile
+  /// is saved when the one in flight comes back.
+  ///
+  /// A refusal stops it for good, because both of them are permanent — a Brief
+  /// that has frozen does not thaw, and a Conversation that is gone does not
+  /// come back. Trying again every time the typing paused would be a request a
+  /// second for as long as the human went on writing, and the answer would be
+  /// the same one already on the card.
+  const keep = () => {
+    clearTimeout(pause);
+    if (refused() || !unsaved() || save.isPending) return;
+    save.mutate(text());
+  };
+
+  onCleanup(() => clearTimeout(pause));
+
+  /// What the quiet indicator says, and nothing until something has been
+  /// typed: a Brief nobody has touched saying `Saved` is the card claiming
+  /// credit for what the human did on another day.
+  const standing = () => {
+    if (save.isPending) return "Saving…";
+    if (unsaved()) return "Not saved yet";
+    return typed() === null ? "" : "Saved";
+  };
 
   return (
     <article class="brief">
       <div class="event-head">
         <h2>Brief</h2>
-        <Show when={!editing() && !adopting()}>
-          <button type="button" class="edit-brief" onClick={write}>
-            Edit
-          </button>
+        {/* Where the Edit button used to be, saying what became of what was
+            typed. Announced politely, because it is the only word the human
+            gets that the record has their brief. */}
+        <Show when={writing() && standing() !== ""}>
+          <p class="brief-standing" aria-live="polite">
+            {standing()}
+          </p>
         </Show>
       </div>
 
       <Show
-        when={editing()}
+        when={writing()}
         fallback={
           <Show
             when={props.brief.markdown !== ""}
             fallback={
               <p class="empty">
                 <Show
-                  when={adopting()}
-                  fallback={
-                    <>
-                      Nothing written yet — this is what the grilling starts
-                      from.
-                    </>
-                  }
+                  when={props.conversation.adopting}
+                  fallback={<>Nothing was written.</>}
                 >
                   Nothing written yet — adopting the stage is what puts its
                   brief here.
@@ -1121,44 +1185,31 @@ function Brief(props: {
           </Show>
         }
       >
-        <form
-          class="edit-brief-form"
-          onSubmit={(ev) => {
-            ev.preventDefault();
-            save.mutate(draft());
-          }}
-        >
-          {/* A copy of what has been typed gives the field its height — see
-              `.grow`. */}
-          <div class="grow" data-value={draft()}>
-            <textarea
-              rows="1"
-              aria-label="Brief"
-              placeholder="What is this piece of work?"
-              value={draft()}
-              onInput={(ev) => {
-                setDraft(ev.currentTarget.value);
-                setRefused(null);
-              }}
-            />
-          </div>
-          <div class="edit-brief-buttons">
-            <button type="submit" disabled={save.isPending}>
-              {save.isPending ? "Saving…" : "Save"}
-            </button>
-            <button type="button" class="cancel" onClick={stop}>
-              Cancel
-            </button>
-          </div>
-          <Show when={refused()}>
-            {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
-          </Show>
-          <Show when={save.isError}>
-            <p class="error">
-              The brief could not be saved: {save.error?.message}
-            </p>
-          </Show>
-        </form>
+        {/* A copy of what has been typed gives the field its height — see
+            `.grow`. */}
+        <div class="grow" data-value={text()}>
+          <textarea
+            rows="1"
+            aria-label="Brief"
+            placeholder="What is this piece of work?"
+            value={text()}
+            onInput={(ev) => {
+              setTyped(ev.currentTarget.value);
+              settle();
+            }}
+            onBlur={() => keep()}
+          />
+        </div>
+      </Show>
+
+      {/* Outside the field rather than under it, so a freeze that lands while
+          the human was typing is still explained on the card it happened to
+          once the card has gone back to being a rendering. */}
+      <Show when={refused()}>
+        {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
+      </Show>
+      <Show when={save.isError}>
+        <p class="error">The brief could not be saved: {save.error?.message}</p>
       </Show>
 
       {/* Under the brief, and only while the brief is still a draft: the branch,

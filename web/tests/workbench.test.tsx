@@ -19,6 +19,7 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  BriefEvent,
   Capture,
   CommitDiff,
   ConversationAborted,
@@ -99,17 +100,23 @@ const ADOPTING = adopting as ConversationView;
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
 
-/// The Brief on the opened Conversation's Timeline.
-const BRIEF = (() => {
-  const first = OPEN.timeline[0]!;
+/// The Brief on a Conversation's Timeline, which is the first thing on every
+/// one of them.
+function briefOf(conversation: ConversationView): BriefEvent {
+  const first = conversation.timeline[0]!;
   if (!("Brief" in first)) {
     throw new Error("the fixture's first Event should be the Brief");
   }
   return first.Brief;
-})();
+}
+
+/// The Brief on the opened Conversation's Timeline.
+const BRIEF = briefOf(OPEN);
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // One test drives the brief field's typing pause on a clock of its own.
+  vi.useRealTimers();
   // The state is the instance's own, over the one every other test reads off
   // the prototype — so it goes when the test does.
   delete (document as { visibilityState?: DocumentVisibilityState })
@@ -167,6 +174,14 @@ function sent(
   );
   expect(written, `expected the page to have written to ${path}`).toBeTruthy();
   return JSON.parse(String(written![1]?.body));
+}
+
+/// How many times the page wrote to `path`, for the tests about *when* a save
+/// goes out rather than what was in it.
+function writes(fetching: ReturnType<typeof serving>, path: string): number {
+  return fetching.mock.calls.filter(
+    ([asked, init]) => String(asked) === path && init?.method === "POST",
+  ).length;
 }
 
 describe("the workbench", () => {
@@ -718,7 +733,7 @@ describe("the adoption page", () => {
 
     await drawn(container, ".adoption");
 
-    expect(container.querySelector(".edit-brief")).toBeNull();
+    expect(screen.queryByLabelText("Brief")).toBeNull();
     expect(container.querySelector(".start-grilling")).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
   });
@@ -885,16 +900,17 @@ describe("a conversation's timeline", () => {
     );
   });
 
-  it("draws the brief inline, as the server rendered it", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
+  /// Frozen, which is the state a Brief is read in: while the Conversation is
+  /// drafting it is the field the tests below type into.
+  it("draws a frozen brief inline, as the server rendered it", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    const body = await drawn(container, ".brief-body");
 
     // The server's own HTML, put in the page: the browser has no markdown
     // parser and never needed one.
-    const body = container.querySelector(".brief-body")!;
-    expect(body.innerHTML).toBe(BRIEF.html);
+    expect(body.innerHTML).toBe(briefOf(GRILLING).html);
     expect(body.querySelector("h1")).toBeTruthy();
   });
 
@@ -935,65 +951,133 @@ describe("a conversation's timeline", () => {
   });
 });
 
+/// The brief while the Conversation is drafting: a field that is always there
+/// and saves itself, rather than a rendering with a way into a form.
 describe("writing the brief", () => {
-  /// Open the field, which is what the Edit button is for.
-  function edit() {
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  }
+  /// The field, and the word beside the heading about what became of what is
+  /// in it.
+  const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
+  const indicator = (container: ParentNode) =>
+    container.querySelector(".brief-standing")?.textContent ?? "";
 
-  it("opens the field on what was last written", async () => {
+  /// Where a save of the Brief goes.
+  const WRITING = `/api/ui/conversations/${OPEN.id}/brief`;
+
+  it("is a field on what was last written, with nothing to press to open it", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    edit();
-
     // The markdown, not the HTML: the source travels beside the rendering for
     // exactly this, so the field needs no parser to fill itself in.
-    expect((screen.getByLabelText("Brief") as HTMLTextAreaElement).value).toBe(
-      BRIEF.markdown,
-    );
+    expect(field().value).toBe(BRIEF.markdown);
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
   });
 
-  it("sends what was typed, and reads the conversation back", async () => {
+  /// A copy of what is in the field is what gives it its height — the field
+  /// itself never scrolls, and there is no handle to drag.
+  it("grows with what is typed into it", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    const growing = container.querySelector(".brief .grow")!;
+    expect(growing.getAttribute("data-value")).toBe(BRIEF.markdown);
+
+    fireEvent.input(field(), { target: { value: "# One\n\n# Two\n" } });
+    expect(growing.getAttribute("data-value")).toBe("# One\n\n# Two\n");
+  });
+
+  it("saves what was typed when the field is left", async () => {
     const written = "# Rate limiting\n\nDecide where the counter lives.\n";
+    const fetching = theWorkbench(json("Saved"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    fireEvent.input(field(), { target: { value: written } });
+    fireEvent.blur(field());
+
+    await waitFor(() => expect(sent(fetching, WRITING)).toEqual({ markdown: written }));
+
+    // The field stays where it is, and says the record has what is in it.
+    await waitFor(() => expect(indicator(container)).toBe("Saved"));
+    expect(field().value).toBe(written);
+  });
+
+  it("saves what was typed after a pause in the typing", async () => {
+    const fetching = theWorkbench(json("Saved"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    // The clock is this test's from here: what it is about is a pause, and a
+    // real one would be a real wait on every run.
+    vi.useFakeTimers();
+    fireEvent.input(field(), { target: { value: "# Half a" } });
+    fireEvent.input(field(), { target: { value: "# Half a thought" } });
+
+    // Mid-sentence, and nothing has gone out: a save a keystroke is what the
+    // pause is there to stop.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(writes(fetching, WRITING)).toBe(0);
+    expect(indicator(container)).toBe("Not saved yet");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // One save, of the whole of what was typed rather than of the first half.
+    expect(writes(fetching, WRITING)).toBe(1);
+    expect(sent(fetching, WRITING)).toEqual({ markdown: "# Half a thought" });
+    await waitFor(() => expect(indicator(container)).toBe("Saved"));
+  });
+
+  /// Leaving a field nothing was typed into is not an edit, and neither is
+  /// coming back to one that has already been saved.
+  it("says nothing to the server when the field has not moved", async () => {
     const fetching = theWorkbench(json("Saved"));
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    edit();
-    fireEvent.input(screen.getByLabelText("Brief"), {
-      target: { value: written },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.blur(field());
+    fireEvent.input(field(), { target: { value: BRIEF.markdown } });
+    fireEvent.blur(field());
 
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/brief`),
-      ).toEqual({ markdown: written }),
-    );
-
-    // The field is spent, and what is read is what the server has.
-    await waitFor(() => expect(screen.queryByLabelText("Brief")).toBeNull());
+    expect(writes(fetching, WRITING)).toBe(0);
   });
 
-  it("keeps what was written when the server refuses it", async () => {
+  /// The freeze can land between a keystroke and the save it caused, which is
+  /// the one thing the human cannot see coming.
+  it("keeps what was written and says why when the server refuses it", async () => {
     const fetching = theWorkbench(json("NotDrafting"));
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    edit();
-    fireEvent.input(screen.getByLabelText("Brief"), {
-      target: { value: "# Too late\n" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.input(field(), { target: { value: "# Too late\n" } });
+    fireEvent.blur(field());
 
     await waitFor(() => screen.getByText(/frozen when grilling started/i));
     // The draft is the only copy of what was written, so it stands.
-    expect((screen.getByLabelText("Brief") as HTMLTextAreaElement).value).toBe(
-      "# Too late\n",
-    );
-    expect(fetching).toHaveBeenCalled();
+    expect(field().value).toBe("# Too late\n");
+    expect(writes(fetching, WRITING)).toBe(1);
+  });
+
+  /// A brief that has frozen does not thaw, so what is written after the
+  /// refusal is not worth asking about again — and asking on every pause would
+  /// be a request a second for as long as the human kept typing.
+  it("stops trying once it has been refused", async () => {
+    const fetching = theWorkbench(json("NotDrafting"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    fireEvent.input(field(), { target: { value: "# Too late\n" } });
+    fireEvent.blur(field());
+    await waitFor(() => screen.getByText(/frozen when grilling started/i));
+
+    fireEvent.input(field(), { target: { value: "# Too late still\n" } });
+    fireEvent.blur(field());
+
+    expect(writes(fetching, WRITING)).toBe(1);
+    // And the refusal is still on the card, over what is still in the field.
+    expect(screen.getByText(/frozen when grilling started/i)).toBeTruthy();
   });
 
   /// The page reads its Conversation again on every Nudge about it and on every
@@ -1001,11 +1085,11 @@ describe("writing the brief", () => {
   /// a Brief half written is the only copy of it there is, and one that went
   /// every time the world was read again could never be finished.
   it("lives through the page reading the conversation again", async () => {
-    // The read that lands while the field is open comes back with something
-    // else about the Conversation changed — the branch renamed from another
-    // device — so the test can wait for it to have landed rather than sleep
-    // until it has. What is asked here is what a read does to the field, and it
-    // does the same whether or not anything came back different.
+    // The read that lands while the field is being typed into comes back with
+    // something else about the Conversation changed — the branch renamed from
+    // another device — so the test can wait for it to have landed rather than
+    // sleep until it has. What is asked here is what a read does to the field,
+    // and it does the same whether or not anything came back different.
     const RENAMED: ConversationView = { ...OPEN, branch: "work/renamed-away" };
     let standing = OPEN;
     const fetching = serving(
@@ -1017,31 +1101,27 @@ describe("writing the brief", () => {
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    edit();
-    fireEvent.input(screen.getByLabelText("Brief"), {
-      target: { value: "# Half a thought" },
-    });
+    fireEvent.input(field(), { target: { value: "# Half a thought" } });
 
     standing = RENAMED;
     readAgain();
     await waitFor(() => screen.getByRole("heading", { name: RENAMED.branch }));
 
-    // The read landed, and the field is still open on what was typed into it.
-    expect((screen.getByLabelText("Brief") as HTMLTextAreaElement).value).toBe(
-      "# Half a thought",
-    );
+    // The read landed, and what was typed is still in the field.
+    expect(field().value).toBe("# Half a thought");
     expect(askedFor(fetching, READING)).toBeGreaterThan(1);
   });
 
-  it("puts the field away again on Cancel", async () => {
-    theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+  /// Frozen, the Brief is a document rather than a field — which is also how an
+  /// adopting Conversation has always drawn one.
+  it("is no field at all once the grilling has started", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    edit();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await drawn(container, ".brief-body");
 
     expect(screen.queryByLabelText("Brief")).toBeNull();
+    expect(container.querySelector(".brief-standing")).toBeNull();
   });
 });
 
@@ -1060,8 +1140,9 @@ describe("a conversation's setup", () => {
     expect(setup.querySelector(".base-commit")).toBeTruthy();
     expect(setup.querySelector(".conversation-profiles")).toBeTruthy();
 
-    // Under the words rather than over them: the brief is what the card is.
-    const body = container.querySelector(".brief .brief-body")!;
+    // Under the words rather than over them: the brief is what the card is,
+    // and while it is a draft the words are the field they are typed into.
+    const body = container.querySelector(".brief .grow")!;
     expect(
       body.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();

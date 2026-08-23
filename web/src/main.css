@@ -952,8 +952,7 @@ main:has(.workbench) {
 }
 
 .start-conversation button,
-.field-line button,
-.edit-brief-buttons button {
+.field-line button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -965,17 +964,9 @@ main:has(.workbench) {
 }
 
 .start-conversation button:disabled,
-.field-line button:disabled,
-.edit-brief-buttons button:disabled {
+.field-line button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
-}
-
-/* The one button that undoes rather than does, so it is drawn as the outline of
-   the one beside it. */
-.edit-brief-buttons .cancel {
-  color: var(--accent);
-  background: none;
 }
 
 /* The roadmaps nothing is driving, under the box that starts a conversation:
@@ -1486,20 +1477,14 @@ main:has(.workbench) {
   font-size: 1.1rem;
 }
 
-.edit-brief {
-  padding: 0;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--accent);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-.edit-brief-buttons {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+/* What became of what was typed into the brief, on the other end of the heading
+   line — where the Edit button used to be, and quiet where that was a control:
+   it reports rather than asks, and a brief that is saving itself should be read
+   past rather than watched. */
+.brief-standing {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
 
 /* The brief is prose, and reads at the measure like every other block of it. */
@@ -1587,7 +1572,7 @@ main:has(.workbench) {
 .branch-name .error,
 .base-commit .error,
 .start-conversation .error,
-.edit-brief-form .error,
+.brief > .error,
 .conversation-profiles .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;

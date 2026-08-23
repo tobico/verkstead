@@ -91,6 +91,13 @@ The editable markdown document a Conversation starts from, and its first
 Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
 rather than editing the frozen one.
 
+Written where it is read: while the Conversation is drafting, the Brief on its
+card *is* the field — raw markdown, always open, keeping itself on a pause in
+the typing and whenever the field is left, with a word beside the heading
+saying the record has it. There is no Edit and no Save, because there is no
+other thing the Brief could be doing while it is a draft. Once it freezes it is
+the server's rendering of it and nothing else.
+
 While it is still a draft its card carries the whole of the Conversation's
 setup under it — the branch, the base commit, both Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both

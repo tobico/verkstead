@@ -140,7 +140,11 @@ flowchart LR
   says; a repo that records none gets a branch off the default branch, said on
   the timeline, because there is no convention to invent on its behalf.
 - **The brief freezes at grill start.** A reopened round adds a new brief
-  event rather than editing the old one.
+  event rather than editing the old one. Until then it is edited where it
+  stands, with no mode to enter and no Save to press (*settled 2026-08-24,
+  building workbench-refit*): the field is always there, it grows with what is
+  in it, and it keeps itself on a pause in the typing and on the way out of
+  the field.
 - **Interruptions** (crash, hang) become timeline events with retry /
   take-over-manually / abort actions in the GUI — roadrunner's remedies,
   GUI-native.
@@ -251,7 +255,7 @@ Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always; setup under it while drafting | — |
+| Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
