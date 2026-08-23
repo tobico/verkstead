@@ -164,9 +164,15 @@ impl Agents {
     ///
     /// The model is the Profile's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
-    /// half of what an Agent Profile *is*. The prompt follows it as the one
-    /// positional argument, which is where an interactive claude takes the thing
-    /// it is to start on.
+    /// half of what an Agent Profile *is*. Until a session is launched with a
+    /// model picked beside its Profile, it is the first of the Profile's list —
+    /// which is the only one a Profile has in the ordinary case. The prompt
+    /// follows it as the one positional argument, which is where an interactive
+    /// claude takes the thing it is to start on.
+    ///
+    /// A Profile listing no models is refused when it is saved, so the flag is
+    /// only ever left off for a row somebody edited by hand — and left off
+    /// rather than passed empty, for the reason the name below is.
     ///
     /// The name comes after the prompt rather than before it, and claude reads
     /// its options on either side of the positional one. What is on the other
@@ -182,8 +188,12 @@ impl Agents {
     /// told anything picks its own.
     fn argv(&self, profile: &store::Profile, prompt: &str, session: Option<&str>) -> Vec<String> {
         let mut argv = self.agent.clone();
-        argv.push("--model".to_owned());
-        argv.push(profile.model.clone());
+
+        if let Some(model) = profile.model() {
+            argv.push("--model".to_owned());
+            argv.push(model.to_owned());
+        }
+
         argv.push(prompt.to_owned());
 
         if let Some(session) = session {
@@ -1315,7 +1325,7 @@ mod tests {
             name: "fable".to_owned(),
             claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
             config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            model: "claude-fable-5".to_owned(),
+            models: vec!["claude-fable-5".to_owned()],
             agent_type: store::AgentType::Claude,
         }
     }

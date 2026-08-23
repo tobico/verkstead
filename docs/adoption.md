@@ -77,10 +77,10 @@ working directory, is [development.md](development.md#quickstart).
 ## A day's work
 
 **Once per machine:** register the Repos you work in, and save at least one
-**Agent Profile** — a claude home and config pair, and a default model. A
-Conversation fixes a **Grilling Profile** and an **Implementation Profile**
-before it starts; the same Profile may fill both, and separate ones are how the
-two halves bill to separate accounts.
+**Agent Profile** — a claude home and config pair, and the models that account
+can run. A Conversation fixes a **Grilling Profile** and an **Implementation
+Profile** before it starts; the same Profile may fill both, and separate ones
+are how the two halves bill to separate accounts.
 
 **Then, per piece of work:**
 

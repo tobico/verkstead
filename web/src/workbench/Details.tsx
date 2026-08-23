@@ -286,7 +286,7 @@ function ProfilePicker(props: {
         id={`${props.role}-profile`}
         options={props.saved}
         value={(profile) => String(profile.id)}
-        label={(profile) => `${profile.name} — ${profile.model}`}
+        label={(profile) => `${profile.name} — ${profile.models.join(", ")}`}
         chosen={props.chosen ? String(props.chosen.id) : ""}
         pick={(picked) => choose.mutate(Number(picked))}
         disabled={choose.isPending}

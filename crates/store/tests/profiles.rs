@@ -30,7 +30,7 @@ fn facts(name: &str) -> ProfileFacts {
         name: name.to_owned(),
         claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
         config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
-        model: "claude-opus-5".to_owned(),
+        models: vec!["claude-opus-5".to_owned()],
         agent_type: AgentType::Claude,
     }
 }
@@ -56,7 +56,7 @@ async fn conversation(pool: &SqlitePool) -> i64 {
 }
 
 #[tokio::test]
-async fn a_saved_profile_holds_its_pair_its_model_and_its_agent_type() {
+async fn a_saved_profile_holds_its_pair_its_models_and_its_agent_type() {
     let (_dir, pool) = fresh_pool().await;
 
     let profile = saved(&pool, "work").await;
@@ -70,7 +70,7 @@ async fn a_saved_profile_holds_its_pair_its_model_and_its_agent_type() {
         profile.config_file,
         PathBuf::from("/watched/accounts/work/.claude.json")
     );
-    assert_eq!(profile.model, "claude-opus-5");
+    assert_eq!(profile.models, ["claude-opus-5"]);
 
     // One value, and the point of it is that the column is there — the second
     // backend slots in beside `claude` rather than being migrated in under it.
@@ -79,6 +79,82 @@ async fn a_saved_profile_holds_its_pair_its_model_and_its_agent_type() {
     assert_eq!(
         load_profile(&pool, profile.id).await.unwrap(),
         Some(profile)
+    );
+}
+
+/// The list is the Profile's own: a Profile names what its account can
+/// actually launch, and each entry is as good as the next.
+#[tokio::test]
+async fn a_profile_holds_every_model_it_lists_in_the_order_it_was_given() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let mut several = facts("work");
+    several.models = vec![
+        "claude-opus-5".to_owned(),
+        "claude-fable-5".to_owned(),
+        "claude-haiku-4-5-20251001".to_owned(),
+    ];
+
+    let profile = create_profile(&pool, &several).await.unwrap().unwrap();
+    assert_eq!(profile.models, several.models);
+
+    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    assert_eq!(read.models, several.models);
+
+    let listed = profiles(&pool).await.unwrap();
+    assert_eq!(listed[0].models, several.models);
+}
+
+/// The list is replaced rather than added to: it is a handful of lines the human
+/// retyped.
+#[tokio::test]
+async fn rewriting_a_profile_replaces_its_list_rather_than_adding_to_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let profile = saved(&pool, "work").await;
+
+    let mut shorter = facts("work");
+    shorter.models = vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()];
+    update_profile(&pool, profile.id, &shorter).await.unwrap();
+
+    let mut shorter_still = facts("work");
+    shorter_still.models = vec!["claude-opus-5".to_owned()];
+    update_profile(&pool, profile.id, &shorter_still)
+        .await
+        .unwrap();
+
+    let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
+    assert_eq!(read.models, ["claude-opus-5"]);
+}
+
+/// A Profile saved before the list existed has one model in the old column and
+/// no rows in the new table. It reads as the list it always was, with nothing for
+/// the human to re-enter.
+#[tokio::test]
+async fn a_profile_written_before_the_list_reads_its_old_model_as_its_only_one() {
+    let (_dir, pool) = fresh_pool().await;
+
+    sqlx::query(
+        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("work")
+    .bind("/watched/accounts/work/.claude")
+    .bind("/watched/accounts/work/.claude.json")
+    .bind("claude-opus-5")
+    .bind("claude")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let listed = profiles(&pool).await.unwrap();
+    assert_eq!(listed[0].models, ["claude-opus-5"]);
+    assert_eq!(
+        load_profile(&pool, listed[0].id)
+            .await
+            .unwrap()
+            .unwrap()
+            .models,
+        ["claude-opus-5"]
     );
 }
 
@@ -120,7 +196,7 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     let profile = saved(&pool, "work").await;
 
     let mut changed = facts("anthropic");
-    changed.model = "claude-fable-5".to_owned();
+    changed.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
         update_profile(&pool, profile.id, &changed).await.unwrap(),
@@ -129,7 +205,7 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
 
     let read = load_profile(&pool, profile.id).await.unwrap().unwrap();
     assert_eq!(read.name, "anthropic");
-    assert_eq!(read.model, "claude-fable-5");
+    assert_eq!(read.models, ["claude-fable-5"]);
     assert_eq!(
         read.claude_dir,
         PathBuf::from("/watched/accounts/anthropic/.claude")
@@ -143,7 +219,7 @@ async fn a_profile_keeping_its_own_name_is_not_refused() {
     let profile = saved(&pool, "work").await;
 
     let mut same_name = facts("work");
-    same_name.model = "claude-fable-5".to_owned();
+    same_name.models = vec!["claude-fable-5".to_owned()];
 
     assert_eq!(
         update_profile(&pool, profile.id, &same_name).await.unwrap(),
@@ -154,8 +230,8 @@ async fn a_profile_keeping_its_own_name_is_not_refused() {
             .await
             .unwrap()
             .unwrap()
-            .model,
-        "claude-fable-5"
+            .models,
+        ["claude-fable-5"]
     );
 }
 
@@ -369,8 +445,8 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
         Some("fable".to_owned())
     );
     assert_eq!(
-        conversation.implementation_profile.map(|p| p.model),
-        Some("claude-opus-5".to_owned())
+        conversation.implementation_profile.map(|p| p.models),
+        Some(vec!["claude-opus-5".to_owned()])
     );
 }
 

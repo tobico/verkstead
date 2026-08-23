@@ -536,7 +536,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "model": "claude-opus-5",
+            "models": ["claude-opus-5"],
         }),
     )
     .await;

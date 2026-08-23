@@ -158,10 +158,13 @@ _Avoid_: takeover (the Remedy's word), pause, manual mode, lock
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
-directory and config file pair, a default model, and an agent-type
-discriminator so other backends can slot in later. The pair is bind-mounted at
-`~/.claude` / `~/.claude.json` inside the sandbox, which is what keeps accounts
-separate.
+directory and config file pair, the models that account can run, and an
+agent-type discriminator so other backends can slot in later. The pair is
+bind-mounted at `~/.claude` / `~/.claude.json` inside the sandbox, which is what
+keeps accounts separate. The models are a list and the list is the Profile's
+own, because different Profiles reach different accounts and each can launch
+different things; none of them is a default, so which one a session runs is
+always picked.
 _Avoid_: account, identity, persona, agent config
 
 **Grilling Profile** / **Implementation Profile**:

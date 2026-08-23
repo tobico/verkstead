@@ -899,9 +899,12 @@ claude_dir: string,
  */
 config_file: string, 
 /**
- * What a session runs on unless it is told otherwise.
+ * The models this account can run a session on, in the order they were
+ * typed. The form takes them a line apiece; blank lines and repeated
+ * whitespace are the server's to drop, and a list that comes to nothing is
+ * refused.
  */
-model: string, };
+models: Array<string>, };
 
 /**
  * One row of the Profile list.
@@ -910,7 +913,13 @@ model: string, };
  * typed to save them: those are what will be bind-mounted, so those are what is
  * worth showing.
  */
-export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, model: string, agent_type: AgentType, 
+export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, 
+/**
+ * Every model this account can run a session on. At least one, and none of
+ * them preferred over the others: the list says what is available and
+ * nothing more.
+ */
+models: Array<string>, agent_type: AgentType, 
 /**
  * `null` while the pair is where it was left, which is the ordinary case.
  */

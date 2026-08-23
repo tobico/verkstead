@@ -424,7 +424,7 @@ function ManualTaskComposer(props: {
                 id="manual-task-profile"
                 options={saved()}
                 value={(profile) => String(profile.id)}
-                label={(profile) => `${profile.name} — ${profile.model}`}
+                label={(profile) => `${profile.name} — ${profile.models.join(", ")}`}
                 chosen={running() === null ? "" : String(running())}
                 pick={(chosen) => setPicked(Number(chosen))}
                 // The one-off pick is gone from the list: it is dropped, and

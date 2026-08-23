@@ -10,7 +10,9 @@
     "claude_dir": "/srv/accounts/fable/.claude",
     "config_file": "/srv/accounts/fable/.claude.json",
     "id": 1,
-    "model": "claude-fable-5",
+    "models": [
+      "claude-fable-5"
+    ],
     "name": "fable"
   },
   "held": null,
@@ -21,7 +23,10 @@
     "claude_dir": "/srv/accounts/opus/.claude",
     "config_file": "/srv/accounts/opus/.claude.json",
     "id": 2,
-    "model": "claude-opus-5",
+    "models": [
+      "claude-opus-5",
+      "claude-haiku-4-5-20251001"
+    ],
     "name": "opus"
   },
   "pinned": [],

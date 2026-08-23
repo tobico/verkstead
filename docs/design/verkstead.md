@@ -68,9 +68,12 @@ flowchart LR
   conversation can reopen with a new brief round. Aborting is possible from
   any state, and **Aborted** is a state of its own — off the ladder rather than
   on it, since every other state is somewhere the work has got to.
-- **Agent profiles** are minimal: name, claude home dir + config file pair,
-  default model — plus an agent-type discriminator so other backends can slot
-  in later (claude is the only type now). Account separation works as in the
+- **Agent profiles** are minimal: name, claude home dir + config file pair, the
+  list of models that account can run — plus an agent-type discriminator so
+  other backends can slot in later (claude is the only type now). The model
+  list is the profile's own rather than one list shared by all of them, and it
+  has no default entry: the profile says what is available and the pick is made
+  where a session is set up. Account separation works as in the
   current scripts: the profile's pair is bind-mounted at `~/.claude` /
   `~/.claude.json` inside the sandbox. Each conversation fixes **two**
   profiles before grilling starts: one for grilling, one for implementation

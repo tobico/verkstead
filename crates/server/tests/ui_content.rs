@@ -1314,10 +1314,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is exactly what the broken reading is for: this app watches nothing,
     // so every Profile it reads back is broken, and these fixtures are what the
     // viewer's tests draw that state from.
+    //
+    // One of them lists more than one model, because a Profile carries the whole
+    // list of what its account can launch and the viewer draws every entry.
     let mut profiles = Vec::new();
-    for (name, home, model) in [
-        ("fable", "/srv/accounts/fable", "claude-fable-5"),
-        ("opus", "/srv/accounts/opus", "claude-opus-5"),
+    for (name, home, models) in [
+        ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
+        (
+            "opus",
+            "/srv/accounts/opus",
+            &["claude-opus-5", "claude-haiku-4-5-20251001"][..],
+        ),
     ] {
         profiles.push(
             store::create_profile(
@@ -1326,7 +1333,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                     name: name.to_owned(),
                     claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
                     config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
-                    model: model.to_owned(),
+                    models: models.iter().map(|model| (*model).to_owned()).collect(),
                     agent_type: store::AgentType::Claude,
                 },
             )

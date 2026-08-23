@@ -4182,7 +4182,7 @@ describe("the manual task composer", () => {
 
     expect(picker.value).toBe(String(IMPLEMENTATION.id));
     expect([...picker.options].map((option) => option.textContent)).toEqual(
-      PROFILES.map((profile) => `${profile.name} — ${profile.model}`),
+      PROFILES.map((profile) => `${profile.name} — ${profile.models.join(", ")}`),
     );
   });
 

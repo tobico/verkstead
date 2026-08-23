@@ -12,6 +12,12 @@
 //! what it already says — a second form for the same four fields would be a
 //! second opinion about what a profile is.
 //!
+//! The models are one of those four, and a profile carries the whole list of
+//! them: a profile reaches one account with one configuration, so what it can
+//! launch is its own rather than a list every profile shares. They are typed as
+//! free text a line apiece, because a list of the models there are goes stale
+//! the week another one ships.
+//!
 //! The agent type is not offered. There is one, and a select with a single
 //! option is theatre; the discriminator is real because it is on the record, and
 //! the picker arrives when there is something to pick between.
@@ -42,7 +48,8 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
   Nameless: "Give the profile a name — it is what you pick it by.",
-  Modelless: "Give the profile a model — a session has to know what it runs on.",
+  Modelless:
+    "Give the profile at least one model — a session has to know what it runs on.",
   NameTaken: "Another profile is called that already.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
@@ -78,8 +85,12 @@ const BLANK: ProfileEdit = {
   name: "",
   claude_dir: "",
   config_file: "",
-  model: "",
+  models: [],
 };
+
+/// The fields of the form that are one line of text. The models are the one
+/// that is not, and they are typed into through [`typedModels`] below.
+type TextField = Exclude<keyof ProfileEdit, "models">;
 
 export function ProfileList(): JSX.Element {
   const queries = useQueryClient();
@@ -161,13 +172,23 @@ export function ProfileList(): JSX.Element {
       name: profile.name,
       claude_dir: profile.claude_dir,
       config_file: profile.config_file,
-      model: profile.model,
+      models: [...profile.models],
     });
   };
 
-  /// One field of the form, typed into.
-  const typed = (field: keyof ProfileEdit) => (value: string) => {
+  /// One of the form's one-line fields, typed into.
+  const typed = (field: TextField) => (value: string) => {
     setForm({ ...form(), [field]: value });
+    setRefused(null);
+  };
+
+  /// And the models, which are that same typing split at its newlines.
+  ///
+  /// Split and nothing else: the empty line under the one being written is part
+  /// of writing the next, so trimming here would fight the human. What is blank
+  /// is dropped by the server at the moment of saving.
+  const typedModels = (value: string) => {
+    setForm({ ...form(), models: value.split("\n") });
     setRefused(null);
   };
 
@@ -195,16 +216,19 @@ export function ProfileList(): JSX.Element {
           onInput={(ev) => typed("name")(ev.currentTarget.value)}
         />
 
-        <label for="profile-model">Default model</label>
-        <input
-          id="profile-model"
-          type="text"
+        {/* One per line, and no default among them: the list says what this
+            account can launch, and which of them a session runs is picked
+            when the session is set up. */}
+        <label for="profile-models">Models, one per line</label>
+        <textarea
+          id="profile-models"
+          rows={3}
           autocapitalize="off"
           autocorrect="off"
           spellcheck={false}
-          placeholder="claude-opus-5"
-          value={form().model}
-          onInput={(ev) => typed("model")(ev.currentTarget.value)}
+          placeholder={"claude-opus-5\nclaude-fable-5"}
+          value={form().models.join("\n")}
+          onInput={(ev) => typedModels(ev.currentTarget.value)}
         />
 
         <label for="profile-dir">
@@ -330,7 +354,11 @@ function ProfileRow(props: {
       <div>
         <span class="title">{props.profile.name}</span>
         <span class="meta">
-          <span class="model">{props.profile.model}</span>
+          {/* Every model, because the list is the whole of what a profile says
+              it can run and a row showing one of them would be picking. */}
+          <For each={props.profile.models}>
+            {(model) => <span class="model">{model}</span>}
+          </For>
           <span class="agent-type">{props.profile.agent_type}</span>
         </span>
         <span class="meta">

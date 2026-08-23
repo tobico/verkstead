@@ -54,13 +54,14 @@ fn pair(root: &Path, account: &str) -> (PathBuf, PathBuf) {
     (claude_dir, config_file)
 }
 
-/// The body a save takes, from a pair and a name.
-fn edit(name: &str, claude_dir: &Path, config_file: &Path, model: &str) -> serde_json::Value {
+/// The body a save takes, from a pair, a name and the models the account can
+/// run.
+fn edit(name: &str, claude_dir: &Path, config_file: &Path, models: &[&str]) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "claude_dir": claude_dir,
         "config_file": config_file,
-        "model": model,
+        "models": models,
     })
 }
 
@@ -73,7 +74,11 @@ async fn saved(app: &Router, watched: &Path, name: &str) -> ProfileEntry {
     let (claude_dir, config_file) = pair(watched, name);
 
     assert_eq!(
-        save(app, &edit(name, &claude_dir, &config_file, "claude-opus-5")).await,
+        save(
+            app,
+            &edit(name, &claude_dir, &config_file, &["claude-opus-5"])
+        )
+        .await,
         ProfileSaved::Saved
     );
 
@@ -226,7 +231,7 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
     let profile = saved(&app, watched.path(), "work").await;
 
     assert_eq!(profile.name, "work");
-    assert_eq!(profile.model, "claude-opus-5");
+    assert_eq!(profile.models, &["claude-opus-5"]);
     assert_eq!(profile.agent_type, AgentType::Claude);
 
     // The resolved paths, which are what will be bind-mounted.
@@ -264,7 +269,7 @@ async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_i
     let rewritten: ProfileSaved = post(
         &app,
         &format!("/api/ui/profiles/{}", profile.id),
-        &edit("anthropic", &claude_dir, &config_file, "claude-fable-5"),
+        &edit("anthropic", &claude_dir, &config_file, &["claude-fable-5"]),
     )
     .await;
     assert_eq!(rewritten, ProfileSaved::Saved);
@@ -272,7 +277,7 @@ async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_i
     let rows = listed(&app).await;
     assert_eq!(rows.len(), 1, "rewriting one does not add another");
     assert_eq!(rows[0].name, "anthropic");
-    assert_eq!(rows[0].model, "claude-fable-5");
+    assert_eq!(rows[0].models, &["claude-fable-5"]);
 
     assert_eq!(remove(&app, profile.id).await, ProfileDeleted::Removed);
     assert!(listed(&app).await.is_empty());
@@ -304,11 +309,19 @@ async fn a_pair_that_is_not_there_is_refused_by_the_half_that_is_missing() {
     let nowhere = watched.path().join("never-made");
 
     assert_eq!(
-        save(&app, &edit("work", &nowhere, &config_file, "claude-opus-5")).await,
+        save(
+            &app,
+            &edit("work", &nowhere, &config_file, &["claude-opus-5"])
+        )
+        .await,
         ProfileSaved::DirMissing
     );
     assert_eq!(
-        save(&app, &edit("work", &claude_dir, &nowhere, "claude-opus-5")).await,
+        save(
+            &app,
+            &edit("work", &claude_dir, &nowhere, &["claude-opus-5"])
+        )
+        .await,
         ProfileSaved::ConfigMissing
     );
 
@@ -325,7 +338,7 @@ async fn a_file_where_the_directory_goes_and_the_reverse_are_both_refused() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &config_file, &config_file, "claude-opus-5")
+            &edit("work", &config_file, &config_file, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::NotADirectory
@@ -333,7 +346,7 @@ async fn a_file_where_the_directory_goes_and_the_reverse_are_both_refused() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &claude_dir, &claude_dir, "claude-opus-5")
+            &edit("work", &claude_dir, &claude_dir, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::NotAFile
@@ -353,7 +366,7 @@ async fn a_pair_outside_the_watched_paths_is_refused_by_the_server() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &outside_dir, &inside_config, "claude-opus-5")
+            &edit("work", &outside_dir, &inside_config, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::DirOutsideWatchedPaths
@@ -361,7 +374,7 @@ async fn a_pair_outside_the_watched_paths_is_refused_by_the_server() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &inside_dir, &outside_config, "claude-opus-5")
+            &edit("work", &inside_dir, &outside_config, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::ConfigOutsideWatchedPaths
@@ -387,7 +400,7 @@ async fn a_symlink_out_of_the_watched_paths_does_not_get_a_pair_in() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &looks_inside, &config_file, "claude-opus-5")
+            &edit("work", &looks_inside, &config_file, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::DirOutsideWatchedPaths
@@ -402,7 +415,12 @@ async fn a_relative_path_is_refused_without_being_resolved() {
     assert_eq!(
         save(
             &app,
-            &edit("work", Path::new(".claude"), &config_file, "claude-opus-5")
+            &edit(
+                "work",
+                Path::new(".claude"),
+                &config_file,
+                &["claude-opus-5"]
+            )
         )
         .await,
         ProfileSaved::DirNotAbsolute
@@ -414,7 +432,7 @@ async fn a_relative_path_is_refused_without_being_resolved() {
                 "work",
                 &claude_dir,
                 Path::new(".claude.json"),
-                "claude-opus-5"
+                &["claude-opus-5"],
             )
         )
         .await,
@@ -422,23 +440,54 @@ async fn a_relative_path_is_refused_without_being_resolved() {
     );
 }
 
-/// A Profile is picked out of a list by its name and run on its model. Neither
-/// is a field to leave empty.
+/// Every model an account can launch, saved and read back in the order it was
+/// written. The list is the Profile's own, and no entry of it is preferred.
 #[tokio::test]
-async fn a_profile_with_no_name_or_no_model_is_refused() {
+async fn a_profile_lists_every_model_its_account_can_run() {
     let (watched, _dir, app) = workbench().await;
     let (claude_dir, config_file) = pair(watched.path(), "work");
 
     assert_eq!(
         save(
             &app,
-            &edit("   ", &claude_dir, &config_file, "claude-opus-5")
+            &edit(
+                "work",
+                &claude_dir,
+                &config_file,
+                // Blank lines and stray whitespace are the form's leavings, and
+                // the server drops them rather than saving a model called "".
+                &["claude-opus-5", "  ", " claude-fable-5 "]
+            )
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+
+    let rows = listed(&app).await;
+    assert_eq!(rows[0].models, ["claude-opus-5", "claude-fable-5"]);
+}
+
+/// A Profile is picked out of a list by its name and run on one of its models.
+/// Neither is a field to leave empty.
+#[tokio::test]
+async fn a_profile_with_no_name_or_no_models_is_refused() {
+    let (watched, _dir, app) = workbench().await;
+    let (claude_dir, config_file) = pair(watched.path(), "work");
+
+    assert_eq!(
+        save(
+            &app,
+            &edit("   ", &claude_dir, &config_file, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::Nameless
     );
     assert_eq!(
-        save(&app, &edit("work", &claude_dir, &config_file, "  ")).await,
+        save(&app, &edit("work", &claude_dir, &config_file, &["  "])).await,
+        ProfileSaved::Modelless
+    );
+    assert_eq!(
+        save(&app, &edit("work", &claude_dir, &config_file, &[])).await,
         ProfileSaved::Modelless
     );
     assert!(listed(&app).await.is_empty());
@@ -453,7 +502,7 @@ async fn a_name_another_profile_already_has_is_refused() {
     assert_eq!(
         save(
             &app,
-            &edit("work", &claude_dir, &config_file, "claude-opus-5")
+            &edit("work", &claude_dir, &config_file, &["claude-opus-5"])
         )
         .await,
         ProfileSaved::NameTaken
@@ -627,7 +676,7 @@ async fn a_profile_that_is_not_there_says_so_however_it_is_asked_about() {
     let rewritten: ProfileSaved = post(
         &app,
         "/api/ui/profiles/404",
-        &edit("work", &claude_dir, &config_file, "claude-opus-5"),
+        &edit("work", &claude_dir, &config_file, &["claude-opus-5"]),
     )
     .await;
     assert_eq!(rewritten, ProfileSaved::NoSuchProfile);
@@ -669,7 +718,7 @@ async fn an_id_that_is_not_a_number_names_no_profile() {
     let rewritten: ProfileSaved = post(
         &app,
         "/api/ui/profiles/nonsense",
-        &edit("work", &claude_dir, &config_file, "claude-opus-5"),
+        &edit("work", &claude_dir, &config_file, &["claude-opus-5"]),
     )
     .await;
     assert_eq!(rewritten, ProfileSaved::NoSuchProfile);

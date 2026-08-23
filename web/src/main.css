@@ -489,7 +489,11 @@ textarea::placeholder {
   font-size: 0.9em;
 }
 
-.edit-profile input {
+/* The models are the one field that is a list, so they are the one taken in a
+   textarea — drawn as the inputs around it, because it is the same kind of
+   typing with room for more than one line of it. */
+.edit-profile input,
+.edit-profile textarea {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -500,6 +504,10 @@ textarea::placeholder {
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
+}
+
+.edit-profile textarea {
+  resize: vertical;
 }
 
 .edit-profile-buttons {

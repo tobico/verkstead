@@ -106,7 +106,7 @@ async fn entries(
                 // be saved — so nothing is lost putting them back on the wire.
                 claude_dir: profile.claude_dir.to_string_lossy().into_owned(),
                 config_file: profile.config_file.to_string_lossy().into_owned(),
-                model: profile.model,
+                models: profile.models,
                 agent_type: agent_type(profile.agent_type),
             })
             .collect()
@@ -159,13 +159,22 @@ async fn checked(
     edit: &ProfileEdit,
 ) -> Result<Result<store::ProfileFacts, ProfileSaved>> {
     let name = edit.name.trim().to_owned();
-    let model = edit.model.trim().to_owned();
+
+    // Trimmed and the blanks dropped: the form hands these over a line apiece,
+    // and a trailing newline is not a model. Their order is kept, because it is
+    // the order the human typed and reading the list back should say so.
+    let models: Vec<String> = edit
+        .models
+        .iter()
+        .map(|model| model.trim().to_owned())
+        .filter(|model| !model.is_empty())
+        .collect();
 
     if name.is_empty() {
         return Ok(Err(ProfileSaved::Nameless));
     }
 
-    if model.is_empty() {
+    if models.is_empty() {
         return Ok(Err(ProfileSaved::Modelless));
     }
 
@@ -180,7 +189,7 @@ async fn checked(
                 name,
                 claude_dir,
                 config_file,
-                model,
+                models,
                 // One type, and the form does not offer a choice of one. What
                 // makes the discriminator real is the column, not a picker.
                 agent_type: store::AgentType::Claude,

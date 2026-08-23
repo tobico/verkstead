@@ -59,7 +59,12 @@ pub struct ProfileEntry {
     pub name: String,
     pub claude_dir: String,
     pub config_file: String,
-    pub model: String,
+
+    /// Every model this account can run a session on. At least one, and none of
+    /// them preferred over the others: the list says what is available and
+    /// nothing more.
+    pub models: Vec<String>,
+
     pub agent_type: AgentType,
 
     /// `null` while the pair is where it was left, which is the ordinary case.
@@ -82,8 +87,11 @@ pub struct ProfileEdit {
     /// The absolute path of the file bind-mounted over `~/.claude.json`.
     pub config_file: String,
 
-    /// What a session runs on unless it is told otherwise.
-    pub model: String,
+    /// The models this account can run a session on, in the order they were
+    /// typed. The form takes them a line apiece; blank lines and repeated
+    /// whitespace are the server's to drop, and a list that comes to nothing is
+    /// refused.
+    pub models: Vec<String>,
 }
 
 /// What became of saving a Profile.
@@ -104,7 +112,8 @@ pub enum ProfileSaved {
     /// one without a name is one nobody can choose.
     Nameless,
 
-    /// It was given no model. A session has to know what it runs on.
+    /// It was given no models. A session has to know what it runs on, and a
+    /// Profile naming none is one nothing could be launched under.
     Modelless,
 
     /// Another Profile is called that already.

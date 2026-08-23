@@ -1052,7 +1052,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "model": format!("claude-{name}-5"),
+            "models": [format!("claude-{name}-5")],
         }),
     )
     .await;

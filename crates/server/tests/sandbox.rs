@@ -211,7 +211,7 @@ async fn grilling() -> Grilling {
             name: "work".to_owned(),
             claude_dir,
             config_file,
-            model: "claude-opus-5".to_owned(),
+            models: vec!["claude-opus-5".to_owned()],
             agent_type: store::AgentType::Claude,
         },
     )
