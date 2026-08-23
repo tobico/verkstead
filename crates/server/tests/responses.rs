@@ -280,6 +280,46 @@ async fn a_wait_opened_after_submission_receives_the_response_immediately() {
     );
 }
 
+/// The direction the human picked on a closing Set reaches the session that
+/// proposed, in the Response it is handed.
+///
+/// The pick informs the agent, so getting it there is the whole point of its
+/// being a field of the Response rather than something Verkstead keeps to
+/// itself: the CLI prints this document and the agent parses it.
+#[tokio::test]
+async fn the_direction_picked_on_a_closing_set_reaches_the_waiting_agent() {
+    let (_dir, _pool, app) = fresh_app().await;
+    let id = post_set(
+        &app,
+        &format!("{SET}proposal:\n  direction: inline\n  rationale: One change, in one file.\n"),
+    )
+    .await;
+
+    assert_eq!(
+        post_response(&app, id, &format!("{COMPLETE}direction: roadmap\n"))
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+
+    let delivered = wait_for_response(&app, id, 30).await;
+    assert_eq!(delivered.status(), StatusCode::OK);
+
+    let yaml = body_text(delivered).await;
+    let response: Response = serde_saphyr::from_str(&yaml).unwrap();
+
+    assert_eq!(
+        response.direction,
+        Some(verkstead_schema::Direction::Roadmap),
+        "the human's pick, and not the direction the agent recommended",
+    );
+    assert!(
+        yaml.contains("direction: roadmap"),
+        "and it is in the document the agent parses, spelled as the wire spells \
+         it: {yaml}"
+    );
+}
+
 #[tokio::test]
 async fn a_wait_on_an_unanswered_set_gives_up_when_the_hold_window_closes() {
     let (_dir, _pool, app) = fresh_app().await;

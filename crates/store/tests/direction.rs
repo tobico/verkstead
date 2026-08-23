@@ -90,7 +90,6 @@ fn proposing(direction: Direction) -> QuestionSet {
         postscript: None,
         proposal: Some(Proposal {
             direction,
-            accepted_by: "Q14.1".to_owned(),
             rationale: "Six changes, each independently testable.".to_owned(),
         }),
         review: None,
@@ -113,7 +112,7 @@ fn ordinary() -> QuestionSet {
 /// Answer a Set the way both halves of the server do, through the one path a
 /// Response takes.
 async fn answer(pool: &SqlitePool, set_id: i64) -> Submission {
-    answered(pool, set_id, &accepting()).await
+    answered(pool, set_id, &accepting(Direction::TaskList)).await
 }
 
 /// The same, with a Response of the test's own choosing.
@@ -132,10 +131,13 @@ async fn proposed(pool: &SqlitePool, set_id: i64, response: &Response) -> Option
     taken.proposed
 }
 
-/// Picking the Option the proposal names, which is the one thing that accepts
-/// one — `accepted_by: Q14.1`.
-fn accepting() -> Response {
-    Response::from_yaml("answers:\n  - label: Q14\n    selected: 1\n").unwrap()
+/// Picking a direction on the chooser, which is the one thing that accepts a
+/// proposal — and which direction is picked is the human's, never the agent's.
+fn accepting(direction: Direction) -> Response {
+    Response {
+        direction: Some(direction),
+        ..Response::from_yaml("answers:\n  - label: Q14\n    unanswered: true\n").unwrap()
+    }
 }
 
 /// What state a Conversation is in.
@@ -240,7 +242,12 @@ async fn the_acceptance_says_what_the_proposal_moved() {
 
     let ordinary = ask(&pool, id, &ordinary()).await.unwrap().unwrap();
     assert_eq!(
-        proposed(&pool, ordinary.id, &accepting()).await,
+        proposed(
+            &pool,
+            ordinary.id,
+            &Response::from_yaml("answers:\n  - label: Q14\n    selected: 1\n").unwrap()
+        )
+        .await,
         None,
         "a Set carrying no proposal settled none, and says so by having nothing to say",
     );
@@ -250,26 +257,30 @@ async fn the_acceptance_says_what_the_proposal_moved() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        proposed(&pool, proposing.id, &accepting()).await,
-        Some(Proposed::Accepted(Directing::Moved)),
-        "the store hands back what happened rather than logging it",
+        proposed(&pool, proposing.id, &accepting(Direction::TaskList)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::Moved,
+        }),
+        "the store hands back what happened, and which direction was picked — \
+         the human's rather than the recommended one",
     );
 }
 
-/// Every way of answering a proposal that is not picking the Option it named.
+/// Every way of answering a proposal that is not picking a direction on it.
 ///
-/// One test over the four, because they are one rule: only `accepted_by` ends a
+/// One test over the four, because they are one rule: only a pick ends a
 /// grilling, and everything else is the human disagreeing. Each gets its own
 /// Conversation, so none of them is standing on what the last one left behind.
 #[tokio::test]
-async fn any_other_answer_leaves_the_conversation_grilling() {
+async fn any_answer_without_a_pick_leaves_the_conversation_grilling() {
     for (how, response) in [
         (
-            "another Option",
+            "an Option beside the chooser",
             "answers:\n  - label: Q14\n    selected: 2\n",
         ),
         (
-            "an answer in their own words instead of an Option",
+            "an answer in their own words",
             "answers:\n  - label: Q14\n    free_text: Not until the migration is settled.\n",
         ),
         (
@@ -277,7 +288,7 @@ async fn any_other_answer_leaves_the_conversation_grilling() {
             "answers:\n  - label: Q14\n    unanswered: true\ncomment: |\n  Say more about the migration first.\n",
         ),
         (
-            "an Option the proposal did not name, with words beside it",
+            "an Option with words beside it",
             "answers:\n  - label: Q14\n    selected: 2\n    free_text: The counter still worries me.\n",
         ),
     ] {
@@ -308,12 +319,12 @@ async fn any_other_answer_leaves_the_conversation_grilling() {
     }
 }
 
-/// Picking the named Option *and* saying something about it is still acceptance.
+/// Picking a direction *and* saying something beside it is still acceptance.
 ///
-/// The Guide's own reading: free text beside a selected Option is the rationale
-/// or a qualification, and free text instead of one is an answer of the human's
-/// own. Only the second of those is a refusal — a human who picked "yes, go
-/// ahead" and added a note meant yes.
+/// Words beside a pick are the qualification the Guide says they are — the agent
+/// reads them and the work goes ahead — where words instead of a pick are the
+/// human's own answer, which is the proposal sent back. A human who picked a
+/// direction and added a note meant the direction.
 #[tokio::test]
 async fn accepting_with_something_to_add_is_still_accepting() {
     let (_dir, pool) = fresh_pool().await;
@@ -323,14 +334,20 @@ async fn accepting_with_something_to_add_is_still_accepting() {
         .unwrap()
         .unwrap();
 
-    let qualified = Response::from_yaml(
-        "answers:\n  - label: Q14\n    selected: 1\n    free_text: Keep the config key as it is.\n",
-    )
-    .unwrap();
+    let qualified = Response {
+        direction: Some(Direction::TaskList),
+        ..Response::from_yaml(
+            "answers:\n  - label: Q14\n    free_text: Keep the config key as it is.\n",
+        )
+        .unwrap()
+    };
 
     assert_eq!(
         proposed(&pool, created.id, &qualified).await,
-        Some(Proposed::Accepted(Directing::Moved)),
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::Moved,
+        }),
     );
     assert_eq!(state(&pool, id).await, Lifecycle::Direction);
 }
@@ -361,8 +378,11 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        proposed(&pool, second.id, &accepting()).await,
-        Some(Proposed::Accepted(Directing::Moved)),
+        proposed(&pool, second.id, &accepting(Direction::TaskList)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::Moved,
+        }),
     );
 
     assert_eq!(state(&pool, id).await, Lifecycle::Direction);
@@ -390,8 +410,11 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
     answer(&pool, first.id).await;
 
     assert_eq!(
-        proposed(&pool, second.id, &accepting()).await,
-        Some(Proposed::Accepted(Directing::NotGrilling)),
+        proposed(&pool, second.id, &accepting(Direction::Roadmap)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::Roadmap,
+            directing: Directing::NotGrilling,
+        }),
         "the first acceptance moved it, and the second has nothing left to move",
     );
     assert_eq!(

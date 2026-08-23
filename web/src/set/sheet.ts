@@ -5,8 +5,9 @@
 //! a sheet becomes is arithmetic — an entry per question, whitespace not
 //! counting for anything — and a draft is that same arithmetic held still.
 
-import type { Answer, Response } from "../api/types";
+import type { Answer, Direction, Response } from "../api/types";
 import { forget, read, write } from "../device";
+import { DIRECTIONS } from "../directions";
 
 /// One question's fields as the human left them, away from the signals holding
 /// them — the shape [`drafted`] turns into a Response, and the shape a draft is
@@ -20,15 +21,20 @@ export type Filled = {
 };
 
 /// A half-finished answer sheet, as it sits in `localStorage` between visits:
-/// every question's fields in the order the Set asked them, plus the set-level
-/// comment.
+/// every question's fields in the order the Set asked them, the set-level
+/// comment, and the direction picked where the Set carries a proposal to pick
+/// one on.
 ///
 /// The same per-question shape a submit snapshots, so a draft serializes as the
 /// sheet stands rather than through a parallel one.
 ///
 /// Deliberately per device and never sent to the server: a phone and a laptop
 /// keep their own drafts of the same Set.
-export type Draft = { filled: Filled[]; comment: string };
+export type Draft = {
+  filled: Filled[];
+  comment: string;
+  direction: Direction | null;
+};
 
 /// Whether the human has put anything into this question: an Option, words, or
 /// both. Whitespace is not an answer here any more than it is at submit.
@@ -42,10 +48,18 @@ export function answered(field: Filled): boolean {
 /// human put something in, the Unanswered marker when they did not. Whitespace
 /// is not an answer, and neither is a blank comment.
 ///
+/// The pick is not one of the entries: the chooser answers no Question, so it
+/// travels as the Response's own `direction` — and on a Set with no chooser
+/// there is nothing to pick, so nothing goes out.
+///
 /// A field with nothing in it is left out of its entry rather than sent empty,
 /// which is how the schema writes a Response everywhere else — what the CLI
 /// parses and what the agent is handed as YAML.
-export function drafted(filled: Filled[], comment: string): Response {
+export function drafted(
+  filled: Filled[],
+  comment: string,
+  direction: Direction | null = null,
+): Response {
   const answers: Answer[] = filled.map((field) => {
     const words = field.free_text.trim();
     const answer: Answer = { label: field.label };
@@ -67,7 +81,15 @@ export function drafted(filled: Filled[], comment: string): Response {
 
   const said = comment.trim();
 
-  return said === "" ? { answers } : { answers, comment: said };
+  const response: Response = { answers };
+  if (said !== "") {
+    response.comment = said;
+  }
+  if (direction !== null) {
+    response.direction = direction;
+  }
+
+  return response;
 }
 
 /// The questions the warning before submit names: those the Response leaves
@@ -107,8 +129,16 @@ export function draftKey(id: number): string {
 /// Whether there is nothing in a draft to come back to. An untouched sheet is
 /// not worth storing, and whitespace is no more an answer here than it is at
 /// submit.
+///
+/// A picked direction counts, and is the one thing that may be the whole of a
+/// draft: a proposal accepted with nothing said beside it is a Response, so it
+/// is a draft too.
 export function empty(draft: Draft): boolean {
-  return draft.comment.trim() === "" && !draft.filled.some(answered);
+  return (
+    draft.comment.trim() === "" &&
+    draft.direction === null &&
+    !draft.filled.some(answered)
+  );
 }
 
 /// The draft in `body`, if it is one this Set can be filled in from.
@@ -186,10 +216,18 @@ function parsed(body: string): Draft | null {
     return null;
   }
 
-  const { filled, comment } = payload as Partial<Draft>;
+  const { filled, comment, direction } = payload as Partial<Draft>;
   if (!Array.isArray(filled) || typeof comment !== "string") {
     return null;
   }
+
+  // Written by a build that predates the chooser, or by one whose three
+  // directions were not these: either way there is no pick to restore, and the
+  // rest of the draft is still the human's writing.
+  const picked =
+    typeof direction === "string" && DIRECTIONS.includes(direction)
+      ? direction
+      : null;
 
   const fields: Filled[] = [];
   for (const field of filled as unknown[]) {
@@ -208,5 +246,5 @@ function parsed(body: string): Draft | null {
     fields.push({ label, selected, free_text });
   }
 
-  return { filled: fields, comment };
+  return { filled: fields, comment, direction: picked };
 }

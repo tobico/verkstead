@@ -18,11 +18,14 @@ import { createStore } from "solid-js/store";
 import { submitResponse } from "../api/client";
 import type {
   AskView,
+  Direction,
   OptionView,
+  ProposalView,
   QuestionView,
   Response as Decided,
   Submitted,
 } from "../api/types";
+import { DIRECTION, DIRECTION_NOTE, DIRECTIONS } from "../directions";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
 import { anchor } from "./outline";
@@ -60,6 +63,10 @@ export function Answering(props: {
   id: number;
   questions: QuestionView[];
   postscript: string | null;
+
+  /// The wrap-up proposal this Set carries, on the one Set that carries one.
+  /// What puts the direction chooser on the sheet; `null` leaves it off.
+  proposal: ProposalView | null;
 }): JSX.Element {
   // Read once rather than through a memo: the fields are the Set's own shape,
   // and rebuilding them under a human who is typing into them would throw away
@@ -75,6 +82,7 @@ export function Answering(props: {
   const [sheet, setSheet] = createStore({
     filled: kept?.filled ?? asked.map(blank),
     comment: kept?.comment ?? "",
+    direction: kept?.direction ?? null,
   });
 
   // Whether this Set is done with: it has an answer, or it can never take one.
@@ -90,6 +98,7 @@ export function Answering(props: {
     const draft = {
       filled: sheet.filled.map((field) => ({ ...field })),
       comment: sheet.comment,
+      direction: sheet.direction,
     };
 
     if (settled()) {
@@ -100,7 +109,8 @@ export function Answering(props: {
   });
 
   /// What the sheet says right now, as a Response.
-  const response = (): Decided => drafted(sheet.filled, sheet.comment);
+  const response = (): Decided =>
+    drafted(sheet.filled, sheet.comment, sheet.direction);
 
   const queries = useQueryClient();
 
@@ -220,6 +230,23 @@ export function Answering(props: {
           )}
         </For>
       </ol>
+      {/* The chooser, on the one Set that carries a proposal. Under the
+          Questions because it is the closing decision: what is still uncertain
+          is asked above, and this is what to do now that it is not. */}
+      <Show when={props.proposal}>
+        {(proposal) => (
+          <Choosing
+            proposal={proposal()}
+            picked={() => sheet.direction}
+            pick={(direction) =>
+              setSheet("direction", (held) =>
+                held === direction ? null : direction,
+              )
+            }
+            move={(direction) => setSheet("direction", direction)}
+          />
+        )}
+      </Show>
       {/* The agent's closing word, wrapped around the box it is inviting
           something into: what it suggests taking up is read on the way to
           writing, rather than asked as a Question of its own. A Set that closed
@@ -284,6 +311,87 @@ export function Answering(props: {
         )}
       </Show>
     </>
+  );
+}
+
+/// The direction chooser, injected onto any Set whose agent closed with a
+/// proposal: how the work gets built, decided in the one place the human is
+/// already looking.
+///
+/// All three every time, whichever one was recommended — the recommendation is
+/// marked and never preselected, exactly as an Option's ★ is, so nothing is
+/// picked until the human picks it. The rationale sits beside the three, because
+/// what they are deciding against is the agent's argument rather than a bare
+/// word.
+///
+/// And the chooser says what picking does. It is the one control on the page
+/// whose meaning is not obvious from what it is labelled: picking accepts the
+/// proposal, and every other way of answering sends it back. That used to be
+/// left to the agent to write into the Preface, which made the mechanics
+/// something each grilling explained in its own words — or forgot to.
+///
+/// A second click on the picked direction clears it, the way a second click on
+/// a selected Option does: un-picking is the only gesture a radio group has no
+/// button for, and changing your mind about accepting is exactly the case that
+/// wants one.
+function Choosing(props: {
+  proposal: ProposalView;
+  picked: () => Direction | null;
+  /// A click, which picks the direction — or clears the choice, when it landed
+  /// on the direction already picked.
+  pick: (direction: Direction) => void;
+  /// An arrow key, which only ever moves the choice.
+  move: (direction: Direction) => void;
+}): JSX.Element {
+  return (
+    <section class="direction-pick" id="direction">
+      <h2 class="section-heading">Direction</h2>
+      <div
+        class="proposal markdown"
+        innerHTML={props.proposal.rationale_html}
+      />
+      <ul class="directions">
+        <For each={DIRECTIONS}>
+          {(offered) => {
+            const recommended = () => props.proposal.direction === offered;
+
+            return (
+              <li
+                class="direction"
+                classList={{ recommended: recommended() }}
+              >
+                <label>
+                  <input
+                    type="radio"
+                    id={`direction-${offered}`}
+                    name="direction"
+                    value={offered}
+                    checked={props.picked() === offered}
+                    // Both gestures, for the reason an Option answers both: an
+                    // arrow key fires a change and never a click, and a click on
+                    // what is already picked fires a click and never a change.
+                    onChange={() => props.move(offered)}
+                    onClick={() => props.pick(offered)}
+                  />
+                  <span class="direction-name">{DIRECTION[offered]}</span>
+                  <Show when={recommended()}>
+                    <span class="star" title="the agent's Recommendation">
+                      ★
+                    </span>
+                  </Show>
+                </label>
+                <p class="note">{DIRECTION_NOTE[offered]}</p>
+              </li>
+            );
+          }}
+        </For>
+      </ul>
+      <p class="semantics">
+        Picking a direction accepts the proposal and lets the agent get on with
+        it. Anything else — an answer of your own, questions left open, nothing
+        picked here — sends it back for another round.
+      </p>
+    </section>
   );
 }
 

@@ -266,6 +266,7 @@ fn decided_every_way() -> Response {
             unanswered("Q3"),
         ],
         comment: Some("Do the in-process one first; we can move it later.".to_owned()),
+        direction: None,
     }
 }
 
@@ -1067,8 +1068,8 @@ fn assert_sanitised(json: &str, wrote_it: &str) {
     );
 }
 
-/// The grilling's closing move: one answerable question, and the `proposal`
-/// block that makes answering it end the grilling.
+/// The grilling's closing move: whatever is still worth asking, and the
+/// `proposal` block that puts the direction chooser on the page.
 ///
 /// The rationale is markdown, because the chooser renders it — which is the
 /// whole reason it travels as a rationale rather than as a word.
@@ -1078,18 +1079,14 @@ fn wrap_up_proposal() -> QuestionSet {
         preface: Some("We settled all four questions. Here is what I think we build.\n".to_owned()),
         questions: vec![Question {
             label: "Q9".to_owned(),
-            text: "Ready to build it this way?".to_owned(),
+            text: "Anything above you want changed before we build it?".to_owned(),
             columns: Vec::new(),
-            options: vec![
-                option(1, "Yes, go ahead", true),
-                option(2, "Not yet — more to work through", false),
-            ],
+            options: Vec::new(),
             subquestions: Vec::new(),
         }],
         postscript: None,
         proposal: Some(verkstead_schema::Proposal {
             direction: verkstead_schema::Direction::TaskList,
-            accepted_by: "Q9.1".to_owned(),
             rationale: "Five changes that barely touch each other: the detector, the \
                         pause, the notification, the resume and the window arithmetic.\n\n\
                         - **Inline** would be one session holding all five at once\n\
@@ -1103,16 +1100,19 @@ fn wrap_up_proposal() -> QuestionSet {
     }
 }
 
-/// The human accepting it, which is what moves the Conversation on.
+/// The human accepting it, which is picking a direction on the chooser — and
+/// picking one the agent did not recommend, because that is as much an
+/// acceptance as agreeing with it.
 fn accepting_the_proposal() -> Response {
     Response {
         answers: vec![Answer {
             label: "Q9".to_owned(),
-            selected: Some(1),
+            selected: None,
             free_text: None,
-            unanswered: false,
+            unanswered: true,
         }],
         comment: None,
+        direction: Some(verkstead_schema::Direction::Inline),
     }
 }
 
@@ -1154,6 +1154,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = set_json(&app, &pool, &diagrammed_set()).await;
     write("set-diagram.json", &json);
+
+    // The grilling's closing Set, which is the one kind whose page carries the
+    // direction chooser: the recommendation to mark and the rationale to draw
+    // beside the three choices.
+    let (_dir, pool, app) = fresh_app().await;
+    let (_, json) = set_json(&app, &pool, &wrap_up_proposal()).await;
+    write("set-proposing.json", &json);
+
+    // And the same one answered with a direction picked on it, which is the
+    // record of the choice — there is no Event of its own for one.
+    let (_dir, pool, app) = fresh_app().await;
+    let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
+    write("set-proposed.json", &pinned(&json));
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a

@@ -202,8 +202,9 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// The same reading the store settles the move by — see
 /// [`store::submit_response`] — so the Conversation being in Direction and the
 /// chooser having something to draw are the one fact rather than two that could
-/// come apart. A Set still waiting on the human has not been accepted either:
-/// nobody has answered it yet.
+/// come apart. Accepting is the pick, so a Response that picked nothing sent the
+/// proposal back; a Set still waiting on the human has not been accepted either,
+/// because nobody has answered it yet.
 fn accepted_proposal(asked: &store::SetOnTimeline) -> Option<&verkstead_schema::Proposal> {
     let proposal = asked.set.proposal.as_ref()?;
 
@@ -211,7 +212,7 @@ fn accepted_proposal(asked: &store::SetOnTimeline) -> Option<&verkstead_schema::
         return None;
     };
 
-    proposal.accepted(&answered.response).then_some(proposal)
+    answered.response.direction.is_some().then_some(proposal)
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.

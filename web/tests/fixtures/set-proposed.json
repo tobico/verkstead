@@ -1,0 +1,42 @@
+{
+  "branch": "usage-limits",
+  "conversation": 1,
+  "diagrams": false,
+  "diff": null,
+  "id": 1,
+  "postscript_html": null,
+  "preface_html": "<p>We settled all four questions. Here is what I think we build.</p>\n",
+  "project": "verkstead",
+  "proposal": {
+    "direction": "task-list",
+    "rationale_html": "<p>Five changes that barely touch each other: the detector, the pause, the notification, the resume and the window arithmetic.</p>\n<ul>\n<li><strong>Inline</strong> would be one session holding all five at once</li>\n<li><strong>A roadmap</strong> is more ceremony than two days of work needs</li>\n</ul>\n"
+  },
+  "questions": [
+    {
+      "ask": {
+        "columns": [],
+        "name": "Q9",
+        "options": [],
+        "text_html": "<p>Anything above you want changed before we build it?</p>\n"
+      },
+      "heading": false,
+      "nav_text": "Anything above you want changed before we build it?",
+      "subquestions": []
+    }
+  ],
+  "standing": {
+    "Answered": {
+      "response": {
+        "answers": [
+          {
+            "label": "Q9",
+            "unanswered": true
+          }
+        ],
+        "direction": "inline"
+      },
+      "submitted_at": "2025-08-03T09:07:11.000Z"
+    }
+  },
+  "title": "Ready to build the usage-limit pause"
+}

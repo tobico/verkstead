@@ -26,9 +26,9 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
-    ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent,
-    ProfileSaved, PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted,
-    TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    ConversationView, GrillingStarted, InterruptionEvent, Lifecycle, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Remedy, RemedySettled, Started, Submitted, TaskListEvent,
+    TimelineEvent, TranscriptView, Turn,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -290,22 +290,26 @@ impl Grilling {
         .await
     }
 
+    /// The same, picking a direction on the chooser — which is what accepts a
+    /// proposal, and so what sets the picked direction's pipeline going.
+    async fn pick(&self, set_id: i64, direction: &str) -> Submitted {
+        post(
+            &self.app,
+            &format!("/api/ui/sets/{set_id}/response"),
+            &serde_json::json!({
+                "answers": [{ "label": "Q9", "selected": 1 }],
+                "direction": direction,
+            }),
+        )
+        .await
+    }
+
     /// The same, for a Set whose questions are not the proposal's one.
     async fn respond(&self, set_id: i64, answers: serde_json::Value) -> Submitted {
         post(
             &self.app,
             &format!("/api/ui/sets/{set_id}/response"),
             &serde_json::json!({ "answers": answers }),
-        )
-        .await
-    }
-
-    /// And choose how the work gets built.
-    async fn direct(&self, direction: &str) -> DirectionChosen {
-        post(
-            &self.app,
-            &format!("/api/ui/conversations/{}/direction", self.id),
-            &serde_json::json!({ "direction": direction }),
         )
         .await
     }
@@ -327,22 +331,21 @@ impl Grilling {
     }
 }
 
-/// A closing Set: the proposal that ends a grilling, and the Option that means
-/// go ahead.
+/// A closing Set: the proposal that ends a grilling, which is what puts the
+/// direction chooser on the page.
 const PROPOSING: &str = r#"
 title: Ready to build the rate limiter
 questions:
   - label: Q9
-    text: Ready to build it this way?
+    text: Anything still open before we build it?
     options:
       - n: 1
-        text: Yes, go ahead
+        text: Nothing from me
         recommended: true
       - n: 2
-        text: Not yet — more to work through
+        text: Yes, see below
 proposal:
   direction: inline
-  accepted_by: Q9.1
   rationale: |
     One change, in one file.
 "#;
@@ -1426,8 +1429,7 @@ async fn a_run_stopped_on_an_interruption_is_waiting_on_the_human() {
     let set = fixture.ask(PROPOSING).await;
     assert!(fixture.row().await.waiting, "a Set nobody has answered");
 
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     // Which the implementation session then fails, and the run stops.
     let stopped = fixture.stopped().await;
@@ -1546,20 +1548,13 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let view = fixture.view().await;
-    assert_eq!(view.state, Lifecycle::Direction);
     assert!(
         handoff(&view).is_some_and(|handoff| handoff.html.contains("in-process counter")),
         "the handoff is taken onto the Timeline as the proposal is accepted",
     );
-    assert!(
-        outputs(&view).iter().all(|output| !output.running),
-        "the grilling ended with its proposal: it has its Response and nothing left to do",
-    );
-
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
 
     // The second session, which is a different Event: the first is the grilling,
     // and it ended when its proposal was accepted.
@@ -1628,7 +1623,6 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         claude-grilling-5)
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
-            sleep 300
             ;;
         *)
             printf 'this session never gets to run\n'
@@ -1638,18 +1632,14 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     )
     .await;
 
+    // The grilling says its piece and stops there, rather than idling on the
+    // answer as one really does: the pick starts the next session the moment it
+    // lands, and the bind has to be gone before that.
     let grilled = fixture
-        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
-        .await;
-
-    let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    fixture
         .until(|view| {
-            outputs(view)
-                .iter()
-                .all(|output| !output.running)
-                .then_some(())
+            output(view)
+                .filter(|output| output.lines > 0 && !output.running)
+                .map(|o| o.id)
         })
         .await;
 
@@ -1659,7 +1649,8 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     let missing = fixture.spill.path().to_owned();
     std::fs::remove_dir_all(&missing).unwrap();
 
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let refused = fixture
         .until(|view| {
@@ -1735,10 +1726,7 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
-
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let breaking_down = fixture
         .until(|view| {
@@ -1854,10 +1842,7 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
-
-    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
 
     let staging = fixture
         .until(|view| {
@@ -2053,8 +2038,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // The breakdown lands, and the runner is watching it: nothing here presses
     // anything again.
@@ -2176,8 +2160,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // The backlog as the breakdown wrote it: nothing done yet.
     let written = fixture
@@ -2269,8 +2252,7 @@ async fn worked_to_empty(fixture: &Grilling) {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     fixture
         .until(|view| {
@@ -3507,8 +3489,7 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let quiz = fixture.ask(BREAKDOWN_QUIZ).await;
 
@@ -3757,8 +3738,7 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -3851,8 +3831,7 @@ async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -3906,8 +3885,7 @@ async fn retrying_runs_the_step_again_in_a_session_told_what_the_human_wrote() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
     let before = outputs(&fixture.view().await).len();
@@ -4010,8 +3988,7 @@ async fn taking_over_and_aborting_both_leave_the_repo_as_the_session_left_it() {
         let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
 
         let set = fixture.ask(PROPOSING).await;
-        assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-        assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+        assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
         let stopped = fixture.stopped().await;
         let sessions = outputs(&fixture.view().await).len();
@@ -4079,8 +4056,7 @@ async fn a_remedy_pressed_twice_is_the_first_choice_arriving_again() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -4149,8 +4125,7 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
     let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -4222,8 +4197,7 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // Once the breakdown session is up, so there is a run to abort mid-step.
     fixture
@@ -4329,8 +4303,7 @@ async fn staged_and_settled(fixture: &Grilling) {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
 
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))

@@ -22,7 +22,7 @@ understanding.
 You end it, not them. There is no button anywhere that stops a grilling: once
 you and the human have reached that shared understanding, the closing move is
 **the handoff document, and then one final Question Set that proposes wrapping
-up**. Answering that Set is what moves the work on to being built.
+up**. Picking a direction on that Set is what moves the work on to being built.
 
 ### The handoff document
 
@@ -56,21 +56,11 @@ direction you recommend and why:
 title: Ready to build the rate limiter
 preface: |
   I think we have this. Here is what we settled …
-
-  Answering **yes** ends the grilling and hands over to the build. Anything
-  else keeps us here — say what is still open and I will pick it up.
 questions:
   - label: Q14
-    text: Ready to build it this way?
-    options:
-      - n: 1
-        text: Yes, go ahead
-        recommended: true
-      - n: 2
-        text: Not yet — more to work through
+    text: Anything in the above you want changed before we build it?
 proposal:
   direction: task-list
-  accepted_by: Q14.1
   rationale: |
     Six changes across the limiter, the config and the migration, each
     independently testable. Inline would be one session holding all of it;
@@ -84,24 +74,25 @@ proposal:
 - **`rationale` is markdown, and the human reads it.** It is shown beside the
   three choices as your reasoning for the one you picked, so write it as an
   argument rather than a label. A `proposal` without one is refused.
-- **`accepted_by` names the Option that means *go ahead*** — `Q14.1` for a
-  Question's, `Q14a.1` for a Sub-question's. It has to be an Option your Set
-  actually offers, or the Set is refused: nothing else can end the grilling, so
-  a proposal nobody can accept is one that would grill forever.
+- **Ask no question about whether to go ahead.** The workbench draws the
+  chooser on any Set carrying a `proposal` — all three directions, yours marked
+  as the recommendation, your rationale beside them — and says what picking one
+  does. A Question asking the same thing is a second place to answer it, and the
+  chooser is the one that counts. Ask about what is still uncertain, or ask
+  nothing at all.
 - **Put a `proposal` on one Set and no others.** It is the closing move, not a
   running recommendation; an ordinary round of grilling carries no `proposal`
   block at all.
-- **The choice of direction is not yours.** You recommend one; the human picks
-  afterwards, and may well pick another. Nothing about the Answer to your
-  question changes that.
+- **The choice of direction is not yours.** You recommend one; the human picks,
+  and may well pick another. What they pick is what runs — your recommendation
+  changes nothing about that.
 
 ### When they don't accept
 
-Any other Answer keeps the Conversation grilling: a different Option, an answer
-in their own words instead of an Option, or the question left open. That is how
-they disagree, and it is the only way back — so **say in the Preface what
-answering yes does**, as the example does. A human who did not realise the
-Option ended the grilling cannot un-answer it.
+The pick comes back as `direction` on the Response, beside the `answers`.
+**A `direction` is the proposal accepted; no `direction` is the proposal sent
+back** — an answer in their own words, questions left open, anything at all
+without a pick. That is how they disagree, and it is the whole way back.
 
 You get their Response either way, and you are still holding the whole thread.
 Read it and decide for yourself what it calls for:

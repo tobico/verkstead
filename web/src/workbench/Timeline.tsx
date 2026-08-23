@@ -58,6 +58,7 @@ import type {
   StageListEvent,
   TaskListEvent,
 } from "../api/types";
+import { DIRECTION, DIRECTION_NOTE, DIRECTIONS } from "../directions";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 
@@ -115,17 +116,6 @@ export const DIRECTION_REFUSAL: Record<DirectionChosen, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotChoosing:
     "This conversation is not choosing a direction — the grilling has not proposed wrapping up, or the work is past this point.",
-};
-
-/// What each direction is called, wherever one is named: on a button in the
-/// chooser, and in the line the timeline gives the choice afterwards.
-///
-/// One record for both, so the thing the human pressed and the thing they read
-/// back cannot come to be called different things.
-export const DIRECTION: Record<Direction, string> = {
-  inline: "Implement inline",
-  "task-list": "Break into a task list",
-  roadmap: "Stage a roadmap",
 };
 
 /// What a move reads as. The state moved *to*, said as something that happened.
@@ -743,25 +733,6 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The three ways the work can be built, in the order the design names them.
-///
-/// All three run. Each starts as soon as it is chosen — the press is the choice
-/// and the start together — and what differs is which pipeline it sets going.
-const DIRECTIONS: { direction: Direction; note: string }[] = [
-  {
-    direction: "inline",
-    note: "One fresh session under the implementation profile, primed with the handoff. Starts as soon as you choose it.",
-  },
-  {
-    direction: "task-list",
-    note: "Broken into .tasks/ in the worktree by a session of its own, then one fresh session per task. Starts as soon as you choose it.",
-  },
-  {
-    direction: "roadmap",
-    note: "Staged under docs/roadmaps/ by a session of its own, a feature per stage. Starts as soon as you choose it.",
-  },
-];
-
 /// Where the grilling hands over: what the agent proposed, and the human's
 /// choice of how the work gets built.
 ///
@@ -828,23 +799,27 @@ function DirectionChooser(props: { conversation: ConversationView }): JSX.Elemen
             {(offered) => (
               <li
                 classList={{
-                  recommended: recommended(offered.direction),
-                  chosen: props.conversation.direction === offered.direction,
+                  recommended: recommended(offered),
+                  chosen: props.conversation.direction === offered,
                 }}
               >
                 <button
                   type="button"
                   class="direction"
                   disabled={choose.isPending}
-                  aria-pressed={props.conversation.direction === offered.direction}
-                  onClick={() => choose.mutate(offered.direction)}
+                  aria-pressed={props.conversation.direction === offered}
+                  onClick={() => choose.mutate(offered)}
                 >
-                  {DIRECTION[offered.direction]}
+                  {DIRECTION[offered]}
                 </button>
-                <Show when={recommended(offered.direction)}>
+                <Show when={recommended(offered)}>
                   <span class="mark">Recommended</span>
                 </Show>
-                <p class="note">{offered.note}</p>
+                {/* What it is, and then what pressing it sets off — which is
+                    this chooser's own half of the sentence. */}
+                <p class="note">
+                  {DIRECTION_NOTE[offered]} Starts as soon as you choose it.
+                </p>
               </li>
             )}
           </For>

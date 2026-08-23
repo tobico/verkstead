@@ -1087,7 +1087,8 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
- * Set, plus an optional set-level comment.
+ * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
+ * the direction the human picked.
  *
  * The invariant is explicitness, not completeness: every Question and
  * Sub-question in the Set appears in `answers` one way or the other, so the
@@ -1103,7 +1104,23 @@ answers: Array<Answer>,
 /**
  * What the human wants to say about the Set as a whole.
  */
-comment?: string | null, };
+comment?: string | null, 
+/**
+ * How the human chose to have the work built, on the one Set that carries
+ * a [`crate::set::Proposal`].
+ *
+ * A field of its own rather than an ordinary Answer, because it answers no
+ * Question: the chooser is the viewer's, injected onto any Set carrying a
+ * proposal, and the three directions it offers are the same three every
+ * time. An Answer here would be a Question the agent never asked and would
+ * have to be excluded from every rule that counts them.
+ *
+ * Picking is the whole of accepting the proposal. Every other way of
+ * answering sends it back — an answer in the human's own words, questions
+ * left open, anything without a pick — so `None` on a proposal Set is the
+ * human disagreeing, and `None` anywhere else is every ordinary Response.
+ */
+direction?: Direction | null, };
 
 /**
  * One row of a Question Set's Timeline table: the number it answers to, what
@@ -1176,7 +1193,20 @@ diagrams: boolean,
  * so it travels with the Set rather than being fetched once the page is
  * already up.
  */
-standing: Standing, };
+standing: Standing, 
+/**
+ * The wrap-up proposal this Set carries, on the one Set that carries one.
+ *
+ * What the page draws the direction chooser from: the recommendation to
+ * mark, and the reasoning to put beside the three choices. `null` on every
+ * ordinary Set, which is what leaves the chooser off it.
+ *
+ * It travels with the Set rather than being looked up beside it for the
+ * reason the Conversation does: the decision and what it is a decision
+ * about arrive together, so the page never draws the Questions above a
+ * chooser that has not turned up yet.
+ */
+proposal: ProposalView | null, };
 
 /**
  * One stage of a roadmap: the number it answers to, what it is called, and

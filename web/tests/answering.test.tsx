@@ -679,6 +679,9 @@ describe("the draft between visits", () => {
         { label: "Q3", selected: null, free_text: "" },
       ],
       comment: "back in an hour",
+      // Nothing to pick on this Set: it carries no proposal, so the chooser is
+      // not on the page to have been left alone.
+      direction: null,
     });
   });
 

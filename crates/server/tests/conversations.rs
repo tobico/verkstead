@@ -1057,16 +1057,15 @@ const PROPOSING: &str = r#"
 title: Ready to build the rate limiter
 questions:
   - label: Q9
-    text: Ready to build it this way?
+    text: Anything still open before we build it?
     options:
       - n: 1
-        text: Yes, go ahead
+        text: Nothing from me
         recommended: true
       - n: 2
-        text: Not yet — more to work through
+        text: Yes, see below
 proposal:
   direction: task-list
-  accepted_by: Q9.1
   rationale: |
     Six changes, each independently testable.
 "#;
@@ -1107,8 +1106,29 @@ async fn ask(app: &Router, conversation: i64, yaml: &str) -> i64 {
     created.id
 }
 
-/// Answer it from the browser, which is the path the human's own reply takes.
+/// Answer it from the browser, which is the path the human's own reply takes —
+/// picking a direction on the chooser, which is the whole of accepting a
+/// proposal.
 async fn answer(app: &Router, set_id: i64) -> verkstead_render::Submitted {
+    picking(app, set_id, "task-list").await
+}
+
+/// The same, with the direction of the test's own choosing.
+async fn picking(app: &Router, set_id: i64, direction: &str) -> verkstead_render::Submitted {
+    post(
+        app,
+        &format!("/api/ui/sets/{set_id}/response"),
+        &serde_json::json!({
+            "answers": [{ "label": "Q9", "selected": 1 }],
+            "direction": direction,
+        }),
+    )
+    .await
+}
+
+/// Answer an ordinary round of grilling, which has no chooser on it to pick
+/// anything with.
+async fn answer_ordinary(app: &Router, set_id: i64) -> verkstead_render::Submitted {
     answered(
         app,
         set_id,
@@ -1117,8 +1137,8 @@ async fn answer(app: &Router, set_id: i64) -> verkstead_render::Submitted {
     .await
 }
 
-/// The same, with an Answer of the test's own choosing — for the ways of
-/// answering that are not the Option `accepted_by` names.
+/// And with no pick at all, which is every way of sending a proposal back: the
+/// Answer is the test's own, and what makes it a refusal is what is missing.
 async fn answered(
     app: &Router,
     set_id: i64,
@@ -1186,8 +1206,10 @@ async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
     id
 }
 
+/// Picking a direction on the closing Set is the whole of accepting it: the
+/// grilling ends and the picked direction's pipeline starts, off the one answer.
 #[tokio::test]
-async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
+async fn picking_a_direction_on_the_closing_set_sets_the_work_going() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
@@ -1199,11 +1221,15 @@ async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Direction);
     assert_eq!(
-        moves(&view),
-        [Lifecycle::Grilling, Lifecycle::Direction],
-        "nothing on this page was pressed to get here: the agent proposed and the human answered",
+        view.state,
+        Lifecycle::Implementing,
+        "nothing on this page was pressed to get here: the agent proposed and the human picked",
+    );
+    assert_eq!(
+        view.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "and the pick is the choice, with no second trip to the Timeline",
     );
 
     let proposal = view.proposal.expect("the closing Set proposed a direction");
@@ -1218,10 +1244,24 @@ async fn answering_the_closing_proposal_hands_the_work_over_to_the_human() {
         "and it arrives as HTML, like every other piece of agent markdown: {}",
         proposal.rationale_html
     );
+}
 
+/// The human is not held to the recommendation, and picking against it accepts
+/// the proposal exactly as agreeing with it does.
+#[tokio::test]
+async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    picking(&app, ask(&app, id, PROPOSING).await, "inline").await;
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
     assert_eq!(
-        view.direction, None,
-        "the recommendation is marked, never chosen on the human's behalf",
+        view.proposal.expect("the proposal was accepted").direction,
+        verkstead_schema::Direction::TaskList,
+        "the recommendation stands as what was argued for, not as what was chosen",
     );
 }
 
@@ -1259,7 +1299,7 @@ async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
     let set = ask(&app, id, ORDINARY).await;
     assert!(only_row(&app).await.waiting);
 
-    answer(&app, set).await;
+    answer_ordinary(&app, set).await;
     assert!(
         !only_row(&app).await.waiting,
         "an answered Set is a decision taken, not one outstanding",
@@ -1278,26 +1318,24 @@ async fn a_set_that_was_archived_unanswered_stops_drawing_the_human_too() {
     assert!(!only_row(&app).await.waiting);
 }
 
-/// The grilling wrapped and the human has to pick a direction, which is the one
-/// source of *waiting* that is the Conversation's own state rather than something
-/// on its Timeline.
+/// The closing Set is what the human is waiting on, and answering it is the
+/// whole of it: there is no second thing to press behind the Set, so nothing is
+/// left drawing them once it is answered.
 #[tokio::test]
-async fn a_conversation_choosing_its_direction_is_waiting_on_the_human() {
+async fn a_closing_set_stops_drawing_the_human_the_moment_it_is_picked_on() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
-    // Accepting the proposal answers the Set as it moves the Conversation, so
-    // what is left waiting is the Direction and nothing else.
-    answer(&app, ask(&app, id, PROPOSING).await).await;
+    let set = ask(&app, id, PROPOSING).await;
+    assert!(only_row(&app).await.waiting);
+
+    answer(&app, set).await;
 
     let row = only_row(&app).await;
-    assert_eq!(row.state, Lifecycle::Direction);
-    assert!(row.waiting);
-
-    direct(&app, id, "inline").await;
+    assert_eq!(row.state, Lifecycle::Implementing);
     assert!(
-        !only_row(&app).await.waiting,
-        "the direction is chosen; there is nothing left to pick",
+        !row.waiting,
+        "the pick settled the direction as it settled the Set",
     );
 }
 
@@ -1318,7 +1356,7 @@ async fn a_draft_is_never_marked_as_waiting() {
     // And the Set is genuinely unanswered: what is being read here is the draft
     // rule and not an empty Timeline.
     assert_eq!(
-        answer(&app, set).await,
+        answer_ordinary(&app, set).await,
         verkstead_render::Submitted::Accepted
     );
 }
@@ -1405,7 +1443,7 @@ async fn a_grilling_that_wrote_no_handoff_still_hands_over() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Direction);
+    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(handoff(&view), None);
 }
 
@@ -1438,7 +1476,7 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
 
     let set = ask(&app, id, ORDINARY).await;
     assert_eq!(
-        answer(&app, set).await,
+        answer_ordinary(&app, set).await,
         verkstead_render::Submitted::Accepted
     );
 
@@ -1449,69 +1487,52 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
-/// A task list runs off the press too: what starts is the session that writes
-/// the backlog, and writing it is the work beginning rather than a step in front
-/// of it.
+/// All three run off the pick, and each sets its own pipeline going.
+///
+/// One test over the three, because what differs between them is which session
+/// is launched and this router has no way to run one — what is the same, and
+/// what is being asked here, is that the pick alone records the direction and
+/// takes the Conversation to Implementing. A task list is no exception: what
+/// starts is the session that writes the backlog, and writing it is the work
+/// beginning rather than a step in front of it.
 #[tokio::test]
-async fn choosing_a_task_list_sets_the_conversation_implementing() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-    answer(&app, ask(&app, id, PROPOSING).await).await;
+async fn a_pick_records_the_direction_and_sets_the_conversation_implementing() {
+    for (picked, direction) in [
+        ("inline", verkstead_schema::Direction::Inline),
+        ("task-list", verkstead_schema::Direction::TaskList),
+        ("roadmap", verkstead_schema::Direction::Roadmap),
+    ] {
+        let (watched, _dir, app, _repo, repo_id) = workbench().await;
+        let id = grilling(&app, watched.path(), repo_id).await;
 
-    assert_eq!(direct(&app, id, "task-list").await, DirectionChosen::Chosen);
+        picking(&app, ask(&app, id, PROPOSING).await, picked).await;
 
-    let view = opened(&app, id).await;
+        let view = opened(&app, id).await;
 
-    assert_eq!(view.direction, Some(verkstead_schema::Direction::TaskList));
-    assert_eq!(directions(&view), [verkstead_schema::Direction::TaskList]);
-    assert_eq!(view.state, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&view),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
-        "the choice is an Event of its own and the work starting is a move",
-    );
+        assert_eq!(view.direction, Some(direction), "picking {picked}");
+        assert_eq!(directions(&view), [direction], "picking {picked}");
+        assert_eq!(view.state, Lifecycle::Implementing, "picking {picked}");
+        assert_eq!(
+            moves(&view),
+            [
+                Lifecycle::Grilling,
+                Lifecycle::Direction,
+                Lifecycle::Implementing
+            ],
+            "the work starting is a move, and it passes through Direction on the \
+             way rather than resting there — picking {picked}",
+        );
+    }
 }
 
-/// Inline is the other, so the Conversation leaves Direction the moment it is
-/// chosen. The session itself is another matter — this router has no way to run
-/// one, which is exactly why the move and the launch are separate things.
+/// The work has started, so the chooser has nothing left to do — however a press
+/// on it arrived.
 #[tokio::test]
-async fn choosing_inline_sets_the_conversation_implementing() {
+async fn the_chooser_is_refused_once_a_pick_has_started_the_work() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
     answer(&app, ask(&app, id, PROPOSING).await).await;
 
-    assert_eq!(direct(&app, id, "inline").await, DirectionChosen::Chosen);
-
-    let view = opened(&app, id).await;
-
-    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
-    assert_eq!(directions(&view), [verkstead_schema::Direction::Inline]);
-    assert_eq!(view.state, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&view),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
-        "the choice is an Event of its own and the work starting is a move",
-    );
-}
-
-/// The work has started, so there is no longer a choice here to make — however
-/// the second press arrived.
-#[tokio::test]
-async fn choosing_inline_again_once_the_work_has_started_is_refused() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-    answer(&app, ask(&app, id, PROPOSING).await).await;
-
-    assert_eq!(direct(&app, id, "inline").await, DirectionChosen::Chosen);
     assert_eq!(
         direct(&app, id, "inline").await,
         DirectionChosen::NotChoosing
@@ -1520,35 +1541,8 @@ async fn choosing_inline_again_once_the_work_has_started_is_refused() {
     let view = opened(&app, id).await;
     assert_eq!(
         directions(&view),
-        [verkstead_schema::Direction::Inline],
-        "the refused press records nothing",
-    );
-}
-
-/// And the third is no different from the other two now that there is something
-/// for it to start: the session it launches writes `docs/roadmaps/`, and writing
-/// the roadmap *is* this Conversation's work rather than a step in front of it.
-#[tokio::test]
-async fn choosing_a_staged_roadmap_sets_the_conversation_implementing() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-    answer(&app, ask(&app, id, PROPOSING).await).await;
-
-    assert_eq!(direct(&app, id, "roadmap").await, DirectionChosen::Chosen);
-
-    let view = opened(&app, id).await;
-
-    assert_eq!(view.direction, Some(verkstead_schema::Direction::Roadmap));
-    assert_eq!(directions(&view), [verkstead_schema::Direction::Roadmap]);
-    assert_eq!(view.state, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&view),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
-        "the choice is an Event of its own and the work starting is a move",
+        [verkstead_schema::Direction::TaskList],
+        "the refused press records nothing, and the pick still stands",
     );
 }
 
@@ -1590,8 +1584,8 @@ async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
 
     let set = ask(&app, id, PROPOSING).await;
 
-    // Not the Option `accepted_by` names, and words of their own beside it —
-    // which is the shape of a human saying what is still open.
+    // Nothing picked on the chooser, and words of their own beside the question
+    // — which is the shape of a human saying what is still open.
     assert_eq!(
         answered(
             &app,
@@ -1612,17 +1606,18 @@ async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
     assert_eq!(
         view.state,
         Lifecycle::Grilling,
-        "only the Option the proposal named ends a grilling",
+        "only a pick ends a grilling",
     );
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
+    assert_eq!(view.direction, None, "and nothing was chosen");
     assert_eq!(
         view.proposal, None,
-        "and there is no chooser to draw: nothing was accepted",
+        "and there is no accepted proposal to draw: nothing was accepted",
     );
 }
 
 #[tokio::test]
-async fn a_proposal_put_again_after_a_refusal_reaches_the_chooser() {
+async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
@@ -1638,33 +1633,43 @@ async fn a_proposal_put_again_after_a_refusal_reaches_the_chooser() {
     // The agent read the Response, went back down the branch, and proposed
     // again — this time recommending something else.
     let again = PROPOSING.replace("direction: task-list", "direction: inline");
-    answer(&app, ask(&app, id, &again).await).await;
+    picking(&app, ask(&app, id, &again).await, "inline").await;
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Direction);
+    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
-        [Lifecycle::Grilling, Lifecycle::Direction],
-        "the refusal moved nothing, so it got here once",
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Direction,
+            Lifecycle::Implementing
+        ],
+        "the refusal moved nothing, so the work got going once",
     );
     assert_eq!(
         view.proposal
             .expect("the second proposal is the one in force")
             .direction,
         verkstead_schema::Direction::Inline,
-        "the chooser is about the latest proposal, not the one that was refused",
+        "what is drawn is the latest proposal, not the one that was refused",
     );
 }
 
+/// A proposal with nothing to read beside the recommendation is refused as it
+/// arrives, because the chooser would draw the human a bare word to decide
+/// against.
 #[tokio::test]
-async fn a_proposal_naming_an_option_the_set_does_not_offer_is_refused_as_it_arrives() {
+async fn a_proposal_with_no_reasoning_is_refused_as_it_arrives() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
-    // Nothing could ever accept it, so the grilling it was meant to end would
-    // run until somebody aborted the conversation.
-    let unacceptable = PROPOSING.replace("accepted_by: Q9.1", "accepted_by: Q9.7");
+    let unreasoned = PROPOSING
+        .split("  rationale:")
+        .next()
+        .expect("the fixture has a rationale to cut off")
+        .to_owned()
+        + "  rationale: \"  \"\n";
 
     let response = app
         .clone()
@@ -1673,7 +1678,7 @@ async fn a_proposal_naming_an_option_the_set_does_not_offer_is_refused_as_it_arr
                 .method("POST")
                 .uri(format!("/conversations/{id}/api/v1/sets"))
                 .header(header::CONTENT_TYPE, "application/yaml")
-                .body(Body::from(unacceptable))
+                .body(Body::from(unreasoned))
                 .unwrap(),
         )
         .await
@@ -1684,8 +1689,8 @@ async fn a_proposal_naming_an_option_the_set_does_not_offer_is_refused_as_it_arr
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let refusal = String::from_utf8(body.to_vec()).unwrap();
     assert!(
-        refusal.contains("Q9"),
-        "the refusal should name the question at fault, got: {refusal}"
+        refusal.contains("rationale"),
+        "the refusal should say what is missing, got: {refusal}"
     );
 }
 

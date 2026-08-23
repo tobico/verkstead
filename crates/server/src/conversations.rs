@@ -83,19 +83,22 @@ pub(crate) async fn start_adopting(
 /// log. Three of the four outcomes are unremarkable and one cannot happen, which
 /// is exactly why it is worth saying when it does.
 ///
-/// An accepted proposal is also the moment the grilling is over, and two things
-/// follow from that. The session that proposed is ended: it has its Response,
-/// there is nothing left for it to do, and what comes next runs in the same
-/// worktree under a different account. And its handoff is taken onto the
+/// An accepted proposal is also the moment the grilling is over, and three
+/// things follow from that. The session that proposed is ended: it has its
+/// Response, there is nothing left for it to do, and what comes next runs in the
+/// same worktree under a different account. Its handoff is taken onto the
 /// Timeline, because the directory it was written in is Verkstead's own scratch
-/// space and the Timeline is where a Conversation's documents live.
+/// space and the Timeline is where a Conversation's documents live. And the
+/// direction the human picked is acted on there and then — the pick rides the
+/// Set, so accepting and choosing are one answer and there is nothing left to
+/// press.
 ///
-/// Neither is refused for: by the time this runs the Response is stored and the
-/// Conversation has moved. What a session that would not end or a handoff that
-/// could not be read leaves behind is something to see in the log, and no more
-/// than that. An Interruption is raised about a session that ran and went wrong
-/// — see [`crate::interruptions`] — and neither of these is one: the grilling is
-/// over either way, and what follows it starts from the Brief.
+/// None of the three is refused for: by the time this runs the Response is
+/// stored and the Conversation has moved. What a session that would not end or a
+/// handoff that could not be read leaves behind is something to see in the log,
+/// and no more than that. An Interruption is raised about a session that ran and
+/// went wrong — see [`crate::interruptions`] — and neither of these is one: the
+/// grilling is over either way, and what follows it starts from the Brief.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -103,7 +106,7 @@ pub(crate) async fn settle_a_proposal(
 ) {
     use store::{Directing, Proposed};
 
-    match proposed {
+    let picked = match proposed {
         // The ordinary Set, carrying no proposal at all — which is nearly every
         // Set a grilling asks.
         None => return,
@@ -114,25 +117,38 @@ pub(crate) async fn settle_a_proposal(
             );
             return;
         }
-        Some(Proposed::Accepted(Directing::Moved)) => tracing::info!(
-            set_id,
-            "a wrap-up proposal was accepted; the Conversation is choosing a direction"
-        ),
-        Some(Proposed::Accepted(Directing::NotGrilling)) => {
+        Some(Proposed::Accepted {
+            direction,
+            directing: Directing::Moved,
+        }) => {
+            tracing::info!(
+                set_id,
+                ?direction,
+                "a wrap-up proposal was accepted with a direction picked on it"
+            );
+            direction
+        }
+        Some(Proposed::Accepted {
+            directing: Directing::NotGrilling,
+            ..
+        }) => {
             tracing::debug!(
                 set_id,
                 "a wrap-up proposal was accepted for a Conversation that had already left grilling"
             );
             return;
         }
-        Some(Proposed::Accepted(Directing::NoSuchConversation)) => {
+        Some(Proposed::Accepted {
+            directing: Directing::NoSuchConversation,
+            ..
+        }) => {
             tracing::error!(
                 set_id,
                 "a wrap-up proposal names a Conversation that is not there, so nothing moved"
             );
             return;
         }
-    }
+    };
 
     // Which Conversation the grilling was of. Read back rather than passed in:
     // one of the two endpoints that take a Response knows and the other does
@@ -153,6 +169,24 @@ pub(crate) async fn settle_a_proposal(
 
     if let Err(error) = take_handoff(state, conversation_id).await {
         tracing::error!(error = ?error, conversation_id, "the handoff could not be put on the Timeline");
+    }
+
+    // And the pick, through the one path a direction is ever acted on. Logged
+    // rather than raised for the reason the two above are: the Response is
+    // stored and the grilling is over, so what a start that did not happen
+    // leaves is a Conversation to look at rather than an answer to refuse.
+    match choose_direction(state, conversation_id, picked).await {
+        Ok(DirectionChosen::Chosen) => {}
+        Ok(refused) => tracing::error!(
+            conversation_id,
+            ?refused,
+            "the direction picked on the closing Set was not acted on"
+        ),
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            "acting on the direction picked on the closing Set failed"
+        ),
     }
 }
 
@@ -198,10 +232,13 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 /// starts one that writes `docs/roadmaps/` and carries the branch to a pull
 /// request, and the stages it plans become Conversations of their own.
 ///
+/// Reached from the pick on an accepted proposal — see [`settle_a_proposal`] —
+/// and from the chooser press, which are the same move made a moment apart.
+///
 /// Choosing on a Conversation that is not in Direction is refused by the store,
 /// which is what makes *implement inline* impossible from anywhere else: the
-/// choice and the start are one press, so neither half of it happens without the
-/// other.
+/// choice and the start are one answer, so neither half of it happens without
+/// the other.
 pub(crate) async fn choose_direction(
     state: &AppState,
     id: i64,

@@ -199,8 +199,7 @@ pub struct Fixing {
 /// What became of a wrap-up proposal the human has just answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Proposed {
-    /// The human did not pick the Option that means go ahead, so the grilling
-    /// carries on.
+    /// The human picked no direction, so the grilling carries on.
     ///
     /// Nothing is recorded and nothing is wrong: this is how a human disagrees.
     /// The session that proposed is still holding the thread and has their
@@ -208,12 +207,20 @@ pub enum Proposed {
     /// again — is the agent's own to decide.
     SentBack,
 
-    /// Accepted, and this is what became of moving the Conversation on.
+    /// Accepted: the human picked a direction, and this is what became of
+    /// moving the Conversation on.
+    ///
+    /// The pick travels with it because it is the whole of what the server does
+    /// next — the Conversation is choosing a direction and the direction is
+    /// already chosen, so nobody has to be asked a second time.
     ///
     /// [`Directing::NotGrilling`] is not a failure here either: a grilling that
     /// put two proposals has the first acceptance move the Conversation, and the
     /// second finds the move already made.
-    Accepted(Directing),
+    Accepted {
+        direction: verkstead_schema::Direction,
+        directing: Directing,
+    },
 }
 
 /// What became of a submitted Response.
@@ -275,14 +282,18 @@ pub async fn submit_response(
     // After the Response is stored, and only for the Set that carries a
     // proposal. The insert is what makes a Set answered once, so a proposal is
     // settled once too: a second Response to the same Set never gets this far.
-    let proposed = match &stored.set.proposal {
-        Some(proposal) if proposal.accepted(response) => {
-            Some(Proposed::Accepted(accept_proposal(pool, set_id).await?))
-        }
-        // Answered some other way, which is how a human disagrees: the grilling
+    //
+    // The pick is the whole of accepting — see [`Response::direction`] — so
+    // there is nothing here to read off the Answers.
+    let proposed = match (&stored.set.proposal, response.direction) {
+        (Some(_), Some(direction)) => Some(Proposed::Accepted {
+            direction,
+            directing: accept_proposal(pool, set_id).await?,
+        }),
+        // Answered without a pick, which is how a human disagrees: the grilling
         // carries on, and the agent has their Response.
-        Some(_) => Some(Proposed::SentBack),
-        None => None,
+        (Some(_), None) => Some(Proposed::SentBack),
+        (None, _) => None,
     };
 
     // And, on the one Set a wrap-up's review asks, the same again for what it

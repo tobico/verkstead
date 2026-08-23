@@ -17,11 +17,10 @@
 //!   to fill. An empty `columns` list is not a table with no axes — the wire
 //!   format cannot tell it from an absent one — so it reads as no declaration
 //!   at all, and the question is drawn as the list it always was;
-//! - a Set carrying a `proposal` gives its reasoning, and the Option it names as
-//!   acceptance is one the Set actually offers. The direction is an enum, so the
-//!   wire format refuses an unknown one on its own; what is left is a rationale
-//!   nobody wrote, and an `accepted_by` naming an Option nobody can pick — which
-//!   would be a grilling that could never end.
+//! - a Set carrying a `proposal` gives its reasoning. The direction is an enum,
+//!   so the wire format refuses an unknown one on its own; what is left is a
+//!   rationale nobody wrote, and the chooser has nothing to show the human the
+//!   recommendation was argued for.
 //!
 //! Multi-select needs no rule: the format gives no way to express it — an
 //! Answer carries one `selected` number.
@@ -32,7 +31,9 @@
 //! - every Question and Sub-question appears exactly once, as an Answer or as
 //!   the Unanswered marker, so the agent cannot miss an open question;
 //! - an entry is one or the other, never both, and never neither;
-//! - a selected Option is one the question actually offers.
+//! - a selected Option is one the question actually offers;
+//! - a picked `direction` comes back only from a Set that carries a `proposal`,
+//!   because the chooser is drawn on that Set and on no other.
 //!
 //! Every violation is collected rather than the first one returned, so an
 //! agent that got several things wrong learns about all of them at once.
@@ -214,6 +215,17 @@ impl Response {
             }
         }
 
+        // The pick belongs to the chooser, and the chooser is drawn on a Set
+        // carrying a proposal and on no other. One anywhere else is a direction
+        // nobody offered and nothing would act on — refused rather than dropped
+        // on the floor, so whoever sent it hears about it.
+        if self.direction.is_some() && set.proposal.is_none() {
+            violations.push(Violation::set(
+                "this Response picks a direction, but the Set carries no `proposal`; \
+                 the chooser is drawn on the closing Set alone",
+            ));
+        }
+
         if violations.is_empty() {
             Ok(())
         } else {
@@ -222,18 +234,17 @@ impl Response {
     }
 }
 
-/// The two things a wrap-up proposal has to be, beyond naming a direction the
+/// The one thing a wrap-up proposal has to be, beyond naming a direction the
 /// wire format already knows.
 ///
 /// Which direction is recommended is settled by deserialization: `direction` is
 /// an enum of three, and a Set naming a fourth never reaches this. What is left
-/// is what the grammar cannot express — that there is reasoning to read, and
-/// that there is something to answer.
+/// is what the grammar cannot express — that there is reasoning to read.
 ///
-/// The second of those is the load-bearing one. Answering a proposal Set is what
-/// moves the Conversation on, so a proposal on a Set with nothing answerable in
-/// it is a grilling that could never end: the Set would sit waiting on a human
-/// who has nothing to decide.
+/// Nothing here asks whether the Set has anything answerable on it, because a
+/// proposal Set always has: the viewer injects the chooser, and the three
+/// directions are what there is to decide. The Questions beside it are the
+/// agent's own and may be none at all.
 fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
     let Some(proposal) = &set.proposal else {
         return;
@@ -243,46 +254,6 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
         violations.push(Violation::set(
             "a `proposal` needs a rationale; the chooser shows the human why this \
              direction was recommended, and a bare word is not a reason",
-        ));
-    }
-
-    // The Option that means "go ahead" has to be one the human can actually
-    // pick. A proposal naming an Option nothing offers could never be accepted,
-    // so the grilling it was supposed to end would run until somebody aborted
-    // it — which is the one failure here nobody would be told about.
-    let Some((name, n)) = proposal.acceptance() else {
-        violations.push(Violation::set(format!(
-            "a `proposal` names the Option that means go ahead, as `Q14.1`; \
-             {:?} is not an Option's number",
-            proposal.accepted_by
-        )));
-        return;
-    };
-
-    let Some(options) = offered(set, name) else {
-        violations.push(Violation::set(format!(
-            "a `proposal` is accepted by {:?}, but this Set asks no question \
-             called {name:?}",
-            proposal.accepted_by
-        )));
-        return;
-    };
-
-    if !options.iter().any(|option| option.n == n) {
-        let offered: Vec<String> = options.iter().map(|option| option.n.to_string()).collect();
-        violations.push(Violation::at(
-            name,
-            match offered.is_empty() {
-                true => format!(
-                    "a `proposal` is accepted by Option {n} of this question, which \
-                     offers no Options at all"
-                ),
-                false => format!(
-                    "a `proposal` is accepted by Option {n} of this question, which \
-                     offers only {}",
-                    offered.join(", ")
-                ),
-            },
         ));
     }
 }
