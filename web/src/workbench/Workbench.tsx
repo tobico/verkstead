@@ -26,9 +26,12 @@ import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "s
 import { loadConversation } from "../api/client";
 import type {
   AgentOutputEvent,
+  BriefEvent,
   CommitEvent,
   ConversationView,
+  HandoffEvent,
   InterruptionEvent,
+  ManualTaskEvent,
   PullRequestEvent,
   QuestionSetEvent,
 } from "../api/types";
@@ -36,6 +39,7 @@ import { useReading } from "../freshness";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
+import { Document } from "./Document";
 import { Evidence } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
@@ -51,7 +55,10 @@ type Opened =
   | { asked: QuestionSetEvent }
   | { commit: CommitEvent }
   | { stopped: InterruptionEvent }
-  | { opened: PullRequestEvent };
+  | { opened: PullRequestEvent }
+  | { brief: BriefEvent }
+  | { handoff: HandoffEvent }
+  | { manual: ManualTaskEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
@@ -62,7 +69,10 @@ function which(
   | QuestionSetEvent
   | CommitEvent
   | InterruptionEvent
-  | PullRequestEvent {
+  | PullRequestEvent
+  | BriefEvent
+  | HandoffEvent
+  | ManualTaskEvent {
   if ("output" in open) {
     return open.output;
   }
@@ -72,7 +82,16 @@ function which(
   if ("commit" in open) {
     return open.commit;
   }
-  return "stopped" in open ? open.stopped : open.opened;
+  if ("stopped" in open) {
+    return open.stopped;
+  }
+  if ("brief" in open) {
+    return open.brief;
+  }
+  if ("handoff" in open) {
+    return open.handoff;
+  }
+  return "manual" in open ? open.manual : open.opened;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
@@ -95,6 +114,18 @@ function stoppedIn(open: Opened): InterruptionEvent | undefined {
 
 function pullRequestIn(open: Opened): PullRequestEvent | undefined {
   return "opened" in open ? open.opened : undefined;
+}
+
+function briefIn(open: Opened): BriefEvent | undefined {
+  return "brief" in open ? open.brief : undefined;
+}
+
+function handoffIn(open: Opened): HandoffEvent | undefined {
+  return "handoff" in open ? open.handoff : undefined;
+}
+
+function manualIn(open: Opened): ManualTaskEvent | undefined {
+  return "manual" in open ? open.manual : undefined;
 }
 
 export function Workbench(): JSX.Element {
@@ -137,12 +168,19 @@ export function Workbench(): JSX.Element {
   /// self to show. An id whose Event has gone leaves the pane empty, which is
   /// what it is when nothing is open at all.
   ///
-  /// Five kinds have one: a session's output, whose full self is its
+  /// Eight kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; an interruption, whose full
-  /// self is the evidence it was raised with; and the pull request, whose full
-  /// self is what is on it at GitHub right now. The kind travels with it,
+  /// self is the evidence it was raised with; the pull request, whose full
+  /// self is what is on it at GitHub right now; and the three documents — the
+  /// Brief, the handoff and a Manual Task's instruction — whose full self is
+  /// the markdown their card shows five lines of. The kind travels with it,
   /// because it is what decides which pane is drawn.
+  ///
+  /// A Brief still being drafted is here too, and nothing ever selects it: the
+  /// card is a field with the setup under it rather than a card to press, which
+  /// is the Timeline's own rule about its own card. Saying it a second time here
+  /// would be two rules to keep in step.
   ///
   /// The pull request is looked for among the pinned events rather than in the
   /// timeline, because that is where it is drawn: it is the one event that
@@ -163,6 +201,15 @@ export function Workbench(): JSX.Element {
         }
         if ("Interruption" in entry) {
           return { stopped: entry.Interruption };
+        }
+        if ("Brief" in entry) {
+          return { brief: entry.Brief };
+        }
+        if ("Handoff" in entry) {
+          return { handoff: entry.Handoff };
+        }
+        if ("ManualTask" in entry) {
+          return { manual: entry.ManualTask };
         }
         return undefined;
       }),
@@ -295,6 +342,43 @@ export function Workbench(): JSX.Element {
                       <PullRequest
                         conversation={conversation()}
                         opened={opened()}
+                        back={() => setPane("timeline")}
+                        close={close}
+                      />
+                    )}
+                  </Match>
+                  {/* And the three documents, which are one pane: each is
+                      rendered markdown under the heading its card carries, and
+                      the pane is the whole of what the card showed five lines
+                      of. */}
+                  <Match when={briefIn(open())}>
+                    {(brief) => (
+                      <Document
+                        heading="Brief"
+                        html={brief().html}
+                        empty="Nothing was written."
+                        back={() => setPane("timeline")}
+                        close={close}
+                      />
+                    )}
+                  </Match>
+                  <Match when={handoffIn(open())}>
+                    {(handoff) => (
+                      <Document
+                        heading="Handoff"
+                        html={handoff().html}
+                        empty="The grilling wrote nothing down."
+                        back={() => setPane("timeline")}
+                        close={close}
+                      />
+                    )}
+                  </Match>
+                  <Match when={manualIn(open())}>
+                    {(manual) => (
+                      <Document
+                        heading="Manual task"
+                        html={manual().html}
+                        empty="Nothing was asked for."
                         back={() => setPane("timeline")}
                         close={close}
                       />

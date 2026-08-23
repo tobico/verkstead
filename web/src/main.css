@@ -1487,24 +1487,57 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The brief is prose, and reads at the measure like every other block of it. */
-.brief-body {
+/* The three documents on a timeline — the frozen brief, the handoff the grilling
+   wrote, and the instruction a manual task was set going with. All three are
+   prose, and read at the measure like every other block of it, on the card and
+   in the pane the card opens. */
+.brief-body,
+.handoff-body,
+.manual-task-body,
+.document {
   max-width: var(--measure);
 }
 
-/* The handoff is the same kind of card, and prose for the same reason — what the
-   grilling settled, written out for whoever builds it. Nothing to press: it is
-   the agent's account of a conversation that is over. */
-.handoff > .markdown {
-  max-width: var(--measure);
+/* On the card, each of them is cut off at five lines: enough to say what the
+   document is about, and never enough to push the record off the screen. The
+   whole of it is in the details pane, which is what pressing the card opens.
+
+   The height is written in `em` rather than in lines, because what is clamped is
+   a rendering rather than a paragraph — a heading, a list and a fence are all in
+   there and no two of them are one line high. Five lines of body text is the
+   measure of it, and a document whose first block is taller simply shows less of
+   itself. */
+.clamp {
+  position: relative;
+  max-height: 7.5em;
+  overflow: hidden;
 }
 
-/* And a manual task is the same kind of card again, prose at the same measure:
-   what the human asked for by hand, in the words they asked for it in. Nothing
-   to press here either — what its session did arrives under it as the events
-   any work arrives as. */
-.manual-task > .markdown {
-  max-width: var(--measure);
+/* The cut, drawn only where the document goes on under it — `Clamped` in
+   `Timeline.tsx` is what measures. The last line fades into the card rather than
+   stopping at a straight edge, so what is missing reads as missing rather than
+   as the end of the document. */
+.clamp.cut::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2.5em;
+  background: linear-gradient(to bottom, transparent, var(--card));
+  pointer-events: none;
+}
+
+/* And what says the card can be pressed. The events that are buttons carry this
+   for nothing; these three are articles, because rendered markdown cannot live
+   inside a button, so the same two things a pressable card has — a pointer and a
+   border in the accent while it is the one open — are said here instead. */
+.timeline-event > .openable {
+  cursor: pointer;
+}
+
+.timeline-event > .openable.selected {
+  border-color: var(--accent);
 }
 
 /* What is still the human's to change while the brief is a draft, under the

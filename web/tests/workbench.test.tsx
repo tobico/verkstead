@@ -39,7 +39,7 @@ import type {
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
-import { MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
+import { CLAMPED_LINES, MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
 import {
   OPEN,
   PROFILES,
@@ -3244,6 +3244,15 @@ function theBuilding(
   );
 }
 
+/// The handoff that grilling wrote, which is the same conversation's own.
+const HANDOFF = (() => {
+  const event = BUILDING.timeline.find((entry) => "Handoff" in entry);
+  if (!event || !("Handoff" in event)) {
+    throw new Error("the fixture should carry a handoff");
+  }
+  return event.Handoff;
+})();
+
 describe("a grilling that has handed over", () => {
   it("draws no chooser anywhere: the pick rode the closing set", async () => {
     theBuilding();
@@ -3293,8 +3302,10 @@ describe("a grilling that has handed over", () => {
       "<h1>Pausing on a usage limit</h1>",
     );
 
-    // Nothing to press and nothing to edit: it is the agent's account of a
-    // conversation that is over.
+    // Nothing to edit and nothing to answer: it is the agent's account of a
+    // conversation that is over. The card opens, which is a different thing —
+    // see the documents on a timeline, below.
+    expect(handoff.querySelector("textarea")).toBeNull();
     expect(handoff.querySelector("button")).toBeNull();
   });
 });
@@ -4279,8 +4290,9 @@ describe("a manual task", () => {
     expect(asked.querySelector("code")!.textContent).toBe("main");
   });
 
-  /// Read-only, and nothing to open: what its session went on to do arrives as
-  /// the events any work arrives as, under this one.
+  /// Read-only: what its session went on to do arrives as the events any work
+  /// arrives as, under this one. Opening it is not answering it — the card is a
+  /// way into the whole instruction and nothing more.
   it("asks the human for nothing", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -4470,5 +4482,188 @@ describe("the manual task composer", () => {
       }
       expect(said, `${outcome} should say something`).not.toBe("");
     }
+  });
+});
+
+/// The three documents on a timeline: the frozen brief, the handoff the grilling
+/// wrote, and the instruction a manual task was set going with.
+///
+/// Each of them is as long as whoever wrote it made it, so the card shows the
+/// first five lines under a fade and the whole of it is a press away. Where the
+/// fifth line falls is a fact about a laid-out box and jsdom has no layout, so
+/// the clamp itself is asserted off the stylesheet — the way a drawn diagram's
+/// rules are — and what is asked here is that each document is put inside it and
+/// that pressing the card opens the whole.
+describe("the documents on a timeline", () => {
+  /// The details pane, and what it has drawn.
+  const details = () => screen.getByLabelText("Details");
+
+  it("puts the frozen brief in a clamp, and opens the whole of it", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const brief = await drawn(container, ".timeline-event > .brief");
+
+    expect(brief.querySelector(".clamp > .brief-body")).toBeTruthy();
+
+    fireEvent.click(brief);
+
+    const opened = await drawn(details(), ".document");
+
+    expect(details().querySelector("h1")!.textContent).toBe("Brief");
+    // The whole of it, and not inside a clamp: the pane is where a document
+    // that would not fit on a card is read.
+    expect(opened.innerHTML).toBe(briefOf(GRILLING).html);
+    expect(details().querySelector(".clamp")).toBeNull();
+  });
+
+  it("puts the handoff in a clamp, and opens the whole of it", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const handoff = await drawn(container, ".timeline-event > .handoff");
+
+    expect(handoff.querySelector(".clamp > .handoff-body")).toBeTruthy();
+
+    fireEvent.click(handoff);
+
+    const opened = await drawn(details(), ".document");
+
+    expect(details().querySelector("h1")!.textContent).toBe("Handoff");
+    expect(opened.innerHTML).toBe(HANDOFF.html);
+    expect(details().querySelector(".clamp")).toBeNull();
+  });
+
+  it("puts a manual task's instruction in a clamp, and opens the whole of it", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".clamp > .manual-task-body")).toBeTruthy();
+
+    fireEvent.click(asked);
+
+    const opened = await drawn(details(), ".document");
+
+    expect(details().querySelector("h1")!.textContent).toBe("Manual task");
+    expect(opened.innerHTML).toBe(ASKED_BY_HAND.html);
+    expect(details().querySelector(".clamp")).toBeNull();
+  });
+
+  /// The same affordance the events that are buttons have, said on an article
+  /// because rendered markdown cannot live inside a button: the role, the
+  /// keyboard, and the selection drawn on the card that is open.
+  it("presses like a button, and says which card is open", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    const handoff = await drawn(container, ".timeline-event > .handoff");
+
+    expect(handoff.getAttribute("role")).toBe("button");
+    expect(handoff.getAttribute("tabindex")).toBe("0");
+    expect(handoff.getAttribute("aria-pressed")).toBe("false");
+    expect(handoff.classList.contains("openable")).toBe(true);
+
+    fireEvent.keyDown(handoff, { key: "Enter" });
+
+    await drawn(details(), ".document");
+
+    await waitFor(() =>
+      expect(handoff.classList.contains("selected")).toBe(true),
+    );
+    expect(handoff.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /// A short document opens too. One affordance whether or not the fade is
+  /// drawn, because a card the human has to judge the length of before pressing
+  /// is a card they will not press.
+  it("opens a document too short to be cut off", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    // One paragraph, which is nowhere near the clamp.
+    expect(ASKED_BY_HAND.html.split("\n").length).toBeLessThan(5);
+    expect(asked.getAttribute("role")).toBe("button");
+
+    fireEvent.click(asked);
+
+    await drawn(details(), ".document");
+  });
+
+  /// The brief while it is still a draft is a field with the setup under it, and
+  /// every press on that card belongs to one of those.
+  it("leaves the drafting brief a field, unclamped and unpressable", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const brief = await drawn(container, ".timeline-event > .brief");
+    await drawn(container, ".brief .grow textarea");
+
+    expect(brief.querySelector(".clamp")).toBeNull();
+    expect(brief.getAttribute("role")).toBeNull();
+    expect(brief.getAttribute("tabindex")).toBeNull();
+    expect(brief.classList.contains("openable")).toBe(false);
+
+    fireEvent.click(brief);
+
+    expect(details().querySelector(".document")).toBeNull();
+  });
+
+  /// A notice is a sentence rather than a document: one line already, with
+  /// nothing to cut off and nothing to open.
+  it("leaves a notice line whole", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const notice = await drawn(container, ".timeline-event > .notice");
+
+    expect(notice.querySelector(".clamp")).toBeNull();
+    expect(notice.getAttribute("role")).toBeNull();
+  });
+});
+
+/// The clamp itself, which is the stylesheet's: how tall a card's document is
+/// allowed to be, and where the fade over the cut comes from.
+describe("a clamped document", () => {
+  /// The declarations of the block `selector` opens — the same reading the
+  /// diagram rules are asserted by, and for the same reason: jsdom has no
+  /// layout, so a rule about one is read rather than measured.
+  function block(selector: string): string {
+    const opened = stylesheet.indexOf(`${selector} {`);
+    expect(opened, `the stylesheet should have a \`${selector}\` rule`).not.toBe(-1);
+
+    return stylesheet.slice(opened, stylesheet.indexOf("}", opened));
+  }
+
+  /// The page is set at a line height of 1.5, which is what turns a count of
+  /// lines into a height. The two halves are written down in different languages
+  /// and this is where they are held to each other.
+  const LINE_HEIGHT = 1.5;
+
+  it("shows five lines of it and hides the rest", () => {
+    const clamp = block(".clamp");
+
+    expect(CLAMPED_LINES).toBe(5);
+    expect(clamp).toContain(`max-height: ${CLAMPED_LINES * LINE_HEIGHT}em`);
+    expect(clamp).toContain("overflow: hidden");
+
+    // And that line height is the body's, rather than a number this test made
+    // up: a page set looser or tighter would clamp at a different height.
+    expect(stylesheet).toContain(`font: 16px/${LINE_HEIGHT} system-ui`);
+  });
+
+  it("fades the cut into the card, and only where there is a cut", () => {
+    const cut = block(".clamp.cut::after");
+
+    expect(cut).toContain("linear-gradient(to bottom, transparent, var(--card))");
+    // The fade must not swallow the press: the whole card opens the pane.
+    expect(cut).toContain("pointer-events: none");
+
+    // On `.cut` and nowhere else, which is what makes a short document show
+    // whole with no fade over its last line.
+    expect(stylesheet).not.toContain(".clamp::after");
   });
 });

@@ -12,11 +12,14 @@
 //! work is against rather than a moment in it.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
-//! details pane, which is why this takes a way of selecting one. The Brief has
-//! no full self beyond what is already drawn, so it is the one Event nothing
-//! opens — and it is the one that is written here as well as read: while the
-//! Conversation is drafting it is a field that saves itself, and it carries a
-//! Conversation's setup under it for as long as there is a draft to set up.
+//! details pane, which is why this takes a way of selecting one. Three of them
+//! are documents — the frozen Brief, the handoff and a Manual Task's
+//! instruction — and a document's summary is its own opening: the card shows
+//! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
+//! Brief is also the one Event that is written here as well as read: while the
+//! Conversation is drafting it is a field that saves itself rather than a card
+//! to open, and it carries a Conversation's setup under it for as long as there
+//! is a draft to set up.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
@@ -39,6 +42,7 @@ import {
   Switch,
   createSignal,
   onCleanup,
+  onMount,
   type JSX,
 } from "solid-js";
 
@@ -162,6 +166,96 @@ const MOVED: Record<Lifecycle, string> = {
   Aborted: "Aborted",
 };
 
+/// How many lines of a document a card shows before it is cut off.
+///
+/// Five: enough for the opening of a handoff or an instruction to say what it is
+/// about, and not enough for either to push the record off the screen. Where the
+/// fifth line ends is a fact about the laid-out box rather than about the
+/// markdown — how wide the pane is decides it — so the clamp is a height in the
+/// stylesheet and this is what that height is written from.
+export const CLAMPED_LINES = 5;
+
+/// A document's markdown on a card, cut off at [`CLAMPED_LINES`].
+///
+/// The fade over the last line is drawn only where the document goes on under
+/// it: it says there is more, and a card that already shows the whole thing
+/// would be saying something untrue. Whether it overflows is another fact about
+/// the laid-out box, so it is measured rather than counted — the observer
+/// watches the markdown inside the clamp, whose height is the document's own, so
+/// a rendering that changed and a pane that was resized both come back through
+/// it.
+function Clamped(props: { class: string; html: string }): JSX.Element {
+  let clamp: HTMLDivElement | undefined;
+  let body: HTMLDivElement | undefined;
+
+  const [cut, setCut] = createSignal(false);
+
+  onMount(() => {
+    const measure = () => {
+      if (clamp) {
+        // A pixel of slack: a line height that is not a whole number of pixels
+        // rounds either way, and a card faded over the last pixel of a document
+        // that fits would read as one with something after it.
+        setCut(clamp.scrollHeight - clamp.clientHeight > 1);
+      }
+    };
+
+    const watching = new ResizeObserver(measure);
+
+    if (body) {
+      watching.observe(body);
+    }
+
+    onCleanup(() => watching.disconnect());
+  });
+
+  return (
+    <div class="clamp" classList={{ cut: cut() }} ref={clamp}>
+      <div class={`${props.class} markdown`} innerHTML={props.html} ref={body} />
+    </div>
+  );
+}
+
+/// A card whose whole surface opens the details pane.
+///
+/// Every other openable Event is a `button`, and these three cannot be: what
+/// they hold is rendered markdown, and a link inside a button is not something a
+/// browser will have. So the affordance goes on the article instead — the press,
+/// the keyboard and the role that says what it is — and it reads as the same
+/// card either way.
+///
+/// `open` is nothing where the card is not openable, which is the Brief for as
+/// long as it is a draft: a field is not a thing to press, and neither is the
+/// setup standing under it.
+function Openable(props: {
+  kind: string;
+  selected: boolean;
+  open: (() => void) | null;
+  children: JSX.Element;
+}): JSX.Element {
+  const press = () => props.open?.();
+
+  return (
+    <article
+      class={props.kind}
+      classList={{ openable: props.open !== null, selected: props.selected }}
+      role={props.open === null ? undefined : "button"}
+      tabindex={props.open === null ? undefined : 0}
+      aria-pressed={props.open === null ? undefined : props.selected}
+      onClick={press}
+      onKeyDown={(ev) => {
+        // What a button would do for nothing: Enter and Space press it.
+        if (props.open !== null && (ev.key === "Enter" || ev.key === " ")) {
+          ev.preventDefault();
+          press();
+        }
+      }}
+    >
+      {props.children}
+    </article>
+  );
+}
+
 export function Timeline(props: {
   conversation: ConversationView;
   back: () => void;
@@ -235,20 +329,46 @@ export function Timeline(props: {
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
-                    <Brief conversation={props.conversation} brief={brief()} />
+                    <Brief
+                      conversation={props.conversation}
+                      brief={brief()}
+                      selected={props.selected === brief().id}
+                      open={() => {
+                        props.select(brief().id);
+                        props.details();
+                      }}
+                    />
                   )}
                 </Match>
                 <Match when={"Moved" in event && event.Moved}>
                   {(moved) => <Moved moved={moved()} />}
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
-                  {(handoff) => <Handoff handoff={handoff()} />}
+                  {(handoff) => (
+                    <Handoff
+                      handoff={handoff()}
+                      selected={props.selected === handoff().id}
+                      open={() => {
+                        props.select(handoff().id);
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
                   {(notice) => <Notice notice={notice()} />}
                 </Match>
                 <Match when={"ManualTask" in event && event.ManualTask}>
-                  {(manual) => <ManualTask manual={manual()} />}
+                  {(manual) => (
+                    <ManualTask
+                      manual={manual()}
+                      selected={props.selected === manual().id}
+                      open={() => {
+                        props.select(manual().id);
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -676,14 +796,22 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
 /// Read-only, unlike the Brief beside it. It is the agent's account of a
 /// conversation that is over, and a document the human could edit afterwards
 /// would be a record of something that never happened.
-function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
+///
+/// Clamped, and opened by pressing it: a settled handoff runs to a page or two,
+/// and a timeline that had to be scrolled past one to reach what happened next
+/// is a record nobody reads.
+function Handoff(props: {
+  handoff: HandoffEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   return (
-    <article class="handoff">
+    <Openable kind="handoff" selected={props.selected} open={props.open}>
       <div class="event-head">
         <h2>Handoff</h2>
       </div>
-      <div class="markdown" innerHTML={props.handoff.html} />
-    </article>
+      <Clamped class="handoff-body" html={props.handoff.html} />
+    </Openable>
   );
 }
 
@@ -710,14 +838,21 @@ function Notice(props: { notice: NoticeEvent }): JSX.Element {
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it
 /// committed — under this one and in the order it happened.
-function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+///
+/// Clamped and openable, as the handoff is: an instruction is as long as whoever
+/// typed it made it, and the events it set going belong directly under it.
+function ManualTask(props: {
+  manual: ManualTaskEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   return (
-    <article class="manual-task">
+    <Openable kind="manual-task" selected={props.selected} open={props.open}>
       <div class="event-head">
         <h2>Manual task</h2>
       </div>
-      <div class="markdown" innerHTML={props.manual.html} />
-    </article>
+      <Clamped class="manual-task-body" html={props.manual.html} />
+    </Openable>
   );
 }
 
@@ -1059,9 +1194,16 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 /// and kicking it off are one act, and this is where it is kicked off. Once
 /// grilling starts the card is the Brief alone: everything under it froze at
 /// that moment, so there is nothing there to draw.
+///
+/// Which is also when it becomes a card to press: frozen, it is a document like
+/// the handoff, clamped to [`CLAMPED_LINES`] with the whole of it in the details
+/// pane. While it is a draft it is not openable at all — the card is a field
+/// with a setup under it, and every press on it belongs to one of those.
 function Brief(props: {
   conversation: ConversationView;
   brief: BriefEvent;
+  selected: boolean;
+  open: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
 
@@ -1072,6 +1214,17 @@ function Brief(props: {
   /// rather than from anyone at this keyboard.
   const writing = () =>
     props.conversation.state === "Draft" && props.conversation.adopting === null;
+
+  /// Whether the Brief has frozen, which is the one thing that decides what kind
+  /// of card this is.
+  ///
+  /// Frozen, it is a document like the handoff: clamped, and pressed to read the
+  /// whole of it. Still a draft, it is a card with things on it to press — the
+  /// field, or the setup that stands under a Brief arriving with an adoption —
+  /// so it neither opens nor clamps. The two go together deliberately: a card
+  /// that cut a document off without offering the rest would be one that had
+  /// hidden it.
+  const frozen = () => props.conversation.state !== "Draft";
 
   // What has been typed, or nothing if nothing has been. The field follows the
   // Event until the first keystroke and follows itself after it, so a read of
@@ -1151,7 +1304,11 @@ function Brief(props: {
   };
 
   return (
-    <article class="brief">
+    <Openable
+      kind="brief"
+      selected={props.selected}
+      open={frozen() ? props.open : null}
+    >
       <div class="event-head">
         <h2>Brief</h2>
         {/* Where the Edit button used to be, saying what became of what was
@@ -1181,7 +1338,14 @@ function Brief(props: {
               </p>
             }
           >
-            <div class="brief-body markdown" innerHTML={props.brief.html} />
+            <Show
+              when={frozen()}
+              fallback={
+                <div class="brief-body markdown" innerHTML={props.brief.html} />
+              }
+            >
+              <Clamped class="brief-body" html={props.brief.html} />
+            </Show>
           </Show>
         }
       >
@@ -1218,6 +1382,6 @@ function Brief(props: {
       <Show when={props.conversation.state === "Draft"}>
         <Setup conversation={props.conversation} />
       </Show>
-    </article>
+    </Openable>
   );
 }
