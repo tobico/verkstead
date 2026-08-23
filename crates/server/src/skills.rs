@@ -166,6 +166,36 @@ pub(crate) fn grilling(brief: &str) -> String {
     )
 }
 
+/// And what a grilling relaunched on a stalled Conversation is started on: the
+/// same Brief, and under it whatever the human has already settled.
+///
+/// A grilling that died takes its interview with it — see [`crate::grillings`] —
+/// so the relaunch is a grilling from the beginning, which is what the Brief
+/// alone gives it. What the digest adds is the one part of an interview that
+/// outlives the session having it: the Questions that were asked and the Answers
+/// that came back.
+///
+/// Under the Brief, where the retry note goes and for its reason: the Brief says
+/// what the work is, and this says what has already been decided about it — the
+/// newer and the less general of the two, so it goes second. The note the human
+/// wrote goes after both, being newer and less general still.
+///
+/// A Conversation with nothing answered yet is the Brief and nothing else. A
+/// heading over an empty digest would tell the session that something had been
+/// said.
+pub(crate) fn grilling_again(brief: &str, settled: &str) -> String {
+    let settled = settled.trim();
+
+    if settled.is_empty() {
+        return grilling(brief);
+    }
+
+    format!(
+        "{}\n\n# What has already been asked, and what I said\n\n{settled}\n",
+        grilling(brief).trim_end(),
+    )
+}
+
 /// What an inline implementation session is started on: the two documents it is
 /// building from, under the line that sends the agent into the implementation
 /// skill.
@@ -1269,6 +1299,48 @@ mod tests {
             !prompt.contains(IMPLEMENTING) && !prompt.contains(NEXT_TASK),
             "and nothing sends this session to build the work or work a task instead: \
              {prompt:?}"
+        );
+    }
+
+    /// A grilling started again is the same grilling — the same skill and the
+    /// same Brief — with the log of what has already been settled under it, so
+    /// that it does not open by asking what the human answered yesterday.
+    #[test]
+    fn a_relaunched_grilling_is_told_what_has_already_been_settled() {
+        let prompt = grilling_again(
+            "# Rate limiting\n\nThe API has none.\n",
+            "## How it counts\n\n**Q1** Per key or per address?\n\nPer key\n",
+        );
+
+        assert!(
+            prompt.contains(GRILLING),
+            "it is a grilling, started the way every grilling is: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none."),
+            "on the Brief it was always about: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("# What has already been asked, and what I said"),
+            "under a heading that says what the digest is: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("**Q1** Per key or per address?\n\nPer key\n"),
+            "and the digest goes last, being the least general thing said: {prompt:?}"
+        );
+    }
+
+    /// And a grilling that died before its first Set came back is the Brief
+    /// alone. A heading over nothing would tell the session that something had
+    /// been said, which is exactly the thing this is for.
+    #[test]
+    fn a_relaunched_grilling_with_nothing_answered_is_started_on_the_brief_alone() {
+        let brief = "# Rate limiting\n\nThe API has none.\n";
+
+        assert_eq!(
+            grilling_again(brief, "   \n"),
+            grilling(brief),
+            "nothing is added to the prompt at all",
         );
     }
 

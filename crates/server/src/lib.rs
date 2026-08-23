@@ -26,6 +26,8 @@ mod drivers;
 /// product's business rather than an endpoint's, and standing a router up is
 /// choosing which `gh` it runs.
 pub mod github;
+/// Grilling a Conversation again, where the session that was grilling it died.
+mod grillings;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///

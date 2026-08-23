@@ -221,11 +221,13 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String,
             crate::wrapping::watching(&state, conversation_id);
             drop(driving);
         }
+        // A fresh grilling on the Brief, which is the only thing a retried
+        // grilling can be: the dead session's interview went with the process it
+        // ran in. What it is given beside the Brief is the log of what has
+        // already been settled, so that it does not open by asking again — see
+        // [`crate::grillings::again`].
         Lifecycle::Grilling => {
-            tracing::info!(
-                conversation_id,
-                "a stalled grilling was retried, and relaunching one is not written yet"
-            );
+            crate::grillings::again(state, conversation_id, note, driving).await;
         }
         // None of these is a state anything was supposed to be driving, so none
         // of them is one a stall was raised about — this is a Conversation that

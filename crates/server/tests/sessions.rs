@@ -383,6 +383,34 @@ questions:
         text: Split the migration out
 "#;
 
+/// A round of grilling that came back: what the session asked before it died,
+/// and what a relaunched one has to be told rather than ask again.
+const ASKED_ALREADY: &str = r#"
+title: How the limiter counts
+questions:
+  - label: Q1
+    text: Per key or per address?
+    options:
+      - n: 1
+        text: Per key
+      - n: 2
+        text: Per address
+"#;
+
+/// And one that did not: the Set the session was still waiting on when it went,
+/// which nothing is reading any more.
+const LEFT_HANGING: &str = r#"
+title: What happens when it trips
+questions:
+  - label: Q2
+    text: How long should a client be locked out?
+    options:
+      - n: 1
+        text: A minute
+      - n: 2
+        text: Until the window rolls over
+"#;
+
 /// How fast these run the backlog: fast enough that a test spends its time
 /// launching sessions rather than sleeping between them.
 ///
@@ -6202,6 +6230,110 @@ async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
         1,
         "and the stall was the only thing anybody was asked about: {:?}",
         interruptions(&fixture.view().await),
+    );
+}
+
+/// And on a grilling it means a fresh grilling, because there is nothing else
+/// it could mean: an interview lives in the session having it, and that session
+/// is gone.
+///
+/// What survives it is what the human already answered, which is on the
+/// Timeline — so the relaunched session is primed with the Brief it always had
+/// and a digest of every Set that came back, and does not open by asking again
+/// what was settled yesterday.
+///
+/// And the Set the dead session left open is archived on the way past. Nothing
+/// is waiting on that Answer any more, so leaving it open would be the human
+/// answering into nothing.
+#[tokio::test]
+async fn retrying_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_settled() {
+    let fixture = grilling_swept(r#"printf 'prompt was: %s\n' "$2""#).await;
+
+    fixture.quiet().await;
+
+    // What the dead session got through before it went: one Set answered, and
+    // one still hanging with nobody left to read the Answer.
+    let answered = fixture.ask(ASKED_ALREADY).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                answered,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "and burst on top of it" }
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let orphan = fixture.ask(LEFT_HANGING).await;
+
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(
+        stalled.what, "grilling the work",
+        "the Conversation says it is being grilled and nothing is: {stalled:?}",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture
+            .settle(stalled.id, "Retry", "start from the storage question")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/grilling/SKILL.md"),
+        "a grilling started again is a grilling: {printed:?}",
+    );
+    assert!(
+        printed.contains("The API has none."),
+        "on the Brief it was always about: {printed:?}",
+    );
+    assert!(
+        printed.contains("Per key — and burst on top of it"),
+        "and told what the human already settled, so it does not ask again: {printed:?}",
+    );
+    assert!(
+        !printed.contains("How long should a client be locked out"),
+        "the Set nobody answered said nothing, so nothing of it is quoted: {printed:?}",
+    );
+    assert!(
+        printed.contains("start from the storage question"),
+        "with what they wrote beside the Retry last of all: {printed:?}",
+    );
+
+    let hanging = sets(&fixture.view().await)
+        .into_iter()
+        .find(|asked| asked.set_id == orphan)
+        .expect("the Set the dead session left open is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(hanging, verkstead_render::Standing::ArchivedUnanswered(_)),
+        "and nothing is left for the human to answer into: {hanging:?}",
     );
 }
 

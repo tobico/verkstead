@@ -20,4 +20,4 @@ driver the state calls for.
 - [x] 04: The driver registry — [details](04-driver-registry.md)
 - [x] 05: The stall sweep — [details](05-stall-sweep.md)
 - [x] 06: Retrying a stall for the runner, an inline session or a wrap-up — [details](06-stall-retry-drivers.md)
-- [ ] 07: Retrying a stall for a grilling — [details](07-stall-retry-grilling.md)
+- [x] 07: Retrying a stall for a grilling — [details](07-stall-retry-grilling.md)
