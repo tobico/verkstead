@@ -21,8 +21,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, DirectionChosen,
-    GrillingStarted, ProfileEntry, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, GrillingStarted,
+    ProfileEntry, Started, Worktree,
 };
 use verkstead_schema::Direction;
 
@@ -171,22 +171,16 @@ pub(crate) async fn settle_a_proposal(
         tracing::error!(error = ?error, conversation_id, "the handoff could not be put on the Timeline");
     }
 
-    // And the pick, through the one path a direction is ever acted on. Logged
-    // rather than raised for the reason the two above are: the Response is
-    // stored and the grilling is over, so what a start that did not happen
-    // leaves is a Conversation to look at rather than an answer to refuse.
-    match choose_direction(state, conversation_id, picked).await {
-        Ok(DirectionChosen::Chosen) => {}
-        Ok(refused) => tracing::error!(
-            conversation_id,
-            ?refused,
-            "the direction picked on the closing Set was not acted on"
-        ),
-        Err(error) => tracing::error!(
+    // And the work the pick names. Logged rather than raised for the reason the
+    // two above are: the Response is stored and the Conversation has moved, so
+    // what a start that did not happen leaves is a Conversation to look at
+    // rather than an answer to refuse.
+    if let Err(error) = build(state, conversation_id, picked).await {
+        tracing::error!(
             error = ?error,
             conversation_id,
-            "acting on the direction picked on the closing Set failed"
-        ),
+            "the direction picked on the closing Set was not built"
+        );
     }
 }
 
@@ -219,65 +213,33 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Record how the human chose to have the work built, and set it building.
-///
-/// The choice is recorded first and on its own, because it is a different thing
-/// from the work starting: the Timeline gets the choice as an Event and then the
-/// move that follows from it, and a Conversation whose direction is settled but
-/// whose session would not start still says which way it was headed.
-///
-/// All three start something. Inline starts a session that builds the work; a
-/// task list starts one that breaks it into `.tasks/` first, and the sessions
-/// that work through that backlog follow from what it commits; a staged roadmap
-/// starts one that writes `docs/roadmaps/` and carries the branch to a pull
-/// request, and the stages it plans become Conversations of their own.
-///
-/// Reached from the pick on an accepted proposal — see [`settle_a_proposal`] —
-/// and from the chooser press, which are the same move made a moment apart.
-///
-/// Choosing on a Conversation that is not in Direction is refused by the store,
-/// which is what makes *implement inline* impossible from anywhere else: the
-/// choice and the start are one answer, so neither half of it happens without
-/// the other.
-pub(crate) async fn choose_direction(
-    state: &AppState,
-    id: i64,
-    direction: Direction,
-) -> Result<DirectionChosen> {
-    match store::choose_direction(&state.pool, id, direction).await? {
-        store::Directed::NoSuchConversation => return Ok(DirectionChosen::NoSuchConversation),
-        store::Directed::NotChoosing => return Ok(DirectionChosen::NotChoosing),
-        store::Directed::Chosen => {}
-    }
-
-    build(state, id, direction).await?;
-
-    Ok(DirectionChosen::Chosen)
-}
-
-/// Set the work being built: the Conversation moves to Implementing, and a fresh
-/// session under its implementation Profile starts in its worktree, inside
-/// whichever skill the chosen `direction` primes it for.
+/// Set the work being built: a fresh session under the Conversation's
+/// implementation Profile starts in its worktree, inside whichever skill the
+/// picked `direction` primes it for.
 ///
 /// A fresh session rather than the grilling one carrying on, because the two run
 /// under Profiles the Conversation fixed separately and a session cannot change
 /// the account it is running as. What the grilling knew reaches it as the
 /// handoff — see [`crate::skills::implementing`].
 ///
-/// Implementing either way. Writing the backlog is the work starting rather than
-/// a step before it: an agent is loose in the worktree and about to commit to the
-/// branch, which is the thing the state is there to say.
+/// All three build something. Inline starts a session that builds the work; a
+/// task list starts one that breaks it into `.tasks/` first, and the sessions
+/// that work through that backlog follow from what it commits; a staged roadmap
+/// starts one that writes `docs/roadmaps/` and carries the branch to a pull
+/// request, and the stages it plans become Conversations of their own. Writing
+/// the backlog is the work starting rather than a step before it: an agent is
+/// loose in the worktree and about to commit to the branch, which is the thing
+/// the state is there to say.
 ///
-/// The move is recorded before the session is started, exactly as starting a
-/// grilling records the worktree before launching one, and it is read the same
-/// way: a Conversation that is implementing with nothing implementing it is a
-/// thing to look at and start again, where one that had launched an agent nothing
+/// The move to Implementing is already recorded by the time this runs — the pick
+/// and the move are one transaction in the store — exactly as starting a grilling
+/// records the worktree before launching one, and it is read the same way: a
+/// Conversation that is implementing with nothing implementing it is a thing to
+/// look at and start again, where one that had launched an agent nothing
 /// recorded would be an agent nobody could see or stop. So a session that will
-/// not start is logged rather than raised — the choice stands, and the chooser
-/// says where it was chosen that nothing started off it. Not an Interruption:
-/// those are raised about a session that ran and went wrong, and this is one
-/// that never ran, with nothing to gather as evidence and nothing the human has
-/// to decide between.
+/// not start is logged rather than raised. Not an Interruption: those are raised
+/// about a session that ran and went wrong, and this is one that never ran, with
+/// nothing to gather as evidence and nothing the human has to decide between.
 ///
 /// A task list is where this stops being one session's business. The session
 /// just started writes the backlog and then idles, as an interactive session
@@ -286,26 +248,6 @@ pub(crate) async fn choose_direction(
 /// go and find one: seeing that session out is the first step of the run.
 async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     let pool = &state.pool;
-
-    match store::start_implementing(pool, id).await? {
-        store::Implementing::Started => {}
-        // Something moved the Conversation between the choice and this — a
-        // second press from another device, or an abort mid-decision.
-        store::Implementing::NotChoosing => {
-            tracing::info!(
-                conversation_id = id,
-                "the Conversation left Direction before the implementation could start"
-            );
-            return Ok(());
-        }
-        store::Implementing::NoSuchConversation => {
-            tracing::error!(
-                conversation_id = id,
-                "there is no Conversation to implement"
-            );
-            return Ok(());
-        }
-    }
 
     // Read back rather than assembled from what was just recorded, for the reason
     // starting a grilling reads it back: where an agent is about to be let loose
@@ -394,8 +336,8 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
             }
         }
         // A session that would not start is logged above. There is nothing to
-        // follow, and the chooser says so where it was chosen — see the viewer's
-        // `chosen-note`.
+        // follow, and what the human sees is a Conversation that says it is
+        // being built with nothing building it.
         (_, None) => {}
     }
 

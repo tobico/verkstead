@@ -1,21 +1,21 @@
 //! How a grilling ends and how the work it settled gets built: the wrap-up
-//! proposal that moves a Conversation out of Grilling, and the direction the
-//! human chooses once it is there.
+//! proposal, and the direction the human picks on it.
 //!
 //! The move is driven by a Response arriving rather than by anything anyone
 //! pressed, which is the whole shape of the thing: a grilling ends by the
-//! agent's own closing move, and answering that Set is what accepts it. So what
-//! these ask is what a Conversation's state and its Timeline say afterwards.
+//! agent's own closing move, and picking a direction on that Set is what accepts
+//! it. There is no rung between the two — a pick takes a Conversation from
+//! Grilling straight to Implementing — so what these ask is what a
+//! Conversation's state and its Timeline say afterwards.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Directed, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
-    choose_direction, load_conversation, move_to_direction, open_database, record_handoff,
-    register_repo, save_brief, start_conversation, start_grilling, start_implementing,
-    submit_response, timeline,
+    Directing, Event, Lifecycle, Proposed, Settlements, Submission, ask, load_conversation,
+    open_database, pick_direction, record_handoff, register_repo, save_brief, start_conversation,
+    start_grilling, submit_response, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -175,17 +175,13 @@ async fn handoffs(pool: &SqlitePool, id: i64) -> Vec<String> {
         .collect()
 }
 
-/// And the directions it says were chosen, in order.
-async fn directions(pool: &SqlitePool, id: i64) -> Vec<Direction> {
-    timeline(pool, id)
+/// The latest pick on a Conversation — what it says it is being built as.
+async fn direction(pool: &SqlitePool, id: i64) -> Option<Direction> {
+    load_conversation(pool, id)
         .await
         .unwrap()
-        .iter()
-        .filter_map(|event| match event.event {
-            Event::Directed(direction) => Some(direction),
-            _ => None,
-        })
-        .collect()
+        .expect("the Conversation is there")
+        .direction
 }
 
 #[tokio::test]
@@ -205,13 +201,18 @@ async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
 
     assert_eq!(
         state(&pool, id).await,
-        Lifecycle::Direction,
-        "answering the closing proposal is what ends a grilling",
+        Lifecycle::Implementing,
+        "picking a direction on the closing proposal is what ends a grilling",
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Direction],
-        "and the move is on the Timeline, where everything that happens lands",
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "and the one move is on the Timeline, with no rung in between",
+    );
+    assert_eq!(
+        direction(&pool, id).await,
+        Some(Direction::TaskList),
+        "and what was picked is the Conversation's latest pick",
     );
 }
 
@@ -349,13 +350,13 @@ async fn accepting_with_something_to_add_is_still_accepting() {
             directing: Directing::Moved,
         }),
     );
-    assert_eq!(state(&pool, id).await, Lifecycle::Direction);
+    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
 }
 
 /// A grilling sent back can propose again, and that one can be accepted.
 ///
 /// The whole way back, end to end: the point of a refusal is that the work can
-/// still reach Direction afterwards, and by the same door.
+/// still be built afterwards, and by the same door.
 #[tokio::test]
 async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
     let (_dir, pool) = fresh_pool().await;
@@ -385,10 +386,10 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
         }),
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Direction);
+    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Direction],
+        [Lifecycle::Grilling, Lifecycle::Implementing],
         "the refusal moved nothing, so the Timeline says it got here once",
     );
 }
@@ -419,8 +420,13 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Direction],
+        [Lifecycle::Grilling, Lifecycle::Implementing],
         "so the Timeline does not say it moved twice",
+    );
+    assert_eq!(
+        direction(&pool, id).await,
+        Some(Direction::TaskList),
+        "and the pick that moved it is the one that stands",
     );
 }
 
@@ -437,10 +443,11 @@ async fn a_conversation_that_is_not_grilling_has_no_grilling_to_end() {
         .unwrap();
 
     assert_eq!(
-        move_to_direction(&pool, id).await.unwrap(),
+        pick_direction(&pool, id, Direction::Inline).await.unwrap(),
         Directing::NotGrilling,
     );
     assert_eq!(state(&pool, id).await, Lifecycle::Draft);
+    assert_eq!(direction(&pool, id).await, None);
 }
 
 #[tokio::test]
@@ -448,150 +455,38 @@ async fn there_is_no_conversation_to_move() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        move_to_direction(&pool, 404).await.unwrap(),
+        pick_direction(&pool, 404, Direction::Inline).await.unwrap(),
         Directing::NoSuchConversation,
     );
 }
 
+/// A second pick on a Conversation already being built changes nothing.
+///
+/// Not a rule about picking twice so much as the one rule stated once: only a
+/// grilling can be ended, and this one is over. What the human picked stands,
+/// and the work carries on being built as it.
 #[tokio::test]
-async fn choosing_a_direction_records_it_and_lands_it_on_the_timeline() {
+async fn a_conversation_that_is_already_being_built_takes_no_second_pick() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
-    move_to_direction(&pool, id).await.unwrap();
 
-    assert_eq!(
-        choose_direction(&pool, id, Direction::TaskList)
-            .await
-            .unwrap(),
-        Directed::Chosen,
-    );
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.direction, Some(Direction::TaskList));
-    assert_eq!(
-        conversation.state,
-        Lifecycle::Direction,
-        "what was settled is how the work gets built, not that it has started",
-    );
-    assert_eq!(directions(&pool, id).await, [Direction::TaskList]);
-}
-
-#[tokio::test]
-async fn choosing_again_replaces_the_choice_and_keeps_both_on_the_record() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
-    move_to_direction(&pool, id).await.unwrap();
-
-    choose_direction(&pool, id, Direction::Inline)
-        .await
-        .unwrap();
-    choose_direction(&pool, id, Direction::TaskList)
+    pick_direction(&pool, id, Direction::TaskList)
         .await
         .unwrap();
 
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.direction,
+        pick_direction(&pool, id, Direction::Inline).await.unwrap(),
+        Directing::NotGrilling,
+    );
+    assert_eq!(
+        direction(&pool, id).await,
         Some(Direction::TaskList),
-        "the latest choice is the one in force",
-    );
-    assert_eq!(
-        directions(&pool, id).await,
-        [Direction::Inline, Direction::TaskList],
-        "and the Timeline keeps what it was changed from — nothing leaves a Timeline",
-    );
-}
-
-#[tokio::test]
-async fn a_conversation_that_is_not_choosing_has_nothing_to_choose() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
-
-    assert_eq!(
-        choose_direction(&pool, id, Direction::Inline)
-            .await
-            .unwrap(),
-        Directed::NotChoosing,
-        "a grilling that has not proposed wrapping up is not asking this yet",
-    );
-
-    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.direction, None);
-    assert_eq!(directions(&pool, id).await, []);
-}
-
-#[tokio::test]
-async fn there_is_no_conversation_to_direct() {
-    let (_dir, pool) = fresh_pool().await;
-
-    assert_eq!(
-        choose_direction(&pool, 404, Direction::Inline)
-            .await
-            .unwrap(),
-        Directed::NoSuchConversation,
-    );
-}
-
-#[tokio::test]
-async fn starting_the_implementation_moves_the_conversation_and_says_so() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
-    move_to_direction(&pool, id).await.unwrap();
-    choose_direction(&pool, id, Direction::Inline)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        start_implementing(&pool, id).await.unwrap(),
-        Implementing::Started
-    );
-
-    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&pool, id).await,
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
-        "the choice is an Event of its own and the work starting is a move",
-    );
-}
-
-/// Choosing is what starts the work, so a Conversation that is not choosing has
-/// nothing to start — including one already implementing, which is a second
-/// press.
-#[tokio::test]
-async fn there_is_nothing_to_implement_where_nothing_is_being_chosen() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
-
-    assert_eq!(
-        start_implementing(&pool, id).await.unwrap(),
-        Implementing::NotChoosing,
-    );
-    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
-
-    move_to_direction(&pool, id).await.unwrap();
-    start_implementing(&pool, id).await.unwrap();
-
-    assert_eq!(
-        start_implementing(&pool, id).await.unwrap(),
-        Implementing::NotChoosing,
+        "the pick that ended the grilling is the one in force",
     );
     assert_eq!(
         moves(&pool, id).await,
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
-        "the second press records nothing",
-    );
-
-    assert_eq!(
-        start_implementing(&pool, 404).await.unwrap(),
-        Implementing::NoSuchConversation,
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "and the second pick records nothing",
     );
 }
 
@@ -639,8 +534,7 @@ async fn a_direction_survives_a_restart() {
     let id = {
         let pool = open_database(&database).await.unwrap();
         let id = grilling(&pool).await;
-        move_to_direction(&pool, id).await.unwrap();
-        choose_direction(&pool, id, Direction::TaskList)
+        pick_direction(&pool, id, Direction::TaskList)
             .await
             .unwrap();
         pool.close().await;
@@ -650,7 +544,57 @@ async fn a_direction_survives_a_restart() {
     let pool = open_database(&database).await.unwrap();
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Direction);
+    assert_eq!(conversation.state, Lifecycle::Implementing);
     assert_eq!(conversation.direction, Some(Direction::TaskList));
-    assert_eq!(directions(&pool, id).await, [Direction::TaskList]);
+}
+
+/// A database written before the Direction state left the ladder, opened by this
+/// Verkstead.
+///
+/// The state is gone and so are the two Events about it, and a Conversation
+/// found sitting in it comes out Aborted — its grilling session is over and the
+/// chooser it was waiting on does not exist any more. Written by hand, because
+/// this code cannot write that database any more: that is the whole point of it.
+#[tokio::test]
+async fn a_conversation_caught_choosing_a_direction_comes_out_aborted() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
+
+    let id = {
+        let pool = open_database(&database).await.unwrap();
+        let id = grilling(&pool).await;
+
+        // Back to where the old ladder left it: sitting in Direction, with the
+        // move that put it there and the choice it had made on its Timeline.
+        for statement in [
+            "UPDATE conversations SET state = 'direction'",
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (1, '2026-08-20T09:00:00.000Z', 'moved', 'direction')",
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (1, '2026-08-20T09:01:00.000Z', 'directed', 'task-list')",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+
+        pool.close().await;
+        id
+    };
+
+    let pool = open_database(&database).await.unwrap();
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+
+    assert_eq!(
+        conversation.state,
+        Lifecycle::Aborted,
+        "there is no session to receive anything and no chooser left to press",
+    );
+    assert_eq!(
+        conversation.worktree, None,
+        "and an aborted Conversation has no worktree, as every other abort leaves none",
+    );
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling, Lifecycle::Aborted],
+        "the retired move is off the Timeline and the abort is on it",
+    );
 }

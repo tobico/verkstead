@@ -20,7 +20,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
 use verkstead_schema::{Direction, QuestionSet, SetCreated};
 
-/// The word the `direction` column and the Directed Event's body hold.
+/// The word the `direction` column holds.
 ///
 /// The wire spelling, so the column reads as what an agent wrote and a database
 /// opened by hand says something. Its own pair of functions rather than serde,
@@ -65,9 +65,6 @@ pub enum Lifecycle {
     /// A grilling session is running against it.
     Grilling,
 
-    /// The grilling is over and how to implement the work is being chosen.
-    Direction,
-
     /// The work is being done.
     Implementing,
 
@@ -89,7 +86,6 @@ impl Lifecycle {
         match self {
             Self::Draft => "draft",
             Self::Grilling => "grilling",
-            Self::Direction => "direction",
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::Done => "done",
@@ -104,7 +100,6 @@ impl Lifecycle {
         Ok(match word {
             "draft" => Self::Draft,
             "grilling" => Self::Grilling,
-            "direction" => Self::Direction,
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "done" => Self::Done,
@@ -156,11 +151,13 @@ pub struct Conversation {
     /// store can say; see [`abort_conversation`] for who does.
     pub worktree: Option<PathBuf>,
 
-    /// How the human chose to have the work built, once they have chosen.
+    /// The latest pick: how the human most recently said the work should be
+    /// built, on a proposal Set of this Conversation's.
     ///
-    /// `None` is a choice not yet made rather than a direction of none: a
-    /// Conversation that has not reached Direction has had nobody to choose, and
-    /// one sitting in Direction is waiting for exactly this.
+    /// `None` is nothing picked yet rather than a direction of none — a
+    /// Conversation whose grilling has not put a proposal to the human has had
+    /// nothing to pick on. A later pick replaces an earlier one, because a later
+    /// proposal supersedes the one before it.
     pub direction: Option<Direction>,
 
     /// Which roadmap this Conversation is adopting, where it is adopting one.
@@ -261,13 +258,6 @@ pub enum Event {
     /// a Timeline's worth of memory to hold the one kind that needs it.
     QuestionSet(Box<SetOnTimeline>),
 
-    /// The human chose how the work gets built, and this is what they chose.
-    ///
-    /// Not a [`Self::Moved`], though it lands beside one: the move into Direction
-    /// says the choosing has begun, and this says how it came out. What leaves
-    /// Direction is the implementation starting, which is a move of its own.
-    Directed(Direction),
-
     /// The handoff document the grilling session wrote on its way out.
     ///
     /// Markdown in the `body` column like the Brief, because that is what it is:
@@ -350,7 +340,6 @@ impl Event {
             Self::Moved(_) => "moved",
             Self::AgentOutput(_) => "agent-output",
             Self::QuestionSet(_) => QUESTION_SET,
-            Self::Directed(_) => "directed",
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
@@ -370,7 +359,6 @@ impl Event {
             // Nothing either, and for the nearer reason: a Set is a row in
             // `question_sets` already.
             Self::QuestionSet(_) => "",
-            Self::Directed(direction) => direction_stored(*direction),
             Self::Handoff(markdown) => markdown,
             // Nothing, for the Capture's reason: what a commit is, is a row
             // in `commits`.
@@ -408,7 +396,6 @@ impl Event {
             QUESTION_SET => Self::QuestionSet(Box::new(
                 set.ok_or_else(|| anyhow!("a Question Set Event has no Set beside it"))?,
             )),
-            "directed" => Self::Directed(direction_read(&body)?),
             "handoff" => Self::Handoff(body),
             "commit" => Self::Commit(
                 commit.ok_or_else(|| anyhow!("a Commit Event has no commit beside it"))?,
@@ -501,15 +488,15 @@ pub enum Staged {
     NotDrafting,
 }
 
-/// What became of a wrap-up proposal being accepted.
+/// What became of a direction picked on a wrap-up proposal.
 ///
 /// Driven by a Response arriving rather than by anything the human pressed, so
 /// [`Directing::NotGrilling`] is an ordinary outcome and not a mistake: a second
 /// proposal Set answered after the first has nothing left to move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Directing {
-    /// Moved: the Conversation is choosing a direction, and the move is on the
-    /// Timeline.
+    /// Recorded: the pick is the Conversation's latest, the work is being built,
+    /// and the move is on the Timeline.
     Moved,
 
     /// It was not grilling, so there was no grilling for this to end. Nothing
@@ -518,39 +505,6 @@ pub enum Directing {
 
     /// There is no Conversation with that id.
     NoSuchConversation,
-}
-
-/// What became of the human choosing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Directed {
-    /// Recorded, and the choice is on the Timeline.
-    Chosen,
-
-    /// There is no Conversation with that id.
-    NoSuchConversation,
-
-    /// It is not in Direction, so there is nothing here to choose. Either the
-    /// grilling has not proposed wrapping up yet, or the work is past the point
-    /// where the choice was the human's.
-    NotChoosing,
-}
-
-/// What became of starting the work being built.
-///
-/// The mirror of [`Grilling`] one state along: the same two refusals, named for
-/// the state they are refused out of. A Conversation is set implementing by its
-/// direction being chosen, so there is no way to reach this from anywhere but
-/// Direction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Implementing {
-    /// Recorded: the state and the move on the Timeline.
-    Started,
-
-    /// There is no Conversation with that id.
-    NoSuchConversation,
-
-    /// It is not in Direction, so there is no choice here to act on.
-    NotChoosing,
 }
 
 /// What became of aborting one.
@@ -705,6 +659,69 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the adoptions table")?;
 
+    collapse_the_direction_state(pool).await?;
+
+    Ok(())
+}
+
+/// Take the retired Direction state out of a database written before it left the
+/// ladder.
+///
+/// Direction was where a Conversation sat between its grilling ending and a
+/// human pressing a separate chooser. The pick rides the closing Set now, so
+/// nothing ever waits there — and a Conversation *found* waiting there is
+/// stranded: its grilling session is over, and the chooser it was waiting on is
+/// gone. Aborted is what that is, which is where this puts it, with the move on
+/// its Timeline as every abort has one.
+///
+/// The retired Events go with the state. A Timeline holding a move to `direction`
+/// or a `directed` Event is one this Verkstead cannot read at all — every state
+/// and every kind is a word it knows or an error — and both of them are about
+/// the machinery being removed rather than about the work. What says the human
+/// chose is the answered proposal Set, which stays exactly where it was.
+///
+/// No compatibility path, which is what makes this a one-way collapse: this is a
+/// single-user tool, and in-flight Conversations are finished or aborted before
+/// upgrading. Safe to run against a database that has been through it — after the
+/// first run there is nothing left to match.
+async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
+    // Before the state is rewritten, while the rows to abort can still be found
+    // by it.
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'moved', ?
+         FROM conversations WHERE state = 'direction'",
+    )
+    .bind(Lifecycle::Aborted.stored())
+    .execute(pool)
+    .await
+    .context("recording the abort of every Conversation caught choosing a direction")?;
+
+    // The worktree row goes with it, as it does at [`abort_conversation`]: an
+    // aborted Conversation has none. The directory itself is not the store's to
+    // remove, and never was.
+    sqlx::query(
+        "DELETE FROM worktrees
+         WHERE conversation_id IN (SELECT id FROM conversations WHERE state = 'direction')",
+    )
+    .execute(pool)
+    .await
+    .context("forgetting the worktrees of the Conversations caught choosing a direction")?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE state = 'direction'")
+        .bind(Lifecycle::Aborted.stored())
+        .execute(pool)
+        .await
+        .context("aborting every Conversation caught choosing a direction")?;
+
+    sqlx::query(
+        "DELETE FROM timeline_events
+         WHERE kind = 'directed' OR (kind = 'moved' AND body = 'direction')",
+    )
+    .execute(pool)
+    .await
+    .context("taking the retired Direction Events off the Timelines")?;
+
     Ok(())
 }
 
@@ -834,8 +851,10 @@ async fn started(
 /// - An **open Interruption**, which is a run stopped on a choice only they can
 ///   make. Read off the table rather than off the Timeline, so the whole list
 ///   costs one query.
-/// - The **Direction** state, which is the Conversation sitting on a proposal
-///   the human has to pick a direction from.
+///
+/// A grilling waiting on its closing proposal is the first of them and not a
+/// source of its own: the proposal rides a Question Set, and an unanswered Set
+/// is already an ask left open.
 ///
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
@@ -844,8 +863,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
         "SELECT c.id, c.branch, r.name, c.state,
                 c.state <> 'draft' AND (
-                    c.state = 'direction'
-                    OR EXISTS (
+                    EXISTS (
                         SELECT 1 FROM set_events s
                         JOIN timeline_events e ON e.id = s.event_id
                         WHERE e.conversation_id = c.id
@@ -1595,8 +1613,13 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
     Ok(Aborting::Aborted)
 }
 
-/// Record that a grilling has proposed wrapping up and the human has answered:
-/// the Conversation is out of Grilling and choosing how the work gets built.
+/// Record the direction the human picked on a wrap-up proposal: it is the
+/// Conversation's latest pick, the grilling is over, and the work is being
+/// built.
+///
+/// One move rather than two. There is no rung between the grilling ending and
+/// the work starting — the pick and the acceptance are the one answer, and a
+/// state to sit in between them would be a state nothing ever waits in.
 ///
 /// Called off the back of a Response landing rather than off anything the human
 /// pressed — see [`super::submit_response`] — which is why a Conversation that is
@@ -1604,10 +1627,16 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
 /// that put two proposals to the human has the first Answer move it, and the
 /// second finds the move already made.
 ///
-/// One transaction, so a Conversation that says Direction always has the move on
-/// its Timeline to say when it got there.
-pub async fn move_to_direction(pool: &SqlitePool, id: i64) -> Result<Directing> {
-    let mut tx = pool.begin().await.context("moving to a direction")?;
+/// The pick is recorded as the row alone. What says on the Timeline that the
+/// human chose is the answered proposal Set sitting on it, with the direction
+/// on its Response — a second Event beside it would be a second record of one
+/// decision.
+///
+/// One transaction, as every move is: a Conversation that says Implementing
+/// always has the move on its Timeline to say when it got there, and never says
+/// it is being built without saying how.
+pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) -> Result<Directing> {
+    let mut tx = pool.begin().await.context("acting on a picked direction")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -1623,53 +1652,6 @@ pub async fn move_to_direction(pool: &SqlitePool, id: i64) -> Result<Directing> 
         return Ok(Directing::NotGrilling);
     }
 
-    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Direction.stored())
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("moving Conversation {id} to choosing a direction"))?;
-
-    moved(&mut tx, id, Lifecycle::Direction).await?;
-
-    tx.commit().await.context("moving to a direction")?;
-
-    Ok(Directing::Moved)
-}
-
-/// Record how the human chose to have the work built.
-///
-/// The Conversation stays in Direction: what this settles is *how* the work gets
-/// done, and starting to do it is a move of its own that the stages wiring up
-/// each direction will make. So the Timeline gets the choice as an Event of its
-/// own rather than as a move, and the row is what everything afterwards reads.
-///
-/// Choosing again replaces the choice rather than being refused. Nothing has been
-/// built off it yet while the Conversation is still in Direction, and a human who
-/// pressed the wrong one of three buttons is owed the other two — the Timeline
-/// keeps both Events, so what was chosen and what it was changed to are both on
-/// the record.
-pub async fn choose_direction(
-    pool: &SqlitePool,
-    id: i64,
-    direction: Direction,
-) -> Result<Directed> {
-    let mut tx = pool.begin().await.context("choosing a direction")?;
-
-    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the state of Conversation {id}"))?;
-
-    let Some((state,)) = row else {
-        return Ok(Directed::NoSuchConversation);
-    };
-
-    if Lifecycle::read(&state)? != Lifecycle::Direction {
-        return Ok(Directed::NotChoosing);
-    }
-
     sqlx::query(
         "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
          ON CONFLICT (conversation_id) DO UPDATE SET direction = excluded.direction",
@@ -1678,52 +1660,7 @@ pub async fn choose_direction(
     .bind(direction_stored(direction))
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("recording the direction of Conversation {id}"))?;
-
-    let event = Event::Directed(direction);
-
-    sqlx::query(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
-    )
-    .bind(id)
-    .bind(event.kind())
-    .bind(event.body())
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("putting the direction of Conversation {id} on its Timeline"))?;
-
-    tx.commit().await.context("choosing a direction")?;
-
-    Ok(Directed::Chosen)
-}
-
-/// Record that the work is being built: the Conversation is out of Direction and
-/// implementing, and the move is on its Timeline.
-///
-/// Refused for anything but Direction, which is where choosing happens and the
-/// only place a direction can be acted on. That refusal is what makes *implement
-/// inline on a Conversation that is not choosing* impossible however the request
-/// arrived.
-///
-/// One transaction, as every move is: a Conversation that says Implementing
-/// always has the move on its Timeline to say when it got there.
-pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementing> {
-    let mut tx = pool.begin().await.context("starting the implementation")?;
-
-    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await
-        .with_context(|| format!("reading the state of Conversation {id}"))?;
-
-    let Some((state,)) = row else {
-        return Ok(Implementing::NoSuchConversation);
-    };
-
-    if Lifecycle::read(&state)? != Lifecycle::Direction {
-        return Ok(Implementing::NotChoosing);
-    }
+    .with_context(|| format!("recording the direction picked on Conversation {id}"))?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(Lifecycle::Implementing.stored())
@@ -1734,9 +1671,9 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 
     moved(&mut tx, id, Lifecycle::Implementing).await?;
 
-    tx.commit().await.context("starting the implementation")?;
+    tx.commit().await.context("acting on a picked direction")?;
 
-    Ok(Implementing::Started)
+    Ok(Directing::Moved)
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.
@@ -1808,9 +1745,8 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
 /// The direction is recorded with it, and it is a task list because that is the
 /// pipeline a stage runs: the fork it starts in writes `.tasks/`, and the runner
 /// works the backlog from there. Recorded rather than left empty, so that a
-/// Conversation implementing something always says how — but as the row alone,
-/// with no [`Event::Directed`] beside it: that Event is the human's choice
-/// landing on the Timeline, and there was no chooser here.
+/// Conversation implementing something always says how — though nobody picked
+/// it, because there was no proposal here to pick one on.
 ///
 /// One transaction, as every move is, and the branch and the worktree exist
 /// before it for the reason they do at [`start_grilling`]: the record follows the

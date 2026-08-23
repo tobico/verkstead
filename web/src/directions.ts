@@ -1,9 +1,9 @@
 //! The three ways the work can be built, as everything that names one names it.
 //!
-//! Its own module because two choosers draw the same three: the one injected
+//! Its own module because two pages draw the same three: the chooser injected
 //! onto a Set carrying a proposal, which is where the human picks, and the
-//! workbench's own beside the Timeline. A second copy of these words would be
-//! the same decision offered under two sets of names.
+//! record that same Set becomes once it is answered. A second copy of these
+//! words would be the same decision offered under two sets of names.
 
 import type { Direction } from "./api/types";
 
@@ -11,8 +11,8 @@ import type { Direction } from "./api/types";
 /// also the order to consider them in.
 export const DIRECTIONS: Direction[] = ["inline", "task-list", "roadmap"];
 
-/// What each direction is called, wherever one is named: on the chooser, and in
-/// the line the Timeline gives the choice afterwards.
+/// What each direction is called, wherever one is named: on the chooser, and on
+/// the record it becomes once the Set is answered.
 ///
 /// One record for all of them, so the thing the human picked and the thing they
 /// read back cannot come to be called different things.

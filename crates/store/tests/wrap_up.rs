@@ -12,11 +12,11 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON, WaitingOn,
-    addressed_comments, ask, choose_direction, finish_wrap_up, fix_attempts, forget_fix_attempts,
-    load_conversation, move_to_direction, open_database, record_addressed_comments,
-    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
-    settle_wrap_up, start_conversation, start_grilling, start_implementing, submit_response,
-    timeline, unsettle_wrap_up, wrap_up_settled,
+    addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation,
+    open_database, pick_direction, record_addressed_comments, record_fix_attempt,
+    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
+    start_conversation, start_grilling, submit_response, timeline, unsettle_wrap_up,
+    wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -45,11 +45,9 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
     )
     .await
     .unwrap();
-    move_to_direction(pool, id).await.unwrap();
-    choose_direction(pool, id, verkstead_schema::Direction::TaskList)
+    pick_direction(pool, id, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    start_implementing(pool, id).await.unwrap();
     record_pull_request(
         pool,
         id,

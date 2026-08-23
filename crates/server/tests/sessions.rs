@@ -1905,7 +1905,6 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
             .collect::<Vec<_>>(),
         [
             Lifecycle::Grilling,
-            Lifecycle::Direction,
             Lifecycle::Implementing,
             Lifecycle::Wrapping,
         ],
@@ -3501,9 +3500,9 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         "the proposal and the quiz, both on the Timeline they were asked from",
     );
     assert_eq!(
-        view.proposal.map(|proposal| proposal.direction),
-        Some(verkstead_schema::Direction::Inline),
-        "an ordinary Set carries no proposal, so the accepted one still stands",
+        view.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "an ordinary Set carries no proposal, so the pick that was made still stands",
     );
 
     assert_eq!(fixture.answer(quiz).await, Submitted::Accepted);

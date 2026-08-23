@@ -9,9 +9,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, PullRequest, Wrapping, abort_conversation, choose_direction,
-    load_conversation, move_to_direction, open_database, record_pull_request, register_repo,
-    save_brief, start_conversation, start_grilling, start_implementing, timeline,
+    Event, Lifecycle, PullRequest, Wrapping, abort_conversation, load_conversation, open_database,
+    pick_direction, record_pull_request, register_repo, save_brief, start_conversation,
+    start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -50,11 +50,9 @@ async fn implementing(pool: &SqlitePool) -> i64 {
     )
     .await
     .unwrap();
-    move_to_direction(pool, id).await.unwrap();
-    choose_direction(pool, id, verkstead_schema::Direction::TaskList)
+    pick_direction(pool, id, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    start_implementing(pool, id).await.unwrap();
 
     id
 }

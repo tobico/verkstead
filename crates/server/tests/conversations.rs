@@ -21,8 +21,8 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
-    ConversationView, DirectionChosen, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
-    Registered, Started, TimelineEvent,
+    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, Started,
+    TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -1152,26 +1152,6 @@ async fn answered(
     .await
 }
 
-async fn direct(app: &Router, id: i64, direction: &str) -> DirectionChosen {
-    post(
-        app,
-        &format!("/api/ui/conversations/{id}/direction"),
-        &serde_json::json!({ "direction": direction }),
-    )
-    .await
-}
-
-/// The directions a Conversation's Timeline says were chosen, in order.
-fn directions(view: &ConversationView) -> Vec<verkstead_schema::Direction> {
-    view.timeline
-        .iter()
-        .filter_map(|event| match event {
-            TimelineEvent::Directed(directed) => Some(directed.direction),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Write a handoff where a grilling session would have written one: inside the
 /// Conversation's own directory under the State Directory, which is bound into
 /// its sandbox at `/tmp/verkstead`.
@@ -1231,18 +1211,10 @@ async fn picking_a_direction_on_the_closing_set_sets_the_work_going() {
         Some(verkstead_schema::Direction::TaskList),
         "and the pick is the choice, with no second trip to the Timeline",
     );
-
-    let proposal = view.proposal.expect("the closing Set proposed a direction");
-    assert_eq!(proposal.direction, verkstead_schema::Direction::TaskList);
-    assert!(
-        proposal.rationale_html.contains("independently testable"),
-        "the chooser draws the agent's reasoning, got: {}",
-        proposal.rationale_html
-    );
-    assert!(
-        proposal.rationale_html.contains("<p>"),
-        "and it arrives as HTML, like every other piece of agent markdown: {}",
-        proposal.rationale_html
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "with no rung in between: nothing was ever waiting to be chosen",
     );
 }
 
@@ -1257,12 +1229,13 @@ async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
     assert_eq!(
-        view.proposal.expect("the proposal was accepted").direction,
-        verkstead_schema::Direction::TaskList,
-        "the recommendation stands as what was argued for, not as what was chosen",
+        view.direction,
+        Some(verkstead_schema::Direction::Inline),
+        "what the human picked is what the Conversation is being built as, \
+         whatever the agent argued for",
     );
+    assert_eq!(view.state, Lifecycle::Implementing);
 }
 
 /// The one row of the sidebar, for the tests about what a row says of itself.
@@ -1483,7 +1456,7 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     let view = opened(&app, id).await;
 
     assert_eq!(view.state, Lifecycle::Grilling);
-    assert_eq!(view.proposal, None);
+    assert_eq!(view.direction, None);
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
@@ -1510,71 +1483,44 @@ async fn a_pick_records_the_direction_and_sets_the_conversation_implementing() {
         let view = opened(&app, id).await;
 
         assert_eq!(view.direction, Some(direction), "picking {picked}");
-        assert_eq!(directions(&view), [direction], "picking {picked}");
         assert_eq!(view.state, Lifecycle::Implementing, "picking {picked}");
         assert_eq!(
             moves(&view),
-            [
-                Lifecycle::Grilling,
-                Lifecycle::Direction,
-                Lifecycle::Implementing
-            ],
-            "the work starting is a move, and it passes through Direction on the \
-             way rather than resting there — picking {picked}",
+            [Lifecycle::Grilling, Lifecycle::Implementing],
+            "the work starting is one move, with nothing in between to rest on \
+             — picking {picked}",
         );
     }
 }
 
-/// The work has started, so the chooser has nothing left to do — however a press
-/// on it arrived.
+/// There is nowhere left to press a direction: the standalone chooser and the
+/// endpoint that served it are gone with the state they belonged to.
 #[tokio::test]
-async fn the_chooser_is_refused_once_a_pick_has_started_the_work() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-    answer(&app, ask(&app, id, PROPOSING).await).await;
-
-    assert_eq!(
-        direct(&app, id, "inline").await,
-        DirectionChosen::NotChoosing
-    );
-
-    let view = opened(&app, id).await;
-    assert_eq!(
-        directions(&view),
-        [verkstead_schema::Direction::TaskList],
-        "the refused press records nothing, and the pick still stands",
-    );
-}
-
-#[tokio::test]
-async fn a_conversation_still_grilling_has_no_direction_to_choose() {
+async fn there_is_no_endpoint_left_to_choose_a_direction_on() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{id}/direction"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "direction": "inline" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(
-        direct(&app, id, "inline").await,
-        DirectionChosen::NotChoosing
+        opened(&app, id).await.direction,
+        None,
+        "and nothing was recorded by trying",
     );
-    assert_eq!(opened(&app, id).await.direction, None);
-}
-
-#[tokio::test]
-async fn a_direction_for_a_conversation_that_is_not_there() {
-    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
-
-    assert_eq!(
-        direct(&app, 404, "inline").await,
-        DirectionChosen::NoSuchConversation
-    );
-
-    // And an id that is not a number at all, which is what a typed URL holds.
-    let chosen: DirectionChosen = post(
-        &app,
-        "/api/ui/conversations/nonsense/direction",
-        &serde_json::json!({ "direction": "inline" }),
-    )
-    .await;
-    assert_eq!(chosen, DirectionChosen::NoSuchConversation);
 }
 
 #[tokio::test]
@@ -1609,11 +1555,7 @@ async fn disagreeing_with_a_proposal_leaves_the_grilling_running() {
         "only a pick ends a grilling",
     );
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
-    assert_eq!(view.direction, None, "and nothing was chosen");
-    assert_eq!(
-        view.proposal, None,
-        "and there is no accepted proposal to draw: nothing was accepted",
-    );
+    assert_eq!(view.direction, None, "and nothing was picked");
 }
 
 #[tokio::test]
@@ -1640,19 +1582,13 @@ async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing
-        ],
+        [Lifecycle::Grilling, Lifecycle::Implementing],
         "the refusal moved nothing, so the work got going once",
     );
     assert_eq!(
-        view.proposal
-            .expect("the second proposal is the one in force")
-            .direction,
-        verkstead_schema::Direction::Inline,
-        "what is drawn is the latest proposal, not the one that was refused",
+        view.direction,
+        Some(verkstead_schema::Direction::Inline),
+        "and what stands is the pick on the second proposal, not the refused one",
     );
 }
 

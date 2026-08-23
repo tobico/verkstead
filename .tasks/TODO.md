@@ -17,7 +17,7 @@ docs/adr/0008-pick-informs-artifacts-move.md.
 ## Tasks
 
 - [x] 01: Pick rides the closing Set — [details](01-pick-rides-the-closing-set.md)
-- [ ] 02: Retire the Direction state — [details](02-retire-the-direction-state.md)
+- [x] 02: Retire the Direction state — [details](02-retire-the-direction-state.md)
 - [ ] 03: Task-list tail in-context — [details](03-task-list-tail-in-context.md)
 - [ ] 04: Roadmap tail in-context — [details](04-roadmap-tail-in-context.md)
 - [ ] 05: Handoff after the pick — [details](05-handoff-after-the-pick.md)

@@ -3,7 +3,7 @@
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
   "blocked_on": null,
   "branch": "usage-limits",
-  "direction": null,
+  "direction": "inline",
   "grilling_profile": {
     "agent_type": "Claude",
     "broken": null,
@@ -24,10 +24,6 @@
     "name": "opus"
   },
   "pinned": [],
-  "proposal": {
-    "direction": "task-list",
-    "rationale_html": "<p>Five changes that barely touch each other: the detector, the pause, the notification, the resume and the window arithmetic.</p>\n<ul>\n<li><strong>Inline</strong> would be one session holding all five at once</li>\n<li><strong>A roadmap</strong> is more ceremony than two days of work needs</li>\n</ul>\n"
-  },
   "ready_to_grill": false,
   "repo": {
     "default_branch": "main",
@@ -35,7 +31,7 @@
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
-  "state": "Direction",
+  "state": "Implementing",
   "timeline": [
     {
       "Brief": {
@@ -86,7 +82,7 @@
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
         "id": 11,
-        "state": "Direction"
+        "state": "Implementing"
       }
     },
     {

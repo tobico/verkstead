@@ -1486,9 +1486,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap();
 
     // And a fourth that the grilling has handed over: its closing proposal
-    // answered, so it is out of Grilling and choosing how the work gets built.
-    // The chooser draws the recommendation marked and the reasoning beside it,
-    // and both of those come off this payload.
+    // answered with a direction picked on it, so it is out of Grilling and being
+    // built. The answered Set on its Timeline is the record of that pick.
     //
     // Answered through `submit_response`, which is the one path a Response takes
     // and the one thing that moves a Conversation here — pressing the state into
@@ -1649,13 +1648,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
 
     // Through the states it went through, because that is what a Conversation
-    // with a backlog *is*: a grilling that handed over, a direction the human
-    // chose, and the work being built off it.
-    store::move_to_direction(&pool, tasked).await.unwrap();
-    store::choose_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
+    // with a backlog *is*: a grilling that handed over on a direction the human
+    // picked, and the work being built off it.
+    store::pick_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    store::start_implementing(&pool, tasked).await.unwrap();
 
     store::record_commit(
         &pool,
@@ -1689,7 +1686,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
     write(
-        "conversation-direction.json",
+        "conversation-building.json",
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{directing}")).await,
         )),
@@ -1773,11 +1770,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::move_to_direction(&pool, wrapping).await.unwrap();
-    store::choose_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
+    store::pick_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    store::start_implementing(&pool, wrapping).await.unwrap();
 
     store::record_commit(
         &pool,
@@ -1880,11 +1875,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::start_grilling(&pool, staged, &base, &worktree)
         .await
         .unwrap();
-    store::move_to_direction(&pool, staged).await.unwrap();
-    store::choose_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
+    store::pick_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
         .await
         .unwrap();
-    store::start_implementing(&pool, staged).await.unwrap();
 
     // And what Verkstead did on its own account: the roadmap's first stage
     // started as a Conversation of its own, said on the Timeline of the
