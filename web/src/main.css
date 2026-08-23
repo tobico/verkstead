@@ -966,36 +966,14 @@ main:has(.workbench) {
 
 /* Starting a conversation: which repo the work is in, and nothing else — the
    branch name is prefilled by the server and the brief is written in the
-   timeline. */
-.start-conversation {
+   timeline. One decision, so one press: the button is the whole of the form,
+   and the menu it drops is the anchor everything below hangs from. */
+.new-conversation {
+  position: relative;
   margin-bottom: 1.5rem;
 }
 
-.start-conversation label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.start-conversation-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.start-conversation select {
-  flex: 1 1 8rem;
-  min-width: 0;
-  font: inherit;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-}
-
-.start-conversation button,
+.new-conversation-trigger,
 .field-line button {
   padding: 0.5rem 1rem;
   font: inherit;
@@ -1007,87 +985,114 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.start-conversation button:disabled,
+/* The width of the pane, because it is the pane's one action and the menu comes
+   down the width of it. The mark is pushed to the far end, where a dropdown's
+   is. */
+.new-conversation-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.new-conversation-trigger:disabled,
 .field-line button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-/* The roadmaps nothing is driving, under the box that starts a conversation:
-   another way in rather than something waiting on the human, so it is drawn as
-   the update banner is — a card with an accented edge — and not as a row of the
-   list below it. One card per Repo, with its roadmaps inside. */
-.abandoned {
-  margin-bottom: 1.5rem;
+/* What a press away from the open menu lands on, so that it lands on nothing
+   else: the sidebar is a list of things to open, and a stray press that opened
+   one would take the human off the page they were still deciding about.
+   Invisible, as the Set's own menu backdrop is — a menu is not in front of the
+   page the way a dialog is. */
+.new-conversation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
 }
 
-.abandoned-notice {
-  margin-bottom: 0.6rem;
-  padding: 0.7rem 0.9rem;
+/* The menu, hung under the button and as wide as it. Over the list rather than
+   in the flow above it, so opening it does not push the conversations down —
+   which is the whole of what the notices under the old box were doing. */
+.new-conversation-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  left: 0;
+  z-index: 3;
+  padding: 0.3rem;
   background: var(--card);
   border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--accent);
   border-radius: 0.6rem;
-  font-size: 0.9rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
 }
 
-.abandoned-notice > p {
-  margin: 0;
-}
-
-.abandoned-notice ul {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-/* The roadmap's name over the stage that would be started, because on a phone
-   the two of them do not share a line. */
-.abandoned-notice li {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
-/* Each roadmap is a button, because pressing one starts a conversation to adopt
-   it with. Drawn as the text it already was rather than as a control: the card
-   it is in is the notice, and three buttons stacked in it would read as three
-   things to decide between rather than as what is lying about. */
-.abandoned-notice li button {
+/* Every row of it, whichever group it is in: drawn as the text it is rather
+   than as a control, because a menu of buttons that looked like buttons would
+   read as a form to fill in. */
+.new-conversation-menu button {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   width: 100%;
-  padding: 0.25rem 0.4rem;
-  margin: -0.25rem -0.4rem;
+  padding: 0.4rem 0.6rem;
   font: inherit;
   color: inherit;
   text-align: start;
-  background: none;
-  border: 1px solid transparent;
+  background: transparent;
+  border: 0;
   border-radius: 0.4rem;
   cursor: pointer;
 }
 
-.abandoned-notice li button:hover {
-  border-color: var(--edge);
+.new-conversation-menu button:hover,
+.new-conversation-menu button:focus-visible {
+  background: var(--paper);
 }
 
-.abandoned-notice li button:disabled {
+.new-conversation-menu button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-.abandoned-notice .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
+/* The roadmaps, kept apart from the repos by a rule: pressing one starts a
+   different kind of conversation, and a menu that ran the two together would be
+   offering fifteen equal things. */
+.new-conversation-menu .menu-group {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
 }
 
-.abandoned-notice .stage {
+.new-conversation-menu .menu-heading {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
   color: var(--ink-soft);
+}
+
+/* The roadmap's name over the stage that would be started, because on a phone
+   the two of them do not share a line — and the Repo beside the name, since the
+   group is flat and two repositories may each hold an `mvp`. */
+.adopt-roadmap .what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+}
+
+.adopt-roadmap .in,
+.adopt-roadmap .stage {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.new-conversation-menu .empty {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
 }
 
 /* The conversations themselves, drawn as the set lists' rows are: the whole card
@@ -1777,7 +1782,7 @@ main:has(.workbench) {
 
 .branch-name .error,
 .base-commit .error,
-.start-conversation .error,
+.new-conversation .error,
 .brief > .error,
 .conversation-profiles .error {
   margin: 0.5rem 0 0;

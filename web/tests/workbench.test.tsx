@@ -166,6 +166,22 @@ async function openActions(container: ParentNode): Promise<void> {
   fireEvent(menu, new Event("toggle"));
 }
 
+/// Drop the new-conversation menu, which is where both ways of starting one
+/// live: press the button, and wait for what it drops.
+async function openNewConversation(
+  container: ParentNode,
+): Promise<HTMLElement> {
+  fireEvent.click(await drawn(container, ".new-conversation-trigger"));
+  return drawn(container, ".new-conversation-menu");
+}
+
+/// The repos in that menu, in the order they are offered — waited for, because
+/// the menu opens whether or not the list has arrived.
+async function repoRows(container: ParentNode): Promise<HTMLButtonElement[]> {
+  await drawn(container, ".in-repo");
+  return [...container.querySelectorAll<HTMLButtonElement>(".in-repo")];
+}
+
 /// The body the page put on the wire when it wrote to `path`.
 ///
 /// By the request rather than by being the last thing sent: writing anything
@@ -284,15 +300,19 @@ describe("the workbench", () => {
     ).toEqual(["/settings"]);
   });
 
+  /// The menu still opens with nothing to start a conversation in — and what is
+  /// in it is the page that fixes that, because a menu that opened on nothing
+  /// would say only that the button was broken.
   it("says where to go when there is no repo to start one against", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
       whenever("/api/ui/repos", json([])),
     );
     const { container } = mount();
+    await openNewConversation(container);
 
     await waitFor(() => screen.getByText(/No repos are registered yet/));
-    expect(container.querySelector(".start-conversation")).toBeNull();
+    expect(container.querySelector(".in-repo")).toBeNull();
     expect(screen.getByText("register one").getAttribute("href")).toBe(
       "/settings",
     );
@@ -554,107 +574,199 @@ describe("how a card says where its conversation has got to", () => {
         "}",
     );
   });
-
 });
 
-describe("starting a conversation", () => {
-  it("sends the repo that was picked, and opens what came back", async () => {
+describe("the new conversation menu", () => {
+  /// The whole of starting one: a press on the button, a press on a repo, and
+  /// the conversation that came back is open.
+  it("sends the repo that was pressed, and opens what came back", async () => {
     const fetching = theWorkbench(json({ Started: { id: OPEN.id } }));
-    const { history } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
+    const { container, history } = mount();
+    await openNewConversation(container);
 
-    fireEvent.change(screen.getByLabelText(/new conversation in/i), {
-      target: { value: String(REPOS[1]!.id) },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click((await repoRows(container))[1]!);
 
     // Straight into it: what the human does next is write the brief.
-    await waitFor(() =>
-      expect(history.get()).toBe(`/conversations/${OPEN.id}`),
-    );
+    await waitFor(() => expect(history.get()).toBe(`/conversations/${OPEN.id}`));
     expect(sent(fetching, "/api/ui/conversations")).toEqual({
       repo_id: REPOS[1]!.id,
     });
   });
 
-  it("offers the first repo without anything being picked", async () => {
-    const fetching = theWorkbench(json({ Started: { id: OPEN.id } }));
-    mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
+  /// Every registered repo is a row, in the order the server sent them, and
+  /// nothing is picked in advance: the row pressed *is* the choice.
+  it("offers every registered repo, in the server's order", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await openNewConversation(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect((await repoRows(container)).map((row) => row.textContent)).toEqual(
+      REPOS.map((repo) => repo.name),
+    );
+  });
+
+  /// Nothing of it is on the page until it is asked for, which is the point of
+  /// the menu: the sidebar is the conversations, and the way to add to them is
+  /// one button.
+  it("keeps the repos out of the sidebar until the button is pressed", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await drawn(container, ".new-conversation-trigger");
+
+    expect(container.querySelector(".new-conversation-menu")).toBeNull();
+  });
+
+  it("closes once a repo has been chosen", async () => {
+    theWorkbench(json({ Started: { id: OPEN.id } }));
+    const { container } = mount();
+    await openNewConversation(container);
+
+    fireEvent.click((await repoRows(container))[0]!);
 
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations")).toEqual({
-        repo_id: REPOS[0]!.id,
-      }),
+      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
     );
+  });
+
+  /// The way out that needs no aim, and the focus back on the button it came
+  /// from rather than at the top of the page.
+  it("closes on escape, and gives the button back the focus", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await openNewConversation(container);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() =>
+      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
+    );
+    expect(document.activeElement).toBe(
+      container.querySelector(".new-conversation-trigger"),
+    );
+  });
+
+  /// A press away from it lands on the backdrop rather than on the page, so the
+  /// press that takes the menu back cannot also open a conversation.
+  it("closes on a press outside it", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await openNewConversation(container);
+
+    fireEvent.click(await drawn(container, ".new-conversation-backdrop"));
+
+    await waitFor(() =>
+      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
+    );
+  });
+
+  /// Opened from the keyboard, the first row is where the human is going: a
+  /// menu whose first Tab landed past it is one they would have to walk
+  /// backwards out of.
+  it("puts the focus on the first row when it opens", async () => {
+    theWorkbench();
+    const { container } = mount();
+    await openNewConversation(container);
+
+    const rows = await repoRows(container);
+    expect(document.activeElement).toBe(rows[0]);
+  });
+
+  /// A server that could not answer at all is the one thing here that is an
+  /// error rather than an outcome — and the menu stays open to say it in,
+  /// because a press that failed left nothing else on the screen to carry it.
+  it("stays open to say a start failed", async () => {
+    theWorkbench(
+      whenever(
+        "/api/ui/conversations",
+        () => Promise.reject(new Error("down")),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+    await openNewConversation(container);
+
+    fireEvent.click((await repoRows(container))[0]!);
+
+    const said = await drawn(container, ".new-conversation-menu .error");
+    expect(said.textContent).toContain("down");
   });
 });
 
-describe("the abandoned roadmaps notice", () => {
-  /// The whole of it: one notice per Repo, its roadmaps inside, each named with
-  /// the stage that would be started.
-  it("names the repo, its roadmaps and the stage each one is up to", async () => {
+describe("the adopt-a-roadmap group", () => {
+  /// Under the repos and behind a heading of its own, because pressing one
+  /// starts a different kind of conversation.
+  it("names each abandoned roadmap, its repo and the stage it is up to", async () => {
     theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
     const { container } = mount();
+    await openNewConversation(container);
 
-    const notices = await waitFor(() => {
-      const drawn = container.querySelectorAll(".abandoned-notice");
-      expect(drawn.length).toBe(ABANDONED.length);
-      return drawn;
-    });
+    const group = await drawn(container, ".menu-group");
+    expect(group.querySelector(".menu-heading")!.textContent).toBe(
+      "Adopt a roadmap",
+    );
 
-    const notice = notices[0]!;
-    expect(notice.textContent).toContain(ABANDONED[0]!.repo);
+    const rows = [
+      ...group.querySelectorAll<HTMLButtonElement>(".adopt-roadmap"),
+    ];
+    const flat = ABANDONED.flatMap((repo) =>
+      repo.roadmaps.map((roadmap) => ({ repo: repo.repo, roadmap })),
+    );
+    expect(rows.length).toBe(flat.length);
 
-    const roadmaps = notice.querySelectorAll("li");
-    expect(roadmaps.length).toBe(ABANDONED[0]!.roadmaps.length);
-
-    for (const [n, roadmap] of ABANDONED[0]!.roadmaps.entries()) {
-      const said = roadmaps[n]!.textContent!;
-      expect(said).toContain(roadmap.name);
-      expect(said).toContain(roadmap.stage);
-      expect(said).toContain(roadmap.stage_title);
+    for (const [n, held] of flat.entries()) {
+      const said = rows[n]!.textContent!;
+      expect(said).toContain(held.roadmap.name);
+      expect(said).toContain(held.repo);
+      expect(said).toContain(held.roadmap.stage);
+      expect(said).toContain(held.roadmap.stage_title);
     }
   });
 
-  /// Under the box that starts a conversation, which is what it is an
-  /// alternative to — and above the conversations themselves, which are the work
-  /// already under way.
-  it("is drawn under the new conversation box", async () => {
+  /// The roadmaps are in the menu and nowhere else: nothing is waiting on the
+  /// human here, so nothing of it is in view until the menu is opened.
+  it("leaves no notice in the sidebar", async () => {
     theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
     const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const notice = await drawn(container, ".abandoned");
-    const box = container.querySelector(".start-conversation")!;
+    expect(container.querySelector(".abandoned")).toBeNull();
+    expect(container.querySelector(".adopt-roadmap")).toBeNull();
+  });
 
-    expect(box.compareDocumentPosition(notice)).toBe(
+  /// Beneath the repos, which is the order the two are decided in: starting
+  /// work is the ordinary thing, and adopting is what is also there.
+  it("is drawn beneath the repos", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container } = mount();
+    await openNewConversation(container);
+
+    const group = await drawn(container, ".menu-group");
+    expect((await repoRows(container))[0]!.compareDocumentPosition(group)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
   });
 
   /// Nothing to adopt is nothing to say. A Repo whose roadmaps are all
-  /// complete, mid-flight or broken contributes no notice at all, and a
-  /// workbench with none draws no heading over an empty list.
+  /// complete, mid-flight or broken contributes nothing at all, and a menu with
+  /// none draws no heading over an empty group.
   it("says nothing when there is nothing to adopt", async () => {
     theWorkbench();
     const { container } = mount();
+    await openNewConversation(container);
 
-    await waitFor(() => screen.getByText(DRAFTING.branch));
-
-    expect(container.querySelector(".abandoned")).toBeNull();
+    expect(container.querySelector(".menu-group")).toBeNull();
   });
 
   /// Read again with everything else the page is showing, because the server
   /// reads it off the repositories every time it is asked: a roadmap somebody
-  /// has since picked up stops being on the list, and the notice goes with it.
+  /// has since picked up stops being on the list, and the row goes with it.
   it("is read again when the page looks again", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
     );
     const { container } = mount();
-    await drawn(container, ".abandoned-notice");
+    await openNewConversation(container);
+    await drawn(container, ".menu-group");
 
     const before = askedFor(fetching, "/api/ui/abandoned-roadmaps");
     readAgain();
@@ -666,27 +778,25 @@ describe("the abandoned roadmaps notice", () => {
     );
   });
 
-  /// Clicking a roadmap starts a conversation to adopt it with, and goes
-  /// straight into it — which is where both profiles and the base commit are
+  /// Pressing a roadmap starts a conversation to adopt it with, and goes
+  /// straight into it — which is where both pairings and the base commit are
   /// fixed, and where adopting is pressed.
   ///
   /// What goes out is the repo and the roadmap and nothing else: which stage is
   /// next is the roadmap's own answer at the commit the conversation ends up
   /// branching from, and the page reads it back there.
-  it("starts a conversation to adopt the roadmap that was clicked", async () => {
+  it("starts a conversation to adopt the roadmap that was pressed", async () => {
     const fetching = theWorkbench(
       whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
-      whenever(
-        "/api/ui/adoptions",
-        json({ Started: { id: OPEN.id } }),
-        "POST",
-      ),
+      whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
     );
     const { container, history } = mount();
+    await openNewConversation(container);
 
-    const notice = await drawn(container, ".abandoned-notice");
-    const roadmaps = notice.querySelectorAll<HTMLButtonElement>("li button");
-    fireEvent.click(roadmaps[1]!);
+    const rows = await drawn(container, ".menu-group");
+    fireEvent.click(
+      rows.querySelectorAll<HTMLButtonElement>(".adopt-roadmap")[1]!,
+    );
 
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/adoptions")).toEqual({

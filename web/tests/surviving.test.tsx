@@ -26,7 +26,6 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ConversationEntry,
   ConversationView,
-  Started,
 } from "../src/api/types";
 import { Picker } from "../src/picking";
 import {
@@ -58,23 +57,8 @@ const BUSY: ConversationEntry[] = SIDEBAR.map((entry) =>
   entry.id === 5 ? { ...entry, working: true } : entry,
 );
 
-/// The two repos the picker offers, in the order the server sends them: the
-/// first is what the box opens on, and the other is what a pick picks.
+/// The repo the sidebar's menu is left offering when the other is unregistered.
 const FIRST = REPOS[0]!;
-const OTHER = REPOS[1]!;
-
-/// The body the page put on the wire when it wrote to `path`.
-///
-/// By the request rather than by being the last thing sent: starting a
-/// conversation is followed by reading the list back, so the last call is
-/// ordinarily a read.
-function sent(fetching: ReturnType<typeof serving>, path: string): unknown {
-  const written = fetching.mock.calls.find(
-    ([asked, init]) => String(asked) === path && init?.method === "POST",
-  );
-  expect(written, `expected the page to have written to ${path}`).toBeTruthy();
-  return JSON.parse(String(written![1]?.body));
-}
 
 /// The workbench with the repos answered from a list a test can move under it,
 /// which is what a repository being unregistered elsewhere looks like from here.
@@ -171,15 +155,20 @@ describe("what a Nudge leaves standing", () => {
     );
   });
 
-  it("keeps the repo picker's options", async () => {
+  /// The repos are a menu rather than a `<select>` now, and the merge is what
+  /// keeps its rows alive: a Nudge landing while the menu is open would
+  /// otherwise rebuild the row the human had tabbed to and take their focus
+  /// with it.
+  it("keeps the open menu's repo rows", async () => {
     theWorkbench();
     const { container, client } = mount();
-    await drawn(container, "#against option");
-    const options = nodes(container, "#against option");
+    fireEvent.click(await drawn(container, ".new-conversation-trigger"));
+    await drawn(container, ".in-repo");
+    const offered = nodes(container, ".in-repo");
 
     await nudged(client);
 
-    survived(options, nodes(container, "#against option"));
+    survived(offered, nodes(container, ".in-repo"));
   });
 
   it("keeps both pairing pickers' options", async () => {
@@ -212,47 +201,26 @@ describe("what a Nudge leaves standing", () => {
 });
 
 describe("what a picker shows and what it would send", () => {
-  it("keeps the repo that was picked when the list is read again", async () => {
-    theRepos();
+  /// The sidebar's own repo choice is no longer one of these: the menu that
+  /// replaced the box holds nothing between the press and the wire, so the row
+  /// pressed *is* the repository sent and there is no divergence left to guard
+  /// against. What is asked here instead is that a repository unregistered
+  /// from somewhere else stops being offered.
+  it("stops offering a repo that has been unregistered", async () => {
+    const { holds } = theRepos();
     const { container, client } = mount();
-    const picker = await drawn<HTMLSelectElement>(container, "#against");
-    fireEvent.change(picker, { target: { value: String(OTHER.id) } });
-
-    await nudged(client);
-
-    expect(picker.value).toBe(String(OTHER.id));
-  });
-
-  /// The whole of the bug, end to end: the human picks a repository, it is
-  /// unregistered from somewhere else, and the page is nudged. What must not
-  /// happen is the box showing one repository and starting the conversation in
-  /// another.
-  it("starts the conversation in the repo it is showing when the picked one goes", async () => {
-    const { fetching, holds } = theRepos(
-      whenever(
-        "/api/ui/conversations",
-        json({ Started: { id: 9 } } as Started),
-        "POST",
-      ),
-    );
-    const { container, client } = mount();
-    const picker = await drawn<HTMLSelectElement>(container, "#against");
-    fireEvent.change(picker, { target: { value: String(OTHER.id) } });
+    fireEvent.click(await drawn(container, ".new-conversation-trigger"));
+    await drawn(container, ".in-repo");
 
     holds([FIRST]);
     await nudged(client);
 
-    // The one that is left, rather than the one that was picked — and the same
-    // one the human is reading off the screen.
-    expect(picker.value).toBe(String(FIRST.id));
-    expect(picker.selectedOptions[0]!.textContent).toBe(FIRST.name);
-
-    fireEvent.submit(container.querySelector(".start-conversation")!);
-
     await waitFor(() =>
-      expect(sent(fetching, "/api/ui/conversations")).toEqual({
-        repo_id: FIRST.id,
-      }),
+      expect(
+        [...container.querySelectorAll(".in-repo")].map(
+          (row) => row.textContent,
+        ),
+      ).toEqual([FIRST.name]),
     );
   });
 

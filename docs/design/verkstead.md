@@ -319,6 +319,18 @@ Timeline events:
   Success is quiet and a failure says *failed* in the summary line, in the
   stopped-run red — a session's one bad call is then findable without opening
   the ninety-nine good ones.
+- **Starting work is one menu** (*settled 2026-08-24, building
+  workbench-refit*): a button at the top of the sidebar drops the registered
+  Repos, and the Repo pressed is the Conversation started. Under them, behind a
+  rule, is *Adopt a roadmap* — every abandoned roadmap there is, flat and named
+  with its Repo and the stage a press would start. Both were permanent
+  furniture before: a form of three controls, and a stack of notices under it
+  that the conversations were pushed down by. Nothing is waiting on the human
+  in either, which is what says they belong behind a press — and the roadmaps
+  are still not dismissible, because the group is in the menu every time it
+  opens and a roadmap's score is the repository's to keep. The menu closes on a
+  choice, on escape and on a press outside it, and hands the focus to the first
+  Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,
