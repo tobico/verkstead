@@ -27,6 +27,7 @@ import type {
   ConversationEntry,
   ConversationView,
   GrillingStarted,
+  ManualTaskStarted,
   ProfileEntry,
   PullRequestDetails,
   RemedySettled,
@@ -38,6 +39,7 @@ import type {
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import { MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
@@ -3059,5 +3061,225 @@ describe("the pinned pull request", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Details" }));
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
+  });
+});
+
+/// What the human asked for by hand, which the same conversation carries on the
+/// end of its record: a manual task, set going outside the pipeline.
+const ASKED_BY_HAND = (() => {
+  const event = WRAPPING.timeline.find((entry) => "ManualTask" in entry);
+  if (!event || !("ManualTask" in event)) {
+    throw new Error("the fixture should carry a manual task");
+  }
+  return event.ManualTask;
+})();
+
+describe("a manual task", () => {
+  /// A card in the record, like the brief and the handoff: it is a document
+  /// somebody wrote, and the words are the whole of it.
+  it("draws what was asked for as a card in the record", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".event-head")!.textContent).toContain(
+      "Manual task",
+    );
+    expect(asked.closest(".timeline")).not.toBeNull();
+  });
+
+  /// Put in the page as the server rendered it, like every other piece of
+  /// markdown on this wire — so what the human set in backticks reads as code
+  /// rather than as backticks.
+  it("shows the instruction as the server rendered it", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".markdown")!.innerHTML).toBe(
+      ASKED_BY_HAND.html,
+    );
+    expect(asked.querySelector("code")!.textContent).toBe("main");
+  });
+
+  /// Read-only, and nothing to open: what its session went on to do arrives as
+  /// the events any work arrives as, under this one.
+  it("asks the human for nothing", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelectorAll("button")).toHaveLength(0);
+    expect(asked.querySelectorAll("textarea")).toHaveLength(0);
+  });
+});
+
+/// Where a manual task is submitted from.
+const SET_GOING = `/api/ui/conversations/${WRAPPING.id}/manual-task`;
+
+/// The conversation's own implementation profile, which is what the composer
+/// starts on.
+const IMPLEMENTATION = WRAPPING.implementation_profile!;
+
+/// And the other saved one, which is what a one-off pick picks.
+const OTHER = PROFILES.find((profile) => profile.id !== IMPLEMENTATION.id)!;
+
+describe("the manual task composer", () => {
+  /// Offered wherever nothing is running: this conversation is wrapping up, and
+  /// a wrapping lull is exactly the quiet moment it is there for.
+  it("is drawn at the end of the timeline when nothing is running", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, ".manual-task-composer select");
+    const composer = container.querySelector(".manual-task-composer")!;
+
+    expect(composer.querySelector("textarea")).toBeTruthy();
+    expect(
+      composer.querySelector(".start-manual-task")!.textContent,
+    ).toContain("Set it going");
+    expect(
+      composer.compareDocumentPosition(container.querySelector(".timeline")!) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+  });
+
+  /// And gone while one runs. The rule is the register and nothing else: an
+  /// agent is in the worktree, and a second one would be two editing each
+  /// other's files.
+  it("goes while a session is running", async () => {
+    theWrapping({ working: true });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".manual-task-composer")).toBeNull();
+  });
+
+  /// Drafting is one of the two states with no worktree, so there is nowhere
+  /// for a session to run and nothing to offer.
+  it("is not drawn on a conversation with no worktree", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, ".start-grilling");
+
+    expect(container.querySelector(".manual-task-composer")).toBeNull();
+  });
+
+  /// The dropdown starts on the conversation's implementation profile, because
+  /// that is what its work runs under — but it is a start rather than a rule.
+  it("starts on the conversation's implementation profile", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const picker = await drawn<HTMLSelectElement>(
+      container,
+      ".manual-task-composer select",
+    );
+
+    expect(picker.value).toBe(String(IMPLEMENTATION.id));
+    expect([...picker.options].map((option) => option.textContent)).toEqual(
+      PROFILES.map((profile) => `${profile.name} — ${profile.model}`),
+    );
+  });
+
+  /// The instruction and the profile, on the wire together. One press does both:
+  /// what it says and what it runs as are the whole of a manual task.
+  it("sends what was typed and the profile picked beside it", async () => {
+    const fetching = theWrapping(
+      {},
+      whenever(SET_GOING, json("Started" as ManualTaskStarted), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const picker = await drawn<HTMLSelectElement>(
+      container,
+      ".manual-task-composer select",
+    );
+    const composer = container.querySelector(".manual-task-composer")!;
+    fireEvent.input(composer.querySelector("textarea")!, {
+      target: { value: "Rebase onto main." },
+    });
+    fireEvent.change(picker, { target: { value: String(OTHER.id) } });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    await waitFor(() =>
+      expect(sent(fetching, SET_GOING)).toEqual({
+        instruction: "Rebase onto main.",
+        profile_id: OTHER.id,
+      }),
+    );
+
+    // The pick is one-off: it is what this task runs as, and nothing writes it
+    // back to the conversation.
+    expect(
+      askedFor(
+        fetching,
+        `/api/ui/conversations/${WRAPPING.id}/implementation-profile`,
+      ),
+    ).toBe(0);
+  });
+
+  /// Emptied on the way out, because the instruction is on the timeline now:
+  /// what is left in the box would otherwise read as something still to ask for.
+  it("empties the box once the task is going", async () => {
+    theWrapping({}, whenever(SET_GOING, json("Started"), "POST"));
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+    const typing = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    fireEvent.input(typing, { target: { value: "Rebase onto main." } });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    await waitFor(() => expect(typing.value).toBe(""));
+  });
+
+  /// Nothing typed is nothing to ask for, and the button says so by not being
+  /// pressable rather than by refusing afterwards.
+  it("will not submit an empty instruction", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+
+    expect(
+      composer.querySelector<HTMLButtonElement>(".start-manual-task")!.disabled,
+    ).toBe(true);
+  });
+
+  /// A submit that raced a session loses, and the page says which of the named
+  /// refusals it was: the composer that was pressed was drawn a moment ago.
+  it("says in words that an agent was already running", async () => {
+    theWrapping(
+      {},
+      whenever(SET_GOING, json("AlreadyRunning" as ManualTaskStarted), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+    fireEvent.input(composer.querySelector("textarea")!, {
+      target: { value: "Rebase onto main." },
+    });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    const refused = await drawn(container, ".manual-task-composer .error");
+
+    expect(refused.textContent).toBe(MANUAL_TASK_REFUSAL.AlreadyRunning);
+    expect(refused.textContent).toContain("already running");
+  });
+
+  /// Every named refusal has words of its own, because each of them is
+  /// something different to go and do about it.
+  it("has a sentence for every way of being refused", () => {
+    for (const [outcome, said] of Object.entries(MANUAL_TASK_REFUSAL)) {
+      if (outcome === "Started") {
+        continue;
+      }
+      expect(said, `${outcome} should say something`).not.toBe("");
+    }
   });
 });

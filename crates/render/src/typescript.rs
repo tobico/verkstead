@@ -19,11 +19,11 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, NewAdoption, NewConversation,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    SetView, Started, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice,
+    ConversationEntry, ConversationView, GrillingStarted, ManualTaskStarted, ManualTaskSubmission,
+    NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -118,6 +118,12 @@ fn the_viewers_types_are_written_from_these() {
     // it was answered.
     RemedyChoice::export_all(&config).unwrap();
     RemedySettled::export_all(&config).unwrap();
+
+    // What the human sets going by hand at the end of a Timeline, and every way
+    // of being refused it. The instruction's own Event rides on the
+    // `ConversationView` above, rendered like the handoff.
+    ManualTaskSubmission::export_all(&config).unwrap();
+    ManualTaskStarted::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

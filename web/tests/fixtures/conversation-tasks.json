@@ -95,6 +95,7 @@
       }
     }
   ],
+  "working": false,
   "worktree": {
     "missing": false,
     "path": "/var/lib/verkstead/worktrees/verkstead-task-runner"

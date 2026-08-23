@@ -29,10 +29,16 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
-import { abortConversation, saveBrief, startGrilling } from "../api/client";
+import {
+  abortConversation,
+  listProfiles,
+  saveBrief,
+  startGrilling,
+  startManualTask,
+} from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -43,6 +49,8 @@ import type {
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
+  ManualTaskEvent,
+  ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
   PullRequestEvent,
@@ -99,6 +107,26 @@ export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
+};
+
+/// And each way of being refused a manual task.
+///
+/// `AlreadyRunning` is the one worth reading twice: the composer is drawn
+/// wherever nothing is running, so a submit that arrives to find something
+/// running was pressed against a page a moment out of date. Nothing is queued,
+/// because an instruction written against a worktree that has since moved may no
+/// longer be the thing to do.
+export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
+  Started: "",
+  NoSuchConversation: "This conversation is gone.",
+  NowhereToWork:
+    "This conversation has no worktree to run in — start the grilling first.",
+  AlreadyRunning:
+    "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
+  EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
+  NoSuchProfile: "That profile has been removed.",
+  NotStarted:
+    "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
 /// What a move reads as. The state moved *to*, said as something that happened.
@@ -185,6 +213,9 @@ export function Timeline(props: {
                 <Match when={"Notice" in event && event.Notice}>
                   {(notice) => <Notice notice={notice()} />}
                 </Match>
+                <Match when={"ManualTask" in event && event.ManualTask}>
+                  {(manual) => <ManualTask manual={manual()} />}
+                </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
                     <AgentOutput
@@ -253,7 +284,181 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
+      {/* And under that, the way to move the conversation by hand. It is not
+          one of the two above — neither is it for one state, nor is it the one
+          thing there is to do from here. It is what is offered *whenever
+          nothing is running*, which is a quiet moment between steps as much as
+          it is a run that has stopped, so it sits below whichever of the two is
+          drawn rather than instead of it. */}
+      <ManualTaskComposer conversation={props.conversation} />
     </>
+  );
+}
+
+/// The way to move a conversation by hand: an instruction, a profile to run it
+/// under, and a submit.
+///
+/// Drawn whenever there is a worktree to run in, the conversation is neither
+/// drafting nor aborted, and no session is registered for it. That is the
+/// literal rule and it is deliberate: the gaps between an unattended run's
+/// steps, a wrapping lull, a grilling waiting on a pick, a finished
+/// conversation and a run stopped on an interruption all show it, because the
+/// point of it is to get a stuck conversation moving. After a server restart
+/// nothing is running anywhere, so it shows everywhere, and that is wanted too.
+///
+/// Drafting and aborted are the two states with no worktree, so those are the
+/// two it is never offered in — there is nowhere for a session to run.
+///
+/// The profile starts on the conversation's implementation one and picking
+/// another is one-off: it is what this task runs under, and it never becomes the
+/// conversation's own. Nothing here writes it back.
+function ManualTaskComposer(props: {
+  conversation: ConversationView;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [instruction, setInstruction] = createSignal("");
+  const [picked, setPicked] = createSignal<number | null>(null);
+  const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
+
+  /// The profile list, read here rather than passed down, the way the details
+  /// pane's pickers read it: the control is whole wherever it is drawn.
+  const profiles = useQuery(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+  }));
+
+  /// Which profile is selected: whatever the human picked, and the
+  /// conversation's implementation one until they pick anything.
+  const running = () =>
+    picked() ?? props.conversation.implementation_profile?.id ?? null;
+
+  /// Whether the composer belongs on this conversation at all.
+  const offered = () =>
+    props.conversation.worktree !== null &&
+    props.conversation.state !== "Draft" &&
+    props.conversation.state !== "Aborted" &&
+    !props.conversation.working;
+
+  const submit = useMutation(() => ({
+    mutationFn: (profileId: number) =>
+      startManualTask(props.conversation.id, instruction(), profileId),
+    onSuccess: (outcome: ManualTaskStarted) => {
+      if (outcome !== "Started") {
+        setRefused(outcome);
+        // Refused against a picture of the world this page read a moment ago:
+        // reading it again is both the correction and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        return;
+      }
+
+      // It is on the timeline now, which is where it is read back from: the box
+      // is emptied so what is in it is always something not yet asked for.
+      setRefused(null);
+      setInstruction("");
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <Show when={offered()}>
+      <div class="manual-task-composer">
+        <h2>Do something by hand</h2>
+
+        <label for="manual-task">What should the agent do?</label>
+        {/* A copy of what has been typed gives the field its height — see
+            `.grow`, which the brief's field and an interruption's note use for
+            the same reason. */}
+        <div class="grow" data-value={instruction()}>
+          <textarea
+            id="manual-task"
+            rows="1"
+            placeholder="Rebase this onto main and force-push"
+            value={instruction()}
+            onInput={(ev) => {
+              setInstruction(ev.currentTarget.value);
+              setRefused(null);
+            }}
+          />
+        </div>
+
+        {/* Drawn only once the list is here, the way the details pane's pickers
+            are: a select whose value is set before its options exist is a
+            select showing nothing. */}
+        <div class="manual-task-profile">
+          <label for="manual-task-profile">Run it as</label>
+          <Show
+            when={profiles.data}
+            fallback={
+              <p class="note">
+                {profiles.isError
+                  ? `Could not read the agent profiles: ${profiles.error?.message}`
+                  : "Reading the agent profiles…"}
+              </p>
+            }
+          >
+            {(saved) => (
+              <select
+                id="manual-task-profile"
+                value={running() === null ? "" : String(running())}
+                disabled={submit.isPending}
+                onChange={(ev) => {
+                  const chosen = Number(ev.currentTarget.value);
+                  if (chosen) {
+                    setPicked(chosen);
+                  }
+                }}
+              >
+                <Show when={running() === null}>
+                  <option value="">Not chosen</option>
+                </Show>
+                <For each={saved()}>
+                  {(profile) => (
+                    <option value={profile.id}>
+                      {profile.name} — {profile.model}
+                    </option>
+                  )}
+                </For>
+              </select>
+            )}
+          </Show>
+        </div>
+
+        <button
+          type="button"
+          class="start-manual-task"
+          disabled={
+            submit.isPending ||
+            instruction().trim() === "" ||
+            running() === null
+          }
+          onClick={() => {
+            const profileId = running();
+            if (profileId !== null) {
+              submit.mutate(profileId);
+            }
+          }}
+        >
+          {submit.isPending ? "Starting…" : "Set it going"}
+        </button>
+
+        <p class="note">
+          One session, outside the grilling and the implementation. Nothing about
+          the conversation moves — what it leaves behind is what it commits.
+        </p>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{MANUAL_TASK_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={submit.isError}>
+          <p class="error">
+            The manual task could not be started: {submit.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
   );
 }
 
@@ -451,6 +656,28 @@ function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
 /// prose around it.
 function Notice(props: { notice: NoticeEvent }): JSX.Element {
   return <div class="notice markdown" innerHTML={props.notice.html} />;
+}
+
+/// What the human asked for by hand: the instruction a Manual Task was set
+/// going with.
+///
+/// A card and not a line, unlike the notice above it: it is what somebody asked
+/// for in their own words, and the words are the whole of it. Read-only, like
+/// the handoff — it is a moment on the record rather than a document to go back
+/// to, and what a second thought produces is a second Manual Task.
+///
+/// What the session it started went on to do is not drawn here. That arrives as
+/// the events any work arrives as — what it printed, what it asked, what it
+/// committed — under this one and in the order it happened.
+function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+  return (
+    <article class="manual-task">
+      <div class="event-head">
+        <h2>Manual task</h2>
+      </div>
+      <div class="markdown" innerHTML={props.manual.html} />
+    </article>
+  );
 }
 
 /// A move: the Conversation changing hands, said in a line.

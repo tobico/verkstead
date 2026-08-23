@@ -39,6 +39,7 @@ use std::time::Duration;
 use verkstead_schema::Direction;
 
 use crate::AppState;
+use crate::drivers::Driving;
 use crate::repos::git;
 use crate::sessions::{Quiet, Session};
 use crate::skills;
@@ -69,6 +70,26 @@ pub struct Pace {
     /// choice one phase along, and a caller standing a server up sets all of
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
+
+    /// And how long a Manual Task's session must have printed nothing before it
+    /// is ended — see [`crate::manual`].
+    ///
+    /// Distinctly longer than [`Pace::grace`], because it is carrying more
+    /// weight. A backlog step is ended on quiet *and* a landing read off the
+    /// repository, so quiet is the second of two signals; a manual task has no
+    /// done file and no path to watch, and quiet is the only one there is.
+    /// Ending one early kills a working session silently, and a minute of
+    /// nothing is the shortest silence an agent still at work reliably breaks.
+    pub manual: Duration,
+
+    /// And how often every Conversation is looked over for one that has
+    /// Stalled — see [`crate::stalls`].
+    ///
+    /// Here beside the rest for [`Pace::checks`]s reason rather than because a
+    /// sweep is anything the runner does: a caller standing a server up chooses
+    /// how often Verkstead looks at things, and a stall is one of the things it
+    /// looks for.
+    pub stalls: Duration,
 }
 
 impl Default for Pace {
@@ -77,6 +98,8 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
+            manual: Duration::from_secs(60),
+            stalls: crate::stalls::SWEPT_EVERY,
         }
     }
 }
@@ -263,16 +286,24 @@ async fn tail(state: &AppState, conversation_id: i64, direction: Direction) -> O
 /// because the building belongs to the Stages it plans, so the same session
 /// carries the branch to a pull request and the Conversation goes straight on to
 /// wrapping that up.
+///
+/// `driving` is the registration that says this Conversation is being driven,
+/// taken by whoever armed the watcher rather than here, and held from the pick
+/// through to wherever the tail leaves the Conversation — see [`crate::drivers`]
+/// for why it is handed over rather than taken again. A watcher is the one thing
+/// that follows a grilling session, so it is also what says a grilling picked on
+/// is not standing still.
 pub(crate) async fn follow_the_tail(
     state: AppState,
     conversation_id: i64,
     direction: Direction,
     session: Session,
+    driving: Driving,
 ) {
     match direction {
-        Direction::Inline => follow_handoff(state, conversation_id, session).await,
-        Direction::TaskList => follow_breakdown(state, conversation_id, session).await,
-        Direction::Roadmap => follow_staging(state, conversation_id, session).await,
+        Direction::Inline => follow_handoff(state, conversation_id, session, driving).await,
+        Direction::TaskList => follow_breakdown(state, conversation_id, session, driving).await,
+        Direction::Roadmap => follow_staging(state, conversation_id, session, driving).await,
     }
 }
 
@@ -339,7 +370,16 @@ pub(crate) async fn nobody_writing(state: &AppState, conversation_id: i64, direc
 /// nothing had moved would be a machine spending an account on the same failure
 /// over and over, with nobody watching. What it leaves behind for the human is an
 /// Interruption, which is where the run picks up again if they retry.
-async fn follow_breakdown(state: AppState, conversation_id: i64, writing: Session) {
+///
+/// `driving` is the registration that says this Conversation is being driven,
+/// taken by whoever armed the watcher or pressed the retry rather than here —
+/// see [`crate::drivers`] for why it is handed over rather than taken again.
+async fn follow_breakdown(
+    state: AppState,
+    conversation_id: i64,
+    writing: Session,
+    driving: Driving,
+) {
     if see_out(&state, conversation_id, Step::Planning, writing)
         .await
         .is_none()
@@ -349,7 +389,7 @@ async fn follow_breakdown(state: AppState, conversation_id: i64, writing: Sessio
 
     crate::conversations::grilling_over(&state, conversation_id).await;
 
-    carry_on(state, conversation_id).await
+    carry_on(state, conversation_id, driving).await
 }
 
 /// Run a step again because the human asked for it, and go on working the
@@ -365,6 +405,12 @@ async fn follow_breakdown(state: AppState, conversation_id: i64, writing: Sessio
 /// `note` is what the human wrote alongside the retry, which reaches the agent as
 /// part of its prompt — see [`skills::retrying`].
 pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::Step, note: String) {
+    // Taken before anything is read or launched, because the launch is the
+    // slowest part of this and the whole of it is time the Conversation is
+    // being driven: a retry waits for the Worktree, and what it may be waiting
+    // for is a Manual Task that runs for ten minutes.
+    let driving = state.drivers.driving(conversation_id);
+
     let Some(working_in) = worktree(&state, conversation_id).await else {
         return;
     };
@@ -384,12 +430,13 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
                 "a retried breakdown is starting in a fresh session"
             );
 
-            let Some(session) = launch(&state, conversation_id, Prompt::BreakingDown, &note).await
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::BreakingDown, &note).await
             else {
                 return;
             };
 
-            return follow_breakdown(state, conversation_id, session).await;
+            return follow_breakdown(state, conversation_id, session, driving).await;
         }
         // The same first step by the other route, and the same care about where
         // the branch stands: what it was made on top of was decided once, when
@@ -433,12 +480,7 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         store::Step::Inline => {
             crate::conversations::grilling_over(&state, conversation_id).await;
 
-            let Some(session) = launch(&state, conversation_id, Prompt::Implementing, &note).await
-            else {
-                return;
-            };
-
-            return follow_inline(state, conversation_id, session).await;
+            return inline_again(state, conversation_id, note, driving).await;
         }
         // Nor is this one. A roadmap Conversation has one step of its own, so a
         // retry is that step again — in a session of its own, for the reason a
@@ -448,36 +490,7 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         // failed was finding the pull request it opened, and the retry is that
         // question asked again.
         store::Step::Roadmap => {
-            let Some(base) = base(&state, conversation_id).await else {
-                return;
-            };
-
-            let staged = {
-                let worktree = working_in.clone();
-                let base = base.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    !crate::stages::touched(&worktree, &base).is_empty()
-                })
-                .await
-                .unwrap_or(false)
-            };
-
-            if staged {
-                tracing::info!(
-                    conversation_id,
-                    "the roadmap is written, so the retry looks for the pull request again"
-                );
-
-                return crate::wrapping::opened(&state, conversation_id, None).await;
-            }
-
-            let Some(session) = launch(&state, conversation_id, Prompt::Staging, &note).await
-            else {
-                return;
-            };
-
-            return follow_roadmap(state, conversation_id, base, session).await;
+            return roadmap_again(state, conversation_id, note, &working_in, driving).await;
         }
         // Not a backlog step at all: the backlog was finished before this
         // Conversation ever had a pull request to have checks on. Retrying it is
@@ -491,15 +504,183 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         // first — which is [`crate::review`]'s to launch, because it is the one
         // thing that knows what to do with what the review comes back with.
         store::Step::Review => return crate::review::retried(state, conversation_id).await,
+        // And nor is this one, which is not the pipeline's at all: what a
+        // retried Manual Task runs is the instruction the human typed, read
+        // back off the Timeline because a bare step word has no room for it —
+        // see [`crate::manual::retried`].
+        store::Step::Manual => {
+            return crate::manual::retried(state, conversation_id, note).await;
+        }
+        // Nor is this one, and it is the one that is not a session at all: a
+        // stall is raised about a Conversation nothing was driving, so what a
+        // retry means is *start driving it again* — which the state it is in
+        // decides and no step word can, so the reading is done where the stall
+        // was noticed. See [`crate::stalls::retried`].
+        store::Step::Stalled => {
+            return crate::stalls::retried(state, conversation_id, note, driving).await;
+        }
     };
 
     tracing::info!(conversation_id, step = ?step, "a retried step is starting in a fresh session");
 
-    let Some(session) = launch(&state, conversation_id, prompt, &note).await else {
+    let Some(session) = launch_in_turn(&state, conversation_id, prompt, &note).await else {
         return;
     };
 
-    work(state, conversation_id, step, session).await
+    work(state, conversation_id, step, session, driving).await
+}
+
+/// Start driving a stalled implementation again, from wherever the repository
+/// now stands.
+///
+/// What Retry means where the Conversation it was pressed on is Implementing —
+/// see [`crate::stalls::retried`], which reads that off the state and hands it
+/// here. Which run stopped is the direction's to say, and each of the three
+/// picks up exactly where its own retry would: the backlog off `.tasks/`, an
+/// inline run in a fresh session, a roadmap off what the branch has written.
+///
+/// Nothing is decided from the stall itself, because a stall knows nothing: it
+/// was raised about a Conversation with nothing running, so there is no step to
+/// read and no session's last words to go on. What there is, is the repository,
+/// which is the same thing every other retry asks.
+///
+/// The registration is handed on rather than taken again, so a Conversation the
+/// human has just pressed Retry on is driven from that moment rather than from
+/// whenever the launch gets round to it — see [`crate::drivers`].
+pub(crate) async fn implementing_again(
+    state: AppState,
+    conversation_id: i64,
+    note: String,
+    driving: Driving,
+) {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left to work in");
+            return;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to work in failed");
+            return;
+        }
+    };
+
+    // A Conversation is implementing because a direction was chosen, so a
+    // missing one is a record that cannot be true — and the one thing that says
+    // which run it is that stopped.
+    let Some(direction) = conversation.direction else {
+        tracing::error!(
+            conversation_id,
+            "a Conversation that says it is implementing has no direction recorded, \
+             so there is nothing to say what stalled"
+        );
+        return;
+    };
+
+    let Some(working_in) = conversation.worktree else {
+        tracing::info!(
+            conversation_id,
+            "the Conversation has no Worktree left, so nothing was started again"
+        );
+        return;
+    };
+
+    match direction {
+        Direction::Inline => inline_again(state, conversation_id, note, driving).await,
+        Direction::Roadmap => {
+            roadmap_again(state, conversation_id, note, &working_in, driving).await
+        }
+        // The backlog's own answer to what is next, asked of `.tasks/` exactly
+        // as every other turn of the run asks it — a stage's backlog included,
+        // it being a backlog like any other by the time there is one. What is
+        // next has not changed on account of nothing having been running.
+        Direction::TaskList => {
+            let step = decide(&working_in).await;
+
+            if step == Step::Nothing {
+                // Either the breakdown never landed one or the finish took the
+                // last of it away, and a stall cannot tell those apart: there is
+                // no step word on it and no session to have left a reason. So
+                // nothing is launched, the way a retried task whose backlog has
+                // gone launches nothing, and what the human has instead is the
+                // other two remedies and the composer.
+                tracing::info!(
+                    conversation_id,
+                    "there is no backlog left to work, so nothing was started again"
+                );
+                return;
+            }
+
+            tracing::info!(conversation_id, step = ?step, "a stalled run is being taken up again");
+
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::NextTask, &note).await
+            else {
+                return;
+            };
+
+            work(state, conversation_id, step, session, driving).await
+        }
+    }
+}
+
+/// Run an inline implementation again, in a fresh session told what the human
+/// wrote.
+///
+/// The whole of the work in one session, so there is nothing to read off the
+/// repository first: what the last one left behind is on the branch, and the
+/// note is what tells the new one about it.
+async fn inline_again(state: AppState, conversation_id: i64, note: String, driving: Driving) {
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing, &note).await
+    else {
+        return;
+    };
+
+    follow_inline(state, conversation_id, session, driving).await
+}
+
+/// Write the roadmap again — or, where the branch already has one, look for the
+/// pull request it opened.
+///
+/// The same two cases a retried finish has, one phase earlier: a roadmap
+/// Conversation's own work is one session, and a run that stopped after it had
+/// written the roadmap stopped on the question of what became of it rather than
+/// on the writing.
+async fn roadmap_again(
+    state: AppState,
+    conversation_id: i64,
+    note: String,
+    working_in: &Path,
+    driving: Driving,
+) {
+    let Some(base) = base(&state, conversation_id).await else {
+        return;
+    };
+
+    let staged = {
+        let worktree = working_in.to_owned();
+        let base = base.clone();
+
+        tokio::task::spawn_blocking(move || !crate::stages::touched(&worktree, &base).is_empty())
+            .await
+            .unwrap_or(false)
+    };
+
+    if staged {
+        tracing::info!(
+            conversation_id,
+            "the roadmap is written, so the retry looks for the pull request again"
+        );
+
+        return crate::wrapping::opened(&state, conversation_id, None).await;
+    }
+
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Staging, &note).await
+    else {
+        return;
+    };
+
+    follow_roadmap(state, conversation_id, base, session, driving).await
 }
 
 /// Plan a roadmap stage and then work the backlog it writes, from the first task
@@ -515,7 +696,13 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 /// fork is told because it is the one thing about a stage the repository does not
 /// say.
 pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on: Option<String>) {
-    let Some(session) = launch(
+    // Taken here rather than by [`crate::continuing`], which is the one place
+    // that could have taken it earlier and has nothing to gain from doing so: a
+    // stage is a Conversation made moments ago, and this is spawned as the last
+    // thing that makes it.
+    let driving = state.drivers.driving(conversation_id);
+
+    let Some(session) = launch_in_turn(
         &state,
         conversation_id,
         Prompt::PlanningStage(stacked_on),
@@ -526,14 +713,32 @@ pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on
         return;
     };
 
-    work(state, conversation_id, Step::PlanningStage, session).await
+    work(
+        state,
+        conversation_id,
+        Step::PlanningStage,
+        session,
+        driving,
+    )
+    .await
 }
 
 /// Work a backlog from `first` to empty.
 ///
 /// `first` is the step the session it is handed is running, decided before that
 /// session was started — see [`retry`] for why that ordering is the whole of it.
-async fn work(state: AppState, conversation_id: i64, first: Step, session: Session) {
+///
+/// The registration it is handed is held for the whole run and let go as it
+/// returns, which is what makes the quiet gaps between one step's session and
+/// the next read as a Conversation being driven rather than as one standing
+/// still.
+async fn work(
+    state: AppState,
+    conversation_id: i64,
+    first: Step,
+    session: Session,
+    driving: Driving,
+) {
     let Some(writing) = see_out(&state, conversation_id, first.clone(), session).await else {
         return;
     };
@@ -548,7 +753,7 @@ async fn work(state: AppState, conversation_id: i64, first: Step, session: Sessi
         return;
     }
 
-    carry_on(state, conversation_id).await
+    carry_on(state, conversation_id, driving).await
 }
 
 /// Work whatever the backlog has left, one fresh session per step, until it is
@@ -559,7 +764,11 @@ async fn work(state: AppState, conversation_id: i64, first: Step, session: Sessi
 /// is launched for it. Split out because the two entries into a run differ only
 /// in that first session — the breakdown's own, or the grilling session that
 /// wrote the backlog in its place.
-async fn carry_on(state: AppState, conversation_id: i64) {
+///
+/// The registration is held for the whole loop and let go as it returns, which
+/// is what makes the quiet gaps between one step's session and the next read as
+/// a Conversation being driven rather than as one standing still.
+async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
     loop {
         let Some(worktree) = worktree(&state, conversation_id).await else {
             return;
@@ -586,7 +795,8 @@ async fn carry_on(state: AppState, conversation_id: i64) {
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(started) = launch(&state, conversation_id, Prompt::NextTask, "").await else {
+        let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask, "").await
+        else {
             return;
         };
 
@@ -625,7 +835,12 @@ async fn carry_on(state: AppState, conversation_id: i64) {
 /// itself: the grilling that would have written the handoff is the session that
 /// just ended without one, so a retried tail runs on the Brief and the human's
 /// note — see [`Step::stored`].
-async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session) {
+///
+/// The registration is held across all of it — the watch, the move, and the run
+/// on the other side of it — so there is no moment between the handoff landing
+/// and the implementation session starting where the Conversation reads as one
+/// nothing is driving.
+async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
     let handoffs = crate::handoffs::Handoffs::under(&state.state_dir);
     let step = Step::Handoff(handoffs.document(conversation_id));
 
@@ -639,11 +854,12 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session)
     crate::conversations::hand_over(&state, conversation_id).await;
     crate::conversations::grilling_over(&state, conversation_id).await;
 
-    let Some(session) = launch(&state, conversation_id, Prompt::Implementing, "").await else {
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing, "").await
+    else {
         return;
     };
 
-    follow_inline(state, conversation_id, session).await
+    follow_inline(state, conversation_id, session, driving).await
 }
 
 /// See an inline implementation session out, and stop the run at an Interruption
@@ -658,7 +874,16 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session)
 /// which is what makes a retry answerable: a first attempt that committed twice
 /// and then died leaves two commits behind, and a retry that commits nothing has
 /// still landed nothing.
-async fn follow_inline(state: AppState, conversation_id: i64, mut session: Session) {
+///
+/// The registration it is handed is held until the session is over and whatever
+/// it left behind has been read, so an inline run is a driven Conversation for
+/// exactly as long as somebody is watching it.
+async fn follow_inline(
+    state: AppState,
+    conversation_id: i64,
+    mut session: Session,
+    _driving: Driving,
+) {
     let event_id = session.event_id;
 
     // Taken before the waiting starts, so it is a count of what the run had
@@ -741,12 +966,12 @@ async fn follow_inline(state: AppState, conversation_id: i64, mut session: Sessi
 /// what it arms is a watcher, not a session. Without one there is nothing that
 /// could say a roadmap in the Worktree is this branch's own, so the session is
 /// left running rather than followed.
-async fn follow_staging(state: AppState, conversation_id: i64, writing: Session) {
+async fn follow_staging(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
     let Some(base) = base(&state, conversation_id).await else {
         return;
     };
 
-    follow_roadmap(state, conversation_id, base, writing).await
+    follow_roadmap(state, conversation_id, base, writing, driving).await
 }
 
 /// See a roadmap session out, and carry the Conversation on to wrapping the
@@ -778,7 +1003,13 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session)
 /// A session that ends without writing one stops the run at an Interruption, the
 /// way every other step does, and the human's remedies mean what they always
 /// mean.
-async fn follow_roadmap(state: AppState, conversation_id: i64, base: String, session: Session) {
+async fn follow_roadmap(
+    state: AppState,
+    conversation_id: i64,
+    base: String,
+    session: Session,
+    _driving: Driving,
+) {
     let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
         return;
     };
@@ -1343,6 +1574,34 @@ enum Prompt {
     Reviewing,
 }
 
+/// Wait for the Conversation's Worktree, and then [`launch`] into it.
+///
+/// What every driver here launches through except the two that are already
+/// holding the Turn when they get here — a fix session and the review, both
+/// dispatched by a wrap-up that took it before it decided anything.
+///
+/// The wait is what keeps a launch from displacing a session somebody else put
+/// there. [`crate::sessions::Sessions::start`] ends whatever is registered, which
+/// is exactly what a run relaunching its own step wants and exactly what must
+/// not happen to a Manual Task — the human sets one going in a quiet moment
+/// between steps, and a run that reached the next one a second later would kill
+/// it mid-sentence. A manual session holds the Turn for as long as it runs, so
+/// this waits for it rather than ending it.
+///
+/// Held across the launch alone rather than across the session, because that is
+/// the whole of what it is protecting: once a session is registered, everything
+/// else that might start one can see it there.
+async fn launch_in_turn(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    note: &str,
+) -> Option<Session> {
+    let _turn = state.sessions.turn(conversation_id).await;
+
+    launch(state, conversation_id, inside, note).await
+}
+
 /// Start a fresh session on the next step, under the Conversation's
 /// implementation Profile.
 ///
@@ -1357,6 +1616,11 @@ enum Prompt {
 /// The Conversation is read back every time rather than held across the run: a
 /// backlog takes hours, and where an agent is about to be let loose is the one
 /// thing that must not be guessed at.
+///
+/// The Turn is the caller's to have taken — see [`launch_in_turn`], which is
+/// what the callers that are not already holding one launch through. It cannot
+/// be taken here: a wrap-up takes the Turn before it decides what to dispatch,
+/// and a lock taken twice by the one task is a task waiting on itself.
 async fn launch(
     state: &AppState,
     conversation_id: i64,

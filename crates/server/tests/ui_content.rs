@@ -1811,6 +1811,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap();
 
+    // And a Manual Task on the end of it: what the human asked for by hand once
+    // the pull request was up, which is the shape a Conversation nothing is
+    // driving gets moved on in. Written here rather than submitted, because what
+    // a submission does is start a session, and this file is about wire shapes.
+    store::record_manual_task(
+        &pool,
+        wrapping,
+        "Rebase this onto `main` and force-push — the conflict is in \
+         `src/limits.rs` alone.",
+    )
+    .await
+    .unwrap();
+
     write(
         "conversation-wrapping.json",
         &pin_health(&pin_timeline(

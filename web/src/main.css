@@ -1264,6 +1264,14 @@ main:has(.workbench) {
   max-width: var(--measure);
 }
 
+/* And a manual task is the same kind of card again, prose at the same measure:
+   what the human asked for by hand, in the words they asked for it in. Nothing
+   to press here either — what its session did arrives under it as the events
+   any work arrives as. */
+.manual-task > .markdown {
+  max-width: var(--measure);
+}
+
 /* What a conversation is, beside what has happened to it: the repo it is
    attached to, and where it has got to. Read rather than changed — a
    conversation is attached to a repo when it is started. */
@@ -2055,6 +2063,72 @@ main:has(.workbench) {
 }
 
 .adoption .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* The way to move a conversation by hand, under whichever of the two above is
+   drawn rather than instead of one: neither of those is for a state this is
+   for, and this is offered whenever nothing is running rather than in one
+   state. Set off by a rule, so the end of the record is still visible as an
+   end. */
+.manual-task-composer {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.manual-task-composer h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.manual-task-composer label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The profile the one-off session runs as, on its own line under the box: the
+   instruction is the thing being written and this is a setting on it. */
+.manual-task-composer .manual-task-profile {
+  margin-top: 0.75rem;
+}
+
+.manual-task-composer select {
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.manual-task-composer .start-manual-task {
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.manual-task-composer .start-manual-task:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.manual-task-composer .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.manual-task-composer .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }

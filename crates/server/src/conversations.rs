@@ -211,6 +211,12 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
         return false;
     };
 
+    // Taken here rather than inside the watcher, so the registration is on
+    // before the task that holds it exists: a watcher is what follows a grilling
+    // session, and the whole of what carries the Conversation from the pick
+    // through the move that follows it — see [`crate::drivers`].
+    let driving = state.drivers.driving(id);
+
     state.followers.arm(
         id,
         tokio::spawn(crate::runner::follow_the_tail(
@@ -218,6 +224,7 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
             id,
             direction,
             session,
+            driving,
         )),
     );
 
@@ -246,7 +253,15 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
 /// Raising one twice is not raising two: the store keeps one open Interruption
 /// per Conversation, so a server restarted again over the same Conversation
 /// leaves the first standing.
-pub(crate) fn resume(state: &AppState) {
+///
+/// The task is handed back rather than let go, for the reason
+/// [`crate::wrapping::resume`]'s is: the stall sweep calls a grilling with no
+/// session undriven, and every one of these is exactly that until this has said
+/// what it has to say about it. A sweep that looked first would raise its own
+/// Interruption over the top of the better one. See [`crate::stalls::sweeping`].
+#[must_use = "the sweep waits for the grillings to be looked over before it \
+              judges whether anything is driving them"]
+pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
     let state = state.clone();
 
     tokio::spawn(async move {
@@ -295,7 +310,7 @@ pub(crate) fn resume(state: &AppState) {
                 crate::runner::nobody_writing(&state, id, direction).await;
             }
         }
-    });
+    })
 }
 
 /// Record that the grilling is over and the work is being built.
