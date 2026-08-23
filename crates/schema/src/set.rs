@@ -83,9 +83,11 @@ pub struct QuestionSet {
 /// The grilling agent's closing move: that the work is understood well enough
 /// to build, and how it recommends building it.
 ///
-/// The recommendation travels as data rather than only as prose, because the
-/// workbench draws the chooser with the recommended direction marked — a
-/// rationale the human reads is not a thing a radio button can be checked from.
+/// Two parts and no third, because the whole of accepting is the pick the viewer
+/// injects onto this Set — see [`crate::response::Response::direction`]. The
+/// recommendation travels as data rather than only as prose, because the chooser
+/// draws it marked, and a rationale the human reads is not a thing a radio button
+/// can be checked from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
@@ -96,26 +98,11 @@ pub struct Proposal {
     /// the human is deciding against the agent's reasoning rather than against
     /// a bare word.
     pub rationale: String,
-
-    /// The Option that means *go ahead*, in the Guide's own notation: `Q14.1`
-    /// for a Question's, `Q14a.1` for a Sub-question's.
-    ///
-    /// What lets the human disagree. Verkstead has to know whether a proposal
-    /// was accepted, and it cannot read that off wording the agent chose — so
-    /// the agent names the Option it will take as acceptance, and every other
-    /// way of answering leaves the Conversation grilling: another Option, an
-    /// answer in the human's own words, or the question left open.
-    ///
-    /// That is the whole way back. A grilling ends only when the human says so
-    /// in the one place they are already looking, and the session that proposed
-    /// is still holding the thread when they don't — it takes their Response
-    /// and decides for itself whether to keep grilling or propose again.
-    pub accepted_by: String,
 }
 
 /// One Option, by the name of the question that offers it and its number.
 ///
-/// The Guide's `Q14.1` taken apart. Whitespace-trimmed either side of the dot,
+/// The Guide's `Q1.1` taken apart. Whitespace-trimmed either side of the dot,
 /// because the label a Question answers to is trimmed everywhere else too.
 fn option_named(label: &str) -> Option<(&str, u32)> {
     let (name, n) = label.trim().rsplit_once('.')?;
@@ -126,32 +113,6 @@ fn option_named(label: &str) -> Option<(&str, u32)> {
     }
 
     Some((name, n.trim().parse().ok()?))
-}
-
-impl Proposal {
-    /// The Option this proposal is accepted by, or `None` where `accepted_by`
-    /// is not in the notation at all.
-    pub fn acceptance(&self) -> Option<(&str, u32)> {
-        option_named(&self.accepted_by)
-    }
-
-    /// Whether this Response accepts the proposal.
-    ///
-    /// Only the named Option being selected is acceptance. Free text *beside*
-    /// it is the qualification the Guide says it is — the agent reads it, and
-    /// the work goes ahead — but free text *instead* of it is an answer of the
-    /// human's own, which wins over the Options offered and is therefore not
-    /// the one this names. An Unanswered question is never acceptance, exactly
-    /// as the Guide says of every other question.
-    pub fn accepted(&self, response: &crate::response::Response) -> bool {
-        let Some((name, n)) = self.acceptance() else {
-            return false;
-        };
-
-        response.answers.iter().any(|answer| {
-            answer.label.trim() == name && !answer.unanswered && answer.selected == Some(n)
-        })
-    }
 }
 
 /// The wrap-up review's closing move: what it found, and which Answer to each

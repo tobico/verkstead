@@ -19,11 +19,11 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
-    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Started,
-    Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice,
+    ConversationEntry, ConversationView, GrillingStarted, ManualTaskStarted, ManualTaskSubmission,
+    NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -86,12 +86,9 @@ fn the_viewers_types_are_written_from_these() {
     // named separately. It takes no request shape either.
     Adopted::export_all(&config).unwrap();
 
-    // How the work gets built, once the grilling has proposed wrapping up. The
-    // recommendation and its reasoning ride on the `ConversationView` above,
-    // because the chooser draws them beside the buttons; this is the choice
-    // going back.
-    DirectionChoice::export_all(&config).unwrap();
-    DirectionChosen::export_all(&config).unwrap();
+    // Nothing here for how the work gets built: the recommendation and its
+    // reasoning ride on the `SetView` above, the pick goes back as a field of
+    // the Response, and neither is a payload of its own.
 
     // What a session printed. The summary rides on the Timeline; the Capture
     // is its own payload, because it is fetched by the one pane that shows it.

@@ -266,6 +266,7 @@ fn decided_every_way() -> Response {
             unanswered("Q3"),
         ],
         comment: Some("Do the in-process one first; we can move it later.".to_owned()),
+        direction: None,
     }
 }
 
@@ -1067,8 +1068,8 @@ fn assert_sanitised(json: &str, wrote_it: &str) {
     );
 }
 
-/// The grilling's closing move: one answerable question, and the `proposal`
-/// block that makes answering it end the grilling.
+/// The grilling's closing move: whatever is still worth asking, and the
+/// `proposal` block that puts the direction chooser on the page.
 ///
 /// The rationale is markdown, because the chooser renders it — which is the
 /// whole reason it travels as a rationale rather than as a word.
@@ -1078,18 +1079,14 @@ fn wrap_up_proposal() -> QuestionSet {
         preface: Some("We settled all four questions. Here is what I think we build.\n".to_owned()),
         questions: vec![Question {
             label: "Q9".to_owned(),
-            text: "Ready to build it this way?".to_owned(),
+            text: "Anything above you want changed before we build it?".to_owned(),
             columns: Vec::new(),
-            options: vec![
-                option(1, "Yes, go ahead", true),
-                option(2, "Not yet — more to work through", false),
-            ],
+            options: Vec::new(),
             subquestions: Vec::new(),
         }],
         postscript: None,
         proposal: Some(verkstead_schema::Proposal {
             direction: verkstead_schema::Direction::TaskList,
-            accepted_by: "Q9.1".to_owned(),
             rationale: "Five changes that barely touch each other: the detector, the \
                         pause, the notification, the resume and the window arithmetic.\n\n\
                         - **Inline** would be one session holding all five at once\n\
@@ -1103,16 +1100,19 @@ fn wrap_up_proposal() -> QuestionSet {
     }
 }
 
-/// The human accepting it, which is what moves the Conversation on.
+/// The human accepting it, which is picking a direction on the chooser — and
+/// picking one the agent did not recommend, because that is as much an
+/// acceptance as agreeing with it.
 fn accepting_the_proposal() -> Response {
     Response {
         answers: vec![Answer {
             label: "Q9".to_owned(),
-            selected: Some(1),
+            selected: None,
             free_text: None,
-            unanswered: false,
+            unanswered: true,
         }],
         comment: None,
+        direction: Some(verkstead_schema::Direction::Inline),
     }
 }
 
@@ -1154,6 +1154,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = set_json(&app, &pool, &diagrammed_set()).await;
     write("set-diagram.json", &json);
+
+    // The grilling's closing Set, which is the one kind whose page carries the
+    // direction chooser: the recommendation to mark and the rationale to draw
+    // beside the three choices.
+    let (_dir, pool, app) = fresh_app().await;
+    let (_, json) = set_json(&app, &pool, &wrap_up_proposal()).await;
+    write("set-proposing.json", &json);
+
+    // And the same one answered with a direction picked on it, which is the
+    // record of the choice — there is no Event of its own for one.
+    let (_dir, pool, app) = fresh_app().await;
+    let (_, json) = answered_set(&app, &pool, &wrap_up_proposal(), &accepting_the_proposal()).await;
+    write("set-proposed.json", &pinned(&json));
 
     // The Repo list: two registrations, put in through the store rather than
     // through the endpoint, because what is being written here is the shape of a
@@ -1473,13 +1486,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap();
 
     // And a fourth that the grilling has handed over: its closing proposal
-    // answered, so it is out of Grilling and choosing how the work gets built.
-    // The chooser draws the recommendation marked and the reasoning beside it,
-    // and both of those come off this payload.
+    // answered with an inline direction picked on it, and the handoff that pick
+    // asked for written, so it is out of Grilling and being built. The answered
+    // Set on its Timeline is the record of the pick.
     //
     // Answered through `submit_response`, which is the one path a Response takes
-    // and the one thing that moves a Conversation here — pressing the state into
-    // the store by hand would write a fixture no Answer could ever produce.
+    // — pressing the pick into the store by hand would write a fixture no Answer
+    // could ever produce. What moves the Conversation is the tail landing, below.
     let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
         .await
         .unwrap()
@@ -1529,12 +1542,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await;
 
-    // And the other half of that closing move: the document the grilling wrote
-    // before it proposed, which Verkstead takes onto the Timeline as the
-    // proposal is accepted. Recorded here for the reason the worktree is
-    // recorded rather than made — where the file came from is
-    // `tests/conversations.rs`'s subject, and what the Timeline does with it is
-    // this one's.
+    // And what the pick asked for: an inline grilling's tail is the handoff, and
+    // Verkstead takes it onto the Timeline as that session ends. Recorded here
+    // for the reason the worktree is recorded rather than made — where the file
+    // came from is `tests/conversations.rs`'s subject, and what the Timeline does
+    // with it is this one's.
+    //
+    // The move follows it, in that order, because that is the order the far side
+    // of an inline pick happens in: a Conversation that says it is being built
+    // has the document the grilling left beside it.
     store::record_handoff(
         &pool,
         directing,
@@ -1547,6 +1563,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    store::start_implementing(&pool, directing).await.unwrap();
 
     // And the commits on its branch, which is what a session leaves behind
     // besides its output. Recorded here rather than made, exactly as the
@@ -1636,13 +1653,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
 
     // Through the states it went through, because that is what a Conversation
-    // with a backlog *is*: a grilling that handed over, a direction the human
-    // chose, and the work being built off it.
-    store::move_to_direction(&pool, tasked).await.unwrap();
-    store::choose_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
+    // with a backlog *is*: a grilling the human picked a task list on, which
+    // broke the work down itself and committed the plan, and the work being
+    // built off it. In that order, because the plan commit is what ends the
+    // grilling.
+    store::pick_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
-    store::start_implementing(&pool, tasked).await.unwrap();
 
     store::record_commit(
         &pool,
@@ -1658,6 +1675,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap()
     .unwrap();
+
+    store::start_implementing(&pool, tasked).await.unwrap();
 
     write(
         "conversations.json",
@@ -1676,7 +1695,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
     write(
-        "conversation-direction.json",
+        "conversation-building.json",
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{directing}")).await,
         )),
@@ -1760,8 +1779,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::move_to_direction(&pool, wrapping).await.unwrap();
-    store::choose_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
+    store::pick_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
     store::start_implementing(&pool, wrapping).await.unwrap();
@@ -1877,14 +1895,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     git(&worktree, &["add", "-A"]);
     git(&worktree, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
+    // A roadmap pick records the direction and moves nothing: the grilling
+    // session writes the roadmap itself, so the Conversation says it is grilling
+    // until the pull request that follows the roadmap is recorded.
     store::start_grilling(&pool, staged, &base, &worktree)
         .await
         .unwrap();
-    store::move_to_direction(&pool, staged).await.unwrap();
-    store::choose_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
+    store::pick_direction(&pool, staged, verkstead_schema::Direction::Roadmap)
         .await
         .unwrap();
-    store::start_implementing(&pool, staged).await.unwrap();
 
     // And what Verkstead did on its own account: the roadmap's first stage
     // started as a Conversation of its own, said on the Timeline of the

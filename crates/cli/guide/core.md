@@ -376,6 +376,11 @@ omission, and there is nothing there to follow up:
   on the answers; it may reframe them. **An absent `comment` means they had
   nothing to add** — the box is on every Set and always optional, so an empty
   one is an answer of its own, and never a Question left open.
+- `direction` → the direction they picked, on a Set that carried a `proposal`
+  and on no other. It answers no Question, so it is a field of the Response
+  rather than an entry in `answers`. **A `direction` is the proposal accepted**,
+  and its absence is the proposal sent back. See the grilling skill for what to
+  do about either.
 
 A Response of nothing but `unanswered` entries plus a `comment` is a valid
 counter-question. It means the human is not answering as asked — take the

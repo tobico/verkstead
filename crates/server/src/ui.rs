@@ -28,10 +28,10 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
     Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
-    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
-    RepoEntry, SetView, Standing, Submitted, Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    ConversationEntry, ConversationView, GrillingStarted, Lifecycle, ManualTaskStarted,
+    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted,
+    Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
 use verkstead_schema::{ApiError, Response};
 
@@ -97,13 +97,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
-        // How the work gets built, once the grilling has proposed wrapping up.
-        // What moved the Conversation here was a Question Set being answered —
-        // see [`store::submit_response`] — so there is no route for that.
-        .route(
-            "/api/ui/conversations/{id}/direction",
-            post(choose_direction),
-        )
+        // No route for how the work gets built: the direction rides the closing
+        // Question Set, and answering one is answering a Set — see
+        // [`store::submit_response`].
+        //
         // And what the human does about a run that stopped. Per Event rather
         // than per Conversation, because that is what is being answered: the
         // Timeline is where the question was put, and a route that took only
@@ -202,24 +199,6 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     let view: SetView = verkstead_render::set_view(stored.id, conversation, stored.set, standing);
 
     Json(view).into_response()
-}
-
-/// The wrap-up proposal a Set carried, where it carried one *and* the human
-/// accepted it.
-///
-/// The same reading the store settles the move by — see
-/// [`store::submit_response`] — so the Conversation being in Direction and the
-/// chooser having something to draw are the one fact rather than two that could
-/// come apart. A Set still waiting on the human has not been accepted either:
-/// nobody has answered it yet.
-fn accepted_proposal(asked: &store::SetOnTimeline) -> Option<&verkstead_schema::Proposal> {
-    let proposal = asked.set.proposal.as_ref()?;
-
-    let Some(store::Settlement::Answered(answered)) = &asked.settlement else {
-        return None;
-    };
-
-    proposal.accepted(&answered.response).then_some(proposal)
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
@@ -612,27 +591,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ),
     };
 
-    // What the grilling proposed on its way out, read off the Timeline for the
-    // reason the Brief is: it is already here, and a second read would be a
-    // second opinion about which proposal is in force.
-    //
-    // Only an *accepted* one. A grilling proposes as often as it takes, and a
-    // proposal the human sent back is a thing that was declined rather than a
-    // thing in force — drawing its reasoning beside the chooser would credit the
-    // decision to the wrong argument. The last accepted one wins, so a grilling
-    // that was sent back and proposed again is about what it proposed the second
-    // time.
-    let proposal = timeline
-        .iter()
-        .rev()
-        .find_map(|event| match &event.event {
-            store::Event::QuestionSet(asked) => accepted_proposal(asked),
-            _ => None,
-        })
-        .map(verkstead_render::proposal_view);
-
     // What the work has stopped on, read off the Timeline for the reason the
-    // Brief and the proposal are: it is already here. The store's index makes at
+    // Brief is: it is already here. The store's index makes at
     // most one open, so the last one that is unsettled is the one — and it is
     // the *only* one, which is what makes *the run stops here* a fact rather
     // than a promise.
@@ -666,7 +626,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         grilling_profile,
         implementation_profile,
         worktree,
-        proposal,
         direction: conversation.direction,
         pinned,
         blocked_on,
@@ -720,11 +679,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             &asked.set,
                             standing,
                         )
-                    }
-                    // One of three words, like a move — and drawn as a line for the
-                    // same reason.
-                    store::Event::Directed(direction) => {
-                        verkstead_render::directed_event(event.id, event.at, direction)
                     }
                     // Rendered like the Brief, and inline like it: a document to
                     // read, with nothing of it a details pane would add.
@@ -1089,35 +1043,10 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/direction` — how the work gets built, and
-/// the work starting.
-///
-/// One press for both, because there is no second decision in between: choosing
-/// inline sets a session going under the implementation Profile. Roadmap is
-/// refused here as well as greyed out in the chooser — see
-/// [`crate::conversations::choose_direction`].
-async fn choose_direction(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<DirectionChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(DirectionChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::conversations::choose_direction(&state, id, choice.direction).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a direction failed");
-            unavailable("the direction could not be chosen")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/interruption/{event}` — what the human is
 /// doing about a run that stopped.
 ///
-/// One press for the choice and the doing, as the direction chooser is: retry
+/// One press for the choice and the doing: retry
 /// launches a fresh session for the same step, taking whatever was written
 /// alongside; take over stops Verkstead driving; abort ends the run. In every
 /// case the repository is left as the session left it.
@@ -1335,7 +1264,6 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
     match state {
         store::Lifecycle::Draft => Lifecycle::Draft,
         store::Lifecycle::Grilling => Lifecycle::Grilling,
-        store::Lifecycle::Direction => Lifecycle::Direction,
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::Done => Lifecycle::Done,

@@ -56,16 +56,19 @@ pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
 ///
 /// `resumed` is whatever the startup takes up again before anything is judged —
 /// the wrap-ups a restarting server carries on watching, which register as it
-/// goes. Waited for rather than raced, because the two answer the same question
-/// from opposite ends: a Conversation left wrapping up has nothing driving it
-/// for exactly as long as it takes to start its watchers, and a sweep that got
-/// there first would call every healthy one of them stalled.
-pub(crate) fn sweeping(state: &AppState, resumed: JoinHandle<()>) {
+/// goes, and the grillings it looks over for a pick left unwatched. Waited for
+/// rather than raced, because the two answer the same question from opposite
+/// ends: a Conversation left mid-run has nothing driving it for exactly as long
+/// as it takes to take it up again, and a sweep that got there first would call
+/// every healthy one of them stalled.
+pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     let state = state.clone();
 
     tokio::spawn(async move {
-        if let Err(error) = resumed.await {
-            tracing::error!(error = ?error, "taking up what was left running failed, so the sweep judges what it finds");
+        for taking_up in resumed {
+            if let Err(error) = taking_up.await {
+                tracing::error!(error = ?error, "taking up what was left running failed, so the sweep judges what it finds");
+            }
         }
 
         loop {
@@ -233,7 +236,7 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String,
         // of them is one a stall was raised about — this is a Conversation that
         // moved between the stall and the human getting to it, which the move
         // itself has already answered.
-        Lifecycle::Draft | Lifecycle::Direction | Lifecycle::Done | Lifecycle::Aborted => {
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => {
             tracing::info!(
                 conversation_id,
                 state = ?lifecycle,
@@ -250,7 +253,7 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String,
 /// it. Every other Interruption names a step a session was launched for; this
 /// one names the thing nobody was doing.
 ///
-/// The four states nothing drives never reach here — [`sweep`] leaves them
+/// The three states nothing drives never reach here — [`sweep`] leaves them
 /// alone, and [`crate::drivers::Drivers::driven`] is where that is decided — so
 /// what they answer is only ever read by a database somebody has been in by
 /// hand.
@@ -259,9 +262,7 @@ fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Grilling => "grilling the work",
         Lifecycle::Implementing => "implementing the work",
         Lifecycle::Wrapping => "wrapping the work up",
-        Lifecycle::Draft | Lifecycle::Direction | Lifecycle::Done | Lifecycle::Aborted => {
-            "driving the Conversation"
-        }
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => "driving the Conversation",
     }
 }
 

@@ -27,14 +27,13 @@
     {
       "PullRequest": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 28,
+        "id": 24,
         "number": 41,
         "title": "Rate limiting",
         "url": "https://github.com/tobico/verkstead/pull/41"
       }
     }
   ],
-  "proposal": null,
   "ready_to_grill": false,
   "repo": {
     "default_branch": "main",
@@ -48,35 +47,21 @@
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<h1>Rate limiting</h1>\n<p>The API has none, so one account can exhaust it for everybody.</p>\n",
-        "id": 22,
+        "id": 20,
         "markdown": "# Rate limiting\n\nThe API has none, so one account can exhaust it for everybody.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 23,
+        "id": 21,
         "state": "Grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 24,
-        "state": "Direction"
-      }
-    },
-    {
-      "Directed": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "direction": "task-list",
-        "id": 25
-      }
-    },
-    {
-      "Moved": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "id": 26,
+        "id": 22,
         "state": "Implementing"
       }
     },
@@ -85,7 +70,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 24,
         "files": 1,
-        "id": 27,
+        "id": 23,
         "insertions": 0,
         "sha": "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8",
         "subject": "chore: finish rate-limiting"
@@ -94,7 +79,7 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 29,
+        "id": 25,
         "state": "Wrapping"
       }
     },
@@ -102,7 +87,7 @@
       "ManualTask": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Rebase this onto <code>main</code> and force-push — the conflict is in <code>src/limits.rs</code> alone.</p>\n",
-        "id": 30
+        "id": 26
       }
     }
   ],

@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::set::is_false;
+use crate::set::{Direction, is_false};
 
 // A Response is what the viewer submits, so its TypeScript is generated from
 // this definition along with the rest of the viewer's wire — see the note on
@@ -18,7 +18,8 @@ use crate::set::is_false;
 use ts_rs::TS;
 
 /// The submitted collection of Answers and Unanswered markers for one Question
-/// Set, plus an optional set-level comment.
+/// Set, plus an optional set-level comment — and, on a Set carrying a proposal,
+/// the direction the human picked.
 ///
 /// The invariant is explicitness, not completeness: every Question and
 /// Sub-question in the Set appears in `answers` one way or the other, so the
@@ -36,6 +37,22 @@ pub struct Response {
     /// What the human wants to say about the Set as a whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+
+    /// How the human chose to have the work built, on the one Set that carries
+    /// a [`crate::set::Proposal`].
+    ///
+    /// A field of its own rather than an ordinary Answer, because it answers no
+    /// Question: the chooser is the viewer's, injected onto any Set carrying a
+    /// proposal, and the three directions it offers are the same three every
+    /// time. An Answer here would be a Question the agent never asked and would
+    /// have to be excluded from every rule that counts them.
+    ///
+    /// Picking is the whole of accepting the proposal. Every other way of
+    /// answering sends it back — an answer in the human's own words, questions
+    /// left open, anything without a pick — so `None` on a proposal Set is the
+    /// human disagreeing, and `None` anywhere else is every ordinary Response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction: Option<Direction>,
 }
 
 /// One question's slot in a Response: either an Answer — a selected Option

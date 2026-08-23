@@ -18,8 +18,6 @@ import type {
   ConversationAborted,
   ConversationEntry,
   ConversationView,
-  Direction,
-  DirectionChosen,
   GrillingStarted,
   ManualTaskStarted,
   ProfileChosen,
@@ -254,24 +252,10 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
 }
 
-/// Say how the work gets built, once the grilling has proposed wrapping up.
-///
-/// The conversation stays in Direction: this settles *how*, and starting is a
-/// move of its own. There is no call for the move that got it here — answering
-/// the grilling's closing question set is what did that.
-export function chooseDirection(
-  id: number,
-  direction: Direction,
-): Promise<DirectionChosen> {
-  return post<DirectionChosen>(`/api/ui/conversations/${id}/direction`, {
-    direction,
-  });
-}
-
 /// Say what to do about a run that stopped: run the step again, take it on
 /// manually, or end the run.
 ///
-/// One press for the choice and the doing, as choosing a direction is. The note
+/// One press for the choice and the doing. The note
 /// is what a retried session is told alongside — "try again but leave the
 /// migration alone" — and is sent for the other two as well: a human who wrote
 /// why they were taking over has said something worth keeping on the record.

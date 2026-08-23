@@ -433,6 +433,102 @@ comment: |
     );
 }
 
+/// [`SET`] closed with a wrap-up proposal on it, which is what puts the
+/// direction chooser on the page and so what makes a pick something to answer
+/// with.
+fn proposing() -> QuestionSet {
+    QuestionSet::from_yaml(&format!(
+        "{SET}proposal:\n  direction: task-list\n  rationale: Five loosely coupled changes.\n"
+    ))
+    .expect("the proposing Set should parse")
+}
+
+/// The pick, as it comes back on the Response.
+///
+/// A field of its own rather than an entry in `answers`, because it answers no
+/// Question: the chooser is the viewer's, and the three directions it offers are
+/// the same three every time.
+#[test]
+fn a_response_carries_the_direction_the_human_picked() {
+    let picked = Response::from_yaml(
+        "
+answers:
+  - label: Q1
+    unanswered: true
+  - label: Q2a
+    unanswered: true
+  - label: Q2b
+    unanswered: true
+direction: roadmap
+",
+    )
+    .unwrap();
+
+    assert_eq!(picked.direction, Some(verkstead_schema::Direction::Roadmap));
+    picked
+        .validate(&proposing())
+        .expect("a pick on a Set that carries a proposal is what accepting is");
+}
+
+/// And a Response without one, which is how the human sends a proposal back.
+#[test]
+fn a_response_that_picks_nothing_resolves_a_proposal_set_all_the_same() {
+    let sent_back = Response::from_yaml(
+        "
+answers:
+  - label: Q1
+    selected: 1
+  - label: Q2a
+    unanswered: true
+  - label: Q2b
+    free_text: Not until the migration is settled.
+",
+    )
+    .unwrap();
+
+    assert_eq!(sent_back.direction, None);
+    sent_back
+        .validate(&proposing())
+        .expect("nothing about a Response obliges it to pick");
+}
+
+#[test]
+fn a_pick_round_trips_through_yaml() {
+    let response = Response::from_yaml("answers: []\ndirection: task-list\n").unwrap();
+    let reparsed = Response::from_yaml(&response.to_yaml().unwrap()).unwrap();
+
+    assert_eq!(reparsed, response);
+}
+
+/// A pick on a Set with no chooser on it is a direction nobody offered.
+///
+/// Refused rather than dropped on the way past, so whoever sent it hears about
+/// it: nothing would act on one, and a Response quietly losing half of what it
+/// said is worse than one turned away.
+#[test]
+fn a_pick_on_a_set_that_carries_no_proposal_is_refused() {
+    let error = Response::from_yaml(
+        "
+answers:
+  - label: Q1
+    selected: 1
+  - label: Q2a
+    selected: 1
+  - label: Q2b
+    unanswered: true
+direction: inline
+",
+    )
+    .unwrap()
+    .validate(&set())
+    .expect_err("the chooser is drawn on the closing Set alone");
+
+    assert!(
+        error.to_string().contains("proposal"),
+        "the refusal should say why there was nothing to pick, got: {error}"
+    );
+}
+
 /// The complete Response to [`SET`], with `extra` appended to its answers.
 fn complete_but(extra: &str) -> Result<(), verkstead_schema::ValidationError> {
     let response = Response::from_yaml(&format!(

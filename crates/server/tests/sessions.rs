@@ -26,9 +26,9 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
-    ConversationView, DirectionChosen, GrillingStarted, InterruptionEvent, Lifecycle,
-    ManualTaskEvent, ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
-    Remedy, RemedySettled, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    ConversationView, GrillingStarted, InterruptionEvent, Lifecycle, ManualTaskEvent,
+    ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Remedy,
+    RemedySettled, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -290,22 +290,26 @@ impl Grilling {
         .await
     }
 
+    /// The same, picking a direction on the chooser — which is what accepts a
+    /// proposal, and so what sets the picked direction's pipeline going.
+    async fn pick(&self, set_id: i64, direction: &str) -> Submitted {
+        post(
+            &self.app,
+            &format!("/api/ui/sets/{set_id}/response"),
+            &serde_json::json!({
+                "answers": [{ "label": "Q9", "selected": 1 }],
+                "direction": direction,
+            }),
+        )
+        .await
+    }
+
     /// The same, for a Set whose questions are not the proposal's one.
     async fn respond(&self, set_id: i64, answers: serde_json::Value) -> Submitted {
         post(
             &self.app,
             &format!("/api/ui/sets/{set_id}/response"),
             &serde_json::json!({ "answers": answers }),
-        )
-        .await
-    }
-
-    /// And choose how the work gets built.
-    async fn direct(&self, direction: &str) -> DirectionChosen {
-        post(
-            &self.app,
-            &format!("/api/ui/conversations/{}/direction", self.id),
-            &serde_json::json!({ "direction": direction }),
         )
         .await
     }
@@ -347,22 +351,21 @@ impl Grilling {
     }
 }
 
-/// A closing Set: the proposal that ends a grilling, and the Option that means
-/// go ahead.
+/// A closing Set: the proposal that ends a grilling, which is what puts the
+/// direction chooser on the page.
 const PROPOSING: &str = r#"
 title: Ready to build the rate limiter
 questions:
   - label: Q9
-    text: Ready to build it this way?
+    text: Anything still open before we build it?
     options:
       - n: 1
-        text: Yes, go ahead
+        text: Nothing from me
         recommended: true
       - n: 2
-        text: Not yet — more to work through
+        text: Yes, see below
 proposal:
   direction: inline
-  accepted_by: Q9.1
   rationale: |
     One change, in one file.
 "#;
@@ -902,6 +905,20 @@ fn pull_request(view: &ConversationView) -> Option<&PullRequestEvent> {
         PinnedEvent::PullRequest(opened) => Some(opened),
         _ => None,
     })
+}
+
+/// A Conversation's own directory outside its worktree, as the host sees it —
+/// the far side of the `/tmp/verkstead` a session writes its handoff into.
+///
+/// What the tests put in there is a marker a stub is waiting on: a stub cannot
+/// idle on a blocking ask, so this is how one is held at a point the test needs
+/// it held at.
+fn handoff_directory(fixture: &Grilling) -> PathBuf {
+    fixture
+        .state
+        .path()
+        .join("handoffs")
+        .join(fixture.id.to_string())
 }
 
 /// The handoff on a Timeline, once the grilling has handed one over.
@@ -1504,6 +1521,7 @@ async fn a_run_stopped_on_an_interruption_is_waiting_on_the_human() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'the grilling is running\n'
             sleep 300
             ;;
@@ -1525,8 +1543,7 @@ async fn a_run_stopped_on_an_interruption_is_waiting_on_the_human() {
     let set = fixture.ask(PROPOSING).await;
     assert!(fixture.row().await.waiting, "a Set nobody has answered");
 
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     // Which the implementation session then fails, and the run stops.
     let stopped = fixture.stopped().await;
@@ -1598,15 +1615,21 @@ async fn a_capture_survives_the_server_restarting() {
     assert_eq!(read_back.text, said);
 }
 
-/// The inline direction end to end: the grilling writes a handoff where the
-/// skill says, the human accepts its proposal, and choosing *implement inline*
-/// runs a fresh session under the *other* Profile — primed with the handoff, and
+/// The inline direction end to end: the human picks it on the closing Set, the
+/// grilling session writes a handoff where the skill says and goes quiet, and
+/// that handoff plus quiet is what ends the grilling — after which a fresh
+/// session under the *other* Profile builds the work, primed with the handoff and
 /// committing without anything to wait on.
 ///
 /// One stub for both sessions, telling them apart by the model it was run on,
 /// because that is the fact under all of it: the two run as different accounts,
 /// which is why the grilling cannot simply carry on and why the handoff has to
 /// exist at all.
+///
+/// The stub writes its handoff as it starts rather than when the Response lands,
+/// for the reason the task-list and roadmap stubs commit their artifacts early: a
+/// stub cannot idle on a blocking ask, and a document already written is watched
+/// for exactly as one written a minute later is.
 #[tokio::test]
 async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     let fixture = grilling(
@@ -1645,23 +1668,21 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    let view = fixture.view().await;
-    assert_eq!(view.state, Lifecycle::Direction);
-    assert!(
-        handoff(&view).is_some_and(|handoff| handoff.html.contains("in-process counter")),
-        "the handoff is taken onto the Timeline as the proposal is accepted",
-    );
-    assert!(
-        outputs(&view).iter().all(|output| !output.running),
-        "the grilling ended with its proposal: it has its Response and nothing left to do",
-    );
+    // The handoff plus quiet is what ends the grilling, and the document goes on
+    // the Timeline at that moment — the one moment it is certainly finished.
+    let handed = fixture
+        .until(|view| handoff(view).map(|handoff| handoff.html.clone()))
+        .await;
 
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert!(
+        handed.contains("in-process counter"),
+        "the handoff arrives rendered, like every other piece of agent markdown: {handed}",
+    );
 
     // The second session, which is a different Event: the first is the grilling,
-    // and it ended when its proposal was accepted.
+    // and it ended when its handoff landed.
     let implementing = fixture
         .until(|view| {
             outputs(view)
@@ -1707,6 +1728,313 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 }
 
+/// And an inline grilling that goes quiet without writing one: the run stops at
+/// an Interruption, the way every other step that never landed does.
+///
+/// The handoff is what the session that builds is primed with, so a session that
+/// ended without one has left the work half handed over — and nothing here
+/// guesses at whether that was a crash, an agent that stopped short, or one that
+/// decided it had nothing to say. The human is asked.
+///
+/// What a retry runs then is the implementation itself, on the Brief and
+/// whatever they wrote alongside. There is nobody left holding the grilling to
+/// write a handoff a second time: that context is exactly what has gone.
+#[tokio::test]
+async fn an_inline_grilling_that_writes_no_handoff_stops_at_an_interruption() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf 'I have nothing more to add\n'
+            exit 0
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            printf 'a limiter\n' > limiter.md
+            git add limiter.md
+            git commit --quiet -m 'feat: rate limiting'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The grilling stops where it is, with the pick answered and nothing written
+    // in its directory.
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "writing the handoff for the session that builds",
+        "which step failed: the inline tail is the handoff, and it did not land",
+    );
+    assert_eq!(
+        stopped.how, "the session ended without finishing the step",
+        "and an agent that stops short exits zero, so nothing but this could say it",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(handoff(&view), None, "there is none to have been taken");
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and nothing moved: the artifact is what moves a Conversation",
+    );
+    assert_eq!(
+        outputs(&view)
+            .into_iter()
+            .filter(|output| output.id != grilled)
+            .count(),
+        0,
+        "with nothing launched behind it",
+    );
+
+    assert_eq!(
+        fixture
+            .settle(stopped.id, "Retry", "build it without the handoff")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let retried = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(retried).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5")
+            && said.contains("~/.claude/skills/implementing/SKILL.md"),
+        "the retry is the work itself, under the Profile that builds: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF) && !said.contains("What the grilling settled"),
+        "primed with the Brief alone, there being no handoff to fold in: {said:?}"
+    );
+    assert!(
+        said.contains("build it without the handoff"),
+        "and with what the human wrote beside the retry: {said:?}"
+    );
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .await;
+}
+
+/// A grilling picked on twice: the later pick is the one watched for, and the
+/// artifact the earlier one asked for moves nothing.
+///
+/// Which is the whole of *the pick informs, the artifact moves*. A pick lets the
+/// session proceed and never makes it, so between one and the artifact the
+/// session may come back with another Set instead — and where that Set carries a
+/// proposal of its own, a pick on it supersedes. Exactly one watcher is live from
+/// that moment, and it is watching for what the human last asked for.
+///
+/// The stub writes the superseded artifact anyway, which is what makes this prove
+/// anything: a handoff appearing on a Conversation whose pick has moved on is a
+/// document nobody asked for, and nothing may act on it.
+#[tokio::test]
+async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/handoff-now ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            while [ ! -f /tmp/verkstead/backlog-now ]; do sleep 0.1; done
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-counter.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    // The first proposal, picked inline: from here the handoff is what this
+    // Conversation is waiting on.
+    let first = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(first, "inline").await, Submitted::Accepted);
+
+    // The session judged that something was still open and came back with
+    // another proposal rather than writing anything, and this time they picked
+    // the other way.
+    let second = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(second, "task-list").await, Submitted::Accepted);
+
+    assert_eq!(
+        fixture.view().await.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "the latest pick is the one in force",
+    );
+
+    // Now the artifact the superseded pick asked for. The watcher that would have
+    // taken it was cancelled when the second pick armed its own.
+    std::fs::write(handoff_directory(&fixture).join("handoff-now"), "").unwrap();
+
+    // Written and sitting there, which is what makes the rest of this a test: a
+    // handoff nothing takes has to be one there was something to take.
+    let written = handoff_directory(&fixture).join("handoff.md");
+    let deadline = Instant::now() + PATIENCE;
+    while !written.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "the stub never wrote the handoff the superseded pick asked for",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls than the handoff watcher would have needed:
+    // it wakes every 100ms and ends a session on 300ms of quiet.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        handoff(&view),
+        None,
+        "nothing took it: the pick that asked for one has been superseded",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "so nothing moved, and the grilling is still what is happening",
+    );
+    assert_eq!(
+        outputs(&view)
+            .into_iter()
+            .filter(|output| output.id != grilled)
+            .count(),
+        0,
+        "with nothing launched behind it",
+    );
+
+    // And the artifact the pick in force asked for, which is what does move it.
+    std::fs::write(handoff_directory(&fixture).join("backlog-now"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .await;
+
+    let worked = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(worked).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5")
+            && said.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the backlog is being worked, which is where a task-list pick leads: {said:?}"
+    );
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "and the handoff was never taken, on a direction that needs none",
+    );
+}
+
+/// A server restarted between the pick and the artifact.
+///
+/// The pick is a row and survives; the grilling session that would have written
+/// the artifact was a process and did not. So the watcher is armed again from the
+/// stored latest pick, finds nothing to arm it on, and stops the run where it is
+/// — naming the tail the Conversation was waiting on, so the human can retry it
+/// into a fresh session or take it over.
+///
+/// A second server over the same database, which is what a restart is here: what
+/// a pick armed lives in the process that armed it.
+#[tokio::test]
+async fn a_restarted_server_stops_the_tail_it_can_no_longer_watch() {
+    let fixture = grilling(
+        r#"
+        printf 'the grilling is running\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    assert!(
+        interruptions(&fixture.view().await).is_empty(),
+        "the first server is watching it happily, which is what makes this prove \
+         anything",
+    );
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "breaking the work down into a backlog",
+        "the tail it was waiting on is named as the pick asked for it",
+    );
+    assert_eq!(
+        stopped.how, "the session that was writing it is gone",
+        "and the reason is the restart, in words",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "nothing moved: no artifact landed, and a stopped run moves nothing either",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what an Interruption is for",
+    );
+    assert_eq!(
+        stopped.settled, None,
+        "and it is open, which is what draws them the three remedies: {stopped:?}",
+    );
+}
+
 /// A sandbox that will not start says why where somebody is looking.
 ///
 /// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing
@@ -1725,6 +2053,8 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
             sleep 300
@@ -1737,28 +2067,22 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     )
     .await;
 
+    // The grilling holds off writing its handoff until the test says so, because
+    // the handoff is what ends it: the bind has to be gone before the session
+    // that wants it is launched, and that session follows the grilling ending.
     let grilled = fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    fixture
-        .until(|view| {
-            outputs(view)
-                .iter()
-                .all(|output| !output.running)
-                .then_some(())
-        })
-        .await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     // The bind the server admitted at startup, gone by the time the next session
-    // wants it. Taken away only once the grilling has ended, because a directory
-    // bound into a sandbox that is still up is one the host cannot remove.
+    // wants it.
     let missing = fixture.spill.path().to_owned();
     std::fs::remove_dir_all(&missing).unwrap();
 
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
 
     let refused = fixture
         .until(|view| {
@@ -1788,32 +2112,40 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     );
 }
 
-/// The task-list direction end to end: the same Profile and the same worktree as
-/// inline, inside Verkstead's fork of to-tasks instead — which writes a real
-/// `.tasks/` backlog and commits it to the branch.
+/// The task-list direction end to end: the grilling session reads on into the
+/// bundled fork of to-tasks and commits a real `.tasks/` backlog to the branch,
+/// without anything else being launched.
+///
+/// The stub writes its backlog as it starts rather than when the Response lands,
+/// because a stub cannot idle on a blocking ask — nothing in these fixtures dials
+/// the router. That costs the test nothing: what Verkstead does with a task-list
+/// pick is launch nothing and start watching, and a backlog already committed is
+/// watched for exactly as one committed a minute later is.
 ///
 /// Repo files stay the source of truth, so what this asks of the far end is what
 /// git says: the backlog is in the worktree and it is committed. Verkstead runs
 /// the workflow that writes it and owns none of it.
 #[tokio::test]
-async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
+async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
     let fixture = grilling(
         r#"
         case "$1" in
         claude-grilling-5)
-            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
             printf 'model=%s\n' "$1"
-            printf 'prompt=%s\n' "$2"
             grep '^name:' "$HOME/.claude/skills/breaking-down/SKILL.md"
+            printf '# A document nobody asked for\n' > /tmp/verkstead/handoff.md
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-counter.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            sleep 300
             ;;
         esac
         "#,
@@ -1834,48 +2166,25 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
-
-    let breaking_down = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id != grilling_output && !output.running)
-                .map(|output| output.id)
-        })
+    // The plan commit plus quiet is what ends the grilling, and the move that
+    // follows it is what says the work is being built.
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
         .await;
 
-    let said = fixture.capture(breaking_down).await.replace("\r\n", "\n");
+    let said = fixture.capture(grilling_output).await.replace("\r\n", "\n");
 
     assert!(
-        said.contains("model=claude-implementation-5"),
-        "the breakdown runs under the implementation Profile, as the work it plans does: {said:?}"
-    );
-    assert!(
-        said.contains("~/.claude/skills/breaking-down/SKILL.md"),
-        "and inside the bundled fork of to-tasks: {said:?}"
+        said.contains("model=claude-grilling-5"),
+        "the backlog is written by the session that settled it, under the grilling \
+         Profile it has been running as all along: {said:?}"
     );
     assert!(
         said.contains("name: breaking-down"),
-        "which is really there to be read: installed under the State Directory and \
-         bound into the sandbox exactly as grilling's is: {said:?}"
-    );
-    assert!(
-        !said.contains("~/.claude/skills/implementing/SKILL.md"),
-        "which is the other direction, and not this one: {said:?}"
-    );
-    assert!(
-        said.contains("A counter per key.") && said.contains(BRIEF),
-        "primed with both documents, exactly as an inline session is: {said:?}"
-    );
-
-    assert_eq!(
-        fixture.view().await.state,
-        Lifecycle::Implementing,
-        "writing the backlog is the work starting rather than a step in front of it",
+        "reading on into the bundled fork of to-tasks, which is really there to be \
+         read from a grilling sandbox: {said:?}"
     );
 
     assert!(
@@ -1897,11 +2206,53 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
         fixture.view().await.branch,
         "on the branch the Conversation already made — the fork creates none",
     );
+
+    // What follows the backlog is the task run, under the Profile that builds:
+    // no second planning session anywhere on the Timeline.
+    let worked = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilling_output && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let next = fixture.capture(worked).await.replace("\r\n", "\n");
+
+    assert!(
+        next.contains("model=claude-implementation-5"),
+        "the task run is the implementation Profile's, as the work it does is: {next:?}"
+    );
+    assert!(
+        next.contains("~/.claude/skills/next-task/SKILL.md")
+            && !next.contains("~/.claude/skills/breaking-down/SKILL.md"),
+        "and it is the first task rather than a second breakdown: {next:?}"
+    );
+
+    // And no handoff anywhere in it. The backlog is what the grilling settled,
+    // committed to the branch, so a document beside it would be a second record
+    // of the plan that nothing downstream reads — which is why the stub wrote one
+    // and nothing went looking for it.
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "nothing was taken onto the Timeline",
+    );
+    assert!(
+        !next.contains("What the grilling settled"),
+        "and nothing was folded into the task session's prompt: {next:?}"
+    );
 }
 
-/// The roadmap direction end to end: the same Profile and the same worktree
-/// again, inside Verkstead's fork of to-roadmap this time — which writes a real
-/// `docs/roadmaps/<name>/` and commits it to the branch.
+/// The roadmap direction end to end: the grilling session reads on into the
+/// bundled fork of to-roadmap and commits a real `docs/roadmaps/<name>/` to the
+/// branch, without anything else being launched.
+///
+/// The stub writes its roadmap as it starts rather than when the Response lands,
+/// for the reason the task-list one does: a stub cannot idle on a blocking ask,
+/// and a roadmap already committed is watched for exactly as one committed a
+/// minute later is.
 ///
 /// Repo files stay the source of truth here too, so what this asks of the far
 /// end is what git says, and what it asks of Verkstead is the reading it draws
@@ -1913,25 +2264,26 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
 /// does. So what ends it is Verkstead's own done-signal — a roadmap on the
 /// branch that was not there before, committed, and then quiet.
 #[tokio::test]
-async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
+async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
     let fixture = grilling(
         r#"
         case "$1" in
         claude-grilling-5)
-            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
             printf 'model=%s\n' "$1"
-            printf 'prompt=%s\n' "$2"
             grep '^name:' "$HOME/.claude/skills/staging/SKILL.md"
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             mkdir -p docs/roadmaps/rate-limiting
             printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
             printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
             printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
             git add docs
             git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+            printf 'the roadmap is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
             sleep 300
             ;;
         esac
@@ -1953,49 +2305,11 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.view().await.state, Lifecycle::Direction);
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
 
-    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
-
-    let staging = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id != grilling_output && output.lines > 0)
-                .map(|output| output.id)
-        })
-        .await;
-
-    let said = fixture.capture(staging).await.replace("\r\n", "\n");
-
-    assert!(
-        said.contains("model=claude-implementation-5"),
-        "the staging runs under the implementation Profile, as the work it plans does: {said:?}"
-    );
-    assert!(
-        said.contains("~/.claude/skills/staging/SKILL.md"),
-        "and inside the bundled fork of to-roadmap: {said:?}"
-    );
-    assert!(
-        said.contains("name: staging"),
-        "which is really there to be read: installed under the State Directory and \
-         bound into the sandbox exactly as grilling's is: {said:?}"
-    );
-    assert!(
-        !said.contains("~/.claude/skills/breaking-down/SKILL.md")
-            && !said.contains("~/.claude/skills/implementing/SKILL.md"),
-        "which are the other two directions, and not this one: {said:?}"
-    );
-    assert!(
-        said.contains("A counter per key.") && said.contains(BRIEF),
-        "primed with both documents, exactly as the other two are: {said:?}"
-    );
-
-    // Writing the roadmap is the work starting rather than a step in front of
-    // it, and a roadmap is work like any other work: the fork carries the branch
-    // to a pull request the same way a finished backlog does, and the
-    // Conversation moves on to wrapping that up.
+    // A roadmap is work like any other work: the same session carries the branch
+    // to a pull request the way a finished backlog does, and the Conversation
+    // moves on to wrapping that up.
     let opened = fixture
         .until(|view| {
             (view.state == Lifecycle::Wrapping)
@@ -2005,6 +2319,38 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
         .await;
 
     assert_eq!(opened.number, 41);
+
+    let said = fixture.capture(grilling_output).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-grilling-5"),
+        "the roadmap is written by the session that settled it, under the grilling \
+         Profile it has been running as all along: {said:?}"
+    );
+    assert!(
+        said.contains("name: staging"),
+        "reading on into the bundled fork of to-roadmap, which is really there to be \
+         read from a grilling sandbox: {said:?}"
+    );
+
+    assert_eq!(
+        outputs(&fixture.view().await)
+            .into_iter()
+            .filter(|output| output.id != grilling_output && output.lines > 0)
+            .count(),
+        0,
+        "and nothing else was launched: the staging is the grilling carrying on",
+    );
+
+    // And no handoff anywhere in it either. A roadmap Conversation crosses into
+    // no fresh context that has to be told what was settled — the stage briefs
+    // say it, in the repository, and each Stage has a grilling of its own — so
+    // the document the stub wrote is one nothing goes looking for.
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "nothing was taken onto the Timeline",
+    );
 
     assert_eq!(
         fixture
@@ -2017,13 +2363,9 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Direction,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-        ],
-        "through Implementing on the way, because writing the roadmap is the work",
+        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        "with no Implementing on the way: on a roadmap the building belongs to the \
+         Stages, and this Conversation's own work is the planning",
     );
 
     assert!(
@@ -2094,7 +2436,15 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
+            printf 'breaking down\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
             sleep 300
             ;;
         *)
@@ -2104,32 +2454,20 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
                 exit 0
                 ;;
             esac
-            if [ ! -d .tasks ]; then
-                printf 'breaking down\n'
-                mkdir -p .tasks
-                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
-                printf '# 01. Count the requests\n' > .tasks/01-count.md
-                printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
-                git add .tasks
-                git commit --quiet -m 'chore: plan rate-limiting tasks'
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                printf 'working %s\n' "$next"
+                printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
+                number=${next%%-*}
+                printf 'a limiter\n' >> limiter.md
+                rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+                git add -A
+                git commit --quiet -m "feat: $next"
             else
-                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-                if [ -n "$next" ]; then
-                    printf 'working %s\n' "$next"
-                    printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
-                    number=${next%%-*}
-                    printf 'a limiter\n' >> limiter.md
-                    rm ".tasks/$next"
-                    sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
-                    git add -A
-                    git commit --quiet -m "feat: $next"
-                else
-                    printf 'finishing\n'
-                    git rm --quiet .tasks/TODO.md
-                    git commit --quiet -m 'chore: finish rate-limiting'
-                fi
+                printf 'finishing\n'
+                git rm --quiet .tasks/TODO.md
+                git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
             ;;
@@ -2152,8 +2490,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // The breakdown lands, and the runner is watching it: nothing here presses
     // anything again.
@@ -2185,7 +2522,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     fixture
         .until(|view| {
             let sessions = outputs(view);
-            (sessions.len() == 6 && sessions.iter().all(|output| !output.running)).then_some(())
+            (sessions.len() == 5 && sessions.iter().all(|output| !output.running)).then_some(())
         })
         .await;
 
@@ -2193,9 +2530,9 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
 
     assert_eq!(
         outputs(&view).len(),
-        6,
-        "one Event per session: the grilling, the breakdown, a task each, the finish, \
-         and the review of the pull request it opened",
+        5,
+        "one Event per session: the grilling, which broke the work down itself, a task \
+         each, the finish, and the review of the pull request it opened",
     );
     assert!(
         outputs(&view).iter().all(|output| !output.running),
@@ -2227,7 +2564,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
-        6,
+        5,
         "an empty backlog leaves the runner idle rather than launching sessions at nothing",
     );
 }
@@ -2240,27 +2577,27 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
     let fixture = grilling(
         r#"
         case "$1" in
-        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+        claude-grilling-5)
+            printf 'grilling\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01\n' > .tasks/01-count.md
+            printf '# 02\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            sleep 300
+            ;;
         *)
-            if [ ! -d .tasks ]; then
-                mkdir -p .tasks
-                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
-                printf '# 01\n' > .tasks/01-count.md
-                printf '# 02\n' > .tasks/02-refuse.md
-                git add .tasks
-                git commit --quiet -m 'chore: plan rate-limiting tasks'
-            else
-                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-                if [ -n "$next" ]; then
-                    rm ".tasks/$next"
-                    git add -A
-                    git commit --quiet -m "feat: $next"
-                    # Only the first task, so the list is caught half worked
-                    # through rather than empty.
-                    sleep 300
-                fi
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                rm ".tasks/$next"
+                git add -A
+                git commit --quiet -m "feat: $next"
+                # Only the first task, so the list is caught half worked
+                # through rather than empty.
+                sleep 300
             fi
             printf 'stopping\n'
             sleep 300
@@ -2275,8 +2612,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // The backlog as the breakdown wrote it: nothing done yet.
     let written = fixture
@@ -2326,7 +2662,16 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// which is the half under test.
 const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
-claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
 *)
     case "$2" in
     *reviewing/SKILL.md*)
@@ -2334,42 +2679,32 @@ claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
         exit 0
         ;;
     esac
-    if [ ! -d .tasks ]; then
-        mkdir -p .tasks
-        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-        printf '# 01\n' > .tasks/01-count.md
-        git add .tasks
-        git commit --quiet -m 'chore: plan rate-limiting tasks'
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: count the requests"
     else
-        next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-        if [ -n "$next" ]; then
-            printf 'a limiter\n' >> limiter.md
-            rm ".tasks/$next"
-            git add -A
-            git commit --quiet -m "feat: count the requests"
-        else
-            git rm --quiet .tasks/TODO.md
-            git commit --quiet -m 'chore: finish rate-limiting'
-            printf 'pushed, and the pull request is open\n'
-        fi
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
     ;;
 esac
 "#;
 
-/// Take a Conversation from the direction chooser to a worked-through backlog,
-/// with nothing pressed on the way: the whole point of the run is that nobody is
-/// asked anything between the direction and the pull request.
+/// Take a Conversation from the pick on its closing Set to a worked-through
+/// backlog, with nothing pressed on the way: the whole point of the run is that
+/// nobody is asked anything between the direction and the pull request.
 async fn worked_to_empty(fixture: &Grilling) {
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     fixture
         .until(|view| {
@@ -3597,15 +3932,19 @@ async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() 
 
 /// A breakdown asks its quiz the way every session asks anything: an ordinary
 /// Set, with the session idling until the Answers come back. Nothing about it
-/// ends or redirects the Conversation — the direction was settled before this
-/// session started.
+/// ends or redirects the Conversation — the direction is settled, and what moves
+/// the Conversation is the plan commit rather than any Answer.
+///
+/// Which matters more now that the quiz comes from the grilling session itself:
+/// the approval round still gates the commit, and the Conversation stays grilling
+/// across it.
 #[tokio::test]
 async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
     let fixture = grilling(
         r#"
         case "$1" in
-        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
-        *) printf 'breaking down\n'; sleep 300 ;;
+        claude-grilling-5) printf 'breaking down\n'; sleep 300 ;;
+        *) printf 'this session never gets to run\n'; sleep 300 ;;
         esac
         "#,
     )
@@ -3616,8 +3955,7 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let quiz = fixture.ask(BREAKDOWN_QUIZ).await;
 
@@ -3629,17 +3967,24 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
         "the proposal and the quiz, both on the Timeline they were asked from",
     );
     assert_eq!(
-        view.proposal.map(|proposal| proposal.direction),
-        Some(verkstead_schema::Direction::Inline),
-        "an ordinary Set carries no proposal, so the accepted one still stands",
+        view.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "an ordinary Set carries no proposal, so the pick that was made still stands",
     );
 
     assert_eq!(fixture.answer(quiz).await, Submitted::Accepted);
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Implementing,
-        "answering a breakdown question moves nothing: the direction is settled",
+        Lifecycle::Grilling,
+        "answering a breakdown question moves nothing: the direction is settled, and \
+         nothing has been committed yet",
+    );
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        1,
+        "and nothing was launched: the session writing the backlog is the one that \
+         proposed",
     );
 }
 
@@ -3866,8 +4211,7 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
     );
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -3930,13 +4274,14 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
 async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
     let fixture = grilling(
         r#"
+        model=$1
         name=
         while [ $# -gt 0 ]; do
             if [ "$1" = --session-id ]; then name=$2; fi
             shift
         done
 
-        case "$1" in
+        case "$model" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
@@ -3960,8 +4305,7 @@ async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -4015,8 +4359,7 @@ async fn retrying_runs_the_step_again_in_a_session_told_what_the_human_wrote() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
     let before = outputs(&fixture.view().await).len();
@@ -4119,8 +4462,7 @@ async fn taking_over_and_aborting_both_leave_the_repo_as_the_session_left_it() {
         let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
 
         let set = fixture.ask(PROPOSING).await;
-        assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-        assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+        assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
         let stopped = fixture.stopped().await;
         let sessions = outputs(&fixture.view().await).len();
@@ -4172,6 +4514,7 @@ async fn a_remedy_pressed_twice_is_the_first_choice_arriving_again() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'grilling\n'
             sleep 300
             ;;
@@ -4188,8 +4531,7 @@ async fn a_remedy_pressed_twice_is_the_first_choice_arriving_again() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -4229,15 +4571,6 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
-            if [ -f .tasks/TODO.md ]; then
-                printf 'this task is beyond me\n'
-                exit 1
-            fi
-
             mkdir -p .tasks
             printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-count.md
@@ -4245,6 +4578,10 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
             git commit --quiet -m 'chore: plan the rate limiter'
             printf 'the backlog is written\n'
             sleep 300
+            ;;
+        *)
+            printf 'this task is beyond me\n'
+            exit 1
             ;;
         esac
         "#,
@@ -4258,8 +4595,7 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
     let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
 
@@ -4331,8 +4667,7 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // Once the breakdown session is up, so there is a run to abort mid-step.
     fixture
@@ -4365,8 +4700,17 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
 }
 
 /// A roadmap Conversation that stages, wraps up and settles — with a stub that
-/// tells the four sessions apart by the skill their prompts name, which is the
-/// fact under them: all of them run under the one implementation Profile.
+/// tells the sessions apart by the skill their prompts name, which is the fact
+/// under them: every one after the grilling runs under the one implementation
+/// Profile.
+///
+/// The grilling session is the one that stages, because that is what a roadmap
+/// pick does now: it reads on into the staging skill and carries the branch to a
+/// pull request without leaving the context that settled the work. It writes the
+/// roadmap as it starts rather than when the Response lands, because a stub
+/// cannot idle on a blocking ask — nothing in these fixtures dials the router —
+/// and a roadmap already committed is watched for exactly as one committed a
+/// minute later is.
 ///
 /// `workflow` is what the branch records about how this repository's own work
 /// goes for review, written beside the roadmap by the session that stages it.
@@ -4379,9 +4723,6 @@ case "$2" in
 *grilling/SKILL.md*)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
     printf 'the handoff is written\n'
-    sleep 300
-    ;;
-*staging/SKILL.md*)
     mkdir -p docs/roadmaps/rate-limiting docs/agents
 {workflow}
     printf '# Rate limiting roadmap\n\n## Stages\n\n{stages}' > docs/roadmaps/rate-limiting/ROADMAP.md
@@ -4438,8 +4779,7 @@ async fn staged_and_settled(fixture: &Grilling) {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("roadmap").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
 
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
@@ -5375,8 +5715,7 @@ async fn a_driver_waits_for_a_manual_session_rather_than_ending_it() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     let stopped = fixture.stopped().await;
     fixture.quiet().await;
@@ -5947,8 +6286,7 @@ async fn retrying_a_stalled_inline_run_starts_a_fresh_session_told_what_the_huma
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     // The session committed its work and exited, so nothing was left to ask the
     // human about — and nothing was left driving the Conversation either, which
@@ -6037,20 +6375,16 @@ async fn retrying_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
         r#"
         case "$1" in
         claude-grilling-5)
-            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
             sleep 300
             ;;
         *)
-            if [ ! -f .tasks/TODO.md ]; then
-                mkdir -p .tasks
-                printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
-                printf '# 01. Count the requests\n' > .tasks/01-count.md
-                git add .tasks
-                git commit --quiet -m 'chore: plan the rate limiter'
-                printf 'the backlog is written\n'
-                sleep 300
-            elif [ ! -f TRIED ]; then
+            if [ ! -f TRIED ]; then
                 printf 'once\n' > TRIED
                 printf 'this task is beyond me\n'
                 exit 1
@@ -6069,8 +6403,7 @@ async fn retrying_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("task-list").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     let died = fixture.stopped().await;
 
@@ -6165,6 +6498,7 @@ async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
         *)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
+            sleep 300
             ;;
         esac
         "#,
@@ -6177,8 +6511,7 @@ async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
         .await;
 
     let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
-    assert_eq!(fixture.direct("inline").await, DirectionChosen::Chosen);
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
     fixture
         .until(|view| (commits(view).len() == 1).then_some(()))

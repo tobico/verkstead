@@ -48,16 +48,18 @@ pub struct PullRequest {
 /// What became of recording one.
 ///
 /// The mirror of [`super::Implementing`] one state along, and refused for the
-/// same kind of reason: a Conversation that is not implementing has no finish
-/// step behind it, so there is nothing here for a PR to be the end of.
+/// same kind of reason: a Conversation that is neither implementing nor grilling
+/// has nothing behind it that opens a pull request, so there is nothing here for
+/// a PR to be the end of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Wrapping {
     /// Recorded: the PR, the state, and both Events on the Timeline.
     Started,
 
-    /// It is not implementing, so this is not a Conversation with work to wrap
-    /// up — it was aborted out from under the run, or it is wrapping already.
-    NotImplementing,
+    /// It is neither implementing nor grilling, so this is not a Conversation
+    /// with work to wrap up — it was aborted out from under the run, or it is
+    /// wrapping already.
+    NothingToWrap,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -87,17 +89,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-/// Record the pull request the finish step opened, and move the Conversation
+/// Record the pull request the work was carried to, and move the Conversation
 /// into Wrapping.
+///
+/// Two states get here, because two kinds of work open a pull request. A backlog
+/// worked to empty is Implementing, and its finish step opened one. A roadmap is
+/// still Grilling — the session that settled the work wrote the roadmap and
+/// carried the branch on without ever leaving the grilling — so Wrapping is the
+/// rung straight after it, and Implementing never happens on a Conversation whose
+/// building is its Stages'.
 ///
 /// One transaction, as every move is — and this one carries more than a move:
 /// the PR Event, the row it hangs off, the state, and the move itself. What the
 /// Timeline must never hold is one of them without the others.
 ///
 /// The state is read inside the transaction so that the answer still holds when
-/// the insert acts on it. That is what makes a second attempt at the same finish
-/// safe: the first made the move, and the second finds a Conversation that is
-/// not implementing any more.
+/// the insert acts on it. That is what makes a second attempt at the same ending
+/// safe: the first made the move, and the second finds a Conversation that has
+/// nothing left to wrap.
 pub async fn record_pull_request(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -115,8 +124,11 @@ pub async fn record_pull_request(
         return Ok(Wrapping::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? != Lifecycle::Implementing {
-        return Ok(Wrapping::NotImplementing);
+    if !matches!(
+        Lifecycle::read(&state)?,
+        Lifecycle::Implementing | Lifecycle::Grilling
+    ) {
+        return Ok(Wrapping::NothingToWrap);
     }
 
     let (event_id,): (i64,) = sqlx::query_as(

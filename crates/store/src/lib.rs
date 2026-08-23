@@ -40,12 +40,12 @@ mod wrap_up;
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Aborting, Chosen, Conversation, ConversationRow, Directed, Directing, Edited, Event, Grilling,
+    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
     Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting,
-    ask, asked_from, choose_direction, conversations, load_conversation, move_to_direction, note,
-    record_handoff, record_manual_task, rename_branch, review_asked, save_brief, set_asked_from,
-    set_base_commit, set_grilling_profile, set_implementation_profile, set_state, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
+    ask, asked_from, conversations, load_conversation, note, pick_direction, record_handoff,
+    record_manual_task, rename_branch, review_asked, save_brief, set_asked_from, set_base_commit,
+    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
 pub use interruptions::{
@@ -200,8 +200,7 @@ pub struct Fixing {
 /// What became of a wrap-up proposal the human has just answered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Proposed {
-    /// The human did not pick the Option that means go ahead, so the grilling
-    /// carries on.
+    /// The human picked no direction, so the grilling carries on.
     ///
     /// Nothing is recorded and nothing is wrong: this is how a human disagrees.
     /// The session that proposed is still holding the thread and has their
@@ -209,12 +208,22 @@ pub enum Proposed {
     /// again — is the agent's own to decide.
     SentBack,
 
-    /// Accepted, and this is what became of moving the Conversation on.
+    /// Accepted: the human picked a direction, and this is what became of
+    /// moving the Conversation on.
     ///
-    /// [`Directing::NotGrilling`] is not a failure here either: a grilling that
-    /// put two proposals has the first acceptance move the Conversation, and the
-    /// second finds the move already made.
-    Accepted(Directing),
+    /// The pick travels with it because it is the whole of what the server does
+    /// next — the direction is already settled, so nobody has to be asked a
+    /// second time.
+    ///
+    /// Accepted is not the same as moved, and no pick moves anything:
+    /// [`Directing::Writing`] is the grilling session carrying on to write the
+    /// picked Direction's artifact, which is what moves the Conversation when it
+    /// lands. [`Directing::NotGrilling`] is not a failure either — it is a pick
+    /// answered after the grilling it was put from had already ended.
+    Accepted {
+        direction: verkstead_schema::Direction,
+        directing: Directing,
+    },
 }
 
 /// What became of a submitted Response.
@@ -245,11 +254,12 @@ pub enum Submission {
 /// browser or from `curl`, so a wait ends the same way either way — and so an
 /// archived Set is refused the same way either way.
 ///
-/// It is also where a grilling ends. A Set carrying a `proposal` is the grilling
-/// agent's closing move, and answering one moves its Conversation out of Grilling
-/// and into Direction — here, rather than in either endpoint, for the reason
-/// everything else about answering is here: the browser and `curl` must not be
-/// able to leave a Conversation in different states for the same Answer.
+/// It is also where a direction is settled. A Set carrying a `proposal` is the
+/// grilling agent's closing move, and a Response that picks a direction on one
+/// records the pick and moves whatever the pick moves — here, rather than in
+/// either endpoint, for the reason everything else about answering is here: the
+/// browser and `curl` must not be able to leave a Conversation in different
+/// states for the same Answer.
 pub async fn submit_response(
     pool: &SqlitePool,
     settlements: &Settlements,
@@ -276,14 +286,18 @@ pub async fn submit_response(
     // After the Response is stored, and only for the Set that carries a
     // proposal. The insert is what makes a Set answered once, so a proposal is
     // settled once too: a second Response to the same Set never gets this far.
-    let proposed = match &stored.set.proposal {
-        Some(proposal) if proposal.accepted(response) => {
-            Some(Proposed::Accepted(accept_proposal(pool, set_id).await?))
-        }
-        // Answered some other way, which is how a human disagrees: the grilling
+    //
+    // The pick is the whole of accepting — see [`Response::direction`] — so
+    // there is nothing here to read off the Answers.
+    let proposed = match (&stored.set.proposal, response.direction) {
+        (Some(_), Some(direction)) => Some(Proposed::Accepted {
+            direction,
+            directing: accept_proposal(pool, set_id, direction).await?,
+        }),
+        // Answered without a pick, which is how a human disagrees: the grilling
         // carries on, and the agent has their Response.
-        Some(_) => Some(Proposed::SentBack),
-        None => None,
+        (Some(_), None) => Some(Proposed::SentBack),
+        (None, _) => None,
     };
 
     // And, on the one Set a wrap-up's review asks, the same again for what it
@@ -343,8 +357,8 @@ async fn answer_review(
     })
 }
 
-/// Move the Conversation an accepted proposal was asked from on to choosing a
-/// direction.
+/// Act on the direction picked on an accepted proposal, for the Conversation the
+/// Set was asked from.
 ///
 /// A Set is on exactly one Timeline, so which Conversation to move is read off
 /// the Set rather than passed in: the agent-facing endpoint knows which
@@ -357,12 +371,16 @@ async fn answer_review(
 /// raised because the Response is stored by the time this runs, and failing the
 /// submission now would leave a waiting agent holding a Set that has in fact been
 /// answered.
-async fn accept_proposal(pool: &SqlitePool, set_id: i64) -> Result<Directing> {
+async fn accept_proposal(
+    pool: &SqlitePool,
+    set_id: i64,
+    direction: verkstead_schema::Direction,
+) -> Result<Directing> {
     let Some(conversation_id) = asked_from(pool, set_id).await? else {
         return Ok(Directing::NoSuchConversation);
     };
 
-    move_to_direction(pool, conversation_id).await
+    pick_direction(pool, conversation_id, direction).await
 }
 
 /// What became of archiving a Set unanswered.

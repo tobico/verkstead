@@ -53,7 +53,6 @@
       }
     }
   ],
-  "proposal": null,
   "ready_to_grill": false,
   "repo": {
     "default_branch": "main",
@@ -61,49 +60,28 @@
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
-  "state": "Implementing",
+  "state": "Grilling",
   "timeline": [
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<h1>A staged roadmap</h1>\n<p>Too much for one feature, so it is cut into stages and each becomes a\nfeature of its own.</p>\n",
-        "id": 31,
+        "id": 27,
         "markdown": "# A staged roadmap\n\nToo much for one feature, so it is cut into stages and each becomes a\nfeature of its own.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 32,
+        "id": 28,
         "state": "Grilling"
-      }
-    },
-    {
-      "Moved": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "id": 33,
-        "state": "Direction"
-      }
-    },
-    {
-      "Directed": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "direction": "roadmap",
-        "id": 34
-      }
-    },
-    {
-      "Moved": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "id": 35,
-        "state": "Implementing"
       }
     },
     {
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Stage 01 of the <code>mvp</code> roadmap — <em>Workbench</em> — has started as a Conversation of its own, on <code>workbench</code>.</p>\n",
-        "id": 36
+        "id": 29
       }
     }
   ],

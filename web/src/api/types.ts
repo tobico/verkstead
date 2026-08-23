@@ -425,7 +425,7 @@ repo: string, state: Lifecycle,
 working: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
- * left open, a run stopped on an Interruption, or a Direction to choose.
+ * left open, or a run stopped on an Interruption.
  *
  * Folded from every source before it leaves, so the viewer holds no list of
  * them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -489,19 +489,12 @@ adopting: AdoptionView | null,
  */
 worktree: Worktree | null, 
 /**
- * What the grilling proposed on its way out, once it has proposed anything.
+ * The latest pick: how the human most recently said the work should be
+ * built, on a proposal Set of this Conversation's.
  *
- * Lifted out of the Timeline rather than left for the page to go looking
- * for: the chooser draws the recommendation marked and the reasoning beside
- * it, and a page that had to walk its own Timeline for the last Set carrying
- * one would be a second opinion about which proposal is in force.
- */
-proposal: ProposalView | null, 
-/**
- * How the human chose to have the work built, once they have chosen.
- *
- * `null` while the choice is still open, which is what the chooser draws
- * its buttons for.
+ * `null` until a proposal has been put to them and picked on. What the page
+ * *draws* of the choice is the answered Set on the Timeline, which is where
+ * it was made; this is the fact about the Conversation itself.
  */
 direction: Direction | null, 
 /**
@@ -561,34 +554,12 @@ pinned: Array<PinnedEvent>, };
 export type DiffView = { html: string, paths: Array<string>, };
 
 /**
- * The direction the human chose, as the page receives it.
- *
- * No rendered body, like a move: there is no markdown in a choice of one of
- * three. What the Timeline draws is a sentence of the viewer's own making.
- */
-export type DirectedEvent = { id: number, 
-/**
- * When it was chosen, RFC 3339.
- */
-at: string, direction: Direction, };
-
-/**
  * One of the three ways the work can be built.
  *
  * Named on the wire in the words the design uses for them, so a Set is
  * readable as written: `inline`, `task-list`, `roadmap`.
  */
 export type Direction = "inline" | "task-list" | "roadmap";
-
-/**
- * Which direction the human is choosing.
- */
-export type DirectionChoice = { direction: Direction, };
-
-/**
- * What became of choosing one.
- */
-export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing";
 
 /**
  * What became of starting a Conversation grilling.
@@ -666,7 +637,7 @@ settled: RemedyTaken | null, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done" | "Aborted";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Aborted";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -874,8 +845,8 @@ broken: Broken | null, };
 export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "DirOutsideWatchedPaths" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "ConfigOutsideWatchedPaths" | "NotAFile";
 
 /**
- * The grilling's closing proposal as the chooser draws it: which direction was
- * recommended, and why.
+ * The grilling's closing proposal as the Set it rides draws it: which direction
+ * was recommended, and why.
  *
  * The rationale arrives as HTML like every other piece of agent markdown on this
  * wire — the parser and the sanitizer are the server's.
@@ -1148,7 +1119,8 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
- * Set, plus an optional set-level comment.
+ * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
+ * the direction the human picked.
  *
  * The invariant is explicitness, not completeness: every Question and
  * Sub-question in the Set appears in `answers` one way or the other, so the
@@ -1164,7 +1136,23 @@ answers: Array<Answer>,
 /**
  * What the human wants to say about the Set as a whole.
  */
-comment?: string | null, };
+comment?: string | null, 
+/**
+ * How the human chose to have the work built, on the one Set that carries
+ * a [`crate::set::Proposal`].
+ *
+ * A field of its own rather than an ordinary Answer, because it answers no
+ * Question: the chooser is the viewer's, injected onto any Set carrying a
+ * proposal, and the three directions it offers are the same three every
+ * time. An Answer here would be a Question the agent never asked and would
+ * have to be excluded from every rule that counts them.
+ *
+ * Picking is the whole of accepting the proposal. Every other way of
+ * answering sends it back — an answer in the human's own words, questions
+ * left open, anything without a pick — so `None` on a proposal Set is the
+ * human disagreeing, and `None` anywhere else is every ordinary Response.
+ */
+direction?: Direction | null, };
 
 /**
  * One row of a Question Set's Timeline table: the number it answers to, what
@@ -1237,7 +1225,20 @@ diagrams: boolean,
  * so it travels with the Set rather than being fetched once the page is
  * already up.
  */
-standing: Standing, };
+standing: Standing, 
+/**
+ * The wrap-up proposal this Set carries, on the one Set that carries one.
+ *
+ * What the page draws the direction chooser from: the recommendation to
+ * mark, and the reasoning to put beside the three choices. `null` on every
+ * ordinary Set, which is what leaves the chooser off it.
+ *
+ * It travels with the Set rather than being looked up beside it for the
+ * reason the Conversation does: the decision and what it is a decision
+ * about arrive together, so the page never draws the Questions above a
+ * chooser that has not turned up yet.
+ */
+proposal: ProposalView | null, };
 
 /**
  * One stage of a roadmap: the number it answers to, what it is called, and
@@ -1360,7 +1361,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What a tool answered.

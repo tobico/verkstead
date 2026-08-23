@@ -124,6 +124,20 @@ enum Step {
     /// the same backlog. What differs is which fork wrote it.
     PlanningStage,
 
+    /// Write the handoff, which is the whole of what an inline grilling has left
+    /// to do once the human has picked: the work itself runs under the other
+    /// Profile in a session of its own, so everything this one settled has to be
+    /// written down before it ends.
+    ///
+    /// Carries the path the document is watched for, which is outside the
+    /// Worktree — Verkstead's own directory rather than the project's, so that
+    /// no `git add -A` after it can sweep the document into the human's
+    /// repository. See [`crate::handoffs`].
+    ///
+    /// Never what [`next_step`] answers, for the reason [`Step::Planning`] never
+    /// is: it is the step the runner is handed rather than one it decides.
+    Handoff(PathBuf),
+
     /// Work this task file, the lowest-numbered one left.
     Task(PathBuf),
 
@@ -155,6 +169,12 @@ enum Landing {
     /// repository often has already — a path arriving would read as landed
     /// before the session had written a line.
     Roadmap(String),
+
+    /// The handoff document, written in the Conversation's own directory outside
+    /// the Worktree. An absolute path rather than one inside it, and nothing
+    /// asked of git: what version control would say about a file the repository
+    /// has never heard of is nothing at all.
+    Handoff(PathBuf),
 }
 
 impl Step {
@@ -165,6 +185,10 @@ impl Step {
             // The plan commit is what puts the backlog under version control,
             // so the backlog being there and committed is the breakdown done.
             Step::Planning | Step::PlanningStage => Some(Landing::Arrived(todo())),
+            // And the handoff is the document itself, in a directory no commit
+            // reaches: nothing puts it under version control, so its being there
+            // is the whole of the signal.
+            Step::Handoff(path) => Some(Landing::Handoff(path.clone())),
             // Finishing a task is what deletes its file.
             Step::Task(file) => Some(Landing::Gone(file.clone())),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
@@ -189,6 +213,11 @@ impl Step {
         match self {
             Step::Planning => Some(store::Step::Planning),
             Step::PlanningStage => Some(store::Step::Stage),
+            // Recorded as the inline run it was about to prime, because that is
+            // what a retry has to launch. There is nobody left holding the
+            // grilling to write a handoff a second time — a retried tail runs
+            // fresh, on the Brief and whatever the human wrote beside the retry.
+            Step::Handoff(_) => Some(store::Step::Inline),
             Step::Task(_) => Some(store::Step::Task),
             Step::Finish => Some(store::Step::Finish),
             Step::Staging(_) => Some(store::Step::Roadmap),
@@ -205,6 +234,7 @@ impl Step {
         match self {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::PlanningStage => "planning the roadmap stage into a backlog".to_owned(),
+            Step::Handoff(_) => "writing the handoff for the session that builds".to_owned(),
             Step::Task(file) => format!("the task in {}", file.display()),
             Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
@@ -218,14 +248,121 @@ fn todo() -> PathBuf {
     Path::new(BACKLOG).join(TODO)
 }
 
+/// The tail a picked direction asks for, as the step that watches for it.
+///
+/// The same three pairings the followers below are built on — an inline pick ends
+/// on the handoff, a task list on the backlog, a roadmap on the roadmap — asked
+/// for without a session to follow. What wants them that way is the run that has
+/// *lost* its session: an Interruption has to name the step the Conversation was
+/// waiting on, and there is nobody left to read it off.
+///
+/// `None` is a Conversation whose base commit could not be read, which is the one
+/// fact of the three that has to be fetched — see [`Landing::Roadmap`] for why a
+/// roadmap is watched for against the commit the branch came off.
+async fn tail(state: &AppState, conversation_id: i64, direction: Direction) -> Option<Step> {
+    Some(match direction {
+        Direction::Inline => Step::Handoff(
+            crate::handoffs::Handoffs::under(&state.state_dir).document(conversation_id),
+        ),
+        Direction::TaskList => Step::Planning,
+        Direction::Roadmap => Step::Staging(base(state, conversation_id).await?),
+    })
+}
+
+/// Follow the grilling session as it writes what the pick asked for.
+///
+/// Nothing is launched: the session is the one that proposed, idling on the
+/// blocking ask the Response is being delivered through, and it goes on from
+/// there with the whole thread still in its context. What this is, is the watcher
+/// — the artifact landing, plus quiet, is what ends the session and moves the
+/// Conversation on.
+///
+/// The three tails differ in what the artifact is and in where landing it leaves
+/// the Conversation. A backlog is the start of a run — the tasks it names are
+/// worked one fresh session each, under the Profile that builds — so the
+/// Conversation goes on to Implementing. The handoff an inline pick asks for
+/// leaves it in the same place, one session rather than a run standing on the
+/// other side of it. A roadmap is the whole of this Conversation's own work,
+/// because the building belongs to the Stages it plans, so the same session
+/// carries the branch to a pull request and the Conversation goes straight on to
+/// wrapping that up.
+///
+/// `driving` is the registration that says this Conversation is being driven,
+/// taken by whoever armed the watcher rather than here, and held from the pick
+/// through to wherever the tail leaves the Conversation — see [`crate::drivers`]
+/// for why it is handed over rather than taken again. A watcher is the one thing
+/// that follows a grilling session, so it is also what says a grilling picked on
+/// is not standing still.
+pub(crate) async fn follow_the_tail(
+    state: AppState,
+    conversation_id: i64,
+    direction: Direction,
+    session: Session,
+    driving: Driving,
+) {
+    match direction {
+        Direction::Inline => follow_handoff(state, conversation_id, session, driving).await,
+        Direction::TaskList => follow_breakdown(state, conversation_id, session, driving).await,
+        Direction::Roadmap => follow_staging(state, conversation_id, session, driving).await,
+    }
+}
+
+/// Stop the run where a pick found nobody to write what it asked for.
+///
+/// Which is what a restart leaves behind: the pick is a row and survives, and the
+/// grilling session that would have gone on to write the artifact was a process
+/// and did not — see [`crate::conversations::resume`]. The Conversation would
+/// otherwise sit grilling for ever, watched by nothing and waiting on an artifact
+/// nobody is writing.
+///
+/// So it stops the way every other step that lost its session stops: the
+/// Interruption goes on the Timeline with the tail it was waiting on, and the
+/// human picks a remedy. Retrying runs that tail again in a fresh session — which
+/// for all three is exactly what [`retry`] already launches.
+///
+/// No session to read a last word off, so the evidence carries the other facts
+/// alone. What the session said before the restart is on the Timeline above the
+/// Interruption either way, as its own Event.
+pub(crate) async fn nobody_writing(state: &AppState, conversation_id: i64, direction: Direction) {
+    let Some(step) = tail(state, conversation_id, direction).await else {
+        return;
+    };
+
+    // Every tail is a step that runs, so every one of them is a step an
+    // Interruption can be raised about. [`Step::Nothing`] is the only one that is
+    // not, and [`tail`] never answers it.
+    let Some(stored) = step.stored() else {
+        return;
+    };
+
+    stop(
+        state,
+        conversation_id,
+        stored,
+        &step.what(),
+        "the session that was writing it is gone",
+        None,
+    )
+    .await;
+}
+
 /// Work `conversation_id`'s backlog to empty, starting from the session that is
 /// writing it.
 ///
-/// `planning` is the breakdown session the task-list direction has just
-/// launched. It is the run's first step rather than something that happened
-/// before the run: it is an ordinary interactive session and will idle once its
-/// plan is committed, so something has to see it out — and what sees a session
-/// out is exactly this.
+/// `writing` is the session that will commit the backlog: ordinarily the
+/// grilling session itself, which got the human's pick back through its blocking
+/// ask and breaks the work down without leaving the context that settled it, and
+/// on a retry a fresh session launched for the tail. Either way it is the run's
+/// first step rather than something that happened before the run — an ordinary
+/// interactive session, which will idle once its plan is committed, so something
+/// has to see it out, and what sees a session out is exactly this.
+///
+/// The plan commit is the end of the planning as well as the start of the run, so
+/// the Conversation moves as the session is seen out: grilling until then and
+/// implementing afterwards — see [`crate::conversations::grilling_over`]. No
+/// handoff is taken or written on this path: the backlog is what the grilling
+/// settled, committed to the branch, and every session that works it reads the
+/// repository rather than a summary of a conversation it never had.
 ///
 /// Returns when there is nothing left to run: the backlog worked through, a
 /// Conversation that has gone, or a step whose session ended without landing it.
@@ -235,15 +372,24 @@ fn todo() -> PathBuf {
 /// Interruption, which is where the run picks up again if they retry.
 ///
 /// `driving` is the registration that says this Conversation is being driven,
-/// taken by whoever chose the direction rather than here — see
-/// [`crate::drivers`] for why it is handed over rather than taken again.
-pub(crate) async fn follow(
+/// taken by whoever armed the watcher or pressed the retry rather than here —
+/// see [`crate::drivers`] for why it is handed over rather than taken again.
+async fn follow_breakdown(
     state: AppState,
     conversation_id: i64,
-    planning: Session,
+    writing: Session,
     driving: Driving,
 ) {
-    work(state, conversation_id, Step::Planning, planning, driving).await
+    if see_out(&state, conversation_id, Step::Planning, writing)
+        .await
+        .is_none()
+    {
+        return;
+    }
+
+    crate::conversations::grilling_over(&state, conversation_id).await;
+
+    carry_on(state, conversation_id, driving).await
 }
 
 /// Run a step again because the human asked for it, and go on working the
@@ -274,7 +420,24 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
     // now has left, which is the same answer the fork the session runs will come
     // to. Inline is not a backlog step at all and is followed on its own.
     let (step, prompt) = match step {
-        store::Step::Planning => (Step::Planning, Prompt::BreakingDown),
+        // The breakdown over again, and in a session of its own: the grilling
+        // that would have written the backlog is the session that just ended
+        // without one. So it is followed the way the grilling session was —
+        // seen out, and then the Conversation moved on to being built.
+        store::Step::Planning => {
+            tracing::info!(
+                conversation_id,
+                "a retried breakdown is starting in a fresh session"
+            );
+
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::BreakingDown, &note).await
+            else {
+                return;
+            };
+
+            return follow_breakdown(state, conversation_id, session, driving).await;
+        }
         // The same first step by the other route, and the same care about where
         // the branch stands: what it was made on top of was decided once, when
         // it was made, and is read back rather than decided again — a retry that
@@ -308,11 +471,24 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             }
             step => (step, Prompt::NextTask),
         },
-        store::Step::Inline => return inline_again(state, conversation_id, note, driving).await,
+        // Not a backlog step either, and the one whose retry may be picking the
+        // tail up a rung earlier than it failed: an inline grilling that went
+        // quiet without a handoff is recorded as this step too, because writing
+        // one again is what nobody is left to do. So the move is made here if it
+        // has not been made — a Conversation that is building the work says so —
+        // and the session runs on the Brief and the note.
+        store::Step::Inline => {
+            crate::conversations::grilling_over(&state, conversation_id).await;
+
+            return inline_again(state, conversation_id, note, driving).await;
+        }
         // Nor is this one. A roadmap Conversation has one step of its own, so a
-        // retry is that step again — unless the roadmap already landed, which is
-        // the same case a retried finish has: what failed was finding the pull
-        // request it opened, and the retry is that question asked again.
+        // retry is that step again — in a session of its own, for the reason a
+        // retried breakdown gets one: the grilling that would have written the
+        // roadmap is the session that just ended without one. Unless the roadmap
+        // already landed, which is the same case a retried finish has: what
+        // failed was finding the pull request it opened, and the retry is that
+        // question asked again.
         store::Step::Roadmap => {
             return roadmap_again(state, conversation_id, note, &working_in, driving).await;
         }
@@ -552,7 +728,7 @@ pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on
 /// `first` is the step the session it is handed is running, decided before that
 /// session was started — see [`retry`] for why that ordering is the whole of it.
 ///
-/// The registration it is handed is held for the whole loop and let go as it
+/// The registration it is handed is held for the whole run and let go as it
 /// returns, which is what makes the quiet gaps between one step's session and
 /// the next read as a Conversation being driven rather than as one standing
 /// still.
@@ -561,26 +737,39 @@ async fn work(
     conversation_id: i64,
     first: Step,
     session: Session,
-    _driving: Driving,
+    driving: Driving,
 ) {
-    let mut ran = first;
-    let mut session = session;
+    let Some(writing) = see_out(&state, conversation_id, first.clone(), session).await else {
+        return;
+    };
 
+    // The finish step is the last one a backlog has, and landing it is not the
+    // end of the run: what the finish did was push and open a pull request, and
+    // the Conversation moves on to wrapping that up. Asked here rather than
+    // afterwards, because this is the one place that knows *which* step just
+    // landed.
+    if first == Step::Finish {
+        crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        return;
+    }
+
+    carry_on(state, conversation_id, driving).await
+}
+
+/// Work whatever the backlog has left, one fresh session per step, until it is
+/// empty.
+///
+/// Where [`work`] is handed a session that is already running its step, this
+/// starts from the repository: what is next is read off `.tasks/` and a session
+/// is launched for it. Split out because the two entries into a run differ only
+/// in that first session — the breakdown's own, or the grilling session that
+/// wrote the backlog in its place.
+///
+/// The registration is held for the whole loop and let go as it returns, which
+/// is what makes the quiet gaps between one step's session and the next read as
+/// a Conversation being driven rather than as one standing still.
+async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
     loop {
-        let Some(writing) = see_out(&state, conversation_id, ran.clone(), session).await else {
-            return;
-        };
-
-        // The finish step is the last one a backlog has, and landing it is not
-        // the end of the run: what the finish did was push and open a pull
-        // request, and the Conversation moves on to wrapping that up. Asked here
-        // rather than after the loop, because this is the one place that knows
-        // *which* step just landed.
-        if ran == Step::Finish {
-            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
-            return;
-        }
-
         let Some(worktree) = worktree(&state, conversation_id).await else {
             return;
         };
@@ -611,9 +800,66 @@ async fn work(
             return;
         };
 
-        ran = step;
-        session = started;
+        let Some(writing) = see_out(&state, conversation_id, step.clone(), started).await else {
+            return;
+        };
+
+        if step == Step::Finish {
+            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+            return;
+        }
     }
+}
+
+/// Follow the grilling session as it writes the handoff, and start the session
+/// that builds from it.
+///
+/// The inline counterpart to [`follow_breakdown`], and the same move with a
+/// different artifact: the session that settled the work is the one that writes
+/// down what it settled, after the pick rather than before it, so what the human
+/// said beside the pick is part of what the handoff has to say. Nothing is
+/// launched here either — the session is already running, idling on the ask the
+/// Response came back through.
+///
+/// Then the three things the far side of an inline pick needs, in the order they
+/// have to happen in. The handoff goes on the Timeline, which is where a
+/// Conversation's documents live and the one moment this one is certainly
+/// finished. The Conversation moves, so that what says it is being built has
+/// everything the grilling left beside it. And the work starts, in a fresh
+/// session under the implementation Profile — fresh because the two run as
+/// accounts the Conversation fixed separately and a session cannot change the
+/// one it is running as, which is the whole reason the handoff exists.
+///
+/// A session that goes quiet without writing one stops at an Interruption, the
+/// way every other step does. What a retry launches then is the implementation
+/// itself: the grilling that would have written the handoff is the session that
+/// just ended without one, so a retried tail runs on the Brief and the human's
+/// note — see [`Step::stored`].
+///
+/// The registration is held across all of it — the watch, the move, and the run
+/// on the other side of it — so there is no moment between the handoff landing
+/// and the implementation session starting where the Conversation reads as one
+/// nothing is driving.
+async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
+    let handoffs = crate::handoffs::Handoffs::under(&state.state_dir);
+    let step = Step::Handoff(handoffs.document(conversation_id));
+
+    if see_out(&state, conversation_id, step, writing)
+        .await
+        .is_none()
+    {
+        return;
+    }
+
+    crate::conversations::hand_over(&state, conversation_id).await;
+    crate::conversations::grilling_over(&state, conversation_id).await;
+
+    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing, "").await
+    else {
+        return;
+    };
+
+    follow_inline(state, conversation_id, session, driving).await
 }
 
 /// See an inline implementation session out, and stop the run at an Interruption
@@ -632,7 +878,7 @@ async fn work(
 /// The registration it is handed is held until the session is over and whatever
 /// it left behind has been read, so an inline run is a driven Conversation for
 /// exactly as long as somebody is watching it.
-pub(crate) async fn follow_inline(
+async fn follow_inline(
     state: AppState,
     conversation_id: i64,
     mut session: Session,
@@ -703,9 +949,29 @@ pub(crate) async fn follow_inline(
         store::Step::Inline,
         "implementing the work inline",
         &how,
-        event_id,
+        Some(event_id),
     )
     .await;
+}
+
+/// Follow the grilling session as it stages the work into a roadmap.
+///
+/// The roadmap's counterpart to [`follow_breakdown`], and the same move: the
+/// session that settled the work writes the artifact without leaving the context
+/// that settled it, so nothing is launched here and what is followed is the
+/// session already running.
+///
+/// The commit the branch came off is read here rather than handed in, because
+/// this entry has nobody to have decided it — the pick arrives on a Response and
+/// what it arms is a watcher, not a session. Without one there is nothing that
+/// could say a roadmap in the Worktree is this branch's own, so the session is
+/// left running rather than followed.
+async fn follow_staging(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
+    let Some(base) = base(&state, conversation_id).await else {
+        return;
+    };
+
+    follow_roadmap(state, conversation_id, base, writing, driving).await
 }
 
 /// See a roadmap session out, and carry the Conversation on to wrapping the
@@ -713,18 +979,31 @@ pub(crate) async fn follow_inline(
 ///
 /// The whole of a roadmap Conversation's own work in one session — the stages it
 /// plans are Conversations of their own — so there is no next step to launch.
-/// What there is, is the same ending a backlog's last step has: the fork commits
-/// the roadmap and then follows the repository's own finish sequence, so the
-/// branch is pushed and on a pull request by the time the session goes quiet. A
+/// What there is, is the same ending a backlog's last step has: the session
+/// commits the roadmap and then follows the repository's own finish sequence, so
+/// the branch is pushed and on a pull request by the time it goes quiet. A
 /// roadmap is work like any other work and goes for review like any other work.
 ///
-/// `base` is the commit the branch came off, which is what says a roadmap on it
-/// is one this branch wrote — see [`Landing::Roadmap`].
+/// So the ladder for a roadmap Conversation is Grilling to Wrapping, with nothing
+/// in between. Implementing is where an agent is building the work, and on a
+/// roadmap the building belongs to the Stages: this Conversation's own work is
+/// the planning, which is the grilling carrying on. The move is
+/// [`crate::wrapping::opened`]'s, made as the pull request is recorded.
+///
+/// No handoff anywhere in it, and none in a task list either. A handoff is for
+/// a context boundary the work actually crosses, and a roadmap crosses none:
+/// what the grilling settled is in the stage briefs it committed, and each Stage
+/// is a Conversation with a grilling of its own.
+///
+/// `writing` is the session that will commit the roadmap: ordinarily the grilling
+/// session itself, and on a retry a fresh one launched for the tail. `base` is
+/// the commit the branch came off, which is what says a roadmap on it is one this
+/// branch wrote — see [`Landing::Roadmap`].
 ///
 /// A session that ends without writing one stops the run at an Interruption, the
 /// way every other step does, and the human's remedies mean what they always
 /// mean.
-pub(crate) async fn follow_roadmap(
+async fn follow_roadmap(
     state: AppState,
     conversation_id: i64,
     base: String,
@@ -987,6 +1266,10 @@ async fn stopped(state: &AppState, conversation_id: i64) -> bool {
 
 /// Stop the run: put what went wrong on the Timeline for the human to answer.
 ///
+/// `writing` is the Timeline Event the session that failed was printing into, and
+/// `None` where there is no session left to read one off — a restart, which kills
+/// every session it had and leaves the Conversation's row behind.
+///
 /// Nothing is refused for. By the time this runs the session is gone and the step
 /// has not landed, and an Interruption that could not be raised is a run stopped
 /// with nothing saying so — which is a thing to see in the log, and the same
@@ -997,10 +1280,10 @@ async fn stop(
     step: store::Step,
     what: &str,
     how: &str,
-    writing: i64,
+    writing: Option<i64>,
 ) {
     if let Err(error) =
-        crate::interruptions::raise(state, conversation_id, step, what, how, Some(writing)).await
+        crate::interruptions::raise(state, conversation_id, step, what, how, writing).await
     {
         tracing::error!(
             error = ?error,
@@ -1099,7 +1382,15 @@ async fn see_out(
         .badly()
         .unwrap_or_else(|| "the session ended without finishing the step".to_owned());
 
-    stop(state, conversation_id, stored, &step.what(), &how, event_id).await;
+    stop(
+        state,
+        conversation_id,
+        stored,
+        &step.what(),
+        &how,
+        Some(event_id),
+    )
+    .await;
 
     None
 }
@@ -1164,6 +1455,10 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
             return !crate::stages::touched(worktree, base).is_empty()
                 && pending(worktree, Path::new(crate::stages::ROADMAPS)) == Some(false);
         }
+        // And this one is not in the Worktree at all, so there is no commit to
+        // wait for: the document being there with something in it is the whole
+        // of it, read by exactly the rule that will take it.
+        Landing::Handoff(path) => return crate::handoffs::written(path),
     };
 
     if worktree.join(path).exists() != wanted {
@@ -1357,11 +1652,11 @@ async fn launch(
             let handoff = handoff.as_deref();
 
             let prompt = match &inside {
-                Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
+                Prompt::BreakingDown => skills::breaking_down(&brief),
                 Prompt::PlanningStage(stacked_on) => {
                     skills::next_stage(&brief, stacked_on.as_deref())
                 }
-                Prompt::Staging => skills::staging(&brief, handoff),
+                Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
@@ -1723,6 +2018,43 @@ mod tests {
             Step::Staging("d41f8a3b".to_owned()).landing(),
             Some(Landing::Roadmap("d41f8a3b".to_owned())),
         );
+        assert_eq!(
+            Step::Handoff(PathBuf::from("/srv/verkstead/handoffs/7/handoff.md")).landing(),
+            Some(Landing::Handoff(PathBuf::from(
+                "/srv/verkstead/handoffs/7/handoff.md"
+            ))),
+        );
         assert_eq!(Step::Nothing.landing(), None);
+    }
+
+    /// The handoff is the one landing with no repository in it. Nothing puts the
+    /// document under version control — it is written outside the checkout on
+    /// purpose — so what says the step is over is the document being there with
+    /// something in it, and a Worktree with everything committed says nothing
+    /// about it either way.
+    #[test]
+    fn the_handoff_lands_outside_the_worktree_entirely() {
+        let dir = worktree(&[]);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let document = elsewhere.path().join("handoff.md");
+        let landing = Landing::Handoff(document.clone());
+
+        assert!(!landed(dir.path(), &landing), "nothing is written yet");
+
+        std::fs::write(&document, "  \n").unwrap();
+        assert!(
+            !landed(dir.path(), &landing),
+            "and a document of nothing hands nothing over",
+        );
+
+        std::fs::write(&document, "# What we settled\n").unwrap();
+        assert!(landed(dir.path(), &landing));
+
+        assert_eq!(
+            git(dir.path(), &["status", "--porcelain"]),
+            Some(String::new()),
+            "with the Worktree untouched throughout: the handoff is Verkstead's \
+             document rather than the project's",
+        );
     }
 }

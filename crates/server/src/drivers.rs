@@ -22,12 +22,20 @@
 //! the process, so a server that has just come back holds no registrations at
 //! all, which is exactly the truth about it.
 //!
-//! **A grilling has no such task.** Starting one launches the session and keeps
-//! nothing that follows it, so there is nothing there to hold a registration —
-//! see [`crate::conversations::start_grilling`]. A Conversation that is
-//! Grilling is therefore driven exactly while a session is registered for it,
-//! which is why [`Drivers::driven`] is asked with the sessions register in hand
-//! rather than answering out of this one alone.
+//! **A grilling is driven by its session until it is picked on.** Starting one
+//! launches the session and keeps nothing that follows it, so until the human
+//! picks there is nothing to hold a registration — see
+//! [`crate::conversations::start_grilling`]. That is why [`Drivers::driven`] is
+//! asked with the sessions register in hand rather than answering out of this
+//! one alone.
+//!
+//! A pick changes that: what it arms is a watcher of Verkstead's own, which
+//! follows the same session to the artifact it asked for and goes on holding the
+//! Conversation through the move that follows — see
+//! [`crate::runner::follow_the_tail`]. And a retried tail is the same thing by
+//! the other door: the Conversation is still Grilling while the fresh session is
+//! launched, and the retry has registered before it starts waiting. So a
+//! grilling counts as driven by either.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -101,9 +109,9 @@ impl Drivers {
     /// why that is the cheaper way round.
     ///
     /// A state nothing is meant to be driving answers that it is fine as it
-    /// stands. Draft and Direction are waiting on the human, Done is finished
-    /// and Aborted is stopped: none of them is a Conversation standing still,
-    /// so none of them is one this question is really about.
+    /// stands. Draft is waiting on the human, Done is finished and Aborted is
+    /// stopped: none of them is a Conversation standing still, so none of them
+    /// is one this question is really about.
     pub(crate) fn driven(
         &self,
         working: &HashSet<i64>,
@@ -111,11 +119,13 @@ impl Drivers {
         state: Lifecycle,
     ) -> bool {
         match state {
-            // Nothing follows a grilling session, so the session is the whole of
-            // what is driving one — see this module's own documentation.
-            Lifecycle::Grilling => working.contains(&conversation_id),
+            // A grilling session, or the watcher a pick armed on one — see this
+            // module's own documentation for why it is both.
+            Lifecycle::Grilling => {
+                working.contains(&conversation_id) || self.registered(conversation_id)
+            }
             Lifecycle::Implementing | Lifecycle::Wrapping => self.registered(conversation_id),
-            Lifecycle::Draft | Lifecycle::Direction | Lifecycle::Done | Lifecycle::Aborted => true,
+            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => true,
         }
     }
 
@@ -313,11 +323,11 @@ mod tests {
         );
     }
 
-    /// Nothing follows a grilling session, so the session is the whole of what
-    /// drives one: a grilling whose session has died is a Conversation standing
-    /// still, whatever else happens to be on the drivers register.
+    /// A grilling is driven by its session or by the watcher a pick armed on
+    /// one, and by nothing else: a grilling with neither is a Conversation
+    /// standing still.
     #[test]
-    fn a_grilling_is_driven_by_its_session_and_by_nothing_else() {
+    fn a_grilling_is_driven_by_its_session_or_by_the_watcher_on_it() {
         let drivers = Drivers::new();
 
         assert!(
@@ -326,14 +336,21 @@ mod tests {
         );
         assert!(
             !drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
-            "its grilling session has gone, and nothing else was ever going to grill it",
+            "its session has gone and it was never picked on, so nothing is grilling it",
         );
 
-        let _driving = drivers.driving(CONVERSATION);
+        let driving = drivers.driving(CONVERSATION);
+
+        assert!(
+            drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
+            "a pick's watcher follows the grilling to the artifact it asked for",
+        );
+
+        drop(driving);
 
         assert!(
             !drivers.driven(&working(&[]), CONVERSATION, Lifecycle::Grilling),
-            "a driver registered against a grilling is not what grills it",
+            "and with the watcher gone too there is nothing left driving it",
         );
     }
 
@@ -370,19 +387,14 @@ mod tests {
         }
     }
 
-    /// The states nothing is meant to be driving. Draft and Direction are
-    /// waiting on the human, Done is finished and Aborted is stopped: none of
-    /// them is a Conversation standing still with nobody to move it.
+    /// The states nothing is meant to be driving. Draft is waiting on the
+    /// human, Done is finished and Aborted is stopped: none of them is a
+    /// Conversation standing still with nobody to move it.
     #[test]
     fn a_state_nothing_drives_is_never_one_standing_still() {
         let drivers = Drivers::new();
 
-        for state in [
-            Lifecycle::Draft,
-            Lifecycle::Direction,
-            Lifecycle::Done,
-            Lifecycle::Aborted,
-        ] {
+        for state in [Lifecycle::Draft, Lifecycle::Done, Lifecycle::Aborted] {
             assert!(
                 drivers.driven(&working(&[]), CONVERSATION, state),
                 "{state:?} is not a state anything is supposed to be driving",
