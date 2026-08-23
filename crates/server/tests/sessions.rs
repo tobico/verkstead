@@ -4,31 +4,51 @@
 //!
 //! Everything here is real except the agent. The repository is a repository,
 //! the worktree is one git made, the sandbox is bwrap and the pseudo-terminal is
-//! `script`'s — what stands in for claude is a shell script, because what these
-//! ask is whether a session's output reaches the human, and asking it of the
-//! real claude would be a test that needed an account, a network and a model's
-//! patience.
+//! Verkstead's own — what stands in for claude is a shell script, because what
+//! these ask is whether a session's output reaches the human, and asking it of
+//! the real claude would be a test that needed an account, a network and a
+//! model's patience.
 //!
 //! The stub is handed exactly what claude would be: `--model`, the Profile's
 //! model, and then the Brief. So `$1` is the model it was told to run and `$2`
 //! is the Brief it was primed with — which is how these read them back.
+//!
+//! Watching a live session is here too, at the end, and is the one thing asked
+//! over a socket rather than of the Router: an upgrade is a connection rather
+//! than a request — see [`Watcher`]. It belongs in this file all the same,
+//! because what makes a Screen live is a session running on a real terminal, and
+//! this is where one runs.
+//!
+//! And typing into one, which is the Hold: a real keystroke down a real socket,
+//! into the terminal a real session is reading. What those tests are about is
+//! what it costs Verkstead — a run that ends nothing and advances nothing until
+//! the keyboard goes back — so they drive whole backlogs, with the stub waiting
+//! at a gate the test opens when it wants the step to land.
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use avt::Vt;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
+use base64::Engine;
+use futures_util::{SinkExt, StreamExt};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
-    ConversationView, GrillingStarted, InterruptionEvent, Lifecycle, ManualTaskEvent,
+    ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
     ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Remedy,
-    RemedySettled, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
+    Turn, Watching,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
@@ -330,6 +350,58 @@ impl Grilling {
             .await
     }
 
+    /// Wait until there is a session running, and hand back the Event it is
+    /// printing into — which is what a Screen is watched by.
+    async fn running(&self) -> i64 {
+        self.until(|view| output(view).filter(|output| output.running).map(|o| o.id))
+            .await
+    }
+
+    /// The same for a Conversation that has run more than one session: the
+    /// `nth` of them once it is printing, which is the one there is a Screen to
+    /// attach to.
+    ///
+    /// Counted rather than taken as the latest, because the sessions of a run
+    /// overlap: a pick leaves the grilling session running until whatever it
+    /// asked for lands, so *the latest that is running* is the session before
+    /// this one right up to the moment it is not.
+    async fn attachable(&self, nth: usize) -> i64 {
+        self.until(|view| {
+            outputs(view)
+                .get(nth - 1)
+                .filter(|output| output.running)
+                .map(|output| output.id)
+        })
+        .await
+    }
+
+    /// Put a device on the human's list, the way the page does when
+    /// notifications are turned on for it.
+    async fn subscribe(&self, device: &Device) {
+        let stored: verkstead_render::Subscribed = post(
+            &self.app,
+            "/api/ui/push/subscribe",
+            &serde_json::json!({
+                "endpoint": device.endpoint,
+                "p256dh": device.p256dh(),
+                "auth": device.auth(),
+            }),
+        )
+        .await;
+
+        assert_eq!(stored, verkstead_render::Subscribed::Stored);
+    }
+
+    /// Give the keyboard back, the way the press in the workbench does.
+    async fn hand_back(&self) -> HandedBack {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/hand-back", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
     /// Set a Manual Task going, the way the composer at the end of the Timeline
     /// does: the instruction, and the Profile picked beside it.
     async fn manual(&self, instruction: &str, profile_id: i64) -> ManualTaskStarted {
@@ -342,6 +414,34 @@ impl Grilling {
             }),
         )
         .await
+    }
+
+    /// The same workbench, on a socket of its own, and where to find it.
+    ///
+    /// Everything else here asks the Router directly, which is cheaper and is
+    /// how every other endpoint is asked. The Screen's socket cannot be asked
+    /// that way: an upgrade is a connection rather than a request, so this is
+    /// the one thing that needs a server actually listening somewhere.
+    ///
+    /// The same Router rather than a second one, because it is the same server:
+    /// what the socket hands over is the session this fixture started, held in
+    /// the register this Router shares.
+    async fn listening(&self) -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("a port to listen on");
+
+        let at = listener.local_addr().unwrap();
+        let app = self.app.clone();
+
+        // Left running for the rest of the test. Nothing takes it down: the
+        // process ends when the test does, and a listener held open costs a
+        // socket.
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        at
     }
 
     /// Wait until nothing is running here, which is when the composer is
@@ -428,6 +528,11 @@ const BRISKLY: Pace = Pace {
     poll: Duration::from_millis(100),
     grace: Duration::from_millis(300),
     checks: Duration::from_millis(100),
+    // A Hold's reminder is minutes away on a real server, and how many is not
+    // what the tests about it ask: what they ask is that it goes out once while
+    // the Hold stands and not at all once it has been handed back. A second is
+    // long enough that a hand-back has time to land inside it.
+    holding: Duration::from_secs(1),
     manual: Duration::from_millis(600),
     // Longer than any of these run for, so that the sweep for a stalled
     // Conversation is the one thing that never fires by itself here. Every one
@@ -1082,6 +1187,55 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
             worktree.canonicalize().unwrap().display()
         )),
         "a session works in its Conversation's worktree and nowhere else: {said:?}"
+    );
+}
+
+/// The terminal a session is on, asked from inside the sandbox.
+///
+/// Verkstead opens the pair and starts the sandbox on it — see
+/// [`verkstead_server::terminal`] — so all three of a session's streams are the
+/// one terminal, it is a hundred columns by thirty, and it is told what kind of
+/// terminal that is. Nothing said the last of those before, and what an agent's
+/// interface draws depends on what it thinks it has.
+///
+/// Read back with `stty`, which is a process asking the terminal underneath it
+/// rather than reading a variable something set: `COLUMNS` and `LINES` are not
+/// exported, deliberately, because a number in the environment is a copy that
+/// stops being true the moment a watcher resizes the window.
+#[tokio::test]
+async fn a_session_runs_on_a_terminal_verkstead_opened_for_it() {
+    let fixture = grilling(
+        r#"
+        printf 'term=%s\n' "$TERM"
+        printf 'size=%s\n' "$(stty size)"
+        if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
+            printf 'streams=all three are the terminal\n'
+        else
+            printf 'streams=0:%s 1:%s 2:%s\n' "$(test -t 0 && echo tty)" "$(test -t 1 && echo tty)" "$(test -t 2 && echo tty)"
+        fi
+        "#,
+    )
+    .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("streams=all three are the terminal\n"),
+        "a session's stdin, stdout and stderr are the one terminal, so what the \
+         sandbox complains about lands where the session printed: {said:?}"
+    );
+    assert!(
+        said.contains("size=30 100\n"),
+        "and it is a hundred columns by thirty until somebody watching says \
+         otherwise: {said:?}"
+    );
+    assert!(
+        said.contains("term=xterm-256color\n"),
+        "and it is told what kind of terminal it is on: {said:?}"
     );
 }
 
@@ -2037,11 +2191,12 @@ async fn a_restarted_server_stops_the_tail_it_can_no_longer_watch() {
 
 /// A sandbox that will not start says why where somebody is looking.
 ///
-/// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing
-/// they say ever reaches it — so a session whose sandbox never came up prints
-/// nothing at all. Its Event would otherwise read `0 lines` with the only
-/// account of why in a log at a level nobody has turned on, which is a failure
-/// that looks exactly like an agent with nothing to say.
+/// bwrap complains on its own stderr, which is the terminal Verkstead started
+/// it on — so what it said is in the Capture of the session that failed, where
+/// it happened and among whatever else was printed. The Event would otherwise
+/// read `0 lines` with the only account of why in a log at a level nobody has
+/// turned on, which is a failure that looks exactly like an agent with nothing
+/// to say.
 ///
 /// Provoked through a configured bind, because that is the one part of a sandbox
 /// that is checked at startup and can go on to be missing: what fails here is
@@ -2097,13 +2252,9 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     let said = fixture.capture(event).await;
 
     assert!(
-        said.contains("[the sandbox, not the agent]"),
-        "the plumbing's word goes on the Capture, marked as its own rather \
-         than left to read as something the agent said: {said:?}"
-    );
-    assert!(
         said.contains(&missing.display().to_string()),
-        "and it names the bind bwrap could not make: {said:?}"
+        "the sandbox's own complaint goes on the Capture of the session that \
+         failed, naming the bind bwrap could not make: {said:?}"
     );
     assert!(
         lines > 0 && !latest.is_empty(),
@@ -5445,6 +5596,968 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         "one planning session for the adopted stage and one for the stage after \
          it: {planned:?}",
     );
+}
+
+/// A browser watching one live session's Screen: the socket it is attached
+/// over, and the terminal it is painting on.
+///
+/// A terminal of its own rather than a list of the messages that arrived,
+/// because that is what a browser *is* here — xterm.js fed a repaint and then
+/// what the session printed after it. So what these assertions read is the grid,
+/// which is the only claim the socket makes: a watcher ends up showing what the
+/// session is showing.
+struct Watcher {
+    socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    vt: Vt,
+}
+
+impl Watcher {
+    /// Attach to a session's Screen the way the workbench does, and take the
+    /// repaint it opens with.
+    async fn attach(at: SocketAddr, conversation: i64, event: i64) -> Watcher {
+        let (socket, _) = tokio_tungstenite::connect_async(format!(
+            "ws://{at}/api/ui/conversations/{conversation}/screen/{event}/attach"
+        ))
+        .await
+        .expect("the session's Screen to be attachable");
+
+        let mut watcher = Watcher {
+            socket,
+            // Replaced by the repaint's own size below. A watcher does not know
+            // how big the Screen is until it is told, which is why the size
+            // comes with the repaint.
+            vt: Vt::new(1, 1),
+        };
+
+        match watcher.shown().await {
+            Shown::Painted(painted) => watcher.paint(&painted),
+            shown => panic!("a socket should open with a repaint, and it said: {shown:?}"),
+        }
+
+        watcher
+    }
+
+    /// The next thing the server says, or a panic if it says nothing for long
+    /// enough.
+    async fn shown(&mut self) -> Shown {
+        let said = tokio::time::timeout(PATIENCE, self.socket.next())
+            .await
+            .expect("the server to say something")
+            .expect("the socket to still be open")
+            .expect("the socket to be readable");
+
+        match said {
+            Message::Text(said) => read(&said),
+            said => panic!("a Screen's socket speaks JSON, and it said: {said:?}"),
+        }
+    }
+
+    /// Start again on a grid the repaint's size, and paint it — which is what a
+    /// terminal handed one does, a repaint saying what the whole grid is rather
+    /// than what has changed about it.
+    fn paint(&mut self, painted: &verkstead_render::Screen) {
+        self.vt = Vt::new(usize::from(painted.columns), usize::from(painted.rows));
+        self.vt.feed_str(&painted.repaint);
+    }
+
+    /// Follow the socket until the grid says something, and hand back what it is
+    /// showing.
+    async fn until(&mut self, enough: impl Fn(&str) -> bool) -> Vec<String> {
+        let deadline = Instant::now() + PATIENCE;
+
+        loop {
+            let showing = self.showing();
+
+            if enough(&showing.join("\n")) {
+                return showing;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the Screen never showed it. It is showing: {showing:?}"
+            );
+
+            match self.shown().await {
+                Shown::Painted(painted) => self.paint(&painted),
+                Shown::Printed(printed) => {
+                    self.vt.feed_str(&printed);
+                }
+            }
+        }
+    }
+
+    /// Type into it, which is what takes the Hold.
+    ///
+    /// The bytes a terminal would have made of the keys, because that is what
+    /// the browser sends: xterm.js turns a keypress into what a session expects
+    /// before anything crosses the socket, so a carriage return here is what a
+    /// press of Enter is there.
+    async fn types(&mut self, keys: &str) {
+        let said = serde_json::to_string(&Watching::Typed(keys.to_owned())).unwrap();
+
+        self.socket
+            .send(Message::Text(said.into()))
+            .await
+            .expect("the socket to take a keystroke");
+    }
+
+    /// This watcher's window is now that big — which is the Screen's size from
+    /// here on, for everybody watching it.
+    async fn resize(&mut self, columns: u16, rows: u16) {
+        let said = serde_json::to_string(&Watching::Resized(Size { columns, rows })).unwrap();
+
+        self.socket
+            .send(Message::Text(said.into()))
+            .await
+            .expect("the socket to take a resize");
+    }
+
+    /// The grid it is showing, row by row, with the blank rows at the bottom
+    /// left off.
+    fn showing(&self) -> Vec<String> {
+        let mut rows: Vec<String> = self
+            .vt
+            .view()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+
+        while rows.last().is_some_and(|row| row.is_empty()) {
+            rows.pop();
+        }
+
+        rows
+    }
+}
+
+/// Everybody watching one session is watching the one Screen — and a watcher
+/// that goes away and comes back is put where the others already are.
+///
+/// The whole of what a repaint is for. A session prints for an hour and a
+/// browser opened at the end of it has seen none of that hour, so what it is
+/// handed on connect is not what happens next but what the grid *is*.
+#[tokio::test]
+async fn everybody_watching_one_session_sees_the_one_screen() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        printf 'thinking\rthinking… done\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut one = Watcher::attach(at, fixture.id, event).await;
+    let mut two = Watcher::attach(at, fixture.id, event).await;
+
+    let showing = one.until(|grid| grid.contains("thinking… done")).await;
+
+    assert_eq!(
+        two.until(|grid| grid.contains("thinking… done")).await,
+        showing,
+        "two browsers on one session should be showing the one grid",
+    );
+
+    // The watcher goes — a closed tab, a phone that slept, a connection that
+    // dropped — and comes back to find the session exactly where it was.
+    drop(one);
+
+    let again = Watcher::attach(at, fixture.id, event).await;
+
+    assert_eq!(
+        again.showing(),
+        showing,
+        "a watcher that reconnects should be repainted with what the others are showing",
+    );
+}
+
+/// The size reaches the session's own terminal, so its interface redraws to fit.
+///
+/// Read back off the session rather than off the Screen, because that is the
+/// claim: a grid made wider on the server and nowhere else would be a Screen the
+/// session never heard about and went on drawing a hundred columns into. The
+/// stub asks the terminal underneath it how big it is, which is what a terminal
+/// application does when it is told the window changed.
+#[tokio::test]
+async fn resizing_a_watchers_window_resizes_the_session() {
+    let fixture = grilling(
+        r#"
+        trap 'stty size' WINCH
+        stty size
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+
+    // The size it started on, which is the terminal Verkstead opened for it.
+    watcher.until(|grid| grid.contains("30 100")).await;
+
+    watcher.resize(132, 43).await;
+
+    let showing = watcher.until(|grid| grid.contains("43 132")).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains("43 132")),
+        "the session should have been told its window is now 132 by 43, \
+         and the Screen is showing: {showing:?}",
+    );
+}
+
+/// Watching commits the human to nothing: no Event, no move, and nothing about
+/// the run different for somebody having looked.
+///
+/// The Timeline records the work rather than the watching — the carve-out is
+/// written into its glossary entry — and this is the whole of what that means in
+/// code. A watcher attaches, sees the session, and goes; what is left behind is
+/// the Timeline that was there before.
+#[tokio::test]
+async fn watching_a_session_leaves_nothing_behind() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let before = fixture.view().await;
+    let at = fixture.listening().await;
+
+    {
+        let mut watcher = Watcher::attach(at, fixture.id, event).await;
+        watcher
+            .until(|grid| grid.contains("reading the brief"))
+            .await;
+    }
+
+    // Read after the socket has gone rather than while it is open, because the
+    // claim is about closing one as well as opening it.
+    let after = fixture.view().await;
+
+    assert_eq!(after.state, before.state, "watching moved the Conversation");
+    assert_eq!(
+        after.timeline, before.timeline,
+        "watching left something on the Timeline",
+    );
+}
+
+/// A session that has ended has no socket to attach to.
+///
+/// Its Screen is the one the details pane fetches — the screen it last stood on,
+/// read-only — and there is nowhere for a keystroke to go, because there is no
+/// terminal at the other end of one. Refused rather than opened and left silent:
+/// a socket that connected to nothing would be a browser waiting for a session
+/// that had already gone.
+#[tokio::test]
+async fn a_session_that_has_ended_has_no_screen_to_attach_to() {
+    let fixture = grilling("printf 'and out\\r\\n'").await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let refused = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{}/screen/{event}/attach",
+        fixture.id
+    ))
+    .await;
+
+    let Err(tokio_tungstenite::tungstenite::Error::Http(response)) = refused else {
+        panic!("attaching to a session that has ended should be refused, and it was not");
+    };
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The gate a stub waits at, so that a test can take the Hold before the session
+/// does the thing being held up.
+///
+/// A file in the spill directory, which every sandbox here gets read-write:
+/// there is no other way to make a session pause where a test wants it, and the
+/// timing this is standing in for is the whole of what these are about. Nothing
+/// waits at it that the test does not open.
+fn a_backlog_held_at(gate: &Path, then: &str) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'breaking down\r\n'
+    while [ ! -f {gate} ]; do sleep 0.05; done
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01. Count the requests\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    printf 'the backlog has landed\r\n'
+    {then}
+    ;;
+*)
+    printf 'working the task\r\n'
+    printf 'a limiter\n' >> limiter.md
+    rm -f .tasks/01-count.md
+    git add -A
+    git commit --quiet -m 'feat: count the requests'
+    sleep 300
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+        then = then,
+    )
+}
+
+/// Take a Conversation as far as its grilling session breaking the work down at
+/// `gate`, with the human at its keyboard: the Hold is in force and the session
+/// has not committed anything yet.
+///
+/// The breakdown is the grilling session's own — a task-list pick leaves the
+/// session that proposed to write the backlog, and the run picks up from the
+/// backlog landing. So there is one session here to attach to, and it is the
+/// first.
+///
+/// The three tests below each start here and part company at what the session
+/// does once the gate opens.
+async fn held_at_the_breakdown(fixture: &Grilling, at: SocketAddr) -> (Watcher, i64) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let event = fixture.attachable(1).await;
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+
+    watcher.until(|grid| grid.contains("breaking down")).await;
+    assert!(
+        fixture.view().await.held.is_none(),
+        "nobody has typed into it yet",
+    );
+
+    watcher.types("\r").await;
+
+    assert_eq!(
+        fixture.until(|view| view.held).await,
+        event,
+        "the first keystroke should have taken the Hold",
+    );
+
+    (watcher, event)
+}
+
+/// Typing into a live Screen reaches the session, and the first keystroke takes
+/// the Hold.
+///
+/// Read back off the session rather than off the Screen, for the reason a resize
+/// is: the claim is that a keystroke arrives at the terminal the agent is
+/// running on, and a Screen that had drawn the typing itself would show the same
+/// thing having reached nobody. So the stub reads its stdin and says what it
+/// heard.
+#[tokio::test]
+async fn typing_into_a_screen_reaches_the_session_and_takes_the_hold() {
+    let fixture = grilling(
+        r#"
+        printf 'ready\r\n'
+        while read -r line; do printf 'heard %s\r\n' "$line"; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher.until(|grid| grid.contains("ready")).await;
+
+    let before = fixture.view().await;
+    assert!(before.held.is_none(), "nobody has taken the keyboard yet");
+    assert!(
+        before.blocked_on.is_none(),
+        "and nothing is waiting on them"
+    );
+
+    watcher.types("hello\r").await;
+
+    let showing = watcher.until(|grid| grid.contains("heard hello")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("heard hello")),
+        "the session should have read what was typed: {showing:?}",
+    );
+
+    let view = fixture.until(|view| view.held.map(|_| view.clone())).await;
+
+    assert_eq!(
+        view.held,
+        Some(event),
+        "the Hold is on the session that was typed into",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(event),
+        "and the Conversation carries *blocked on you*, pointing at it",
+    );
+}
+
+/// A held session is never ended by quiet, however long it stays quiet, and
+/// nothing advances behind it.
+///
+/// The step lands while the human has the keyboard, which is exactly the moment
+/// the runner would otherwise end the session and launch the next one. It does
+/// neither until they hand back — and then it does both, because handing back is
+/// the ordinary rules being asked afresh rather than a decision of its own.
+#[tokio::test]
+async fn a_held_session_is_never_ended_by_quiet_and_nothing_runs_behind_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let fixture =
+        grilling_spilling(spill, &a_backlog_held_at(&gate, "sleep 300"), PULL_REQUEST).await;
+
+    let at = fixture.listening().await;
+    let (_watcher, event) = held_at_the_breakdown(&fixture, at).await;
+
+    // The step lands, and the session goes quiet sitting on its `sleep`.
+    std::fs::write(&gate, "go").unwrap();
+
+    fixture
+        .until(|view| (commits(view).len() == 1).then_some(()))
+        .await;
+
+    // Long enough for many grace periods and many polls of a backlog with a task
+    // in it — see `BRISKLY`.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        1,
+        "the session breaking the work down, and nothing launched behind it: {:?}",
+        outputs(&view),
+    );
+    assert!(
+        outputs(&view)[0].running,
+        "a held session is never ended by quiet, however long it stays quiet",
+    );
+    assert_eq!(view.held, Some(event), "and the Hold is still theirs");
+
+    // The keyboard goes back, and the run picks up exactly where it would have.
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 2).then(|| landed[1].subject.clone())
+        })
+        .await;
+
+    assert_eq!(landed, "feat: count the requests");
+    assert!(
+        fixture.view().await.held.is_none(),
+        "and nothing is holding the Conversation any more",
+    );
+}
+
+/// A session that exits while held advances nothing until the hand-back — and
+/// the hand-back then judges it the ordinary way. Its step landed, so the run
+/// goes on.
+#[tokio::test]
+async fn a_session_that_exits_held_is_judged_when_the_keyboard_goes_back() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_held_at(&gate, "printf 'and out\\r\\n'"),
+        PULL_REQUEST,
+    )
+    .await;
+
+    let at = fixture.listening().await;
+    let (_watcher, event) = held_at_the_breakdown(&fixture, at).await;
+
+    std::fs::write(&gate, "go").unwrap();
+
+    // The session commits the backlog and exits, held.
+    fixture
+        .until(|view| {
+            (commits(view).len() == 1 && outputs(view).iter().all(|o| !o.running)).then_some(())
+        })
+        .await;
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+    assert_eq!(
+        outputs(&view).len(),
+        1,
+        "a session that exited held advances nothing: {:?}",
+        outputs(&view),
+    );
+    assert_eq!(
+        view.held,
+        Some(event),
+        "it is still waiting to be handed back"
+    );
+
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+
+    let landed = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 2).then(|| landed[1].subject.clone())
+        })
+        .await;
+
+    assert_eq!(
+        landed, "feat: count the requests",
+        "the step had landed, so the run goes on",
+    );
+}
+
+/// And the other half of the same rule: a session that exits held having landed
+/// nothing is an Interruption — raised when the keyboard goes back, and not
+/// before.
+///
+/// An inline implementation, because that is the shortest run with an
+/// end-of-session judgement in it: what says it did anything is what it
+/// committed, and this one commits nothing.
+#[tokio::test]
+async fn a_held_session_that_landed_nothing_raises_its_interruption_on_the_hand_back() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let fixture = grilling_spilling(
+        spill,
+        &format!(
+            r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\r\n'
+    sleep 300
+    ;;
+*)
+    printf 'implementing\r\n'
+    while [ ! -f {gate} ]; do sleep 0.05; done
+    printf 'and out with nothing to show\r\n'
+    ;;
+esac
+"#,
+            gate = quoted(&gate),
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    let at = fixture.listening().await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let event = fixture.attachable(2).await;
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+
+    watcher.until(|grid| grid.contains("implementing")).await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+
+    std::fs::write(&gate, "go").unwrap();
+
+    fixture
+        .until(|view| outputs(view).iter().all(|o| !o.running).then_some(()))
+        .await;
+
+    // Long enough for the run to have raised one if it were going to.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing is judged while the human has the keyboard",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(event),
+        "and what they are blocked on is the Hold, which is not on the Timeline",
+    );
+
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+
+    let stopped = fixture.stopped().await;
+    assert!(
+        stopped.how.contains("without committing anything"),
+        "the ordinary rules judged what they left: {:?}",
+        stopped.how,
+    );
+}
+
+/// The socket dropping leaves the Hold exactly where it was — and so does
+/// closing the tab, and so does the browser going away, all three being this one
+/// thing from the server's side.
+///
+/// Verkstead resuming over a half-finished intervention is worse than a stalled
+/// run, so nothing but the hand-back ends one. And nothing about any of it
+/// reaches the Timeline: the Timeline records the work rather than the watching.
+#[tokio::test]
+async fn a_dropped_socket_leaves_the_hold_where_it_was_and_the_timeline_alone() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let before = fixture.view().await;
+
+    {
+        let mut watcher = Watcher::attach(at, fixture.id, event).await;
+        watcher
+            .until(|grid| grid.contains("reading the brief"))
+            .await;
+        watcher.types("\r").await;
+
+        assert_eq!(fixture.until(|view| view.held).await, event);
+    }
+
+    // Long enough for a release on a dropped connection to have happened, if
+    // there were one.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let after = fixture.view().await;
+
+    assert_eq!(
+        after.held,
+        Some(event),
+        "the watcher went and the Hold stayed",
+    );
+    assert_eq!(after.state, before.state, "the Hold moved the Conversation");
+    assert_eq!(
+        after.timeline.len(),
+        before.timeline.len(),
+        "a Hold left something on the Timeline",
+    );
+
+    // And the browser comes back to a session it is still holding.
+    let again = Watcher::attach(at, fixture.id, event).await;
+    drop(again);
+
+    assert_eq!(fixture.view().await.held, Some(event));
+
+    // Which ends the one way it ever ends.
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+    assert!(fixture.view().await.held.is_none());
+    assert_eq!(
+        fixture.hand_back().await,
+        HandedBack::NotHeld,
+        "a second press is the same answer arriving again",
+    );
+
+    assert_eq!(
+        fixture.view().await.timeline.len(),
+        before.timeline.len(),
+        "and handing back left nothing on the Timeline either",
+    );
+}
+
+/// Aborting the Conversation still ends the session, held or not.
+///
+/// The one thing that goes through a Hold, and it is not Verkstead advancing:
+/// it is the human answering. So the keyboard goes back with the session, and
+/// nothing is left holding a Conversation that has stopped.
+#[tokio::test]
+async fn aborting_a_conversation_ends_the_session_the_human_is_holding() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher
+        .until(|grid| grid.contains("reading the brief"))
+        .await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Aborted);
+    assert!(
+        outputs(&view).iter().all(|output| !output.running),
+        "the session was ended, Hold or no Hold",
+    );
+    assert!(
+        view.held.is_none(),
+        "and nothing is left holding a Conversation that has stopped",
+    );
+}
+
+/// A Hold nobody came back to tells the human's devices about it — see
+/// [`Grilling::subscribe`] for the devices, and `crates/server/src/push.rs` for
+/// what is sent.
+///
+/// One push per device and one only: it is a reminder rather than a nag, and a
+/// Hold that goes on standing has already said everything it has to say. Nothing
+/// about it reaches the Timeline, and nothing about it ends the Hold — the
+/// hand-back is still the only way back.
+#[tokio::test]
+async fn a_hold_nobody_came_back_to_tells_the_devices_once() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    let laptop = Device::new(&service, "laptop");
+    fixture.subscribe(&phone).await;
+    fixture.subscribe(&laptop).await;
+
+    let before = fixture.view().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher
+        .until(|grid| grid.contains("reading the brief"))
+        .await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+
+    let pushed = pushes(&taken, 2).await;
+
+    for device in [&phone, &laptop] {
+        let push = pushed
+            .iter()
+            .find(|push| push.device == device.name)
+            .unwrap_or_else(|| panic!("{} was not told about the Hold", device.name));
+
+        // Decrypted with the device's own keys, which is what says it was
+        // encrypted for that device rather than merely addressed to it.
+        let notice = device.read(push);
+
+        assert_eq!(
+            notice["path"],
+            format!("/conversations/{}", fixture.id),
+            "a Hold's push has to open the Conversation whose session is held",
+        );
+        assert_eq!(
+            notice["title"],
+            format!("{} is waiting for you", before.branch),
+            "and say which piece of work it is about",
+        );
+        assert_eq!(notice["project"], before.repo.name);
+    }
+
+    // Long enough for a second round to have gone out if there were one.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "one reminder per device, and no more however long the Hold stands",
+    );
+
+    let after = fixture.view().await;
+
+    assert_eq!(
+        after.held,
+        Some(event),
+        "the reminder went out and the Hold stayed: only the hand-back ends one",
+    );
+    assert_eq!(
+        after.timeline.len(),
+        before.timeline.len(),
+        "a Hold's reminder left something on the Timeline",
+    );
+}
+
+/// And a Hold handed back before the interval passes tells nobody at all.
+///
+/// The reminder is about a Hold nobody came back to, so somebody coming back is
+/// exactly the thing that makes it not worth sending.
+#[tokio::test]
+async fn handing_back_before_the_interval_tells_nobody() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let (service, taken) = push_service().await;
+    fixture.subscribe(&Device::new(&service, "phone")).await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher
+        .until(|grid| grid.contains("reading the brief"))
+        .await;
+    watcher.types("\r").await;
+
+    assert_eq!(fixture.until(|view| view.held).await, event);
+    assert_eq!(fixture.hand_back().await, HandedBack::HandedBack);
+
+    // Long enough for the reminder to have gone out if the hand-back had not
+    // been the answer to it.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert!(
+        taken.lock().unwrap().is_empty(),
+        "a Hold that was handed back is not one to remind anybody about",
+    );
+}
+
+/// One push, as the push service received it.
+#[derive(Debug, Clone)]
+struct Push {
+    /// The path it was posted to, which is the device it was meant for.
+    device: String,
+    body: Vec<u8>,
+}
+
+/// A push service on a loopback port, and the pushes it has taken.
+///
+/// It takes everything it is sent. What the vendors' services answer, and what
+/// Verkstead makes of each answer, is `push_delivery.rs`'s: here the question is
+/// only whether a Hold left standing is one they hear about.
+async fn push_service() -> (String, Arc<Mutex<Vec<Push>>>) {
+    let taken: Arc<Mutex<Vec<Push>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let app = Router::new().route(
+        "/{device}",
+        axum::routing::post({
+            let taken = taken.clone();
+            move |axum::extract::Path(device): axum::extract::Path<String>,
+                  body: axum::body::Bytes| {
+                let taken = taken.clone();
+                async move {
+                    taken.lock().unwrap().push(Push {
+                        device,
+                        body: body.to_vec(),
+                    });
+                    StatusCode::CREATED
+                }
+            }
+        }),
+    );
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("a port to listen on");
+    let at = listener.local_addr().unwrap();
+
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    (format!("http://{at}"), taken)
+}
+
+/// A device as its browser would have described it, plus the private half the
+/// browser would have kept — which is what lets a test read a push back.
+struct Device {
+    name: String,
+    endpoint: String,
+    secret: p256::SecretKey,
+    auth: Vec<u8>,
+}
+
+impl Device {
+    fn new(service: &str, name: &str) -> Device {
+        // Deterministic rather than random, so a failure names the same device
+        // twice running. Sixteen bytes because that is what the auth secret is.
+        let auth: Vec<u8> = name.bytes().cycle().take(16).collect();
+
+        Device {
+            name: name.to_owned(),
+            endpoint: format!("{service}/{name}"),
+            secret: p256::SecretKey::random(&mut p256::elliptic_curve::rand_core::OsRng),
+            auth,
+        }
+    }
+
+    /// The public half, in the encoding `PushManager.subscribe` hands back.
+    fn p256dh(&self) -> String {
+        use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(self.secret.public_key().to_encoded_point(false).as_bytes())
+    }
+
+    fn auth(&self) -> String {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.auth)
+    }
+
+    /// Read a push meant for this device, as its service worker would.
+    fn read(&self, push: &Push) -> serde_json::Value {
+        let plain = web_push_native::decrypt(
+            push.body.clone(),
+            &self.secret,
+            &web_push_native::Auth::clone_from_slice(&self.auth),
+        )
+        .expect("a push for this device has to decrypt with this device's keys");
+
+        serde_json::from_slice(&plain).expect("the notice has to be JSON")
+    }
+}
+
+/// Wait until the push service has taken `count` pushes, then hand them over.
+async fn pushes(taken: &Arc<Mutex<Vec<Push>>>, count: usize) -> Vec<Push> {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        {
+            let pushed = taken.lock().unwrap();
+            if pushed.len() >= count {
+                return pushed.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "waited for {count} pushes and {} arrived",
+                pushed.len(),
+            );
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 /// A Manual Task, end to end: the instruction the human typed reaches an agent

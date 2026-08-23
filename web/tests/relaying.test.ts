@@ -15,7 +15,7 @@ import { ORIGIN, UNREADABLE, worker } from "./worker";
 
 /// A push as the server sends it — see `Notice` in `crates/server/src/push.rs`.
 const NOTICE = {
-  id: 7,
+  path: "/sets/7",
   title: "Whether to keep the outbound queue at all",
   project: "verkstead",
 };

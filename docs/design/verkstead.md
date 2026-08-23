@@ -203,7 +203,7 @@ Timeline events:
 | Event | In timeline | In details pane |
 |---|---|---|
 | Brief | inline, always | — |
-| Agent output | line count + latest statement | full Capture |
+| Agent output | line count + latest statement | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |

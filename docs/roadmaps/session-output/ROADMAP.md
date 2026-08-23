@@ -21,4 +21,4 @@ reorderable.
 ## Stages
 
 - [x] 01: The Transcript — [brief](01-transcript.md)
-- [ ] 02: The Screen and the Hold — [brief](02-screen-and-hold.md)
+- [ ] 02: The Screen and the Hold — [brief](02-screen-and-hold.md) *(in progress: `screen-and-hold`)*

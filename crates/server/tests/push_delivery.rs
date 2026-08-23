@@ -375,7 +375,11 @@ async fn a_set_arriving_is_pushed_once_to_every_device() {
         // Decrypted with the device's own keys, which is the proof that it was
         // encrypted for that device and not merely addressed to it.
         let notice = device.read(push);
-        assert_eq!(notice["id"], created.id);
+        assert_eq!(
+            notice["path"],
+            format!("/sets/{}", created.id),
+            "a Set's push has to open that Set",
+        );
         assert_eq!(notice["title"], "Rate limiting for the public API");
         assert_eq!(notice["project"], "verkstead");
     }

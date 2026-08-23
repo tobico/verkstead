@@ -32,6 +32,7 @@ use std::process::{Command, Stdio};
 use crate::handoffs::{self, Handoffs};
 use crate::skills::{self, Skills};
 use crate::store;
+use crate::terminal;
 
 /// The system directories a sandbox gets read-only, in the order bwrap is told
 /// about them.
@@ -485,12 +486,20 @@ impl Sandbox {
             .arg(PATH)
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
-            // whatever this holds — and with nothing in it, `script` would fall
-            // back to whatever login shell the passwd file gives the user the
-            // server happens to run as.
+            // whatever this holds — and with nothing in it, it would fall back
+            // to whatever login shell the passwd file gives the user the server
+            // happens to run as.
             .arg("--setenv")
             .arg("SHELL")
             .arg(SHELL)
+            // And what kind of terminal a session is on, which is a fact about
+            // the pseudo-terminal Verkstead opened for it rather than about the
+            // sandbox — see [`crate::terminal`]. Said because nothing else
+            // would: the environment is cleared, and an interface told nothing
+            // draws for the dumbest terminal it knows about.
+            .arg("--setenv")
+            .arg("TERM")
+            .arg(terminal::TERM)
             // What makes a session's Question Sets its own Conversation's. The
             // variable the bundled CLI reads, scoped to one Conversation, so
             // nothing is inferred from the project or the branch — two

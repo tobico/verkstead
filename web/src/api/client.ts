@@ -19,6 +19,7 @@ import type {
   ConversationEntry,
   ConversationView,
   GrillingStarted,
+  HandedBack,
   ManualTaskStarted,
   ProfileChosen,
   ProfileDeleted,
@@ -32,6 +33,7 @@ import type {
   RemedySettled,
   RepoEntry,
   Response as Decided,
+  Screen,
   SetView,
   Started,
   Submitted,
@@ -167,6 +169,37 @@ export function loadTranscript(
   );
 }
 
+/// And how it looked, which is the same Event read the third way.
+///
+/// The grid those bytes leave on a terminal, as the escape sequences that would
+/// paint it — the server holds the terminal that decided them, and this is a
+/// repaint to feed the one in the pane (ADR 0007). A session that has ended
+/// repaints to the screen it last stood on.
+export function loadScreen(id: number, event: number): Promise<Screen> {
+  return get<Screen>(`/api/ui/conversations/${id}/screen/${event}`);
+}
+
+/// And where to watch a session that is still running: the one socket in the
+/// app, and the one place the viewer is sent something rather than fetching it.
+///
+/// A repaint on connect and what the session prints after it, with the size of
+/// the window it is being watched in — and whatever is typed into it — going
+/// back the other way. Everything else here stays on SSE and a refetch — a
+/// terminal being drawn is the one thing neither of those is any good for.
+///
+/// Built off the page's own origin, so the socket goes wherever the page came
+/// from: the dev server proxying `/api`, or the one binary serving both.
+export function screenSocket(id: number, event: number): string {
+  const at = new URL(
+    `/api/ui/conversations/${id}/screen/${event}/attach`,
+    window.location.href,
+  );
+
+  at.protocol = at.protocol === "https:" ? "wss:" : "ws:";
+
+  return at.href;
+}
+
 /// One commit's diff, rendered.
 ///
 /// Fetched by the pane that shows it for the Capture's reason, and read out
@@ -250,6 +283,16 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
+}
+
+/// Give a session's keyboard back, which is the one thing that ends a Hold.
+///
+/// Not the socket closing and not the tab going: Verkstead resuming over a
+/// half-finished intervention is worse than a stalled run, so ending one is a
+/// press. What the human left is then judged by the ordinary end-of-session
+/// rules, which is the server's to do and not this side's.
+export function handBack(id: number): Promise<HandedBack> {
+  return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
 }
 
 /// Say what to do about a run that stopped: run the step again, take it on

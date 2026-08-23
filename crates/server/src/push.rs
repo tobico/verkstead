@@ -1,16 +1,22 @@
-//! Telling the devices that a Question Set has arrived.
+//! Telling the devices that something is waiting for the human.
 //!
-//! One push per subscribed device, encrypted for that device's own keys and
-//! signed with the VAPID identity the store generated on first run. The body is
-//! small on purpose: enough for the service worker to draw the notification and
-//! to know which Set to open, and nothing that would put a Question in a
-//! notification the phone shows on a lock screen.
+//! Two things are: a Question Set has arrived, or a Hold has stood a while with
+//! nobody coming back to it. One push per subscribed device either way,
+//! encrypted for that device's own keys and signed with the VAPID identity the
+//! store generated on first run. The body is small on purpose: enough for the
+//! service worker to draw the notification and to know which page to open, and
+//! nothing that would put a Question in a notification the phone shows on a lock
+//! screen.
 //!
 //! Sending happens behind the answer to `POST …/api/v1/sets`, never in front of
 //! it. Delivery goes out through the browser vendors' push services, which is
 //! the one place Verkstead reaches the public internet, and none of it is
 //! reliable enough to make an agent's submission depend on: a service that
 //! cannot be reached costs a notification, not the Set.
+//!
+//! A Hold's push is a reminder and nothing more. It ends no Hold — only the
+//! hand-back does that — and it leaves nothing on the Timeline, which records
+//! the work rather than the watching.
 //!
 //! A push service is also the only thing that can tell us a device has gone —
 //! the app was uninstalled, the subscription expired — and it says so with a
@@ -29,6 +35,9 @@ use time::OffsetDateTime;
 use verkstead_schema::QuestionSet;
 use verkstead_store::{PushSubscription, VapidKeys};
 use web_push_native::{Auth, WebPushBuilder};
+
+use crate::AppState;
+use crate::hold::Which;
 
 /// How long a push service should hold a notification for a phone that is off
 /// or out of signal. Half a day: a Question Set older than that has either been
@@ -54,15 +63,32 @@ const CONTACT: &str = "https://github.com/tobico/verkstead";
 /// than serialized: ES256 is what VAPID is defined in terms of.
 const JWT_HEADER: &str = r#"{"typ":"JWT","alg":"ES256"}"#;
 
-/// What the service worker is handed: enough to draw the notification, and the
-/// id to open.
+/// How long a Hold stands before the human's devices are told about it, on a
+/// server nobody has said otherwise to.
+///
+/// Long enough that a human who typed and is still typing is not interrupted by
+/// news of their own keyboard, and short enough that one who put the phone down
+/// mid-intervention is told while the run they stalled still matters. What a
+/// server actually keeps to is [`crate::Pace::holding`].
+pub(crate) const HELD_A_WHILE: Duration = Duration::from_secs(5 * 60);
+
+/// What the service worker is handed: enough to draw the notification, and where
+/// tapping it goes.
 #[derive(Debug, Serialize)]
 struct Notice<'a> {
-    id: i64,
+    /// The page the notification opens — a Set's own page for a Set, and the
+    /// held Conversation for a Hold.
+    ///
+    /// Said by the server rather than worked out by the worker, because what a
+    /// push is about is the server's to know: a phone woken by a Hold that
+    /// landed on a Question Set it is not about would be worse than no
+    /// notification at all.
+    path: String,
+
     title: &'a str,
 
-    /// Which repository the agent is asking about, when the CLI knew — the one
-    /// thing that tells two Sets apart at a glance on a lock screen.
+    /// Which repository this is about, when it is known — the one thing that
+    /// tells two notifications apart at a glance on a lock screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     project: Option<&'a str>,
 }
@@ -86,7 +112,7 @@ enum Delivery {
 /// answer the agent, and this must not be able to delay that or to fail it.
 pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
     let notice = Notice {
-        id,
+        path: format!("/sets/{id}"),
         title: &set.title,
         project: set.project.as_deref(),
     };
@@ -100,11 +126,74 @@ pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
     };
 
     let pool = pool.clone();
+    let about = format!("Set {id}");
+
     tokio::spawn(async move {
-        if let Err(error) = notify(&pool, id, &notice).await {
+        if let Err(error) = notify(&pool, &about, &notice).await {
             tracing::error!(set = id, error = ?error, "telling the devices about a Set failed");
         }
     });
+}
+
+/// Tell the devices about a Hold once it has stood [`crate::Pace::holding`],
+/// and say nothing at all if the keyboard has gone back before then.
+///
+/// Returns as soon as the waiting is handed to the runtime: what the caller is
+/// doing is relaying a keystroke, and a reminder about it must not be able to
+/// slow that down.
+///
+/// One push per Hold, because it is one wait per Hold: nothing here loops, so a
+/// Hold that goes on standing is told about once and then left alone. The
+/// [`Which`] is what keeps it to *this* Hold — a Conversation handed back and
+/// typed into again in the meantime has a Hold of its own, with a wait of its
+/// own behind it.
+pub(crate) fn when_it_has_stood(state: &AppState, conversation_id: i64, which: Which) {
+    let state = state.clone();
+    let stood_a_while = state.sessions.pace().holding;
+
+    tokio::spawn(async move {
+        tokio::time::sleep(stood_a_while).await;
+
+        // Handed back, or handed back and taken again: either way this Hold is
+        // over, and nothing is owed about a Hold nobody is in.
+        if !state.sessions.still_held(conversation_id, which) {
+            return;
+        }
+
+        if let Err(error) = remind(&state.pool, conversation_id).await {
+            tracing::error!(
+                conversation_id,
+                error = ?error,
+                "telling the devices about a Hold failed",
+            );
+        }
+    });
+}
+
+/// The notice one standing Hold is worth, sent.
+///
+/// Named by the branch, which is what a Conversation is read by — see
+/// [`verkstead_store::ConversationRow`] — with the Repo underneath it, so that a
+/// lock screen says which piece of work the keyboard is still held on.
+async fn remind(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
+    else {
+        // Aborted and gone while the wait was on. Nothing is held any more that
+        // there is anything to say about.
+        return Ok(());
+    };
+
+    let title = format!("{} is waiting for you", conversation.branch);
+
+    let notice = Notice {
+        path: format!("/conversations/{conversation_id}"),
+        title: &title,
+        project: Some(&conversation.repo.name),
+    };
+
+    let notice = serde_json::to_vec(&notice).context("building the push notice")?;
+
+    notify(pool, &format!("the Hold on {conversation_id}"), &notice).await
 }
 
 /// Send the notice to every device, and prune the ones the push services have
@@ -113,7 +202,7 @@ pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
 /// One device at a time rather than all at once: this is a single human's
 /// handful of devices, and the timeout bounds what a slow push service can cost
 /// the ones behind it.
-async fn notify(pool: &SqlitePool, id: i64, notice: &[u8]) -> Result<()> {
+async fn notify(pool: &SqlitePool, about: &str, notice: &[u8]) -> Result<()> {
     let devices = verkstead_store::push_subscriptions(pool).await?;
     if devices.is_empty() {
         return Ok(());
@@ -128,7 +217,7 @@ async fn notify(pool: &SqlitePool, id: i64, notice: &[u8]) -> Result<()> {
     for device in devices {
         match send(&client, &keys, &device, notice).await {
             Ok(Delivery::Taken) => {
-                tracing::debug!(set = id, endpoint = %device.endpoint, "a device was told");
+                tracing::debug!(about, endpoint = %device.endpoint, "a device was told");
             }
             Ok(Delivery::Gone) => {
                 tracing::info!(
@@ -142,10 +231,10 @@ async fn notify(pool: &SqlitePool, id: i64, notice: &[u8]) -> Result<()> {
             // the agent was answered before any of this started.
             Err(error) => {
                 tracing::warn!(
-                    set = id,
+                    about,
                     endpoint = %device.endpoint,
                     error = ?error,
-                    "a device was not told about a Set",
+                    "a device was not told",
                 );
             }
         }
