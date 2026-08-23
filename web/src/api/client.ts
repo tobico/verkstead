@@ -35,6 +35,9 @@ import type {
   Response as Decided,
   Screen,
   SetView,
+  SettingsEdit,
+  SettingsSaved,
+  SettingsView,
   Started,
   Submitted,
   Subscribed,
@@ -399,6 +402,30 @@ export function chooseImplementationProfile(
 /// never waits on GitHub being reachable.
 export function updateNotice(): Promise<UpdateNotice> {
   return get<UpdateNotice>("/api/ui/update");
+}
+
+/// What Verkstead has been told: who a session commits as, and that there is a
+/// GitHub token.
+///
+/// The token itself is not among it and cannot be asked for — what comes back is
+/// its last four characters and when it was saved. See [`saveSettings`].
+export function loadSettings(): Promise<SettingsView> {
+  return get<SettingsView>("/api/ui/settings");
+}
+
+/// Write both settings files back, which the page does in one press.
+///
+/// The token's half of the edit is an action rather than a value — `"Keep"`,
+/// `{ Set }` or `"Clear"` — because most saves are about the author, and a
+/// write-only field left blank means *leave it alone* rather than *take it
+/// away*.
+///
+/// The answer carries the settings as they now stand, read back off the files,
+/// and — where a token was set — what GitHub made of it. A refusal there is part
+/// of the answer rather than a failed save: the token is written down either
+/// way.
+export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
+  return post<SettingsSaved>("/api/ui/settings", edit);
 }
 
 /// The public half of the server's VAPID keypair — what `PushManager.subscribe`

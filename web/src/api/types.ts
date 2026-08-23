@@ -246,6 +246,15 @@ text_html: string,
 columns: Array<string>, options: Array<OptionView>, };
 
 /**
+ * Who a session's commits are by.
+ *
+ * Two strings rather than two optionals, empty where nothing is configured:
+ * the form holds them that way, and half an author is a real state — a name
+ * with no address is what git complains about by name.
+ */
+export type Author = { name: string, email: string, };
+
+/**
  * The commit to branch from, or `null` to go back to the default-branch rule.
  */
 export type BaseCommitOverride = { 
@@ -1283,6 +1292,47 @@ standing: Standing,
 proposal: ProposalView | null, };
 
 /**
+ * The settings as the human has just written them.
+ *
+ * The author fields and the token travel together because the page saves as
+ * one — and the token's half is an action rather than a value, because most
+ * saves are not about the token at all.
+ */
+export type SettingsEdit = { git_author: Author, github_token: TokenEdit, };
+
+/**
+ * What became of a save.
+ *
+ * No refusals to name: there is nothing about a name, an address or a token
+ * this server declines to write down, and a file it could not write at all is
+ * the one failure — which is a status code, because it is something to try
+ * again rather than something to read.
+ */
+export type SettingsSaved = { 
+/**
+ * How the settings stand now, read back off the files rather than echoed
+ * from what came in — the files are the source of truth, and a hand-edit
+ * made a moment ago is part of what the page should be showing.
+ */
+settings: SettingsView, 
+/**
+ * What GitHub made of the token that was just saved, or `null` where the
+ * save was not about a token.
+ */
+verified: Verified | null, };
+
+/**
+ * The settings as they stand, read off the two files at the moment they are
+ * asked for.
+ */
+export type SettingsView = { git_author: Author, 
+/**
+ * What can be said about the configured token, or `null` where there is
+ * none — which is what a Verkstead nobody has told anything looks like.
+ */
+github_token: TokenSaved | null, };
+
+/**
  * What the server says down a live Screen's socket.
  *
  * Watching a running session is the one place the viewer is sent something
@@ -1426,6 +1476,28 @@ tasks: Array<TaskEntry>, };
 export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
+ * What is to become of the configured token.
+ */
+export type TokenEdit = "Keep" | { "Set": { token: string, } } | "Clear";
+
+/**
+ * Everything about the configured token that is not the token.
+ */
+export type TokenSaved = { 
+/**
+ * Its last four characters — fewer, for a token shorter than that, which
+ * is a hand-edit rather than anything GitHub issued.
+ */
+last_four: string, 
+/**
+ * When the secrets file was last written, RFC 3339. The file's own
+ * modification time rather than a stamp stored beside the token: the file
+ * is the source of truth, and a hand-edit that moved the token would leave
+ * a stored stamp saying the wrong day.
+ */
+at: string, };
+
+/**
  * What a tool answered.
  */
 export type ToolResult = { 
@@ -1510,6 +1582,17 @@ export type Unsubscribe = { endpoint: string, };
  * Whether there is a newer Verkstead to update to.
  */
 export type UpdateNotice = "Current" | { "Available": { version: string, } };
+
+/**
+ * Who a token authenticates as, or why nobody could be asked.
+ *
+ * The failure is an answer here rather than a failed save. A token is pasted
+ * once, out of a page on GitHub that will not show it again, and a network
+ * that was briefly down is no reason to make the human go back for another
+ * one: the token is written down, and this says what happened when it was
+ * tried.
+ */
+export type Verified = { "Account": { login: string, } } | { "Refused": { why: string, } };
 
 /**
  * One way a Set fails the question grammar.

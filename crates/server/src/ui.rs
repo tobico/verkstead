@@ -26,15 +26,18 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
 use axum::routing::{get, post};
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
+    Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted,
     ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted,
-    Subscribed, Subscription, Unsubscribe, UpdateNotice,
+    PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit,
+    TokenSaved, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Response};
 
+use crate::settings::{Config, GitAuthor, Secrets};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -159,6 +162,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/push/key", get(push_key))
         .route("/api/ui/push/subscribe", post(subscribe))
         .route("/api/ui/push/unsubscribe", post(unsubscribe))
+        // What Verkstead has been told, and telling it. One route for both, the
+        // read and the save being the same page's two halves — and one save for
+        // the author and the token together, because the page has one button.
+        .route("/api/ui/settings", get(settings).post(save_settings))
         .route("/api/ui/update", get(update))
 }
 
@@ -1442,6 +1449,130 @@ async fn unsubscribe(
             unavailable("the subscription could not be forgotten")
         }
     }
+}
+
+/// `GET /api/ui/settings` — what Verkstead has been told: the git author, and
+/// that there is a GitHub token.
+///
+/// Read off the two files at the moment it is asked for, like everything else
+/// that reads them: the files are the source of truth, so a token or an author
+/// somebody hand-edited into place is what this comes back with.
+async fn settings(State(state): State<AppState>) -> HttpResponse {
+    Json(as_told(&state.settings)).into_response()
+}
+
+/// `POST /api/ui/settings` — write the author down, and set or clear the token.
+///
+/// Both files in one request, because the page has one button. The token's half
+/// is an action rather than a value — see [`TokenEdit`]: most saves are about
+/// the author, and a blank write-only field read as *clear this* would take the
+/// credentials away every time somebody corrected their own email address.
+///
+/// A token that was set is then tried against GitHub, and what GitHub said rides
+/// back with the save. Tried after the writing and never before it: a token is
+/// pasted once, out of a page that will not show it again, and a verification
+/// that failed on the network is no reason to make the human go back for
+/// another one.
+async fn save_settings(
+    State(state): State<AppState>,
+    Json(edit): Json<SettingsEdit>,
+) -> HttpResponse {
+    let settings = state.settings.clone();
+    let gh = state.github.clone();
+
+    // One blocking hop for the whole save: two files written and, where a token
+    // was set, a `gh` run. Everything here is the filesystem or a process, and
+    // none of it belongs on the runtime's threads.
+    let saved = tokio::task::spawn_blocking(move || {
+        settings.save_config(&Config::of_author(GitAuthor::of(
+            Some(edit.git_author.name),
+            Some(edit.git_author.email),
+        )))?;
+
+        let verifying = match &edit.github_token {
+            TokenEdit::Keep => None,
+            TokenEdit::Set { token } => {
+                settings.save_secrets(&Secrets::of_token(Some(token.clone())))?;
+
+                // Read back rather than taken from the request: a token that was
+                // only whitespace is nothing configured, and verifying what was
+                // typed would announce an account for a token no session will
+                // ever be given.
+                settings.secrets().github_token().map(str::to_owned)
+            }
+            TokenEdit::Clear => {
+                settings.save_secrets(&Secrets::of_token(None))?;
+
+                None
+            }
+        };
+
+        let verified = verifying.map(|token| match crate::github::authenticates_as(&gh, &token) {
+            Ok(login) => Verified::Account { login },
+            Err(trouble) => Verified::Refused { why: trouble.why() },
+        });
+
+        Ok::<_, std::io::Error>(SettingsSaved {
+            settings: as_told(&settings),
+            verified,
+        })
+    })
+    .await;
+
+    match saved {
+        Ok(Ok(saved)) => Json(saved).into_response(),
+        // The one way this fails: a file that would not be written. Something to
+        // try again rather than something to read, so it is a status code and
+        // not a named outcome — and worth saying loudly, because a settings page
+        // that quietly saved nothing is how credentials go missing.
+        Ok(Err(error)) => {
+            tracing::error!(error = ?error, "writing the settings files failed");
+            unavailable("the settings could not be saved")
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "saving the settings failed");
+            unavailable("the settings could not be saved")
+        }
+    }
+}
+
+/// How the settings stand, read off the files.
+///
+/// The token comes back as its last four characters and the moment the file was
+/// written, and never as itself — see [`verkstead_render::SettingsView`]. A
+/// token nobody can read back out is a token that cannot leak through a page,
+/// and the four characters are the whole of what the human needs to tell one
+/// from another.
+fn as_told(settings: &crate::settings::Settings) -> SettingsView {
+    let secrets = settings.secrets();
+    let config = settings.config();
+    let author = config.git_author();
+
+    SettingsView {
+        git_author: Author {
+            name: author.name().unwrap_or_default().to_owned(),
+            email: author.email().unwrap_or_default().to_owned(),
+        },
+        github_token: secrets.github_token().map(|token| TokenSaved {
+            last_four: last_four(token),
+            at: settings
+                .secrets_written_at()
+                .and_then(|at| at.format(&Rfc3339).ok())
+                .unwrap_or_default(),
+        }),
+    }
+}
+
+/// The last four characters of a token, or the fewer there are.
+///
+/// By character rather than by byte: a hand-edited file may hold anything at
+/// all, and slicing a string in the middle of a character is a panic in a
+/// settings page.
+fn last_four(token: &str) -> String {
+    let characters: Vec<char> = token.chars().collect();
+    let from = characters.len().saturating_sub(4);
+
+    characters[from..].iter().collect()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

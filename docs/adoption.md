@@ -46,7 +46,7 @@ install. On a NixOS host, import it and enable the service:
 services.verkstead = {
   enable = true;
   watchedPaths = [ "/home/you/src" ];
-  home = "/home/you";                 # for .gitconfig and .config/gh
+  home = "/home/you";                 # optional; the service's own by default
   sandboxBinds = [ "verkstead=/var/cache/verkstead-cargo" ];
 };
 ```
@@ -57,9 +57,11 @@ each is a boundary rather than a convenience:
 - **`watchedPaths`** is what Verkstead may operate inside. There is no default
   and no scan; a **Repo** is registered only from within one, and a path that
   merely reads as inside one is refused.
-- **`home`** is where `.gitconfig` and `.config/gh` are read from, and those
-  two are mounted read-only into every Sandbox. Without them a session commits
-  as nobody and has no GitHub login.
+- **`home`** is only what `HOME` means for the service; nothing is read out of
+  it and nothing of it reaches a Sandbox. Credentials and identity are said
+  instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
+  in the data directory, reaching each session as `GH_TOKEN` and git's own
+  `GIT_CONFIG_*`.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why it is set here and not anywhere the workbench
   can reach. A bare path goes to every session; `name=path` goes only to
@@ -133,7 +135,7 @@ to run. Nobody presses anything for either.
   through: a Set is on the Timeline of the work it came from, and it stays
   there, answered, afterwards. Nothing leaves a Timeline.
 - **The checkout is not what gets worked in.** Every Conversation has its own
-  Worktree under the State Directory, so two pieces of work in one Repo no
+  Worktree under the Data Directory, so two pieces of work in one Repo no
   longer take turns, and the checkout you have open in an editor is not what a
   session is editing.
 - **A run that stops is a thing on a page**, not a terminal you have to find.

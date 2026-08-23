@@ -36,9 +36,9 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router) {
 
     // Beside the database, as it falls out for the real server. Nothing in this
     // file grills, so nothing is ever put in it.
-    let state_dir = dir.path().to_owned();
+    let data_dir = dir.path().to_owned();
 
-    (watched, dir, router_watching(pool, paths, state_dir))
+    (watched, dir, router_watching(pool, paths, data_dir))
 }
 
 /// A claude dir and config file pair at `root`, as `work-sandbox` would find

@@ -164,7 +164,7 @@ jobs:
       - name: The viewer is inside the binary
         run: |
           ./"$BINARY" serve --listen 127.0.0.1:8422 \
-            --database "$RUNNER_TEMP/verkstead.db" &
+            --data-dir "$RUNNER_TEMP" &
           server=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \

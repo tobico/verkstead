@@ -290,7 +290,8 @@ describe("the workbench", () => {
   });
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
-  /// workbench has the root.
+  /// workbench has the root — and the rest of Verkstead is one page, since the
+  /// Repos and the Agent Profiles were folded onto the settings page.
   it("reaches the rest of Verkstead from the sidebar", async () => {
     theWorkbench();
     const { container } = mount();
@@ -299,7 +300,7 @@ describe("the workbench", () => {
     const elsewhere = container.querySelector(".elsewhere")!;
     expect(
       [...elsewhere.querySelectorAll("a")].map((to) => to.getAttribute("href")),
-    ).toEqual(["/repos", "/profiles"]);
+    ).toEqual(["/settings"]);
   });
 
   it("says where to go when there is no repo to start one against", async () => {
@@ -312,7 +313,7 @@ describe("the workbench", () => {
     await waitFor(() => screen.getByText(/No repos are registered yet/));
     expect(container.querySelector(".start-conversation")).toBeNull();
     expect(screen.getByText("register one").getAttribute("href")).toBe(
-      "/repos",
+      "/settings",
     );
   });
 });
@@ -1249,7 +1250,7 @@ describe("a conversation's agent profiles", () => {
     mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText(/No agent profiles are saved yet/));
-    expect(screen.getByText("add one").getAttribute("href")).toBe("/profiles");
+    expect(screen.getByText("add one").getAttribute("href")).toBe("/settings");
   });
 });
 

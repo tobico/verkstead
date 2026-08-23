@@ -272,7 +272,7 @@ fn todo() -> PathBuf {
 async fn tail(state: &AppState, conversation_id: i64, direction: Direction) -> Option<Step> {
     Some(match direction {
         Direction::Inline => Step::Handoff(
-            crate::handoffs::Handoffs::under(&state.state_dir).document(conversation_id),
+            crate::handoffs::Handoffs::under(&state.data_dir).document(conversation_id),
         ),
         Direction::TaskList => Step::Planning,
         Direction::Roadmap => Step::Staging(base(state, conversation_id).await?),
@@ -851,7 +851,7 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
 /// and the implementation session starting where the Conversation reads as one
 /// nothing is driving.
 async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session, driving: Driving) {
-    let handoffs = crate::handoffs::Handoffs::under(&state.state_dir);
+    let handoffs = crate::handoffs::Handoffs::under(&state.data_dir);
     let step = Step::Handoff(handoffs.document(conversation_id));
 
     if see_out(&state, conversation_id, step, writing)

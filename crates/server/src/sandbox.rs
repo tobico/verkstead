@@ -12,9 +12,16 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
-//! - **read-only** — `/nix` and the system paths, `~/.gitconfig`, the gh config,
-//!   and the bundled skills over `~/.claude/skills`
+//! - **read-only** — `/nix` and the system paths, and the bundled skills over
+//!   `~/.claude/skills`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
+//!
+//! Credentials are on none of those lists, and neither is who a session commits
+//! as. Both arrive in the environment out of the settings files the human filled
+//! in — see [`crate::settings`] — GitHub auth as `GH_TOKEN`, and the whole of
+//! git's configuration as `GIT_CONFIG_COUNT` and the pairs it counts. So there
+//! are no gh files inside a sandbox and no `.gitconfig` either, and no question
+//! of which account a session turned out to be running as.
 //!
 //! The network is not a boundary here: it is shared with the host, whole and
 //! unfiltered. An agent has to reach GitHub, the npm registry, the model's API
@@ -30,6 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::handoffs::{self, Handoffs};
+use crate::settings::{Config, GitAuthor, Secrets};
 use crate::skills::{self, Skills};
 use crate::store;
 use crate::terminal;
@@ -78,27 +86,29 @@ const PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin
 /// have a shell at, on NixOS and everywhere else.
 const SHELL: &str = "/bin/sh";
 
-/// The host directory `~` means, and what is read out of it.
+/// GitHub over HTTPS, which is the one host a sandbox is given credentials for
+/// and the one every SSH remote is rewritten to — see [`Sandbox::git_config`].
 ///
-/// A session's HOME is the server's own, at the same path inside the sandbox.
-/// The two things read out of it are the two a coding agent cannot work without
-/// — who git commits as, and what `gh` is authenticated as — and both are the
-/// human's, configured once for the machine rather than per Conversation.
+/// Without a trailing slash, because a credential scope has none and the URL
+/// rewrite says its own.
+const GITHUB: &str = "https://github.com";
+
+/// The host directory `~` means inside a sandbox.
 ///
-/// Nothing else of it comes through. HOME inside is an empty directory with the
-/// Profile's pair and these two mounted into it, which is what makes one
+/// A session's HOME is the server's own, at the same path inside — and that is
+/// the whole of what this is for. Nothing is read out of it any more: it used to
+/// give up two things, what `gh` was authenticated as and who git committed as,
+/// and both are now said rather than found — a token and an author in the
+/// settings files, handed to the session in its environment. What is left is a
+/// path, not a place credentials are collected from.
+///
+/// Nothing of the directory comes through either. HOME inside is an empty
+/// directory with the Profile's pair mounted into it, which is what makes one
 /// account's sessions invisible to another's.
 #[derive(Debug, Clone)]
 pub struct Home {
-    /// The directory itself, which is both where these are read from and what
-    /// `~` resolves to inside.
+    /// The directory itself, which is what `~` resolves to inside.
     pub path: PathBuf,
-
-    /// Where `gh` keeps its hosts file on the host, which is
-    /// `$XDG_CONFIG_HOME/gh` where that is set and `~/.config/gh` where it is
-    /// not. Inside the sandbox it is always the latter — see
-    /// [`Sandbox::command`].
-    pub gh_config: PathBuf,
 }
 
 impl Home {
@@ -109,14 +119,9 @@ impl Home {
     /// the packaged unit it is what the module sets, and in a development shell
     /// it is the human's own.
     pub fn of_the_server() -> Option<Home> {
-        let path = PathBuf::from(std::env::var_os("HOME")?);
-
-        let gh_config = match std::env::var_os("XDG_CONFIG_HOME") {
-            Some(config) if !config.is_empty() => PathBuf::from(config).join("gh"),
-            _ => path.join(".config/gh"),
-        };
-
-        Some(Home { path, gh_config })
+        Some(Home {
+            path: PathBuf::from(std::env::var_os("HOME")?),
+        })
     }
 }
 
@@ -195,12 +200,11 @@ impl SandboxConfig {
     /// can be called anything without a spelling of it turning into a path.
     ///
     /// A bind that is not there is refused rather than skipped, which is where
-    /// this parts company with the two host files in [`Sandbox::command`]: a
-    /// missing gh config is a machine nobody has logged in on, and a missing
-    /// configured bind is a typo that would otherwise take every session in that
-    /// repository down with it, weeks later, with nobody watching. Not created
-    /// either — a directory outside the State Directory is not Verkstead's to
-    /// make.
+    /// this parts company with the settings files: a setting nobody has filled in
+    /// is an installation part-way through being set up, and a missing configured
+    /// bind is a typo that would otherwise take every session in that repository
+    /// down with it, weeks later, with nobody watching. Not created either — a
+    /// directory outside the Data Directory is not Verkstead's to make.
     pub fn resolve(binds: &[String]) -> anyhow::Result<SandboxConfig> {
         let mut config = SandboxConfig::default();
 
@@ -325,6 +329,21 @@ pub struct Sandbox {
 
     home: Home,
 
+    /// What `gh` inside authenticates as, or `None` where nothing is configured.
+    ///
+    /// Taken as the sandbox is built rather than held from startup, so a token
+    /// the human rotates applies from the next session — and a session already
+    /// running keeps the one it started with, which is the only thing an
+    /// environment variable could mean.
+    github_token: Option<String>,
+
+    /// And who it commits as, taken at the same moment and for the same reason.
+    ///
+    /// Either half may be missing, and a missing half is left unsaid rather than
+    /// filled in: git's own "tell me who you are" is the failure worth having,
+    /// because it says what to go and configure.
+    git_author: GitAuthor,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
@@ -349,6 +368,12 @@ impl Sandbox {
     /// answer: a bind with nothing behind it is a sandbox that will not start.
     ///
     /// Git is asked here and the filesystem is written to, so this blocks.
+    ///
+    /// The parameter list is the surface: every one of these is something the
+    /// session gets, and spelling them out is what lets a reader of a call site
+    /// see the whole of what one is given. A struct grouping them would hide
+    /// exactly the thing worth reading.
+    #[allow(clippy::too_many_arguments)]
     pub fn for_conversation(
         conversation: &store::Conversation,
         profile: &store::Profile,
@@ -356,6 +381,8 @@ impl Sandbox {
         reachable: &Reachable,
         skills: &Skills,
         handoffs: &Handoffs,
+        secrets: &Secrets,
+        config: &Config,
         extra: Vec<PathBuf>,
     ) -> Option<Sandbox> {
         let worktree = conversation.worktree.clone()?;
@@ -370,6 +397,8 @@ impl Sandbox {
             skills: skills.path().to_owned(),
             handoff_dir,
             home,
+            github_token: secrets.github_token().map(str::to_owned),
+            git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
             extra,
         })
@@ -444,33 +473,6 @@ impl Sandbox {
             .arg(&self.skills)
             .arg(self.home.path.join(skills::INSIDE_HOME));
 
-        // The two host things a session reads and never writes.
-        //
-        // The gh config lands at `~/.config/gh` whatever it is called outside,
-        // because inside there is no `XDG_CONFIG_HOME` to say otherwise — the
-        // environment is cleared, and a config bound where nothing looks for it
-        // is a session that quietly has no GitHub login.
-        //
-        // Absent is not an error: a machine nobody has logged in on is one where
-        // `gh` will say so, which is a better failure than a sandbox that
-        // refuses to start.
-        for (outside, inside) in [
-            (
-                self.home.path.join(".gitconfig"),
-                self.home.path.join(".gitconfig"),
-            ),
-            (
-                self.home.gh_config.clone(),
-                self.home.path.join(".config/gh"),
-            ),
-        ] {
-            if outside.exists() {
-                bwrap.arg("--ro-bind").arg(&outside).arg(&inside);
-            } else {
-                tracing::debug!(path = %outside.display(), "nothing to bind into the sandbox");
-            }
-        }
-
         for extra in &self.extra {
             bwrap.arg("--bind").arg(extra).arg(extra);
         }
@@ -507,10 +509,95 @@ impl Sandbox {
             // either.
             .arg("--setenv")
             .arg("VERKSTEAD_SERVER")
-            .arg(&self.server)
-            .args(argv);
+            .arg(&self.server);
+
+        // What `gh` inside authenticates as, which it reads from here without
+        // being told to and without a file anywhere. Set only where there is one
+        // to set: `GH_TOKEN` present and empty is a login `gh` fails on obscurely
+        // where its absence is a login it says plainly it does not have.
+        if let Some(token) = &self.github_token {
+            bwrap.arg("--setenv").arg("GH_TOKEN").arg(token);
+        }
+
+        // And the whole of git's configuration, in the environment for the same
+        // reason: there is no file inside for it to be in.
+        let git_config = self.git_config();
+
+        for (n, (key, value)) in git_config.iter().enumerate() {
+            bwrap
+                .arg("--setenv")
+                .arg(format!("GIT_CONFIG_KEY_{n}"))
+                .arg(key)
+                .arg("--setenv")
+                .arg(format!("GIT_CONFIG_VALUE_{n}"))
+                .arg(value);
+        }
 
         bwrap
+            .arg("--setenv")
+            .arg("GIT_CONFIG_COUNT")
+            .arg(git_config.len().to_string())
+            // And nothing git cannot answer for itself is asked of anybody.
+            // Nobody is at this terminal: a push with no usable credentials has
+            // to come back saying so, where a prompt for a username would be a
+            // session sitting on a pty until something noticed.
+            .arg("--setenv")
+            .arg("GIT_TERMINAL_PROMPT")
+            .arg("0");
+
+        bwrap.args(argv);
+
+        bwrap
+    }
+
+    /// Every `key = value` git is configured with inside, in the order the
+    /// environment will number them.
+    ///
+    /// Three things, and the last two are the same thing said twice over: who
+    /// the commits are by, how a push proves who it is, and which URLs that
+    /// proof is any use for.
+    ///
+    /// The credential helper is `gh`'s own, which answers out of `GH_TOKEN` — so
+    /// a `git push` over HTTPS authenticates as whoever the settings file says,
+    /// with nothing stored anywhere and nothing to log in to. It is scoped to
+    /// `https://github.com` rather than left open: a helper on every host is one
+    /// asked about hosts it has no business being asked about.
+    ///
+    /// And the rewrites are what make that reachable at all. A repository cloned
+    /// over SSH has an SSH remote, and there are no keys inside a sandbox for it
+    /// to offer — so a push would fail on a missing key rather than fall back to
+    /// anything. `insteadOf` turns the two spellings of a GitHub SSH remote into
+    /// the HTTPS one as git resolves the URL, leaving what the repository has
+    /// written down untouched: a session pushes, and `.git/config` still says
+    /// what the human cloned.
+    fn git_config(&self) -> Vec<(String, String)> {
+        let mut config = Vec::new();
+
+        // Each half on its own: a name configured and no address is a name
+        // configured, and git says for itself what is still missing.
+        if let Some(name) = self.git_author.name() {
+            config.push(("user.name".to_owned(), name.to_owned()));
+        }
+
+        if let Some(email) = self.git_author.email() {
+            config.push(("user.email".to_owned(), email.to_owned()));
+        }
+
+        config.push((
+            format!("credential.{GITHUB}.helper"),
+            // The `!` is what makes git run it as a command rather than look for
+            // a `git-credential-` binary of that name.
+            "!gh auth git-credential".to_owned(),
+        ));
+
+        // Both spellings of the same remote, as two values of the one
+        // multi-valued key — which is what repeating it in the environment
+        // means, the counted pairs being read as one more configuration file.
+        for ssh in ["git@github.com:", "ssh://git@github.com/"] {
+            config.push((format!("url.{GITHUB}/.insteadOf"), ssh.to_owned()));
+        }
+
+        config
     }
 }
 

@@ -18,7 +18,7 @@ use std::path::Path;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
@@ -26,7 +26,7 @@ use verkstead_render::{Answered, SetView, Standing};
 use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
 };
-use verkstead_server::{open_database, router, store};
+use verkstead_server::{Gh, open_database, router, router_asking_github, store};
 
 /// The Conversation every Set in this file is asked from.
 ///
@@ -1967,6 +1967,81 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )
         .await,
     );
+
+    // The settings of a Verkstead nobody has told anything: no token at all, and
+    // an author of two empty strings. What the page's warnings are drawn over,
+    // and the state a fresh install opens in.
+    let (_dir, app) = told_app().await;
+    write("settings-unset.json", &get(&app, "/api/ui/settings").await);
+
+    // And of one that has been told both. The token goes in through the endpoint
+    // rather than into the file, because writing it is what stamps `secrets.yaml`
+    // — and the stamp is a clock's answer, so it is pinned like every other.
+    let saved = post(
+        &app,
+        "/api/ui/settings",
+        &serde_json::json!({
+            "git_author": { "name": "Ada Lovelace", "email": "ada@example.com" },
+            "github_token": { "Set": { "token": "ghp_0123456789abcdef" } },
+        }),
+    )
+    .await;
+
+    // The answer to the save, which is the other shape this page reads: the
+    // settings as they now stand, and the account GitHub said the token is.
+    write("settings-saved.json", &pin_written_at(&saved, "settings"));
+    write(
+        "settings.json",
+        &pin_written_at(&get(&app, "/api/ui/settings").await, ""),
+    );
+}
+
+/// A server keeping settings files of its own, whose `gh` answers `gh api user`
+/// as one stated account.
+///
+/// The stub is what lets a fixture carry a verified token without a network or
+/// somebody's credentials — what a token really verifies as is
+/// `tests/settings.rs`'s subject, and this is only the shape of the answer.
+async fn told_app() -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let data_dir = dir.path().to_owned();
+
+    let gh = Gh::running(vec![
+        "/bin/sh".to_owned(),
+        "-c".to_owned(),
+        r#"printf '{"login":"ada"}'"#.to_owned(),
+        // `sh -c` gives `$0` the script's own name, so what Verkstead passes
+        // lands in `$1` onwards.
+        "gh".to_owned(),
+    ]);
+
+    (dir, router_asking_github(pool, data_dir, gh))
+}
+
+/// Pin when `secrets.yaml` was written, which is the file's own modification
+/// time and so a different minute on every run.
+///
+/// `at` is the field's path from the root: the settings themselves carry the
+/// token at the top, and a save carries them one level down.
+fn pin_written_at(json: &str, under: &str) -> String {
+    let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    let settings = if under.is_empty() {
+        &mut payload
+    } else {
+        &mut payload[under]
+    };
+
+    assert!(
+        settings["github_token"].get("at").is_some(),
+        "no saved token here to pin:\n{settings}"
+    );
+    settings["github_token"]["at"] = "2026-08-03T09:07:11.000Z".into();
+
+    serde_json::to_string(&payload).unwrap()
 }
 
 /// Pin everything in a payload that the filesystem would otherwise decide: a
@@ -2169,6 +2244,29 @@ async fn get(app: &Router, path: &str) -> String {
     assert_eq!(response.status(), StatusCode::OK, "GET {path}");
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+/// The body of a POST of JSON, as it came back.
+async fn post(app: &Router, path: &str, body: &serde_json::Value) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "POST {path}: {body}");
+    body
 }
 
 /// Write one fixture, indented so that a review of it is a review of the shape.

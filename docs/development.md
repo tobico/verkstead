@@ -27,7 +27,7 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 ```console
 $ (cd web && pnpm install && pnpm build)
 $ cargo run -p verkstead-cli -- serve --watched-path ~/src
-  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 database=verkstead.db watched=["/home/you/src"]
+  INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
 ```
 
 `--watched-path` is the one flag with no default. It names a directory
@@ -36,6 +36,64 @@ convenience: nothing outside the paths given is touched, and a repo is
 registered only from within one. Repeat the flag for more than one, or set
 `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. The server refuses to
 start with none.
+
+Everything Verkstead makes goes in one place, the **Data Directory**: the
+database at `verkstead.db`, the worktrees, the installed skills, the handoff
+directories and the settings files. `--data-dir` says where, or
+`VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
+run out of a checkout wants.
+
+A session's GitHub auth and the author of its commits are two of those settings
+rather than anything found in a home directory. Put a token in `secrets.yaml`
+beside the database, and who you are in `config.yaml`:
+
+```yaml
+# secrets.yaml
+github_token: ghp_...
+```
+
+```yaml
+# config.yaml
+git_author:
+  name: Tobias Cohen
+  email: tobi@tobico.net
+```
+
+Every session started after that gets the token as `GH_TOKEN`, which `gh`
+honours without being told to — as does the server's own `gh`, the one that
+reads a pull request's checks, commits and comments onto a Timeline — and gets
+git configured through the
+environment — the author, `gh auth git-credential` as the credential helper for
+GitHub, and SSH GitHub remotes rewritten to HTTPS so a `git push` inside
+authenticates with the token. There is no file to write and nothing to log in
+to inside a sandbox. With no token — no file, an empty one, one that will not
+parse — sessions start anyway and `gh` inside says it is not logged in, and the
+server's own `gh` falls back to whatever login the host has; with no author, git
+inside asks to be told who you are.
+
+Either file can be written through the viewer's API instead of by hand, which is
+what the settings page saves through:
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/settings
+{"git_author":{"name":"","email":""},"github_token":null}
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+         "github_token":{"Set":{"token":"ghp_..."}}}' \
+    http://127.0.0.1:8422/api/ui/settings
+{"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+  "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"}},
+ "verified":{"Account":{"login":"tobico"}}}
+```
+
+The token goes one way. What comes back about it is its last four characters and
+when `secrets.yaml` was written, never the token itself. Saving one asks GitHub
+who it authenticates as and answers with the account or with what went wrong —
+and writes it down either way, because a token is pasted once out of a page that
+will not show it again, and a network that was briefly down is no reason to send
+somebody back for another. `"github_token"` is `"Keep"` to leave the configured
+one alone, which is what a save of the author fields sends, and `"Clear"` to take
+it away.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
@@ -207,7 +265,7 @@ server, which then says so on every page instead of serving one.
 viewer's vitest suite from the pinned pnpm and node, and boots a VM with the
 NixOS module enabled to put a Question Set through it again, for the sake of
 everything the module wraps around that round trip: a unit that starts itself
-at boot, the state directory systemd hands over, a database that survives the
+at boot, the Data Directory systemd hands over, a database that survives the
 service being stopped and started under a waiting agent, a store-path binary
 serving the viewer that was built into it, and the CLI on `PATH` with nothing
 set in the environment. The VM needs a Linux host to boot the guest on, so on
