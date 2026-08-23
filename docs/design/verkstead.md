@@ -249,9 +249,12 @@ Timeline events:
   working, the same ring empty once it has gone quiet, and nothing at all once
   it is over; `prefers-reduced-motion` holds it still. Quiet is the server's
   judgement, three seconds with nothing printed, computed on every read and
-  announced as it is crossed — a session going quiet is exactly when it stops
-  producing the nudges that would carry the news (*settled 2026-08-23, building
-  agent-output-polish*).
+  announced at both crossings — a session going quiet is exactly when it stops
+  producing the nudges that would carry the news, and what carries it speaking
+  again reaches the conversation being watched rather than the sidebar's list.
+  On the card the waiting dot still outranks both rings, so a grilling sitting
+  on an open set is drawn as waiting rather than as idle (*settled 2026-08-23,
+  building agent-output-polish*).
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,

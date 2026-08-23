@@ -22,7 +22,12 @@ import { Show, type JSX } from "solid-js";
 
 /// What each mark says when it is read aloud, which is the whole of what a
 /// screen reader gets from one — see the module note above.
-const SPOKEN = {
+///
+/// Exported for the sidebar's conversation card, which draws its own mark
+/// inside an already-labelled button and so needs the words rather than the
+/// element: a ring means the same thing wherever it is drawn, and it should
+/// mean it in the same words too.
+export const SPOKEN = {
   working: "a session is running",
   idle: "a session is running and has gone quiet",
 } as const;

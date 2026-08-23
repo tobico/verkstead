@@ -45,6 +45,7 @@ import {
   SIDEBAR,
   drawn,
   mount,
+  nudged,
   theWorkbench,
 } from "./bench";
 import { askedFor, json, serving, whenever } from "./serving";
@@ -299,6 +300,25 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(".mark.waiting")).toBeNull();
   });
 
+  /// And the same ring empty once that session has stopped talking, which is the
+  /// mark the Timeline row and the details pane draw for it too. The case it
+  /// exists for is a grilling that has sat on a blocking ask for an hour: a
+  /// spinner turning the whole time says something is happening when nothing is.
+  it("empties the ring on a conversation whose session has gone quiet", async () => {
+    theSidebar({
+      state: "Grilling",
+      working: true,
+      idle: true,
+      waiting: false,
+    });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.idle")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
   it("shows a dot on a conversation waiting on the human", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
@@ -320,6 +340,48 @@ describe("how a card says where its conversation has got to", () => {
 
     expect(card!.querySelector(".mark.waiting")).toBeTruthy();
     expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  /// And over the empty one, which is the same case a step further on: the
+  /// session that asked has been quiet since it asked. The mark that outranks
+  /// both is the one the human can do something about.
+  it("shows the dot and not the empty ring when it is both", async () => {
+    theSidebar({ state: "Grilling", working: true, idle: true, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.idle")).toBeNull();
+  });
+
+  /// Both crossings reach the card on the news alone: a session going quiet is
+  /// announced on the Conversation's own Nudge kind, and so is its coming back
+  /// out of the silence — because what carries a session speaking is the Screen's
+  /// kind, which is about the Conversation being watched rather than the list of
+  /// them. What a page does with either is read this list again.
+  it("moves between the two rings without the page being reloaded", async () => {
+    let rows: ConversationEntry[] = [
+      { ...SIDEBAR[0]!, working: true, idle: false },
+    ];
+    theWorkbench(whenever("/api/ui/conversations", () => json(rows)()));
+    const { container, client } = mount();
+    await drawn(container, ".conversation-row .mark.working");
+
+    rows = [{ ...rows[0]!, idle: true }];
+    await nudged(client);
+
+    expect(container.querySelector(".conversation-row .mark.idle")).toBeTruthy();
+    expect(container.querySelector(".conversation-row .mark.working")).toBeNull();
+
+    // And back, on the session speaking again.
+    rows = [{ ...rows[0]!, idle: false }];
+    await nudged(client);
+
+    expect(
+      container.querySelector(".conversation-row .mark.working"),
+    ).toBeTruthy();
+    expect(container.querySelector(".conversation-row .mark.idle")).toBeNull();
   });
 
   it("marks nothing on a conversation that is neither", async () => {
@@ -390,7 +452,15 @@ describe("how a card says where its conversation has got to", () => {
         waiting: true,
       },
       {
-        branch: "quiet",
+        branch: "sitting",
+        repo: "verkstead",
+        state: "Grilling",
+        working: true,
+        idle: true,
+        waiting: false,
+      },
+      {
+        branch: "over",
         repo: "verkstead",
         state: "Done",
         working: false,
@@ -406,7 +476,8 @@ describe("how a card says where its conversation has got to", () => {
     ).toEqual([
       "spinning, verkstead, Implementing, a session is running",
       "asking, askance, Grilling, waiting on you",
-      "quiet, verkstead, Done",
+      "sitting, verkstead, Grilling, a session is running and has gone quiet",
+      "over, verkstead, Done",
     ]);
   });
 

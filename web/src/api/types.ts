@@ -437,11 +437,12 @@ export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversa
  * The branch is the row's name: a Conversation has no title of its own, and of
  * what it does have the branch is the short line the human chose.
  *
- * Where it has got to is drawn rather than worded — a spinner for a session
- * that is running, a dot for one that wants answering, a dotted border for a
- * draft and a dimmed card for work that has stopped. Which is why the two facts
- * below are facts and not one collapsed verdict: the row says what is true of
- * the Conversation, and which mark that comes out as is the one rule the viewer
+ * Where it has got to is drawn rather than worded — a turning ring for a
+ * session getting on with it, the same ring empty for one that has gone quiet,
+ * a dot for a Conversation that wants answering, a dotted border for a draft
+ * and a dimmed card for work that has stopped. Which is why the facts below are
+ * facts and not one collapsed verdict: the row says what is true of the
+ * Conversation, and which mark that comes out as is the one rule the viewer
  * keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
@@ -456,6 +457,17 @@ repo: string, state: Lifecycle,
  * server that restarted says no about work it is no longer doing.
  */
 working: boolean, 
+/**
+ * And whether that session has stopped printing — the same quiet the
+ * agent-output row's mark is drawn from, said here so that a card and the
+ * row it opens tell the same truth about the same session.
+ *
+ * Always `false` where nothing is working, which is what keeps the two a
+ * pair rather than a contradiction: idle is a thing a *running* session
+ * is. Which mark it comes out as is the viewer's, and the rule there is
+ * unchanged — waiting still wins over both.
+ */
+idle: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
  * left open, or a run stopped on an Interruption.

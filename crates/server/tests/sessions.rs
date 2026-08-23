@@ -1861,6 +1861,106 @@ async fn a_conversation_reports_that_it_is_working_while_its_session_runs() {
     fixture.row_until(|row| (!row.working).then_some(())).await;
 }
 
+/// And the ring on that card goes empty while the session sits there, which is
+/// the card saying what the row it opens already says.
+///
+/// The case it exists for is a grilling on a blocking ask: the session is alive
+/// and will be for as long as the human takes, and a spinner turning for an hour
+/// says something is happening when nothing is. It goes back the moment the
+/// session speaks, off nothing having had to remember to clear it — the flag is
+/// the quiet clock read at the moment the sidebar is drawn.
+#[tokio::test]
+async fn a_conversation_whose_session_has_gone_quiet_says_so_on_its_card() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\n'
+        sleep 6
+        printf 'what should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // A session that is printing is working rather than idle, which is the
+    // ordinary turning ring.
+    let talking = fixture
+        .row_until(|row| (row.working && !row.idle).then(|| row.clone()))
+        .await;
+    assert!(
+        !talking.waiting,
+        "nothing is being asked, so what the card draws is the ring",
+    );
+
+    // Then it stops, and three seconds of nothing is what the empty ring says.
+    let quiet = fixture.row_until(|row| row.idle.then(|| row.clone())).await;
+    assert!(
+        quiet.working,
+        "idle is a thing a running session is, so the two travel together: \
+         {quiet:?}"
+    );
+    assert!(
+        !quiet.waiting,
+        "and waiting still outranks both, so a card with nothing to answer is \
+         where this can be seen at all",
+    );
+
+    // And back to the turning one when it speaks again.
+    fixture
+        .row_until(|row| (row.working && !row.idle).then_some(()))
+        .await;
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the crossing back out of the silence is announced, which is what the
+/// sidebar hears it on.
+///
+/// The other half of the crossing *into* quiet being announced. What a session
+/// prints is announced on the Screen's kind, which is about the Conversation
+/// being watched rather than the list of them — so a card left on the empty ring
+/// would stay on it until something else happened to the Conversation, which for
+/// a grilling on a blocking ask is the human answering it.
+#[tokio::test]
+async fn a_session_speaking_again_is_announced_to_the_open_pages() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\n'
+        sleep 6
+        printf 'what should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // Opened well past the crossing into quiet — the announcement of *that* has
+    // been and gone, so the next thing down this stream is the one this test is
+    // about.
+    fixture.row_until(|row| row.idle.then_some(())).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut page = Listening::open(&fixture.app).await;
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Conversation {
+            conversation: fixture.id
+        },
+        "the session speaking again is announced on the Conversation's own kind, \
+         before what it printed goes out on the Screen's — because the Screen's \
+         is not what a sidebar reads",
+    );
+
+    let woken = fixture.row().await;
+
+    assert!(
+        woken.working && !woken.idle,
+        "and the sidebar reading itself back on that Nudge finds the turning \
+         ring: {woken:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
 /// And the sidebar's dot, for the source a Conversation can only get to by
 /// really running: a run that stopped on an Interruption is waiting on the human
 /// until a Remedy is chosen.

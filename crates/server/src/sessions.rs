@@ -562,6 +562,23 @@ impl Sessions {
             .collect()
     }
 
+    /// And which of those have stopped printing — [`Sessions::idling`] for the
+    /// whole sidebar at once, and one lock rather than one per row for the same
+    /// reason [`Sessions::working`] is.
+    ///
+    /// A subset of [`Sessions::working`] by construction, because both are the
+    /// same register read: idle is a thing a running session is, and a
+    /// Conversation with nothing in it is in neither set.
+    pub(crate) fn quiet(&self) -> HashSet<i64> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .iter()
+            .filter(|(_, running)| running.quiet.for_how_long() >= IDLE_AFTER)
+            .map(|(conversation_id, _)| *conversation_id)
+            .collect()
+    }
+
     /// The pace the runner works a backlog at — see [`Agents::pace`].
     ///
     /// [`Pace::default`] where this server runs no sessions at all, which is a
@@ -1039,12 +1056,14 @@ struct Printing {
 /// long time to watch a terminal not move.
 ///
 /// The one thing this loop announces that is not something it wrote down is the
-/// session falling quiet: a page draws a session that has stopped differently
-/// from one getting on with it, and going quiet is precisely when a session
-/// stops producing the Nudges that would carry the news. So the crossing *into*
-/// idle is announced on the Conversation's own kind, once — [`IDLE_AFTER`]
-/// after the last thing read. Coming back out of it needs no announcement,
-/// because whatever woke it is output, and output is flushed and announced.
+/// session falling quiet, and then waking: a page draws a session that has
+/// stopped differently from one getting on with it, and going quiet is
+/// precisely when a session stops producing the Nudges that would carry the
+/// news. So both crossings are announced on the Conversation's own kind, once
+/// each — into idle [`IDLE_AFTER`] after the last thing read, and out of it on
+/// the first thing read after that. The waking one is for the sidebar alone:
+/// what a session prints is announced on the Screen's kind, which reaches the
+/// Conversation being watched and not the list of them.
 ///
 /// What comes back is how it ended, which is what whoever is driving decides
 /// between carrying on and raising an Interruption by.
@@ -1091,7 +1110,18 @@ async fn relay(
                 Ok(0) => break,
                 Ok(taken) => {
                     quiet.spoke();
-                    idle = false;
+                    // Coming back out of the silence is a crossing too, and the
+                    // sidebar hears about it on nothing else: what a session
+                    // prints is announced on the Screen's kind, which reaches
+                    // the Conversation being watched rather than the list of
+                    // them. Said once, on the way out.
+                    if idle {
+                        idle = false;
+
+                        nudges.announce(Nudge::Conversation {
+                            conversation: printing.conversation_id,
+                        });
+                    }
 
                     let text = reading.take(&buffer[..taken]);
                     screen.printed(&text);
