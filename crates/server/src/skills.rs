@@ -428,6 +428,47 @@ mod tests {
         );
     }
 
+    /// A pick lets the session proceed and never makes it, so the skill has to
+    /// say what proceeding *is* and what the way back is.
+    ///
+    /// Nothing enforces this end of it. Verkstead watches for the picked
+    /// direction's artifact and for nothing else, so a session that answered a
+    /// pick by writing one of the other two would have decided the direction in
+    /// the human's place — and the only thing standing between it and that is
+    /// the skill saying so.
+    #[test]
+    fn the_grilling_skill_says_a_pick_is_argued_with_by_proposing_again() {
+        let grilling = skill("grilling/SKILL.md");
+
+        let (_, after) = grilling
+            .split_once("### After they pick")
+            .expect("what a pick means is a thing the skill carries");
+        let (picked, _) = after
+            .split_once("### When they pick inline")
+            .expect("with the three branches after it");
+
+        assert!(
+            picked.contains("does not make you"),
+            "a pick lets the session proceed and never makes it: {picked}"
+        );
+        assert!(
+            picked.contains("propose again") || picked.contains("Propose again"),
+            "and the way to argue with one is another proposal: {picked}"
+        );
+        assert!(
+            picked.contains("never do"),
+            "which leaves writing a different artifact as the thing it may not \
+             do — the decision the chooser exists to take out of its hands: \
+             {picked}"
+        );
+        assert!(
+            !grilling.contains("on one Set and no others"),
+            "and a proposal is no longer one-per-grilling: a refused round is \
+             followed by another, and so is a pick that leaves something open: \
+             {grilling}"
+        );
+    }
+
     /// A task-list pick does not end the grilling: the same session writes the
     /// backlog, holding everything the grilling settled. Nothing else tells it so
     /// — no second prompt is sent, because no second session is started — so the

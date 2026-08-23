@@ -19,6 +19,7 @@ mod comments;
 mod commits;
 mod continuing;
 mod conversations;
+mod followers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
 /// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
@@ -125,9 +126,9 @@ const SETTLEMENT_BACKLOG: usize = 64;
 
 /// What the handlers share: the store, word of what has just moved — so held
 /// waits need not poll for a Set arriving and open pages hear about everything
-/// else — which Sets a wait is being held on, which sessions are running,
-/// whether a newer Verkstead has been released than this one, and which
-/// directories any of it may touch.
+/// else — which Sets a wait is being held on, which sessions are running, which
+/// of them a pick has armed a watcher on, whether a newer Verkstead has been
+/// released than this one, and which directories any of it may touch.
 #[derive(Clone)]
 pub(crate) struct AppState {
     pool: SqlitePool,
@@ -135,6 +136,11 @@ pub(crate) struct AppState {
     settlements: Settlements,
     waits: Waits,
     sessions: sessions::Sessions,
+
+    /// The watcher each Conversation's latest pick armed — see [`followers`].
+    /// Beside the sessions rather than inside them, because a watcher is a task
+    /// of Verkstead's own and a session is an agent's process.
+    followers: followers::Followers,
     updates: updates::Updates,
     watched: WatchedPaths,
 
@@ -357,17 +363,21 @@ fn routed(
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
         sessions,
+        followers: followers::Followers::new(),
         updates,
         watched,
         github,
         state_dir,
     };
 
-    // Before anything is served, because it is about what was already happening
-    // rather than about anything a request will start: a Conversation left
-    // wrapping up by a server that stopped has a pull request GitHub has gone on
-    // building, and nobody but this is going to look at it.
+    // Before anything is served, because both are about what was already
+    // happening rather than about anything a request will start: a Conversation
+    // left wrapping up by a server that stopped has a pull request GitHub has
+    // gone on building, and a Conversation left grilling on a pick was waiting
+    // on an artifact from a session that stopped with the server. Nobody but
+    // these is going to look at either.
     wrapping::resume(&state);
+    conversations::resume(&state);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

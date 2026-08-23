@@ -299,10 +299,11 @@ _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
 **Interruption**:
 Something Verkstead detected about an unattended run and cannot resolve itself: a
-session that exited badly, or one that ended having landed nothing. It is an
-Event on the Timeline like any other, and what makes it different is that it is
-**open** — the run does not advance past one, and its Conversation carries
-*blocked on you* until a Remedy is chosen. At most one is open per Conversation.
+session that exited badly, one that ended having landed nothing, or one a restart
+took away with its Step still owed. It is an Event on the Timeline like any
+other, and what makes it different is that it is **open** — the run does not
+advance past one, and its Conversation carries *blocked on you* until a Remedy is
+chosen. At most one is open per Conversation.
 
 It carries the **evidence**, which is what makes the choice answerable without
 opening a terminal: which Step failed, how it ended, what git made of the

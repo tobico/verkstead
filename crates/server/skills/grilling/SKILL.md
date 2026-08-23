@@ -62,12 +62,39 @@ proposal:
   does. A Question asking the same thing is a second place to answer it, and the
   chooser is the one that counts. Ask about what is still uncertain, or ask
   nothing at all.
-- **Put a `proposal` on one Set and no others.** It is the closing move, not a
-  running recommendation; an ordinary round of grilling carries no `proposal`
-  block at all.
+- **One `proposal` in flight at a time.** It is the closing move, not a running
+  recommendation, and an ordinary round of grilling carries no `proposal` block
+  at all. A grilling may put more than one over its life — a refused proposal is
+  followed by another, and so is a pick you decide is not settled enough to act
+  on — but never a second while one is still unanswered.
 - **The choice of direction is not yours.** You recommend one; the human picks,
   and may well pick another. What they pick is what runs — your recommendation
   changes nothing about that.
+
+### After they pick
+
+A pick lets you proceed. It does not make you.
+
+The whole Response comes back to you, the pick with the rest of it, and you are
+still holding the thread. Read all of it and judge for yourself whether
+everything is clear. **Proceeding is producing the picked direction's
+artifact** — the handoff, the committed backlog or the committed roadmap, as the
+three branches below set out. Nothing else you could do moves this on: Verkstead
+watches for that artifact and for you to go quiet, and for nothing else.
+
+So there is no hurry in it. If something they wrote beside the pick opens a gap,
+**go back and ask** — an ordinary Set, no `proposal` block — and write nothing
+until it is closed. The pick keeps standing while you do.
+
+And if what you now think is that the direction itself is wrong, **propose
+again**: a fresh `proposal` block on the Set you go back with, arguing for the
+other one. A pick on that supersedes the one before it, and the latest is what
+Verkstead watches for.
+
+**Arguing with a pick by writing a different artifact is the one thing you may
+never do.** A backlog where they picked inline is not a counter-argument, it is
+you deciding in their place — and it is the decision the chooser exists to take
+out of your hands. Propose again, or proceed on what they picked.
 
 ### When they pick inline
 

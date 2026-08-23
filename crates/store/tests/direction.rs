@@ -500,6 +500,63 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
     );
 }
 
+/// Two proposals both picked on, with the grilling still running between them.
+///
+/// A pick lets the agent proceed and never makes it: it may read the Response,
+/// decide something is still open, and come back with a fresh proposal instead of
+/// writing anything. Nothing about the first pick stops the second from being
+/// made or from standing — the latest is the one the artifact is watched for, and
+/// nothing about either of them moves the Conversation.
+#[tokio::test]
+async fn a_later_pick_supersedes_the_one_before_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let first = ask(&pool, id, &proposing(Direction::Inline))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        proposed(&pool, first.id, &accepting(Direction::Inline)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::Inline,
+            directing: Directing::Writing,
+        }),
+    );
+    assert_eq!(direction(&pool, id).await, Some(Direction::Inline));
+
+    // The agent proceeded on none of it: it came back with another Set, and the
+    // human picked something else on that one.
+    let second = ask(&pool, id, &proposing(Direction::Inline))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        proposed(&pool, second.id, &accepting(Direction::TaskList)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::Writing,
+        }),
+        "a second proposal from a grilling still running is picked on like the first",
+    );
+
+    assert_eq!(
+        direction(&pool, id).await,
+        Some(Direction::TaskList),
+        "and the latest pick is the one that stands",
+    );
+    assert_eq!(
+        state(&pool, id).await,
+        Lifecycle::Grilling,
+        "with the grilling still running, because no artifact has landed",
+    );
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling],
+        "and neither pick moved anything",
+    );
+}
+
 /// A pick answered after the tail it would have informed has already landed.
 ///
 /// Which is the shape of a second proposal Set answered late: the grilling it

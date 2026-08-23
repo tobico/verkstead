@@ -1739,6 +1739,203 @@ async fn an_inline_grilling_that_writes_no_handoff_stops_at_an_interruption() {
         .await;
 }
 
+/// A grilling picked on twice: the later pick is the one watched for, and the
+/// artifact the earlier one asked for moves nothing.
+///
+/// Which is the whole of *the pick informs, the artifact moves*. A pick lets the
+/// session proceed and never makes it, so between one and the artifact the
+/// session may come back with another Set instead — and where that Set carries a
+/// proposal of its own, a pick on it supersedes. Exactly one watcher is live from
+/// that moment, and it is watching for what the human last asked for.
+///
+/// The stub writes the superseded artifact anyway, which is what makes this prove
+/// anything: a handoff appearing on a Conversation whose pick has moved on is a
+/// document nobody asked for, and nothing may act on it.
+#[tokio::test]
+async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/handoff-now ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            while [ ! -f /tmp/verkstead/backlog-now ]; do sleep 0.1; done
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-counter.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    // The first proposal, picked inline: from here the handoff is what this
+    // Conversation is waiting on.
+    let first = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(first, "inline").await, Submitted::Accepted);
+
+    // The session judged that something was still open and came back with
+    // another proposal rather than writing anything, and this time they picked
+    // the other way.
+    let second = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(second, "task-list").await, Submitted::Accepted);
+
+    assert_eq!(
+        fixture.view().await.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "the latest pick is the one in force",
+    );
+
+    // Now the artifact the superseded pick asked for. The watcher that would have
+    // taken it was cancelled when the second pick armed its own.
+    std::fs::write(handoff_directory(&fixture).join("handoff-now"), "").unwrap();
+
+    // Written and sitting there, which is what makes the rest of this a test: a
+    // handoff nothing takes has to be one there was something to take.
+    let written = handoff_directory(&fixture).join("handoff.md");
+    let deadline = Instant::now() + PATIENCE;
+    while !written.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "the stub never wrote the handoff the superseded pick asked for",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls than the handoff watcher would have needed:
+    // it wakes every 100ms and ends a session on 300ms of quiet.
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        handoff(&view),
+        None,
+        "nothing took it: the pick that asked for one has been superseded",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "so nothing moved, and the grilling is still what is happening",
+    );
+    assert_eq!(
+        outputs(&view)
+            .into_iter()
+            .filter(|output| output.id != grilled)
+            .count(),
+        0,
+        "with nothing launched behind it",
+    );
+
+    // And the artifact the pick in force asked for, which is what does move it.
+    std::fs::write(handoff_directory(&fixture).join("backlog-now"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .await;
+
+    let worked = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(worked).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5")
+            && said.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the backlog is being worked, which is where a task-list pick leads: {said:?}"
+    );
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "and the handoff was never taken, on a direction that needs none",
+    );
+}
+
+/// A server restarted between the pick and the artifact.
+///
+/// The pick is a row and survives; the grilling session that would have written
+/// the artifact was a process and did not. So the watcher is armed again from the
+/// stored latest pick, finds nothing to arm it on, and stops the run where it is
+/// — naming the tail the Conversation was waiting on, so the human can retry it
+/// into a fresh session or take it over.
+///
+/// A second server over the same database, which is what a restart is here: what
+/// a pick armed lives in the process that armed it.
+#[tokio::test]
+async fn a_restarted_server_stops_the_tail_it_can_no_longer_watch() {
+    let fixture = grilling(
+        r#"
+        printf 'the grilling is running\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    assert!(
+        interruptions(&fixture.view().await).is_empty(),
+        "the first server is watching it happily, which is what makes this prove \
+         anything",
+    );
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "breaking the work down into a backlog",
+        "the tail it was waiting on is named as the pick asked for it",
+    );
+    assert_eq!(
+        stopped.how, "the session that was writing it is gone",
+        "and the reason is the restart, in words",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "nothing moved: no artifact landed, and a stopped run moves nothing either",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what an Interruption is for",
+    );
+    assert_eq!(
+        stopped.settled, None,
+        "and it is open, which is what draws them the three remedies: {stopped:?}",
+    );
+}
+
 /// A sandbox that will not start says why where somebody is looking.
 ///
 /// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing

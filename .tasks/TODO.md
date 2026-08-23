@@ -21,4 +21,4 @@ docs/adr/0008-pick-informs-artifacts-move.md.
 - [x] 03: Task-list tail in-context — [details](03-task-list-tail-in-context.md)
 - [x] 04: Roadmap tail in-context — [details](04-roadmap-tail-in-context.md)
 - [x] 05: Handoff after the pick — [details](05-handoff-after-the-pick.md)
-- [ ] 06: Latest pick wins — [details](06-latest-pick-wins.md)
+- [x] 06: Latest pick wins — [details](06-latest-pick-wins.md)
