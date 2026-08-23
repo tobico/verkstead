@@ -71,6 +71,30 @@ parse — sessions start anyway and `gh` inside says it is not logged in, and th
 server's own `gh` falls back to whatever login the host has; with no author, git
 inside asks to be told who you are.
 
+Either file can be written through the viewer's API instead of by hand, which is
+what the settings page saves through:
+
+```console
+$ curl http://127.0.0.1:8422/api/ui/settings
+{"git_author":{"name":"","email":""},"github_token":null}
+$ curl -X POST -H 'Content-Type: application/json' \
+    -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+         "github_token":{"Set":{"token":"ghp_..."}}}' \
+    http://127.0.0.1:8422/api/ui/settings
+{"settings":{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
+  "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"}},
+ "verified":{"Account":{"login":"tobico"}}}
+```
+
+The token goes one way. What comes back about it is its last four characters and
+when `secrets.yaml` was written, never the token itself. Saving one asks GitHub
+who it authenticates as and answers with the account or with what went wrong —
+and writes it down either way, because a token is pasted once out of a page that
+will not show it again, and a network that was briefly down is no reason to send
+somebody back for another. `"github_token"` is `"Keep"` to leave the configured
+one alone, which is what a save of the author fields sends, and `"Clear"` to take
+it away.
+
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
 on first run. Leave it running; check it in a third terminal if you like:

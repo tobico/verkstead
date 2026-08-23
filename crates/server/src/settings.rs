@@ -38,9 +38,12 @@
 //! because a file the human wrote and Verkstead cannot read is the one of the
 //! three they would want telling about.
 
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
 /// What the secrets file is called inside the Data Directory. Fixed rather than
 /// configurable, for the reason the database's name is: the directory is what an
@@ -50,6 +53,17 @@ const SECRETS: &str = "secrets.yaml";
 /// And what the other one is called: everything configured that is nobody's
 /// secret.
 const CONFIG: &str = "config.yaml";
+
+/// What `secrets.yaml` is written as: readable and writable by the account
+/// Verkstead runs under, and by nothing else on the machine. A GitHub token is
+/// a password to every repository the human can reach, and a file holding one
+/// that any process could read would undo the point of saying it here rather
+/// than leaving it in a home directory.
+const SECRET_MODE: u32 = 0o600;
+
+/// And what `config.yaml` is written as, which is the ordinary thing: a name and
+/// an email address are on every commit either of them ever makes.
+const ORDINARY_MODE: u32 = 0o644;
 
 /// Where the settings files are: the Data Directory, and nothing else to hold.
 ///
@@ -110,6 +124,109 @@ impl Settings {
             Config::default()
         })
     }
+
+    /// When `secrets.yaml` was last written, or `None` where there is no file to
+    /// have a time.
+    ///
+    /// The file's own modification time rather than a stamp kept beside the
+    /// token, for the reason everything else here is read fresh: the file is the
+    /// source of truth, and a stored stamp would go on claiming a day after a
+    /// hand-edit moved the token.
+    pub fn secrets_written_at(&self) -> Option<OffsetDateTime> {
+        let written = std::fs::metadata(self.secrets_path())
+            .ok()?
+            .modified()
+            .ok()?;
+
+        Some(OffsetDateTime::from(written))
+    }
+
+    /// Write `secrets.yaml`, replacing whatever is there.
+    ///
+    /// Mode 0600 and atomically. The mode because a file holding a GitHub token
+    /// has no business being readable by anything else on the machine, and
+    /// atomically because the alternative is a window in which the file is
+    /// truncated: a session spawning in that window would be one that quietly
+    /// had no credentials, which is the failure this whole feature is about.
+    ///
+    /// Clearing writes an empty file rather than removing one. It says exactly
+    /// what a missing file says — see [`Secrets::read`] — and leaving the file
+    /// there keeps its mode, its ownership and the fact that this is where the
+    /// token goes.
+    pub fn save_secrets(&self, secrets: &Secrets) -> std::io::Result<()> {
+        let text = match secrets.github_token() {
+            Some(_) => yaml(secrets)?,
+            None => String::new(),
+        };
+
+        write_atomically(&self.secrets_path(), &text, SECRET_MODE)
+    }
+
+    /// And write `config.yaml`, the same way but readable: there is nothing in
+    /// it that is anybody's secret, and a name and an address the machine's
+    /// owner cannot read back would be an odd thing to insist on.
+    pub fn save_config(&self, config: &Config) -> std::io::Result<()> {
+        write_atomically(&self.config_path(), &yaml(config)?, ORDINARY_MODE)
+    }
+}
+
+/// One settings file as YAML, ready to be written.
+///
+/// Serialized rather than formatted by hand, because what goes in these files is
+/// the human's own prose: a name with a colon in it, an address in angle
+/// brackets, a token that begins with a character YAML reads as markup. A
+/// serializer knows when to quote and a `format!` does not.
+///
+/// A value that will not serialize is an `io::Error` here rather than a kind of
+/// its own. There is nothing in either of these files that can fail to become
+/// YAML — two strings and a token — so the only caller worth writing is the one
+/// that reports a file it could not write.
+fn yaml<T: Serialize>(value: &T) -> std::io::Result<String> {
+    serde_saphyr::to_string(value).map_err(std::io::Error::other)
+}
+
+/// Write `text` to `path` with mode `mode`, so that a reader sees either the old
+/// file or the new one and never a half of either.
+///
+/// Through a neighbouring temporary file and a rename, which is atomic within a
+/// directory. The mode is set as the temporary file is created rather than
+/// afterwards, so there is no instant in which a file holding a token stands
+/// world-readable — and the temporary is named for this process, so two
+/// Verksteads pointed at one Data Directory would each replace the file rather
+/// than half-write one between them.
+///
+/// A rename that fails leaves the temporary behind. It is named plainly enough
+/// to be recognised for what it is, and the alternative — unwinding on the way
+/// out of an error — is more that can go wrong on the path where something
+/// already has.
+fn write_atomically(path: &Path, text: &str, mode: u32) -> std::io::Result<()> {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "settings".to_owned());
+
+    let temp = path.with_file_name(format!(".{name}.{}.new", std::process::id()));
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(mode)
+        .open(&temp)?;
+
+    file.write_all(text.as_bytes())?;
+
+    // Before the rename rather than after it: a rename makes the new file the
+    // one everything reads, and a machine that lost power between the two would
+    // have replaced the settings with a file of nothing.
+    file.sync_all()?;
+    drop(file);
+
+    // An existing file's mode is the file's rather than the directory's default,
+    // so a `secrets.yaml` written by an earlier Verkstead — or by hand, at
+    // whatever mode the human's umask gave it — is brought to this one's by the
+    // replacement.
+    std::fs::rename(&temp, path)
 }
 
 /// What is in the settings file at `path`, or `None` where there is nothing to
@@ -152,11 +269,15 @@ fn unreadable(path: &Path, error: &serde_saphyr::Error) {
 /// Unknown keys are ignored rather than refused: the human hand-edits this file,
 /// and a key from a later Verkstead — or a comment they left as a key by mistake
 /// — is not worth taking a session's credentials away over.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
     /// The GitHub token every session and every host-side `gh` authenticates
     /// with, or `None` where none is configured.
-    #[serde(default)]
+    ///
+    /// Left out of what is written rather than written as `null`: the file this
+    /// produces is one the human may open, and a key with nothing under it
+    /// reads as a setting that went wrong rather than as one nobody has made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
 }
 
@@ -178,6 +299,18 @@ impl Secrets {
         })
     }
 
+    /// The secrets a settings page has just been told: `token` as it was typed,
+    /// or `None` where the human cleared it.
+    ///
+    /// Whitespace is nothing, as it is on the way in — see [`blank_is_nothing`].
+    /// A token pasted with the newline that came with it is the ordinary case,
+    /// and one that was only spaces is a cleared field spelled another way.
+    pub fn of_token(token: Option<String>) -> Secrets {
+        Secrets {
+            github_token: token.and_then(blank_is_nothing),
+        }
+    }
+
     /// The configured GitHub token, or `None` where there is none.
     pub fn github_token(&self) -> Option<&str> {
         self.github_token.as_deref()
@@ -188,7 +321,7 @@ impl Secrets {
 /// secret.
 ///
 /// Unknown keys are ignored for the reason [`Secrets`]'s are.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Config {
     /// Who a session commits as.
     #[serde(default)]
@@ -213,6 +346,11 @@ impl Config {
         })
     }
 
+    /// The config a settings page has just been told.
+    pub fn of_author(git_author: GitAuthor) -> Config {
+        Config { git_author }
+    }
+
     /// Who a session commits as, which may be nobody.
     pub fn git_author(&self) -> &GitAuthor {
         &self.git_author
@@ -225,16 +363,25 @@ impl Config {
 /// gets the one they filled in, and git says what is still missing. Nothing here
 /// substitutes a default — a commit by `verkstead@localhost` is worse than a
 /// commit that would not be made, because it is the one nobody notices.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct GitAuthor {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     name: Option<String>,
 
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     email: Option<String>,
 }
 
 impl GitAuthor {
+    /// The author a settings page has just been told, each half on its own and
+    /// each blank half nobody — see [`blank_is_nothing`].
+    pub fn of(name: Option<String>, email: Option<String>) -> GitAuthor {
+        GitAuthor {
+            name: name.and_then(blank_is_nothing),
+            email: email.and_then(blank_is_nothing),
+        }
+    }
+
     /// What `user.name` is inside a sandbox, where one is configured.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
@@ -259,7 +406,9 @@ fn blank_is_nothing(value: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, Secrets, Settings};
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::{Config, GitAuthor, Secrets, Settings};
 
     #[test]
     fn the_token_is_what_the_file_says() {
@@ -399,5 +548,221 @@ mod tests {
 
         assert_eq!(settings.config().git_author().name(), Some("Tobias Cohen"));
         assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+    }
+
+    #[test]
+    fn a_saved_token_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+
+        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+    }
+
+    #[test]
+    fn the_secrets_file_is_readable_by_nobody_else_on_the_machine() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+
+        let mode = std::fs::metadata(settings.secrets_path())
+            .unwrap()
+            .permissions()
+            .mode();
+
+        assert_eq!(mode & 0o777, 0o600, "the mode of the file holding a token");
+    }
+
+    #[test]
+    fn a_file_somebody_left_world_readable_is_brought_to_0600_by_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        // A `secrets.yaml` written by hand, at whatever mode the human's umask
+        // gave it — which is the ordinary way one exists before there is a
+        // settings page to write it.
+        std::fs::write(settings.secrets_path(), "github_token: by-hand\n").unwrap();
+        std::fs::set_permissions(
+            settings.secrets_path(),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+
+        let mode = std::fs::metadata(settings.secrets_path())
+            .unwrap()
+            .permissions()
+            .mode();
+
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn clearing_the_token_leaves_a_file_that_configures_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+        settings.save_secrets(&Secrets::of_token(None)).unwrap();
+
+        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(
+            std::fs::read_to_string(settings.secrets_path()).unwrap(),
+            "",
+            "a cleared token leaves the file, saying what a missing one says"
+        );
+    }
+
+    #[test]
+    fn a_token_that_was_only_whitespace_is_no_token_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("   \n".to_owned())))
+            .unwrap();
+
+        assert_eq!(settings.secrets().github_token(), None);
+    }
+
+    #[test]
+    fn a_pasted_token_keeps_none_of_the_whitespace_that_came_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some(" ghp_thetoken\n".to_owned())))
+            .unwrap();
+
+        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+    }
+
+    #[test]
+    fn a_saved_author_is_what_the_next_read_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of_author(GitAuthor::of(
+                Some("Tobias Cohen".to_owned()),
+                Some("tobi@tobico.net".to_owned()),
+            )))
+            .unwrap();
+
+        let config = settings.config();
+
+        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
+        assert_eq!(config.git_author().email(), Some("tobi@tobico.net"));
+    }
+
+    /// The reason the files are serialized rather than formatted by hand: a name
+    /// with YAML's own punctuation in it has to come back as itself.
+    #[test]
+    fn an_author_whose_name_reads_as_markup_survives_the_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of_author(GitAuthor::of(
+                Some("Cohen, Tobias: #1".to_owned()),
+                Some("tobi@tobico.net".to_owned()),
+            )))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().git_author().name(),
+            Some("Cohen, Tobias: #1"),
+        );
+    }
+
+    #[test]
+    fn half_a_saved_author_is_the_half_that_was_filled_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::of_author(GitAuthor::of(
+                Some("Tobias Cohen".to_owned()),
+                Some(String::new()),
+            )))
+            .unwrap();
+
+        let config = settings.config();
+
+        assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
+        assert_eq!(config.git_author().email(), None);
+    }
+
+    #[test]
+    fn there_is_no_written_time_until_something_has_been_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert!(settings.secrets_written_at().is_none());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+
+        assert!(settings.secrets_written_at().is_some());
+    }
+
+    /// The two files are written apart, as they are read apart: saving an author
+    /// must not take a token away.
+    #[test]
+    fn saving_one_file_leaves_the_other_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+        settings
+            .save_config(&Config::of_author(GitAuthor::of(
+                Some("Tobias Cohen".to_owned()),
+                None,
+            )))
+            .unwrap();
+
+        assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
+        assert_eq!(settings.config().git_author().name(), Some("Tobias Cohen"));
+    }
+
+    /// Nothing is left beside the file a save was about: the temporary it went
+    /// through is renamed onto the settings file rather than left in the Data
+    /// Directory.
+    #[test]
+    fn a_save_leaves_nothing_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .unwrap();
+        settings
+            .save_config(&Config::of_author(GitAuthor::of(
+                Some("Tobias Cohen".to_owned()),
+                None,
+            )))
+            .unwrap();
+
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+
+        assert_eq!(left, vec!["config.yaml", "secrets.yaml"]);
     }
 }

@@ -94,6 +94,30 @@ impl Gh {
     /// Blocking, like everything that shells out. The callers are on
     /// `spawn_blocking` — see [`pull_request`] and [`details`].
     fn ask(&self, repo: &Path, args: &[&str]) -> Result<String, Trouble> {
+        self.run(Some(repo), self.token(), args)
+    }
+
+    /// And run it about nothing in particular, authenticating as `token`.
+    ///
+    /// Nowhere to run it, because what this asks is about the token rather than
+    /// about a repository: a `gh` given a working directory would be one that
+    /// could fail for the directory's reasons. And `token` rather than the
+    /// configured one, because what is being asked about is a token that has
+    /// just been typed and may not be the configured one yet — see
+    /// [`authenticates_as`].
+    fn ask_as(&self, token: &str, args: &[&str]) -> Result<String, Trouble> {
+        self.run(None, Some(token.to_owned()), args)
+    }
+
+    /// What the two above are: `gh`, run somewhere or nowhere, as somebody or as
+    /// whoever the host is logged in as, read for its stdout or for why there is
+    /// none.
+    fn run(
+        &self,
+        dir: Option<&Path>,
+        token: Option<String>,
+        args: &[&str],
+    ) -> Result<String, Trouble> {
         let (program, before) = self
             .program
             .split_first()
@@ -104,18 +128,21 @@ impl Gh {
         command
             .args(before)
             .args(args)
-            .current_dir(repo)
             // Nothing here is interactive: a `gh` that stopped to ask for a
             // password would be a server thread waiting on a terminal nobody is
             // at.
             .stdin(Stdio::null());
+
+        if let Some(dir) = dir {
+            command.current_dir(dir);
+        }
 
         // What `gh` authenticates as, which it reads from here without being
         // told to. Set only where there is one to set, for the reason a
         // sandbox's is — see [`crate::sandbox`]: `GH_TOKEN` present and empty is
         // a login `gh` fails on obscurely, and leaving it unset is what lets a
         // Verkstead with nothing configured go on using the host's own login.
-        if let Some(token) = self.token() {
+        if let Some(token) = token {
             command.env("GH_TOKEN", token);
         }
 
@@ -218,6 +245,38 @@ impl Trouble {
             Trouble::Refused(said) => format!("`gh` said: {said}"),
         }
     }
+}
+
+/// Which GitHub account `token` authenticates as, asked through the host's `gh`.
+///
+/// What the settings page verifies a pasted token with. A token is a string of
+/// characters that either is or is not somebody's, and the difference is not
+/// visible on the page: asking GitHub is the only way to tell a working token
+/// from one that was copied short, revoked last week, or issued against the
+/// wrong account entirely — and the account name is what makes the answer worth
+/// reading, because a token that authenticates as the *wrong* person is the
+/// mistake that would otherwise be found in a commit's author line.
+///
+/// `gh api user` rather than `gh auth status`, and the reason is the same one
+/// [`checks`] uses the rollup for: `auth status` reports what it found by
+/// failing, and this asks a question that has an answer. The answer is parsed
+/// here rather than with `--jq`, so that nothing depends on which jq that `gh`
+/// was built with.
+///
+/// Blocking, like everything else here — see [`Gh::run`].
+pub(crate) fn authenticates_as(gh: &Gh, token: &str) -> Result<String, Trouble> {
+    /// The one field of `gh api user` this asks for.
+    #[derive(Deserialize)]
+    struct Account {
+        login: String,
+    }
+
+    let said = gh.ask_as(token, &["api", "user"])?;
+
+    let account: Account = serde_json::from_str(&said)
+        .map_err(|error| Trouble::Refused(format!("gh answered something unreadable: {error}")))?;
+
+    Ok(account.login)
 }
 
 /// The pull request on `branch`, as the host's `gh` finds it.
@@ -1301,5 +1360,73 @@ mod tests {
                 "with secrets.yaml {yaml:?}",
             );
         }
+    }
+
+    /// Verifying a token is the one call that authenticates as something other
+    /// than the configured token — a page cannot ask about a token it has not
+    /// saved yet — so what has to be true is that the candidate is what reaches
+    /// the child.
+    #[test]
+    fn a_token_is_verified_as_the_account_gh_answers_for_it() {
+        let gh = Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            r#"printf '{"login":"%s"}' "${GH_TOKEN-unset}""#.to_owned(),
+            "gh".to_owned(),
+        ]);
+
+        assert_eq!(
+            authenticates_as(&gh, "ghp_thetoken"),
+            Ok("ghp_thetoken".to_owned()),
+            "the candidate token is what gh was run with",
+        );
+    }
+
+    /// And the candidate wins over whatever is configured: saving a second token
+    /// must not come back with the first one's account.
+    #[test]
+    fn the_token_being_verified_is_the_one_asked_about_rather_than_the_saved_one() {
+        let gh = Gh::running(vec![
+            "/bin/sh".to_owned(),
+            "-c".to_owned(),
+            r#"printf '{"login":"%s"}' "${GH_TOKEN-unset}""#.to_owned(),
+            "gh".to_owned(),
+        ]);
+
+        let (_data_dir, settings) = configured(Some("github_token: the-saved-one\n"));
+
+        assert_eq!(
+            authenticates_as(&gh.authenticated_by(settings), "the-candidate"),
+            Ok("the-candidate".to_owned()),
+        );
+    }
+
+    /// A token GitHub will not accept is trouble in `gh`'s own words rather than
+    /// a failure of its own, so that what the settings page prints is what the
+    /// human would have seen in a terminal.
+    #[test]
+    fn a_token_github_refuses_comes_back_as_what_gh_said() {
+        let (_dir, gh) = stub("", "gh: Bad credentials (HTTP 401)");
+
+        assert_eq!(
+            authenticates_as(&gh, "ghp_wrong"),
+            Err(Trouble::Refused(
+                "gh: Bad credentials (HTTP 401)".to_owned()
+            )),
+        );
+
+        assert_eq!(
+            authenticates_as(&gh, "ghp_wrong").unwrap_err().why(),
+            "`gh` said: gh: Bad credentials (HTTP 401)",
+        );
+    }
+
+    /// And a machine with no `gh` on it says that instead, rather than reading
+    /// as a token the human should go and replace.
+    #[test]
+    fn a_machine_with_no_gh_cannot_verify_a_token_and_says_which() {
+        let gh = Gh::running(vec!["verkstead-has-no-such-program".to_owned()]);
+
+        assert_eq!(authenticates_as(&gh, "ghp_thetoken"), Err(Trouble::NoGh));
     }
 }

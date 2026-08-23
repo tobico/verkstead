@@ -165,7 +165,14 @@ flowchart LR
     longer bound in either. Both files are read at every session spawn, so
     anything rotated applies from the next session; a missing, empty or
     unparseable file configures nothing rather than refusing to start, and with
-    no author git's own "tell me who you are" stands.
+    no author git's own "tell me who you are" stands. Both files are read and
+    written through `/api/ui/settings` as well as by hand — the token
+    write-only, coming back as its last four characters and the moment
+    `secrets.yaml` was written, and a saved one verified against GitHub through
+    the host `gh` so the answer names the account it authenticates as, or says
+    in words why nobody could be asked. The save lands either way: a token is
+    pasted once out of a page that will not show it again (*refined 2026-08-23,
+    building intentional-credentials*).
   - per-repo extra binds from sandbox configuration
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)

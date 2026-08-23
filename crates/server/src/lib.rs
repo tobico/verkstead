@@ -166,8 +166,14 @@ pub(crate) struct AppState {
     watched: WatchedPaths,
 
     /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
-    /// reusing whatever auth the machine already has.
+    /// authenticating as the configured token.
     github: Gh,
+
+    /// The two files the human tells Verkstead their credentials and their
+    /// identity in. A handle rather than what is in them: the files are read at
+    /// the moment they are wanted, so the settings page and the next session to
+    /// spawn see the same thing — see [`settings`].
+    settings: settings::Settings,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now — which is
     /// not a Watched Path and is not meant to be: the Watched Paths bound what
@@ -338,6 +344,24 @@ pub fn router_running_sessions(
     )
 }
 
+/// A router keeping its files in `data_dir` and reaching GitHub through `gh`,
+/// running no session at all.
+///
+/// What the settings endpoints are stood up over: saving a GitHub token asks
+/// GitHub who it authenticates as, and asking the real one would be a test that
+/// needed a network and somebody's account — so the `gh` is a parameter here for
+/// the reason it is one on [`router_running_sessions`].
+pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        WatchedPaths::none(),
+        data_dir,
+        sessions::Sessions::none(),
+        gh,
+    )
+}
+
 /// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
@@ -376,6 +400,7 @@ fn routed(
 ) -> Router {
     let state = AppState {
         pool,
+        settings: settings::Settings::in_data_dir(&data_dir),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),

@@ -22,8 +22,8 @@ use crate::{
     ConversationEntry, ConversationView, GrillingStarted, ManualTaskStarted, ManualTaskSubmission,
     NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
     ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemedyChoice, RemedySettled, RepoEntry, SetView, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice,
+    RemedyChoice, RemedySettled, RepoEntry, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    Started, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -140,6 +140,14 @@ fn the_viewers_types_are_written_from_these() {
     Subscription::export_all(&config).unwrap();
     Subscribed::export_all(&config).unwrap();
     Unsubscribe::export_all(&config).unwrap();
+
+    // What Verkstead has been told: the git author, and that there is a GitHub
+    // token. `SettingsView` writes the author and the token's presence, and it
+    // rides back inside `SettingsSaved` along with what GitHub made of a token
+    // just saved — so the save's own answer writes no third type.
+    SettingsView::export_all(&config).unwrap();
+    SettingsEdit::export_all(&config).unwrap();
+    SettingsSaved::export_all(&config).unwrap();
 
     // Whether there is a newer Verkstead than the one serving the page.
     UpdateNotice::export_all(&config).unwrap();
