@@ -19,4 +19,4 @@ database at a fixed name inside.
 - [x] 04: The server's own gh uses the token — [details](04-server-gh-token.md)
 - [x] 05: The settings API — [details](05-settings-api.md)
 - [x] 06: The /settings page — [details](06-settings-page.md)
-- [ ] 07: Fold repos and profiles into /settings — [details](07-fold-in-repos-profiles.md)
+- [x] 07: Fold repos and profiles into /settings — [details](07-fold-in-repos-profiles.md)

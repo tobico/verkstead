@@ -90,8 +90,8 @@ export function Conversations(props: {
           {/* Nothing to attach a Conversation to, so the only thing to offer is
               the page that fixes that. */}
           <p class="empty">
-            No repos are registered yet — <A href="/repos">register one</A> to
-            start a conversation.
+            No repos are registered yet —{" "}
+            <A href="/settings">register one</A> to start a conversation.
           </p>
         </Match>
         <Match when={repos.data}>
@@ -164,17 +164,12 @@ export function Conversations(props: {
         </Match>
       </Switch>
 
-      {/* The rest of Verkstead: the two things a Conversation is settled
-          against, and what Verkstead itself has been told. What is waiting on
-          the human is not among them — a Question Set is reached through the
-          Conversation it was asked from, which is the list above. */}
+      {/* The rest of Verkstead, which is one page: the Repos and the Agent
+          Profiles a Conversation is settled against, and what Verkstead itself
+          has been told. What is waiting on the human is not there — a Question
+          Set is reached through the Conversation it was asked from, which is
+          the list above. */}
       <nav class="elsewhere">
-        <A class="to-repos" href="/repos">
-          Repos →
-        </A>
-        <A class="to-profiles" href="/profiles">
-          Profiles →
-        </A>
         <A class="to-settings" href="/settings">
           Settings →
         </A>

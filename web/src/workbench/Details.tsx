@@ -161,7 +161,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
               fixes that. */}
           <p class="empty">
             No agent profiles are saved yet —{" "}
-            <A href="/profiles">add one</A> to run a session under.
+            <A href="/settings">add one</A> to run a session under.
           </p>
         </Match>
         <Match when={profiles.data}>

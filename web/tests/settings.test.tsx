@@ -1,5 +1,11 @@
-//! The settings page: the GitHub token every session is handed, and who its
-//! commits are by.
+//! The credentials at the top of the settings page: the GitHub token every
+//! session is handed, and who its commits are by.
+//!
+//! Mounted on its own rather than through the page it heads, because the page
+//! holds two more sections whose own files say what they do — and a "Save" that
+//! could be either form's is a test asserting the page's arrangement rather
+//! than the credentials. What the page holds, and what became of the two routes
+//! it holds it instead of, is the last describe here.
 //!
 //! `tests/fixtures/settings*.json` are golden fixtures like the profiles page's:
 //! `cargo test` calls the real endpoint and writes the files, so what these
@@ -17,14 +23,25 @@ import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SettingsSaved, SettingsView } from "../src/api/types";
+import { App } from "../src/App";
+import type {
+  ProfileEntry,
+  RepoEntry,
+  SettingsSaved,
+  SettingsView,
+} from "../src/api/types";
+import { Credentials } from "../src/settings/Credentials";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import { json, serving, whenever } from "./serving";
+import profiles from "./fixtures/profiles.json" with { type: "json" };
+import repos from "./fixtures/repos.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
+const PROFILES = profiles as ProfileEntry[];
+const REPOS = repos as RepoEntry[];
 const UNSET = unset as SettingsView;
 const SAVED = saved as SettingsSaved;
 
@@ -42,7 +59,7 @@ function mount() {
   return render(() => (
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <Route path="/" component={SettingsPage} />
+        <Route path="/" component={Credentials} />
       </MemoryRouter>
     </QueryClientProvider>
   ));
@@ -399,4 +416,91 @@ describe("replacing and clearing the token", () => {
       TOLD.git_author.name,
     );
   });
+});
+
+/// The page the credentials head, with the two lists folded onto it below them
+/// and nothing to update to.
+function thePage() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+
+  serving(
+    whenever("/api/ui/settings", json(TOLD)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/update", json("Current")),
+  );
+
+  return render(() => (
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <Route path="/" component={SettingsPage} />
+      </MemoryRouter>
+    </QueryClientProvider>
+  ));
+}
+
+describe("the settings page", () => {
+  /// One page for everything the human configures: what Verkstead itself was
+  /// told, and the two things a Conversation is settled against.
+  it("holds the credentials, the profiles and the repos", async () => {
+    const { container } = thePage();
+
+    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    await waitFor(() => screen.getByText(PROFILES[0]!.name));
+    await waitFor(() => screen.getByText(REPOS[0]!.name));
+
+    // Each is a section of the one page rather than a page of its own: there is
+    // one heading over the lot and one way back to the workbench.
+    const page = container.querySelector(".list-page")!;
+    expect(page.querySelectorAll("h1")).toHaveLength(1);
+    expect(page.querySelectorAll(".back")).toHaveLength(1);
+  });
+
+  /// Both lists came along whole: the form that registers a Repo and the form
+  /// that saves a Profile are on the page, with the rows underneath them. What
+  /// each does with what is typed is `repos.test.tsx`'s and
+  /// `profiles.test.tsx`'s.
+  it("keeps both lists' forms and rows", async () => {
+    const { container } = thePage();
+
+    await waitFor(() => screen.getByText(REPOS[0]!.name));
+
+    expect(container.querySelector(".repos .add-repo")).not.toBeNull();
+    expect(container.querySelectorAll(".repos .repo-row")).toHaveLength(
+      REPOS.length,
+    );
+    expect(container.querySelector(".profiles .edit-profile")).not.toBeNull();
+    expect(container.querySelectorAll(".profiles .profile-row")).toHaveLength(
+      PROFILES.length,
+    );
+  });
+
+  /// The switch about this device came with the Repos it was on, and it kept
+  /// the heading's line it was on there. The banner about this server came with
+  /// it; where that sits is `update.test.tsx`'s.
+  it("keeps the notifications switch on the heading's line", async () => {
+    const { container } = thePage();
+
+    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+
+    expect(container.querySelector(".page-head .notifications")).not.toBeNull();
+  });
+});
+
+describe("the routes the fold retired", () => {
+  /// Not redirected: the two paths were pages, and they are not pages any more.
+  /// A redirect would be a third opinion about where the Repos live, kept alive
+  /// for a bookmark nobody has.
+  for (const path of ["/repos", "/profiles"]) {
+    it(`answers with the no-such-page fallback at ${path}`, async () => {
+      window.history.pushState({}, "", path);
+      serving(json([]));
+
+      render(() => <App />);
+
+      await waitFor(() => screen.getByText("No such page."));
+    });
+  }
 });

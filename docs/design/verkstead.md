@@ -245,15 +245,19 @@ Timeline events:
   usage-limit pauses) **and milestones** (PR opened, stage complete,
   conversation done).
 - Question sets are answerable in the workbench and on the phone alike.
-- **What Verkstead itself has been told is a page of its own**, `/settings`,
-  reached from the sidebar beside the Repos and the Profiles (*settled
-  2026-08-23, building intentional-credentials*): the GitHub token and the git
-  author, saved together because the server writes both files in one request.
-  The token field is write-only — what the page shows of a saved one is its last
-  four characters and when it was written, with replace and clear as presses of
-  their own, and the account GitHub verified it as after a save. With either
-  setting missing the page says so and says what it costs: sessions that cannot
-  reach GitHub, commits that fail asking who the author is.
+- **Everything the human configures is one page**, `/settings`, the one
+  place the sidebar leads out to (*settled 2026-08-23, building
+  intentional-credentials*). It opens on what Verkstead itself has been told —
+  the GitHub token and the git author, saved together because the server writes
+  both files in one request. The token field is write-only: what is shown of a
+  saved one is its last four characters and when it was written, with replace
+  and clear as presses of their own, and the account GitHub verified it as after
+  a save. With either setting missing the page says so and says what it costs:
+  sessions that cannot reach GitHub, commits that fail asking who the author is.
+  Under the credentials are the Agent Profiles and the Repos, which had pages of
+  their own until they were folded in here — all of it is settled once and then
+  left alone, and `/profiles` and `/repos` are no such page now rather than
+  redirects.
 
 ## Build and migration
 

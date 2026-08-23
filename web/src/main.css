@@ -375,11 +375,9 @@ textarea::placeholder {
 }
 
 /* Where else there is to go, in the same slot on every page: back out of a Set,
-   and out to the pages a Conversation is settled against. */
+   and out to the one page everything is configured on. */
 
 .back,
-.to-repos,
-.to-profiles,
 .to-settings {
   display: inline-block;
   margin-bottom: 0.75rem;
@@ -387,7 +385,9 @@ textarea::placeholder {
   text-decoration: none;
 }
 
-/* More than one of them on a line, which is the conversations sidebar alone. */
+/* The slot laid out for more than one of them, which is the conversations
+   sidebar alone — and it held three until the Repos and the Profiles were
+   folded onto the settings page. */
 .elsewhere {
   display: flex;
   flex-wrap: wrap;
@@ -473,9 +473,9 @@ textarea::placeholder {
   margin-bottom: 1.5rem;
 }
 
-.edit-profile h2 {
+.edit-profile h3 {
   margin: 0 0 0.75rem;
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .edit-profile label {
@@ -717,6 +717,21 @@ textarea::placeholder {
 .settings .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
+}
+
+/* The two lists folded onto the settings page under the credentials, headed the
+   way the credentials' own sections are: everything on this page is one kind of
+   thing, so it is all one page's worth of headings. */
+
+.profiles,
+.repos {
+  margin-bottom: 1.5rem;
+}
+
+.profiles > h2,
+.repos > h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
 }
 
 /* The workbench: conversations, the selected one's timeline, and the details of

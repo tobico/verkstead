@@ -16,18 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Registered, RepoEntry } from "../src/api/types";
 import { RepoList } from "../src/repos/RepoList";
 import { mount, texts } from "./listing";
-import { json, serving, whenever } from "./serving";
+import { json, serving } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
-
-/// This page asks about updating as well as about the Repos — the banner moved
-/// here when the pending list retired — and is told there is nothing to update
-/// to throughout. Held to its own path rather than left in the order the
-/// answers are handed out: a page with two things to fetch has no fixed order
-/// between them, and the banner is `update.test.tsx`'s subject, not this file's.
-const CURRENT = whenever("/api/ui/update", json("Current"));
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -42,7 +35,7 @@ function register(path: string) {
 
 describe("the Repo list", () => {
   it("asks the server for the Repos it has been told about", async () => {
-    const fetching = serving(CURRENT, json(REPOS));
+    const fetching = serving(json(REPOS));
     mount(RepoList);
 
     await waitFor(() => screen.getByText(FIRST.name));
@@ -50,7 +43,7 @@ describe("the Repo list", () => {
   });
 
   it("draws a row per Repo, with what the server said about each", async () => {
-    serving(CURRENT, json(REPOS));
+    serving(json(REPOS));
     mount(RepoList);
 
     const row = (await waitFor(() => screen.getByText(FIRST.name))).closest(
@@ -65,7 +58,7 @@ describe("the Repo list", () => {
   });
 
   it("keeps the order it was given", async () => {
-    serving(CURRENT, json(REPOS));
+    serving(json(REPOS));
     const { container } = mount(RepoList);
 
     await waitFor(() => screen.getByText(FIRST.name));
@@ -76,7 +69,7 @@ describe("the Repo list", () => {
   });
 
   it("says so plainly when none are registered", async () => {
-    serving(CURRENT, json([]));
+    serving(json([]));
     mount(RepoList);
 
     await waitFor(() => screen.getByText("No repos are registered yet."));
@@ -84,7 +77,7 @@ describe("the Repo list", () => {
   });
 
   it("shows the server's own wording when the list cannot be read", async () => {
-    serving(CURRENT, json({ error: "the registered Repos could not be read" }, 500));
+    serving(json({ error: "the registered Repos could not be read" }, 500));
     mount(RepoList);
 
     await waitFor(() =>
@@ -102,7 +95,7 @@ describe("registering a repo", () => {
       default_branch: "main",
     };
 
-    const fetching = serving(CURRENT, json([]), json("Added"), json([arrival]));
+    const fetching = serving(json([]), json("Added"), json([arrival]));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
@@ -121,7 +114,7 @@ describe("registering a repo", () => {
   });
 
   it("empties the field once the repo is taken, so the next one starts clean", async () => {
-    serving(CURRENT, json([]), json("Added"), json(REPOS));
+    serving(json([]), json("Added"), json(REPOS));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
@@ -147,7 +140,7 @@ describe("registering a repo", () => {
 
   for (const [outcome, said] of REFUSALS) {
     it(`says why a path was refused as ${outcome}`, async () => {
-      serving(CURRENT, json([]), json(outcome));
+      serving(json([]), json(outcome));
       mount(RepoList);
       await waitFor(() => screen.getByText("No repos are registered yet."));
 
@@ -163,7 +156,7 @@ describe("registering a repo", () => {
   }
 
   it("drops the refusal as soon as the path is being changed", async () => {
-    serving(CURRENT, json([]), json("OutsideWatchedPaths"));
+    serving(json([]), json("OutsideWatchedPaths"));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
@@ -178,7 +171,7 @@ describe("registering a repo", () => {
   });
 
   it("shows the server's own wording when it could not answer at all", async () => {
-    serving(CURRENT, json([]), json({ error: "the Repo could not be registered" }, 500));
+    serving(json([]), json({ error: "the Repo could not be registered" }, 500));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
@@ -188,7 +181,7 @@ describe("registering a repo", () => {
   });
 
   it("sends nothing at all for an empty path", async () => {
-    const fetching = serving(CURRENT, json([]));
+    const fetching = serving(json([]));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
