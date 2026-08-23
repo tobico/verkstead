@@ -394,12 +394,14 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 ///
-/// Two facts ride out on every row beyond what the store holds: whether a
-/// session is running on it, and whether it is waiting on the human. Both are
-/// read here at the moment the list is drawn, and neither is stored — a running
-/// session is a process this server holds, and what is waiting is an `OR` the
-/// store computes over rows that move on their own. Which mark either one comes
-/// out as is the viewer's, and the rule there is one line: waiting wins.
+/// Three facts ride out on every row beyond what the store holds: whether a
+/// session is running on it, whether that session has gone quiet, and whether
+/// it is waiting on the human. All three are read here at the moment the list
+/// is drawn, and none of them is stored — a running session is a process this
+/// server holds, how long it has been silent is a clock on that process, and
+/// what is waiting is an `OR` the store computes over rows that move on their
+/// own. Which mark they come out as is the viewer's, and the rule there is one
+/// line: waiting wins over both of the others.
 async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
@@ -415,15 +417,29 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // between them any more meaningfully than it changes between reads.
     let working = state.sessions.working();
 
+    // And which of those have gone quiet, which is the other half of what the
+    // card's mark says. A second read of the same register rather than one
+    // answer: `working` is what the whole sidebar is drawn from and this is a
+    // fact about the few rows in it.
+    let quiet = state.sessions.quiet();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
-        .map(|conversation| ConversationEntry {
-            id: conversation.id,
-            branch: conversation.branch,
-            repo: conversation.repo,
-            state: lifecycle(conversation.state),
-            working: working.contains(&conversation.id),
-            waiting: conversation.waiting,
+        .map(|conversation| {
+            let working = working.contains(&conversation.id);
+
+            ConversationEntry {
+                id: conversation.id,
+                branch: conversation.branch,
+                repo: conversation.repo,
+                state: lifecycle(conversation.state),
+                working,
+                // Idle is a thing a running session is, and the two sets are
+                // read a moment apart — so the pair is made consistent here
+                // rather than left to the page that draws it.
+                idle: working && quiet.contains(&conversation.id),
+                waiting: conversation.waiting,
+            }
         })
         .collect();
 
@@ -502,6 +518,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // The other order costs nothing: an Event drawn as running that has just
     // stopped is right again on the next read, a second later.
     let writing = state.sessions.writing(id);
+
+    // And whether that session has stopped printing, which is the other half of
+    // what the mark on its row says. Read here beside the register above rather
+    // than per Event: there is at most one session running on a Conversation,
+    // so the answer cannot differ between the Events it is drawn against.
+    let idling = state.sessions.idling(id);
 
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
@@ -701,8 +723,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         event.id,
                         event.at,
                         summary.lines,
+                        summary.turns,
                         summary.latest,
                         writing == Some(event.id),
+                        idling,
                     ),
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,

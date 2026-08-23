@@ -37,6 +37,7 @@ import {
 import type { ConversationEntry, Started } from "../api/types";
 import { useReading } from "../freshness";
 import { Picker } from "../picking";
+import { SPOKEN } from "./Mark";
 
 export function Conversations(props: {
   selected: string;
@@ -308,14 +309,20 @@ function Abandoned(props: { open: (id: number) => void }): JSX.Element {
 /// Which mark a card carries at its right edge, or nothing where it carries
 /// none.
 ///
-/// Waiting wins, and never both: a Conversation whose session is idling on a
+/// Waiting wins, and never both: a Conversation whose session is sitting on a
 /// Blocking Ask is working *and* waiting, and of the two the one the human can
 /// do something about is the ask. So the dot is what a card shows the moment
-/// there is anything to answer, and the spinner is what is left — a session
-/// getting on with it, with nothing wanted from anybody.
-function mark(entry: ConversationEntry): "waiting" | "working" | null {
+/// there is anything to answer, and a ring is what is left.
+///
+/// Which of the two rings it is says whether that session is doing anything: the
+/// turning one while it prints, and the empty one once it has gone quiet — the
+/// same pair the Timeline row and the details pane draw, so a card and the
+/// session it stands for say the same thing. A grilling that has been sitting on
+/// an ask for an hour turning a spinner is the case this is for, and the reason
+/// the empty ring is the quieter mark of the two.
+function mark(entry: ConversationEntry): "waiting" | "working" | "idle" | null {
   if (entry.waiting) return "waiting";
-  if (entry.working) return "working";
+  if (entry.working) return entry.idle ? "idle" : "working";
   return null;
 }
 
@@ -326,13 +333,17 @@ function mark(entry: ConversationEntry): "waiting" | "working" | null {
 /// reader. So the whole of it goes on the button's label instead: the branch it
 /// is named by, the Repo it is in, the state that used to be written under the
 /// name, and what the mark would have said.
+///
+/// What the two rings say is [`SPOKEN`], the words the mark itself carries
+/// wherever it labels itself: the same ring should not mean one thing on a card
+/// and another on the row it opens.
 function spoken(entry: ConversationEntry): string {
   const which = mark(entry);
   const said =
     which === "waiting"
       ? `${entry.state}, waiting on you`
-      : which === "working"
-        ? `${entry.state}, a session is running`
+      : which
+        ? `${entry.state}, ${SPOKEN[which]}`
         : entry.state;
 
   return `${entry.branch}, ${entry.repo}, ${said}`;

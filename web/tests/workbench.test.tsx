@@ -45,6 +45,7 @@ import {
   SIDEBAR,
   drawn,
   mount,
+  nudged,
   theWorkbench,
 } from "./bench";
 import { askedFor, json, serving, whenever } from "./serving";
@@ -322,6 +323,25 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(".mark.waiting")).toBeNull();
   });
 
+  /// And the same ring empty once that session has stopped talking, which is the
+  /// mark the Timeline row and the details pane draw for it too. The case it
+  /// exists for is a grilling that has sat on a blocking ask for an hour: a
+  /// spinner turning the whole time says something is happening when nothing is.
+  it("empties the ring on a conversation whose session has gone quiet", async () => {
+    theSidebar({
+      state: "Grilling",
+      working: true,
+      idle: true,
+      waiting: false,
+    });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.idle")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
   it("shows a dot on a conversation waiting on the human", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
@@ -343,6 +363,48 @@ describe("how a card says where its conversation has got to", () => {
 
     expect(card!.querySelector(".mark.waiting")).toBeTruthy();
     expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  /// And over the empty one, which is the same case a step further on: the
+  /// session that asked has been quiet since it asked. The mark that outranks
+  /// both is the one the human can do something about.
+  it("shows the dot and not the empty ring when it is both", async () => {
+    theSidebar({ state: "Grilling", working: true, idle: true, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.idle")).toBeNull();
+  });
+
+  /// Both crossings reach the card on the news alone: a session going quiet is
+  /// announced on the Conversation's own Nudge kind, and so is its coming back
+  /// out of the silence — because what carries a session speaking is the Screen's
+  /// kind, which is about the Conversation being watched rather than the list of
+  /// them. What a page does with either is read this list again.
+  it("moves between the two rings without the page being reloaded", async () => {
+    let rows: ConversationEntry[] = [
+      { ...SIDEBAR[0]!, working: true, idle: false },
+    ];
+    theWorkbench(whenever("/api/ui/conversations", () => json(rows)()));
+    const { container, client } = mount();
+    await drawn(container, ".conversation-row .mark.working");
+
+    rows = [{ ...rows[0]!, idle: true }];
+    await nudged(client);
+
+    expect(container.querySelector(".conversation-row .mark.idle")).toBeTruthy();
+    expect(container.querySelector(".conversation-row .mark.working")).toBeNull();
+
+    // And back, on the session speaking again.
+    rows = [{ ...rows[0]!, idle: false }];
+    await nudged(client);
+
+    expect(
+      container.querySelector(".conversation-row .mark.working"),
+    ).toBeTruthy();
+    expect(container.querySelector(".conversation-row .mark.idle")).toBeNull();
   });
 
   it("marks nothing on a conversation that is neither", async () => {
@@ -413,7 +475,15 @@ describe("how a card says where its conversation has got to", () => {
         waiting: true,
       },
       {
-        branch: "quiet",
+        branch: "sitting",
+        repo: "verkstead",
+        state: "Grilling",
+        working: true,
+        idle: true,
+        waiting: false,
+      },
+      {
+        branch: "over",
         repo: "verkstead",
         state: "Done",
         working: false,
@@ -429,20 +499,24 @@ describe("how a card says where its conversation has got to", () => {
     ).toEqual([
       "spinning, verkstead, Implementing, a session is running",
       "asking, askance, Grilling, waiting on you",
-      "quiet, verkstead, Done",
+      "sitting, verkstead, Grilling, a session is running and has gone quiet",
+      "over, verkstead, Done",
     ]);
   });
 
-  /// The spinner is motion, and motion is something to be able to turn off.
+  /// The spinner is motion, and motion is something to be able to turn off —
+  /// everywhere it is drawn, which is every mark on the page rather than the
+  /// sidebar's alone.
   it("holds the spinner still where motion is unwelcome", () => {
     expect(stylesheet).toContain(
       "@media (prefers-reduced-motion: reduce) {\n" +
-        "  .conversation-row .mark.working {\n" +
+        "  .mark.working {\n" +
         "    animation: none;\n" +
         "  }\n" +
         "}",
     );
   });
+
 });
 
 describe("starting a conversation", () => {
@@ -1492,6 +1566,15 @@ function theGrillingOutput(
   );
 }
 
+/// Where a browser would have found an element, for the one assertion that
+/// reads a measurement back: jsdom has no layout, so every element on the page
+/// is at nothing and nothing wide, and a mark measured off two of them would
+/// never be seen to move.
+function lay(element: Element, box: { at: number; wide: number }): void {
+  Object.defineProperty(element, "offsetLeft", { value: box.at });
+  Object.defineProperty(element, "offsetWidth", { value: box.wide });
+}
+
 /// Where the workbench hands this conversation's keyboard back.
 const HANDING_BACK = `/api/ui/conversations/${GRILLING.id}/hand-back`;
 
@@ -1666,16 +1749,22 @@ describe("a move on the timeline", () => {
 });
 
 describe("a session's output on the timeline", () => {
-  /// The design's summary: a line count and the last thing the agent said. An
-  /// hour of terminal output does not go in the middle pane.
-  it("summarises as a line count and the latest statement", async () => {
+  /// The design's summary: how far the conversation has got, and the last thing
+  /// the agent said. An hour of terminal output does not go in the middle pane.
+  ///
+  /// Turns rather than the lines it printed. A full-screen interface redraws
+  /// itself with cursor moves rather than newlines, so a line count read 0 for
+  /// every real session — and what a reader wanted from it was how much of a
+  /// conversation there is to open, which is what a turn is.
+  it("summarises as a turn count and the latest statement", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, ".timeline-event .agent-output");
 
-    expect(output.querySelector(".lines")!.textContent).toBe(
-      `${OUTPUT.lines} lines`,
+    expect(OUTPUT.turns).not.toBeNull();
+    expect(output.querySelector(".turns")!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
     );
     expect(output.querySelector(".latest")!.textContent).toBe(OUTPUT.latest);
 
@@ -1684,18 +1773,61 @@ describe("a session's output on the timeline", () => {
     expect(output.textContent).not.toContain("Reading the brief");
   });
 
-  it("says so while the session is still running", async () => {
-    theGrillingOutput({ running: true });
+  /// A session whose backend keeps no log has no Transcript to count, and its
+  /// row says nothing rather than saying none: every stub agent is one, and a
+  /// `0 turns` on it would be a claim about a conversation nothing can see.
+  it("shows no metric at all for a session with no transcript", async () => {
+    theGrillingOutput({ turns: null });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const output = await drawn(container, ".timeline-event .agent-output");
 
-    expect(output.classList).toContain("running");
-    expect(output.querySelector(".live")!.textContent).toBe("running");
+    expect(output.querySelector(".turns")).toBeNull();
+    expect(output.textContent).not.toContain("0 turns");
+  });
+
+  /// And one turn is a turn. The count is read off a running session, so it
+  /// passes through 1 on its way to the rest of them.
+  it("says `1 turn` of a conversation that has taken one", async () => {
+    theGrillingOutput({ turns: 1 });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".turns")!.textContent).toBe("1 turn");
+  });
+
+  /// A session getting on with it: the turning ring at the right edge, which is
+  /// the mark the sidebar's card already says the same thing with. The word
+  /// `running` it replaced said it once and said nothing about a session that
+  /// had stopped talking an hour ago.
+  it("turns the ring while the session is still working", async () => {
+    theGrillingOutput({ running: true, idle: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".mark.working")).toBeTruthy();
+    expect(output.querySelector(".mark.idle")).toBeNull();
+    expect(output.textContent).not.toContain("running");
+  });
+
+  /// And one that is running and has gone quiet: the same ring, empty. What it
+  /// exists for is the grilling sitting on a blocking ask for hours, which the
+  /// turning ring would have drawn as busy the whole time.
+  it("empties the ring while the session is idle", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+
+    expect(output.querySelector(".mark.idle")).toBeTruthy();
+    expect(output.querySelector(".mark.working")).toBeNull();
   });
 
   /// A session that has ended is a conversation with a Capture, not one with
-  /// an agent in it — and the fixture is exactly that.
+  /// an agent in it — and the fixture is exactly that. Nothing is happening to
+  /// it, so there is no mark for one to be about.
   it("says nothing about running when the session has ended", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -1703,8 +1835,55 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, ".timeline-event .agent-output");
 
     expect(OUTPUT.running).toBe(false);
-    expect(output.classList).not.toContain("running");
-    expect(output.querySelector(".live")).toBeNull();
+    expect(output.querySelector(".mark")).toBeNull();
+    expect(output.textContent).not.toContain("running");
+  });
+
+
+  /// The details pane says the same metric as the row it was opened from, and
+  /// leaves it out for the same session — the two are one summary shown twice,
+  /// and a pane disagreeing with the row it opened from would be two answers to
+  /// the one question.
+  it("says the same turn count in the details pane", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const summary = await drawn(container, ".details-pane .capture-summary");
+
+    expect(summary.querySelector(".turns")!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
+    );
+  });
+
+  /// And it says the same liveness with the same mark, for the same reason: the
+  /// row and the pane are one summary shown twice.
+  it("carries the same mark in the details pane", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const summary = await drawn(container, ".details-pane .capture-summary");
+
+    expect(summary.querySelector(".mark.idle")).toBeTruthy();
+    expect(summary.textContent).not.toContain("running");
+  });
+
+
+  /// And a session that has ended with no Transcript has nothing to say up
+  /// there at all, so the pane draws no summary line rather than an empty one.
+  it("says nothing there either for a session with no transcript", async () => {
+    theGrillingOutput({ turns: null });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    // The record itself, which says the pane is drawn and it is this session's.
+    await drawn(container, ".details-pane .record-switch");
+
+    expect(container.querySelector(".details-pane .capture-summary")).toBeNull();
   });
 
   /// The fallback, and the whole details-pane story for a session whose backend
@@ -2020,19 +2199,90 @@ describe("a session's output on the timeline", () => {
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(before);
   });
 
-  /// The Capture belongs to the pane, and what the conversation is comes
-  /// back when it is closed.
-  it("goes back to the conversation's details when it is closed", async () => {
-    theGrilling();
+  /// The switch is the pane's own control, so it stands in the pane's header
+  /// beside the title — where every other pane's Close is, and where this one's
+  /// was. Two of them there would be one row with two ways off it, so the Close
+  /// goes: "← Timeline" is the way out of every pane on a narrow window, and a
+  /// wide one has the conversation's Timeline standing beside this anyway.
+  it("puts the switch in the header, and keeps no Close beside it", async () => {
+    theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    await drawn(container, ".details-pane .capture");
 
-    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+    await drawn(container, ".details-pane .pane-head .record-switch");
+    await drawn(container, ".details-pane .pane-head .pane-back");
 
-    await drawn(container, ".details-pane .conversation-facts");
-    expect(container.querySelector(".details-pane .capture")).toBeNull();
+    expect(container.querySelector(".details-pane .close-event")).toBeNull();
+  });
+
+  /// Sharing that row is what the switch's width is now about: as wide as its
+  /// two labels, and off onto a line of its own when the title leaves it no
+  /// room. Both are the stylesheet's, and jsdom lays nothing out.
+  it("sizes the switch to its labels and wraps rather than overflowing", () => {
+    expect(stylesheet).toContain(".pane-head {\n  display: flex;\n  flex-wrap: wrap;");
+    expect(stylesheet).toContain(
+      ".record-switch {\n" +
+        "  position: relative;\n" +
+        "  display: flex;\n" +
+        "  flex: 0 0 auto;\n" +
+        "  gap: 0.25rem;\n" +
+        "  max-width: 100%;\n",
+    );
+  });
+
+  /// What is under the pressed label is one element that travels, rather than a
+  /// background on whichever button is pressed — so switching reads as one thing
+  /// moving. Where it travels to is measured, which is why a test has to lay the
+  /// two labels out: jsdom has no layout and everything on the page is at
+  /// nothing and nothing wide.
+  it("moves the mark to whichever label is pressed", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const transcript = await drawn(container, ".details-pane .transcript-tab");
+    const screen = await drawn(container, ".details-pane .screen-tab");
+    const mark = await drawn<HTMLElement>(
+      container,
+      ".details-pane .record-switch .indicator",
+    );
+
+    // Presentation and nothing else: the two buttons already say which is
+    // showing, and saying it twice is saying it wrong.
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+
+    lay(transcript, { at: 4, wide: 78 });
+    lay(screen, { at: 86, wide: 56 });
+
+    fireEvent.click(screen);
+    await waitFor(() => {
+      expect(mark.style.transform).toBe("translateX(86px)");
+      expect(mark.style.width).toBe("56px");
+    });
+
+    fireEvent.click(transcript);
+    await waitFor(() => {
+      expect(mark.style.transform).toBe("translateX(4px)");
+      expect(mark.style.width).toBe("78px");
+    });
+  });
+
+  /// And the travel itself is the stylesheet's: jsdom runs no transitions, so
+  /// the rule is what is read. A tenth of a second, eased at both ends, across
+  /// both what the mark travels — the labels are words of different lengths, so
+  /// it changes width on the way as well as place.
+  it("slides the mark over a tenth of a second, unless motion is unwelcome", () => {
+    expect(stylesheet).toContain(
+      "@media (prefers-reduced-motion: no-preference) {\n" +
+        "  .record-switch .indicator {\n" +
+        "    transition:\n" +
+        "      transform 0.1s ease-in-out,\n" +
+        "      width 0.1s ease-in-out;\n" +
+        "  }\n" +
+        "}",
+    );
   });
 
   /// A phone shows one level at a time, and opening an event is walking into
@@ -2131,9 +2381,14 @@ describe("watching a live session's screen", () => {
     expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
   });
 
-  /// How wide the pane is goes back up, and the server decides what to do with
+  /// How big the pane is goes back up, and the server decides what to do with
   /// it: the size that comes back is a repaint, not this side's own guess.
-  it("says how wide the pane it is drawn in is", async () => {
+  ///
+  /// Both dimensions of it. The rows used to be the server's own count echoed
+  /// back, which left the grid whatever height the session was started at; the
+  /// pane gives the terminal a height now, so the rows that fit are this
+  /// window's answer exactly as the columns are.
+  it("says how big the pane it is drawn in is", async () => {
     watching();
     const { socket } = await watched();
 
@@ -2142,29 +2397,126 @@ describe("watching a live session's screen", () => {
     await waitFor(() => expect(socket.sent.length).toBeGreaterThan(0));
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({
-      Resized: { columns: FITS.cols, rows: SCREEN.rows },
+      Resized: { columns: FITS.cols, rows: FITS.rows },
     });
+
+    // Which is the pane's measurement rather than the grid it was handed: the
+    // fixture's Screen is neither of those numbers.
+    expect(FITS.rows).not.toBe(SCREEN.rows);
   });
 
   /// Two watchers of different sizes must not argue. A repaint arriving at a
-  /// width this pane never asked for is the latest window having won, and this
+  /// size this pane never asked for is the latest window having won, and this
   /// one asking for its own back would be the two of them trading repaints for
   /// as long as both stayed open.
-  it("does not ask for its width back when somebody else resizes", async () => {
+  it("does not ask for its size back when somebody else resizes", async () => {
     watching();
     const { socket } = await watched();
 
     socket.says(PAINTED);
     await waitFor(() => expect(socket.sent).toHaveLength(1));
 
-    // The server's answer to that, and then a repaint at a width nothing here
-    // asked for: another device, watching the same Screen on a smaller one.
-    socket.says({ Painted: { ...SCREEN, columns: FITS.cols } });
-    socket.says({ Painted: { ...SCREEN, columns: 60 } });
+    // The server's answer to that, and then repaints at a width and a height
+    // nothing here asked for: another device, watching the same Screen in a
+    // smaller window.
+    socket.says({ Painted: { ...SCREEN, columns: FITS.cols, rows: FITS.rows } });
+    socket.says({ Painted: { ...SCREEN, columns: 60, rows: FITS.rows } });
+    socket.says({ Painted: { ...SCREEN, columns: FITS.cols, rows: 20 } });
 
     // Said synchronously if it were said at all — the handler measures the pane
     // the moment it has painted the repaint.
     expect(socket.sent).toHaveLength(1);
+  });
+
+  /// And the pane it is measuring is a pane with a height: the stylesheet ends
+  /// it where the window ends and gives the terminal what is left under the
+  /// header, rather than letting it run on down a page that scrolls. Read off
+  /// the stylesheet, because jsdom lays nothing out.
+  it("gives the Screen the pane's height rather than the page's", () => {
+    expect(stylesheet).toContain(
+      ".workbench > .details-pane:has(.screen) {\n" +
+        "  flex-direction: column;\n" +
+        "  height: 100dvh;\n" +
+        "  padding-bottom: 1.25rem;\n" +
+        "  overflow: hidden;\n" +
+        "}",
+    );
+
+    // What is above the terminal keeps its size; the Screen takes the rest.
+    expect(stylesheet).toContain(
+      ".workbench > .details-pane:has(.screen) > :not(.screen) {\n" +
+        "  flex: none;\n" +
+        "}",
+    );
+    expect(stylesheet).toContain(
+      ".screen {\n" +
+        "  display: flex;\n" +
+        "  flex: 1;\n" +
+        "  flex-direction: column;\n" +
+        "  min-height: 0;\n",
+    );
+
+    // And the grid a session left behind, which nothing can resize: at its own
+    // size, scrolling in the card it sits on rather than scrolling the pane.
+    expect(stylesheet).toContain(
+      ".screen .terminal-host {\n" +
+        "  flex: 1;\n" +
+        "  min-height: 0;\n" +
+        "  padding: 0.5rem;\n" +
+        "  overflow: auto;\n",
+    );
+  });
+
+  /// A live terminal is the one that must not scroll, and the rule that says so
+  /// is doing more than tidying: a scrollbar takes a strip off the pane, the
+  /// strip changes what fits, and what fits is what goes up the socket — so a
+  /// watcher shown a bigger window's grid would ask for its own back through
+  /// the scrollbar, and the smaller of the two would always win.
+  it("clips a live terminal rather than letting it scroll", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+
+    const screen = await drawn(container, ".details-pane .screen");
+    expect(screen.classList).toContain("live");
+
+    expect(stylesheet).toContain(
+      ".screen.live .terminal-host {\n  overflow: hidden;\n}",
+    );
+  });
+
+  /// And the grid of a session that has ended does not carry it: nothing will
+  /// resize that one, so scrolling is the only way to the rest of it.
+  it("leaves the grid of an ended session scrolling", async () => {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    theSpeaking();
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const screen = await drawn(container, ".details-pane .screen");
+    expect(screen.classList).not.toContain("live");
+  });
+
+  /// The height belongs to the Screen and not to the pane: switching back to the
+  /// Transcript takes the element the rule hangs off away with it, which is what
+  /// puts the pane's ordinary scrolling back.
+  it("stops binding the pane's height once the Transcript is showing", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+    await drawn(container, ".details-pane .screen");
+
+    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+
+    await waitFor(() =>
+      expect(container.querySelector(".details-pane .screen")).toBeNull(),
+    );
   });
 
   /// Closing the pane lets the socket go. Watching commits the human to nothing
@@ -2216,11 +2568,37 @@ describe("taking a live session's keyboard", () => {
   }
 
   /// What a watcher said up the socket, of the kind named.
-  function said(socket: Attached, kind: "Typed" | "Resized"): unknown[] {
+  function said(
+    socket: Attached,
+    kind: "Typed" | "Moused" | "Resized",
+  ): unknown[] {
     return socket.sent
       .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
       .filter((wrote) => kind in wrote)
       .map((wrote) => wrote[kind]);
+  }
+
+  /// The pane watching a live session, with its socket open and the first
+  /// repaint painted — which is what makes the terminal there is to type into.
+  async function watching(): Promise<{
+    container: ParentNode;
+    socket: Attached;
+  }> {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    theGrillingOutput({ running: true });
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const socket = await attached();
+    socket.says(PAINTED);
+
+    await drawn(container, ".details-pane .screen .xterm-rows");
+
+    return { container, socket };
   }
 
   /// Typing goes up the socket as the bytes the terminal made of it. Nothing is
@@ -2246,6 +2624,48 @@ describe("taking a live session's keyboard", () => {
 
     await waitFor(() => expect(said(socket, "Typed")).toEqual(["\r"]));
     expect(grid.textContent).toBe(before);
+  });
+
+  /// A paste is the keyboard too. It arrives at the terminal as an event of its
+  /// own rather than as a keypress, and what it carries is exactly what somebody
+  /// meant to put into the session — so it goes up as typing, and takes the Hold
+  /// the way a keystroke does.
+  it("sends a paste as typing", async () => {
+    const { container, socket } = await watching();
+
+    const typing = await drawn<HTMLTextAreaElement>(
+      container,
+      ".details-pane .screen .xterm-helper-textarea",
+    );
+
+    fireEvent.paste(typing, {
+      clipboardData: { getData: () => "cargo test" },
+    });
+
+    await waitFor(() => expect(said(socket, "Typed")).toEqual(["cargo test"]));
+    expect(said(socket, "Moused")).toEqual([]);
+  });
+
+  /// And the mouse is not. A session whose interface tracks it has the terminal
+  /// report every move, click and scroll down the same callback a keystroke
+  /// comes out of — so a cursor crossing a live Screen would take the Hold, and
+  /// silently stop Verkstead ending anything, if the two were not told apart.
+  ///
+  /// Told apart by what the human touched rather than by the bytes: nothing
+  /// about a mouse report distinguishes it from an arrow key on the wire. What
+  /// the wheel is turned into here is one of them.
+  it("sends what the mouse did as the mouse, which takes nothing", async () => {
+    const { container, socket } = await watching();
+
+    const grid = await drawn(container, ".details-pane .screen .xterm-screen");
+
+    fireEvent.wheel(grid, { deltaY: 120 });
+
+    await waitFor(() => expect(said(socket, "Moused")).not.toEqual([]));
+
+    // And nothing of it went up as typing, which is the whole of the claim: the
+    // server takes the Hold on the one kind and never on the other.
+    expect(said(socket, "Typed")).toEqual([]);
   });
 
   /// A Hold is the server's answer rather than this page's memory of having
@@ -2790,6 +3210,21 @@ describe("a commit on the timeline", () => {
 
     expect(row.querySelectorAll("button")).toHaveLength(0);
     expect(row.textContent).not.toContain("Approve");
+  });
+
+  /// The diff belongs to the pane, and what the conversation is comes back
+  /// when it is closed.
+  it("goes back to the conversation's details when it is closed", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    await drawn(container, ".details-pane .diff-files");
+
+    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+
+    await drawn(container, ".details-pane .conversation-facts");
+    expect(container.querySelector(".details-pane .diff-files")).toBeNull();
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {

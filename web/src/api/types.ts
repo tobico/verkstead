@@ -123,8 +123,8 @@ title: string,
 stage: AdoptedStage | null, };
 
 /**
- * A session's output as the Timeline shows it: how much there is, the last
- * thing that was said, and whether more is coming.
+ * A session's output as the Timeline shows it: how far its conversation has
+ * got, the last thing that was said, and whether more is coming.
  *
  * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
@@ -141,6 +141,16 @@ at: string,
  */
 lines: number, 
 /**
+ * How many turns its conversation has taken, as the Transcript pane draws
+ * them — which is the metric the row and the pane show.
+ *
+ * `null` where the session keeps no log, and the two places that show this
+ * show nothing at all rather than a zero: a session with no Transcript has
+ * no turns to be wrong about. Not the same as a count of none, which is a
+ * session that has a log and has not said anything into it yet.
+ */
+turns: number | null, 
+/**
  * The last thing the agent said, off its own log — or, where it kept none,
  * the last line it printed with the terminal's control sequences taken
  * out. Empty where it has said nothing yet.
@@ -154,7 +164,21 @@ latest: string,
  * restarted has no sessions, which is why this is read off what is running
  * rather than off what was written.
  */
-running: boolean, };
+running: boolean, 
+/**
+ * And whether that session has stopped printing — quiet long enough for
+ * the mark to say it is sitting there rather than working.
+ *
+ * Beside `running` rather than instead of it, because the two are
+ * different questions and a page draws three answers from them: no mark,
+ * a turning ring, and a still one. Always `false` where nothing is
+ * running, which is what makes those three the only ones there are.
+ *
+ * Computed on every read, off the same clock that ends a session that has
+ * gone quiet — so a page opened onto a session that has been idle for an
+ * hour says so at once rather than waiting to be told.
+ */
+idle: boolean, };
 
 /**
  * Which coding agent a Profile runs.
@@ -413,11 +437,12 @@ export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversa
  * The branch is the row's name: a Conversation has no title of its own, and of
  * what it does have the branch is the short line the human chose.
  *
- * Where it has got to is drawn rather than worded — a spinner for a session
- * that is running, a dot for one that wants answering, a dotted border for a
- * draft and a dimmed card for work that has stopped. Which is why the two facts
- * below are facts and not one collapsed verdict: the row says what is true of
- * the Conversation, and which mark that comes out as is the one rule the viewer
+ * Where it has got to is drawn rather than worded — a turning ring for a
+ * session getting on with it, the same ring empty for one that has gone quiet,
+ * a dot for a Conversation that wants answering, a dotted border for a draft
+ * and a dimmed card for work that has stopped. Which is why the facts below are
+ * facts and not one collapsed verdict: the row says what is true of the
+ * Conversation, and which mark that comes out as is the one rule the viewer
  * keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
@@ -432,6 +457,17 @@ repo: string, state: Lifecycle,
  * server that restarted says no about work it is no longer doing.
  */
 working: boolean, 
+/**
+ * And whether that session has stopped printing — the same quiet the
+ * agent-output row's mark is drawn from, said here so that a card and the
+ * row it opens tell the same truth about the same session.
+ *
+ * Always `false` where nothing is working, which is what keeps the two a
+ * pair rather than a contradiction: idle is a thing a *running* session
+ * is. Which mark it comes out as is the viewer's, and the rule there is
+ * unchanged — waiting still wins over both.
+ */
+idle: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
  * left open, or a run stopped on an Interruption.
@@ -1633,11 +1669,16 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * Two kinds of thing, each saying which it is: the socket is a conversation in
- * both directions, and what a watcher does to a Screen is either look at it a
- * different size or type into it.
+ * Three kinds of thing, each saying which it is: the socket is a conversation
+ * in both directions, and what a watcher does to a Screen is look at it a
+ * different size, type into it, or move a mouse over it.
+ *
+ * The last two carry the same thing — bytes on their way to the session's own
+ * terminal — and are told apart for one reason, which is the Hold. Typing
+ * takes it and mousing never does, so which of the two the human did has to
+ * survive the crossing rather than be guessed at from the bytes.
  */
-export type Watching = { "Resized": Size } | { "Typed": string };
+export type Watching = { "Resized": Size } | { "Typed": string } | { "Moused": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

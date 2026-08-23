@@ -1124,9 +1124,9 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// happened, and two Events stamped in the same millisecond must not come back
 /// in an arbitrary one.
 ///
-/// A Capture's summary is joined in rather than fetched per Event, and no
-/// Capture itself is: a Timeline is read every time an open page looks again,
-/// and what a session printed is megabytes the middle pane never shows.
+/// A Capture's summary is read for the whole Timeline rather than per Event,
+/// and no Capture itself is: a Timeline is read every time an open page looks
+/// again, and what a session printed is megabytes the middle pane never shows.
 ///
 /// A Question Set's whole body *is* joined in, which is the one place this pays
 /// for a deserialization per Event — see [`SetOnTimeline`] for why there is
@@ -1135,16 +1135,13 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Set would be a read for every Question the human has ever been put.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
-    /// Capture summary that is there for one kind of Event, the Set with
-    /// however it was settled that is there for another, and the commit that is
-    /// there for a third.
+    /// Set with however it was settled that is there for one kind of Event, and
+    /// the commit that is there for another.
     type Row = (
         i64,
         String,
         String,
         String,
-        Option<i64>,
-        Option<String>,
         Option<i64>,
         Option<String>,
         Option<String>,
@@ -1158,11 +1155,10 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT e.id, e.at, e.kind, e.body, cap.lines, cap.latest,
+        "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at,
                 c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
-         LEFT JOIN captures cap ON cap.event_id = e.id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
@@ -1176,12 +1172,20 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     .await
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
-    // The one kind that is not joined into the query above, and the reason is
-    // arithmetic rather than judgement: a row of it is eight columns, the query
-    // is already at the sixteen a tuple can be read back as, and there is no
-    // seventeenth position to put them in. Its own read is cheap where the join
-    // would not have been — an Interruption is the rare Event, so this is a
-    // second query that nearly always comes back with nothing.
+    // The kinds that are not joined into the query above, and the reason is
+    // arithmetic rather than judgement: the query is at the sixteen columns a
+    // tuple can be read back as, and there is no seventeenth position to put
+    // one in. Each is one more read for the whole Timeline rather than a read
+    // per Event, which is what the joins were saving.
+    //
+    // The Capture summaries first, which is the one of the three that is on
+    // nearly every Timeline: how much a session printed, how many turns its
+    // conversation took, and the last thing it said.
+    let mut summaries = super::captures::on_timeline(pool, conversation_id).await?;
+
+    // Then the Interruptions. Cheap where the join would not have been — an
+    // Interruption is the rare Event, so this nearly always comes back with
+    // nothing.
     let mut interruptions = super::interruptions::on_timeline(pool, conversation_id).await?;
 
     // And the pull request, for the same arithmetic and a cheaper read still:
@@ -1196,8 +1200,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 at,
                 kind,
                 body,
-                lines,
-                latest,
                 set_id,
                 set_body,
                 answered_at,
@@ -1209,10 +1211,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 insertions,
                 deletions,
             ) = row;
-
-            let summary = lines
-                .zip(latest)
-                .map(|(lines, latest)| super::Summary { lines, latest });
 
             let commit = match (sha, subject, files, insertions, deletions) {
                 (Some(sha), Some(subject), Some(files), Some(insertions), Some(deletions)) => {
@@ -1245,6 +1243,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
             // Taken out rather than looked up, because each belongs to exactly
             // one Event and the Events are walked once.
+            let summary = summaries.remove(&id);
             let interruption = interruptions.remove(&id);
             let pull_request = pull_requests.remove(&id);
 

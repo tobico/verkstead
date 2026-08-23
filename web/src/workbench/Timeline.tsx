@@ -62,6 +62,7 @@ import { useReading } from "../freshness";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
+import { Mark } from "./Mark";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -730,12 +731,17 @@ function AgentOutput(props: {
     >
       <span class="event-head">
         <span class="what">Agent output</span>
-        <span class="lines">
-          {props.output.lines} {props.output.lines === 1 ? "line" : "lines"}
-        </span>
-        <Show when={props.output.running}>
-          <span class="live">running</span>
+        {/* How far the conversation has got. A session with no Transcript to
+            count has no metric at all rather than a zero: there is nothing here
+            that took turns, and a `0 turns` would be a claim about it. */}
+        <Show when={props.output.turns !== null}>
+          <span class="turns">
+            {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
+          </span>
         </Show>
+        {/* And whether anything is still writing it, at the right edge — the
+            same mark a sidebar card says the same thing with. */}
+        <Mark running={props.output.running} idle={props.output.idle} />
       </span>
       <span class="latest">
         <Show

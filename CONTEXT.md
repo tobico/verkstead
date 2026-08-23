@@ -143,13 +143,17 @@ _Avoid_: terminal, console, attach view, pane
 
 **Hold**:
 The human at a live session's keyboard. Begins with the first keystroke typed
-into a Screen and ends only by being handed back — never by a timeout or a
-dropped connection, because the machine resuming over a half-finished
-intervention is worse than a stalled run. While it lasts Verkstead keeps
-recording but ends nothing and advances nothing, and the Conversation carries
-*blocked on you*; on hand-back the ordinary end-of-session rules judge
-whatever the human left. Distinct from the *Take over manually* Remedy, which
-is Verkstead stepping aside for good.
+into a Screen — the keyboard alone, paste included — and ends only by being
+handed back, never by a timeout or a dropped connection, because the machine
+resuming over a half-finished intervention is worse than a stalled run. While
+it lasts Verkstead keeps recording but ends nothing and advances nothing, and
+the Conversation carries *blocked on you*; on hand-back the ordinary
+end-of-session rules judge whatever the human left. Its one job is stopping
+Verkstead ending a session out from under somebody who is deliberately
+intervening — so the mouse never takes one: a session whose interface tracks
+the mouse gets every move, click and scroll over its Screen, held or not, and
+a cursor crossing a pane is not an intervention. Distinct from the *Take over
+manually* Remedy, which is Verkstead stepping aside for good.
 _Avoid_: takeover (the Remedy's word), pause, manual mode, lock
 
 **Agent Profile**:

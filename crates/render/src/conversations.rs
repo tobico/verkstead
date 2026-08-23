@@ -45,11 +45,12 @@ pub enum Lifecycle {
 /// The branch is the row's name: a Conversation has no title of its own, and of
 /// what it does have the branch is the short line the human chose.
 ///
-/// Where it has got to is drawn rather than worded — a spinner for a session
-/// that is running, a dot for one that wants answering, a dotted border for a
-/// draft and a dimmed card for work that has stopped. Which is why the two facts
-/// below are facts and not one collapsed verdict: the row says what is true of
-/// the Conversation, and which mark that comes out as is the one rule the viewer
+/// Where it has got to is drawn rather than worded — a turning ring for a
+/// session getting on with it, the same ring empty for one that has gone quiet,
+/// a dot for a Conversation that wants answering, a dotted border for a draft
+/// and a dimmed card for work that has stopped. Which is why the facts below are
+/// facts and not one collapsed verdict: the row says what is true of the
+/// Conversation, and which mark that comes out as is the one rule the viewer
 /// keeps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -67,6 +68,16 @@ pub struct ConversationEntry {
     /// The server's own registry of running processes and nothing else, so a
     /// server that restarted says no about work it is no longer doing.
     pub working: bool,
+
+    /// And whether that session has stopped printing — the same quiet the
+    /// agent-output row's mark is drawn from, said here so that a card and the
+    /// row it opens tell the same truth about the same session.
+    ///
+    /// Always `false` where nothing is working, which is what keeps the two a
+    /// pair rather than a contradiction: idle is a thing a *running* session
+    /// is. Which mark it comes out as is the viewer's, and the rule there is
+    /// unchanged — waiting still wins over both.
+    pub idle: bool,
 
     /// Whether something about this Conversation is waiting on the human: an ask
     /// left open, or a run stopped on an Interruption.
@@ -823,8 +834,8 @@ pub struct BriefEvent {
     pub html: String,
 }
 
-/// A session's output as the Timeline shows it: how much there is, the last
-/// thing that was said, and whether more is coming.
+/// A session's output as the Timeline shows it: how far its conversation has
+/// got, the last thing that was said, and whether more is coming.
 ///
 /// The summary and not the Capture. A grilling session prints megabytes over
 /// an hour, and the Timeline is re-read every time an open page hears the world
@@ -841,6 +852,15 @@ pub struct AgentOutputEvent {
     /// How many lines it has printed.
     pub lines: i64,
 
+    /// How many turns its conversation has taken, as the Transcript pane draws
+    /// them — which is the metric the row and the pane show.
+    ///
+    /// `null` where the session keeps no log, and the two places that show this
+    /// show nothing at all rather than a zero: a session with no Transcript has
+    /// no turns to be wrong about. Not the same as a count of none, which is a
+    /// session that has a log and has not said anything into it yet.
+    pub turns: Option<i64>,
+
     /// The last thing the agent said, off its own log — or, where it kept none,
     /// the last line it printed with the terminal's control sequences taken
     /// out. Empty where it has said nothing yet.
@@ -853,6 +873,19 @@ pub struct AgentOutputEvent {
     /// restarted has no sessions, which is why this is read off what is running
     /// rather than off what was written.
     pub running: bool,
+
+    /// And whether that session has stopped printing — quiet long enough for
+    /// the mark to say it is sitting there rather than working.
+    ///
+    /// Beside `running` rather than instead of it, because the two are
+    /// different questions and a page draws three answers from them: no mark,
+    /// a turning ring, and a still one. Always `false` where nothing is
+    /// running, which is what makes those three the only ones there are.
+    ///
+    /// Computed on every read, off the same clock that ends a session that has
+    /// gone quiet — so a page opened onto a session that has been idle for an
+    /// hour says so at once rather than waiting to be told.
+    pub idle: bool,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -976,9 +1009,14 @@ pub enum Shown {
 
 /// And what a watcher says back up it.
 ///
-/// Two kinds of thing, each saying which it is: the socket is a conversation in
-/// both directions, and what a watcher does to a Screen is either look at it a
-/// different size or type into it.
+/// Three kinds of thing, each saying which it is: the socket is a conversation
+/// in both directions, and what a watcher does to a Screen is look at it a
+/// different size, type into it, or move a mouse over it.
+///
+/// The last two carry the same thing — bytes on their way to the session's own
+/// terminal — and are told apart for one reason, which is the Hold. Typing
+/// takes it and mousing never does, so which of the two the human did has to
+/// survive the crossing rather than be guessed at from the bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Watching {
@@ -999,6 +1037,20 @@ pub enum Watching {
     /// own terminal has already turned a keypress into the ones a session
     /// expects.
     Typed(String),
+
+    /// What the mouse did, on its way to the same terminal.
+    ///
+    /// A session whose interface tracks the mouse is sent a report of every
+    /// move, click and scroll over its Screen, down the path a keystroke takes
+    /// — so one of these is a keystroke in every respect but the one that
+    /// matters here: **it never takes the Hold**. The Hold is the human
+    /// deliberately intervening, and a cursor crossing a live Screen is not
+    /// that.
+    ///
+    /// Written through whether the Conversation is held or not, exactly as
+    /// [`Watching::Typed`] is: a human mid-intervention uses the mouse as much
+    /// as the keyboard.
+    Moused(String),
 }
 
 /// What handing a Conversation's keyboard back came to.
@@ -1054,15 +1106,22 @@ pub fn agent_output_event(
     id: i64,
     at: String,
     lines: i64,
+    turns: Option<i64>,
     latest: String,
     running: bool,
+    idle: bool,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
         at,
         lines,
+        turns,
         latest,
         running,
+        // Idle is a thing a running session is, and the caller reads the two
+        // off different places — so the pair is made consistent here rather
+        // than at each of them.
+        idle: running && idle,
     })
 }
 

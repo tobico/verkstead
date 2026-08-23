@@ -56,7 +56,7 @@ pub use settings::{
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,
-    statements, transcript_after, transcript_view,
+    statements, transcript_after, transcript_view, turns,
 };
 pub use update::UpdateNotice;
 pub use view::{Answered, AskView, DiffView, OptionView, QuestionView, SetView, Standing};

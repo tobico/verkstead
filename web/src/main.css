@@ -1131,22 +1131,25 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The mark at the right edge, which is how a card says what is happening to it
-   now that the state is no longer written under the name. One size for both, so
-   a card does not resize when a session finishes and leaves an ask behind it. */
-.conversation-row .mark {
+/* The mark at the right edge, which is how anything a session may be running on
+   says what is happening to it now that the state is no longer written in
+   words: a card in the sidebar, a session's row on the Timeline, and the
+   details pane that row opens. One size for every kind, so nothing resizes when
+   a session finishes and leaves an ask behind it. */
+.mark {
   flex: none;
+  align-self: center;
   width: 0.75rem;
   height: 0.75rem;
   border-radius: 50%;
 }
 
 /* Something is waiting on the human: an ask left open, a run stopped on an
-   Interruption, or a direction to choose. The ember, filled — the one mark on
-   this card that is about them rather than about the work, and the reason it is
-   the accent rather than the `--stopped` red is that not one of the three is
+   Interruption, or a direction to choose. The ember, filled — the one mark
+   that is about them rather than about the work, and the reason it is the
+   accent rather than the `--stopped` red is that not one of the three is
    anything going wrong. */
-.conversation-row .mark.waiting {
+.mark.waiting {
   background: var(--accent);
 }
 
@@ -1154,10 +1157,18 @@ main:has(.workbench) {
    Low contrast on purpose — it is there to be caught out of the corner of an
    eye rather than watched, and a sidebar of them should not be a sidebar of
    things demanding to be read. */
-.conversation-row .mark.working {
+.mark.working {
   border: 1.5px solid var(--edge);
   border-top-color: var(--ink-soft);
   animation: turning 1.4s linear infinite;
+}
+
+/* And one that is running and has stopped talking: the same ring with no lit
+   arc at all, which is an empty circle. Quieter than the turning one on purpose
+   — a session sitting on an ask is not doing anything, and the mark that says
+   so should not be the one that catches an eye. */
+.mark.idle {
+  border: 1.5px solid var(--edge);
 }
 
 @keyframes turning {
@@ -1168,9 +1179,11 @@ main:has(.workbench) {
 
 /* Held still where motion is unwelcome. What is left is a ring with a mark on
    one side of it, which says a session is running as plainly as a turning one
-   does — all it loses is the liveliness. */
+   does — all it loses is the liveliness. And it is still told apart from the
+   idle ring, because the lit arc is what the two differ by rather than the
+   turning. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-row .mark.working {
+  .mark.working {
     animation: none;
   }
 }
@@ -1714,19 +1727,30 @@ main:has(.workbench) {
   justify-content: flex-start;
 }
 
+/* The mark at the right edge of the line rather than beside the metric: what it
+   says is about the row as a whole, and the right edge is where every other
+   thing that says it lives. */
+.agent-output .event-head .mark,
+.capture-summary .mark {
+  margin-left: auto;
+}
+
 .agent-output .what {
   font-size: 1.1rem;
   font-weight: 600;
 }
 
-.agent-output .lines {
+.agent-output .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-/* A session that is still talking. The colour the accent already is, because
-   what this says is that something is happening here rather than that something
-   is wrong. */
+/* A liveness said in words, which is now the Interruption's badge alone: a
+   session's own is the mark above, because a Timeline of rows shouting
+   `RUNNING` is a Timeline nobody reads. The colour the accent already is,
+   because what a badge like this ordinarily says is that something is happening
+   here rather than that something is wrong — and the Interruption, which means
+   the opposite, says so by overriding it below. */
 .live {
   font-size: 0.8rem;
   font-weight: 600;
@@ -2108,25 +2132,49 @@ main:has(.workbench) {
   border-radius: 0.6rem;
 }
 
-/* The two ways of reading one session, switched between at the top of the pane.
+/* The two ways of reading one session, switched between in the pane's header.
    A pair rather than a row of tabs, because there are two of them and there is
    no third coming: what says which is showing is the pressed one, not a rule
-   about position. */
+   about position.
+
+   As wide as its two labels rather than as wide as the pane: it shares the
+   header row with the title, and a switch that stretched would leave the title
+   nothing. It does not shrink either — when the two will not fit beside each
+   other the header wraps and the switch takes the next line whole, which is
+   what `flex-wrap` on `.pane-head` is there for. */
 .record-switch {
+  position: relative;
   display: flex;
+  flex: 0 0 auto;
   gap: 0.25rem;
-  margin: 0 0 0.75rem;
+  max-width: 100%;
+  margin: 0;
   padding: 0.2rem;
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* What is under the pressed label: one element moved to it, rather than a
+   background drawn on it. A background belongs to the element it is on and
+   cannot travel between two; this can, which is what makes switching read as
+   one thing moving. Taken out of the flex row so its travel costs the labels
+   nothing, and first in the markup so they paint over it. Where it stands is
+   measured — see `Output.tsx`. */
+.record-switch .indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  background: var(--accent);
+  border-radius: 0.4rem;
+}
+
 .record-switch button {
-  flex: 1;
-  padding: 0.4rem 0.75rem;
+  position: relative;
+  padding: 0.35rem 0.7rem;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
   background: none;
   border: 0;
@@ -2136,26 +2184,63 @@ main:has(.workbench) {
 
 .record-switch button[aria-pressed="true"] {
   color: var(--paper);
-  background: var(--accent);
 }
 
-/* The Screen: the grid the session left, drawn as a terminal. The terminal
-   sizes itself from the grid it was handed, so this only has to give it a card
-   to sit on and somewhere to scroll sideways on a phone — a repaint is a
-   hundred columns wide whatever the pane is. */
+/* The slide itself: a tenth of a second, eased at both ends, and across both
+   what it travels — the labels are words of different lengths, so the mark
+   changes width on its way as well as place.
+
+   Given only where motion is welcome, as the toggle switch's is. Under
+   `prefers-reduced-motion` there is no transition to run and the mark is simply
+   wherever the pressed label is, which is the instant switch this replaced. */
+@media (prefers-reduced-motion: no-preference) {
+  .record-switch .indicator {
+    transition:
+      transform 0.1s ease-in-out,
+      width 0.1s ease-in-out;
+  }
+}
+
+/* The Screen: the grid the session is showing, drawn as a terminal — and the
+   one thing this pane ever holds that is sized by the pane rather than by what
+   is in it. A column down the pane's whole height: the terminal takes the room
+   left under the header and the switcher, and the note or the Hold bar under it
+   keeps its own. What makes the pane a column to fill is the rule at the end of
+   this section.
+
+   The grid a session left behind cannot be redrawn at all — it is fixed at the
+   size it was printed for — so it is shown at its own size and scrolls in the
+   card it sits on: sideways on a phone, as it always did, and downwards where
+   the pane is the shorter of the two. */
 .screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin: 0;
 }
 
 .screen .terminal-host {
+  flex: 1;
+  min-height: 0;
   padding: 0.5rem;
-  overflow-x: auto;
+  overflow: auto;
   background: #000;
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* A live one is redrawn at whatever size this pane has, so there is nothing here
+   to scroll to — and a scrollbar would be worse than useless: it takes a strip
+   off the pane, the strip changes what fits, and what fits is what goes up the
+   socket. Two watchers would trade sizes until one of them closed, with the
+   smaller of the two always winning, which is the opposite of the rule. */
+.screen.live .terminal-host {
+  overflow: hidden;
+}
+
 .screen .read-only {
+  flex: none;
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -2167,6 +2252,7 @@ main:has(.workbench) {
    work is waiting — the accent means something is happening. */
 .screen .holding {
   display: flex;
+  flex: none;
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
@@ -2565,6 +2651,50 @@ main:has(.workbench) {
   .pane-back,
   .pane-forward {
     display: none;
+  }
+}
+
+/* The pane with a Screen in it, which is the one pane here that ends where the
+   window does rather than running on down the page. A column: the header and
+   the turn count keep their size and the Screen takes the rest, so the terminal
+   is given a height to fit itself to — and a live session's terminal is told
+   what it was given, which is why nothing scrolls under one.
+
+   Here rather than beside the Screen's own rules because of what it has to
+   agree with: the three rules above are what decide which panes are drawn, and
+   all this does to one of them is make a block into a column.
+
+   Only where a Screen is showing. The Transcript is a column of the page and
+   scrolls like everything else this pane holds, which is what switching back to
+   it puts back.
+
+   The window's height at every width: above the first breakpoint the grid has
+   already given the pane exactly that, and below it the pane is the whole page
+   with nothing standing above it. And the room a scrolling pane leaves under
+   its last line goes, because a pane that does not scroll has no use for it. */
+.workbench > .details-pane:has(.screen) {
+  flex-direction: column;
+  height: 100dvh;
+  padding-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+.workbench > .details-pane:has(.screen) > :not(.screen) {
+  flex: none;
+}
+
+/* And that it is a column at all, said twice, because the pane is shown by two
+   different rules: by name below the last breakpoint, and along with every
+   other pane above it. What must not happen is either of them turning into a
+   `display` for a pane that is meant to be hidden — so each is answered where
+   it is made rather than once over the top of both. */
+.workbench[data-pane="details"] > .details-pane:has(.screen) {
+  display: flex;
+}
+
+@media (min-width: 80rem) {
+  .workbench > .details-pane:has(.screen) {
+    display: flex;
   }
 }
 

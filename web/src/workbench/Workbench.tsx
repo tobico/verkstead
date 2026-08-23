@@ -258,7 +258,6 @@ export function Workbench(): JSX.Element {
                         conversation={conversation()}
                         output={output()}
                         back={() => setPane("timeline")}
-                        close={() => setEvent(null)}
                       />
                     )}
                   </Match>

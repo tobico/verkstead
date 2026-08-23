@@ -63,6 +63,9 @@ async fn session_that_printed(pool: &SqlitePool, printed: &str) -> (i64, i64) {
         printed,
         &store::Summary {
             lines: printed.matches('\n').count() as i64,
+            // A session with no log of its own, which is what a Screen is
+            // painted for: the terminal is the whole record.
+            turns: None,
             latest: String::new(),
         },
     )

@@ -33,7 +33,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
-use crate::capture::Reading;
+use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
@@ -56,6 +56,16 @@ const CHUNK: usize = 8 * 1024;
 /// busy the agent's spinner was. Half a second is under what a human reads as a
 /// delay and two orders of magnitude off what a redraw costs.
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
+
+/// How long a session has to print nothing before it is called idle.
+///
+/// Short, because what it measures is a terminal rather than an agent: claude
+/// repaints its spinner many times a second while it is working, so a session
+/// that has printed nothing for this long is one that has stopped — sitting on
+/// a Blocking Ask, or waiting for the human at a Hold. Three seconds is clear
+/// of the longest gap a working session leaves, and short enough that the mark
+/// says so while it still matters.
+pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
@@ -340,6 +350,15 @@ impl Quiet {
             .expect("a session's quiet clock is not poisoned")
             .elapsed()
     }
+
+    /// When it last said anything, for whoever wants to sleep until it has been
+    /// quiet long enough rather than to ask how long it has been.
+    fn since(&self) -> Instant {
+        *self
+            .0
+            .lock()
+            .expect("a session's quiet clock is not poisoned")
+    }
 }
 
 /// A session that has been started, as its relay holds it.
@@ -469,6 +488,25 @@ impl Sessions {
             .map(|running| running.event_id)
     }
 
+    /// Whether a Conversation's running session has stopped printing.
+    ///
+    /// `false` for a Conversation with nothing running, which is the answer
+    /// that reads right wherever it is asked: idle is a thing a *running*
+    /// session is, and a session that has ended is neither.
+    ///
+    /// Read at the moment a Conversation is drawn rather than stored, as
+    /// [`Sessions::writing`] is and for the same reason — how long a process has
+    /// been quiet is a fact about a process. The crossing is announced as it
+    /// happens too, because a session going quiet is exactly when it stops
+    /// producing the Nudges an open page re-reads on; see [`relay`].
+    pub(crate) fn idling(&self, conversation_id: i64) -> bool {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .is_some_and(|running| running.quiet.for_how_long() >= IDLE_AFTER)
+    }
+
     /// What a Conversation's running session is drawing, or `None` where the
     /// Event named is not one this Conversation has a session still running for.
     ///
@@ -521,6 +559,23 @@ impl Sessions {
             .expect("the sessions registry is not poisoned")
             .keys()
             .copied()
+            .collect()
+    }
+
+    /// And which of those have stopped printing — [`Sessions::idling`] for the
+    /// whole sidebar at once, and one lock rather than one per row for the same
+    /// reason [`Sessions::working`] is.
+    ///
+    /// A subset of [`Sessions::working`] by construction, because both are the
+    /// same register read: idle is a thing a running session is, and a
+    /// Conversation with nothing in it is in neither set.
+    pub(crate) fn quiet(&self) -> HashSet<i64> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .iter()
+            .filter(|(_, running)| running.quiet.for_how_long() >= IDLE_AFTER)
+            .map(|(conversation_id, _)| *conversation_id)
             .collect()
     }
 
@@ -1000,6 +1055,16 @@ struct Printing {
 /// the Screen is a terminal somebody may be watching, and half a second is a
 /// long time to watch a terminal not move.
 ///
+/// The one thing this loop announces that is not something it wrote down is the
+/// session falling quiet, and then waking: a page draws a session that has
+/// stopped differently from one getting on with it, and going quiet is
+/// precisely when a session stops producing the Nudges that would carry the
+/// news. So both crossings are announced on the Conversation's own kind, once
+/// each — into idle [`IDLE_AFTER`] after the last thing read, and out of it on
+/// the first thing read after that. The waking one is for the sidebar alone:
+/// what a session prints is announced on the Screen's kind, which reaches the
+/// Conversation being watched and not the list of them.
+///
 /// What comes back is how it ended, which is what whoever is driving decides
 /// between carrying on and raising an Interruption by.
 async fn relay(
@@ -1029,9 +1094,14 @@ async fn relay(
     let mut tailed = Instant::now();
     let mut ending = false;
 
+    // Whether the session has already been said to be quiet, so that it is said
+    // once per silence rather than every time round the loop.
+    let mut idle = false;
+
     loop {
         let deadline = tokio::time::Instant::from_std(flushed + FLUSH_EVERY);
         let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
+        let idling = tokio::time::Instant::from_std(quiet.since() + IDLE_AFTER);
 
         tokio::select! {
             read = terminal.read(&mut buffer) => match read {
@@ -1040,6 +1110,18 @@ async fn relay(
                 Ok(0) => break,
                 Ok(taken) => {
                     quiet.spoke();
+                    // Coming back out of the silence is a crossing too, and the
+                    // sidebar hears about it on nothing else: what a session
+                    // prints is announced on the Screen's kind, which reaches
+                    // the Conversation being watched rather than the list of
+                    // them. Said once, on the way out.
+                    if idle {
+                        idle = false;
+
+                        nudges.announce(Nudge::Conversation {
+                            conversation: printing.conversation_id,
+                        });
+                    }
 
                     let text = reading.take(&buffer[..taken]);
                     screen.printed(&text);
@@ -1051,8 +1133,7 @@ async fn relay(
                 }
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
-                let said = tail.as_ref().and_then(Tail::latest);
-                flush(pool, nudges, printing, &mut pending, &reading, said).await;
+                flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1060,13 +1141,24 @@ async fn relay(
                 // the next flush: an agent that has stopped to think is one
                 // whose terminal has gone quiet, and that is exactly when the
                 // row saying what it last said is being read.
-                if let Some(tail) = tail.as_mut()
-                    && tail.poll(pool, nudges, event_id).await
+                if let Some(followed) = tail.as_mut()
+                    && followed.poll(pool, nudges, event_id).await
                 {
-                    summarise(pool, nudges, printing, &reading, tail.latest()).await;
+                    summarise(pool, nudges, printing, &reading, told(&tail)).await;
                 }
 
                 tailed = Instant::now();
+            }
+            _ = tokio::time::sleep_until(idling), if !idle => {
+                idle = true;
+
+                // The row on the Timeline and the sidebar card alike, which is
+                // what the Conversation's own kind reaches. Nothing was written
+                // — this is the one Nudge that is about a session having done
+                // nothing.
+                nudges.announce(Nudge::Conversation {
+                    conversation: printing.conversation_id,
+                });
             }
             _ = &mut stopping, if !ending => {
                 ending = true;
@@ -1085,8 +1177,7 @@ async fn relay(
     screen.printed(&last);
     pending.push_str(&last);
 
-    let said = tail.as_ref().and_then(Tail::latest);
-    flush(pool, nudges, printing, &mut pending, &reading, said).await;
+    flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1119,28 +1210,40 @@ async fn relay(
     // Which is also why the summary is written again here. Those final lines
     // are ordinarily the whole point of the row — an agent says what it did as
     // it goes — and by now there is no output left to carry them.
-    if let Some(tail) = tail.as_mut()
-        && tail.poll(pool, nudges, event_id).await
+    if let Some(followed) = tail.as_mut()
+        && followed.poll(pool, nudges, event_id).await
     {
-        summarise(pool, nudges, printing, &reading, tail.latest()).await;
+        summarise(pool, nudges, printing, &reading, told(&tail)).await;
     }
 
     ended
 }
 
+/// What the session's log says of it, for the summary the Timeline reads —
+/// nothing at all where there is no log to follow.
+fn told(tail: &Option<Tail>) -> Told<'_> {
+    match tail {
+        Some(tail) => Told {
+            turns: tail.turns(),
+            said: tail.latest(),
+        },
+        None => Told::default(),
+    }
+}
+
 /// Put what has been printed since last time in the store, and tell whoever is
 /// watching that it is there.
 ///
-/// `said` is the last thing the session's agent said in its own log, which is
-/// what the Timeline row is summarised by where there is one — see
-/// [`Reading::summary`].
+/// `told` is what the session's agent has said and how many turns it has taken,
+/// off the log it keeps of its own conversation — which is what the Timeline row
+/// is summarised by where there is one, see [`Reading::summary`].
 async fn flush(
     pool: &SqlitePool,
     nudges: &Nudges,
     printing: Printing,
     pending: &mut String,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     if pending.is_empty() {
         return;
@@ -1151,7 +1254,7 @@ async fn flush(
         event_id,
     } = printing;
 
-    match store::append_capture(pool, event_id, pending, &reading.summary(said)).await {
+    match store::append_capture(pool, event_id, pending, &reading.summary(told)).await {
         // Kept rather than dropped: the next flush carries it, and a store that
         // is briefly unwritable should cost latency rather than a hole in a
         // record nothing can go back and fill.
@@ -1181,14 +1284,14 @@ async fn summarise(
     nudges: &Nudges,
     printing: Printing,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     let Printing {
         conversation_id,
         event_id,
     } = printing;
 
-    match store::summarise_capture(pool, event_id, &reading.summary(said)).await {
+    match store::summarise_capture(pool, event_id, &reading.summary(told)).await {
         Err(error) => {
             tracing::error!(error = ?error, event_id, "summarising a session failed")
         }

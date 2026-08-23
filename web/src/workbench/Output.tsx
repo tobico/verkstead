@@ -1,11 +1,11 @@
 //! One session, opened: what it said and how it looked, in the details pane.
 //!
-//! A two-way switch at the top, opening on the Transcript because that is what
-//! a reader usually came for. The Transcript is the session's own account of its
-//! conversation — the agent's prose, its reasoning, the tools it called and the
-//! turns put to it — and where a session left none, which is every stub agent
-//! and every backend that keeps no such log, the Capture stands in its place and
-//! is drawn exactly as it always was.
+//! A two-way switch in the pane's header, opening on the Transcript because
+//! that is what a reader usually came for. The Transcript is the session's own
+//! account of its conversation — the agent's prose, its reasoning, the tools it
+//! called and the turns put to it — and where a session left none, which is
+//! every stub agent and every backend that keeps no such log, the Capture stands
+//! in its place and is drawn exactly as it always was.
 //!
 //! The Screen is the same session read the other way: not the bytes it sent a
 //! terminal but the terminal at the other end of them, drawn as a terminal — see
@@ -43,12 +43,14 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createSignal,
   type JSX,
 } from "solid-js";
 
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { Mark } from "./Mark";
 import { Screen } from "./Screen";
 import type {
   AgentOutputEvent,
@@ -62,7 +64,6 @@ export function Output(props: {
   conversation: ConversationView;
   output: AgentOutputEvent;
   back: () => void;
-  close: () => void;
 }): JSX.Element {
   // Whether this session was already over when the pane opened, read once as
   // the pane is set up rather than tracked: a session over before it was
@@ -170,6 +171,30 @@ export function Output(props: {
     props.conversation.held === props.output.id ? "screen" : "transcript",
   );
 
+  /// The two labels themselves, so the mark under the pressed one can be put
+  /// where that one is.
+  let transcriptTab!: HTMLButtonElement;
+  let screenTab!: HTMLButtonElement;
+
+  /// Where that mark stands: the pixels the pressed label occupies.
+  ///
+  /// Measured rather than written down, because the two labels are words of
+  /// different lengths and the mark travels between them. A rule could put a
+  /// background on whichever button is pressed, but a background cannot move
+  /// from one element to another, and moving is the whole of what this is for.
+  ///
+  /// Read off `offsetLeft` and `offsetWidth`, which are the switch's own
+  /// coordinates — it is the offset parent and the containing block both — so
+  /// where the header has put it makes no difference and a header that wraps
+  /// needs no measuring again. What these do follow is the font, and that is
+  /// settled long before anybody presses anything.
+  const [mark, setMark] = createSignal({ at: 0, wide: 0 });
+
+  createEffect(() => {
+    const pressed = showing() === "transcript" ? transcriptTab : screenTab;
+    setMark({ at: pressed.offsetLeft, wide: pressed.offsetWidth });
+  });
+
   return (
     <>
       <div class="pane-head">
@@ -177,41 +202,68 @@ export function Output(props: {
           ← Timeline
         </button>
         <h1>Agent output</h1>
-        {/* The way back to what the conversation is, which is what this pane
-            shows when no event is open. */}
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
+
+        {/* The two ways of reading the one session, beside the title rather than
+            across the pane under it: two words is all the width it ever needs,
+            and the header is where a pane's own controls belong. Buttons that
+            say which they are rather than tabs — there are two of them, both are
+            always there, and `aria-pressed` is the one word that says which is
+            showing.
+
+            The mark under the pressed one is presentation and nothing else, so
+            it is hidden from anybody being read to: what it draws is what
+            `aria-pressed` has already said, and it exists so that switching
+            reads as one thing moving rather than two things blinking. */}
+        <div
+          class="record-switch"
+          role="group"
+          aria-label="How to read this session"
+        >
+          <span
+            class="indicator"
+            aria-hidden="true"
+            style={{
+              transform: `translateX(${mark().at}px)`,
+              width: `${mark().wide}px`,
+            }}
+          />
+          <button
+            type="button"
+            class="transcript-tab"
+            ref={transcriptTab}
+            aria-pressed={showing() === "transcript"}
+            onClick={() => setShowing("transcript")}
+          >
+            Transcript
+          </button>
+          <button
+            type="button"
+            class="screen-tab"
+            ref={screenTab}
+            aria-pressed={showing() === "screen"}
+            onClick={() => setShowing("screen")}
+          >
+            Screen
+          </button>
+        </div>
       </div>
 
-      <p class="capture-summary">
-        {props.output.lines} {props.output.lines === 1 ? "line" : "lines"}
-        <Show when={props.output.running}>
-          <span class="live">running</span>
-        </Show>
-      </p>
-
-      {/* The two ways of reading the one session. Buttons that say which they
-          are rather than tabs: there are two of them, both are always there,
-          and `aria-pressed` is the one word that says which is showing. */}
-      <div class="record-switch" role="group" aria-label="How to read this session">
-        <button
-          type="button"
-          class="transcript-tab"
-          aria-pressed={showing() === "transcript"}
-          onClick={() => setShowing("transcript")}
-        >
-          Transcript
-        </button>
-        <button
-          type="button"
-          class="screen-tab"
-          aria-pressed={showing() === "screen"}
-          onClick={() => setShowing("screen")}
-        >
-          Screen
-        </button>
-      </div>
+      {/* The same metric the Timeline row shows, and absent for the same
+          reason: a session with no Transcript has no turns to count. A finished
+          session with none has nothing to say here at all, so the line itself
+          goes rather than standing empty above the record. */}
+      <Show when={props.output.turns !== null || props.output.running}>
+        <p class="capture-summary">
+          <Show when={props.output.turns !== null}>
+            <span class="turns">
+              {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
+            </span>
+          </Show>
+          {/* And the same mark the row this was opened from carries: one
+              session's liveness, said the one way. */}
+          <Mark running={props.output.running} idle={props.output.idle} />
+        </p>
+      </Show>
 
       <Show
         when={showing() === "transcript"}

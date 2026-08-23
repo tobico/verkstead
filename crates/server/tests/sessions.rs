@@ -50,6 +50,7 @@ use verkstead_render::{
     RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
     Turn, Watching,
 };
+use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -1434,13 +1435,19 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
 async fn a_session_that_keeps_no_log_leaves_no_transcript() {
     let fixture = grilling(r#"printf 'Nothing to say.\n'"#).await;
 
-    let event = fixture
-        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+    let summary = fixture
+        .until(|view| output(view).filter(|output| !output.running).cloned())
         .await;
+    let event = summary.id;
 
     assert!(
         fixture.transcript(event).await.is_empty(),
         "a session that wrote no log should have left no Transcript behind"
+    );
+    assert_eq!(
+        summary.turns, None,
+        "and its row shows no metric at all rather than a count of none: there is \
+         no conversation here to have taken turns"
     );
     assert_eq!(
         fixture.capture(event).await,
@@ -1501,6 +1508,195 @@ async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
     assert!(
         drawn.contains("esc to interrupt"),
         "the interface was drawing something else the whole time: {drawn:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the row's metric is how far that conversation has got: the turns on the
+/// Transcript, counted as the log is followed.
+///
+/// The line count it replaced was a count of newlines off the terminal, and a
+/// full-screen interface redraws itself with cursor moves — so it read 0 for
+/// every real session. The turns are the Transcript's own, which is where a
+/// session's conversation actually is.
+///
+/// Counted as the pane draws them, so the backend's own bookkeeping — about a
+/// third of every log — is none of them. The stub writes one of those beside
+/// the three turns to say so.
+#[tokio::test]
+async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
+    let fixture = grilling(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
+        printf '{"type":"attachment","attachment":{"type":"todos"}}\n' >> "$log"
+        printf 'Reading the brief.\n'
+        sleep 1
+
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}\n' >> "$log"
+        printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"limiter.md"}]}}\n' >> "$log"
+        printf 'Looking.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let counted = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.turns == Some(1))
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        counted.running,
+        "the session is still sitting on its `sleep`, so the count moved while it ran"
+    );
+
+    // And it goes on moving: the tool call and its answer are two more turns,
+    // and the bookkeeping line beside them is none.
+    let grown = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.turns == Some(3))
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        grown.turns,
+        Some(3),
+        "the prose, the call and the answer — and not the backend's own line"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And beside the metric, whether that session is still talking — which is a
+/// different question from whether it is running, and the one the mark on the
+/// row draws.
+///
+/// Idle is the server's judgement rather than the page's, because what it is
+/// measuring is a terminal: claude repaints its spinner many times a second
+/// while it works, so a session that has printed nothing for three seconds is
+/// one that has stopped. The case it exists for is a grilling sitting on a
+/// blocking ask for hours with the Timeline saying it is busy.
+///
+/// And it goes back on speaking, which is the other half: the flag is computed
+/// on every read rather than latched, so nothing has to remember to clear it.
+#[tokio::test]
+async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
+    let fixture = grilling(
+        r#"
+        printf 'Reading the brief.\n'
+        sleep 5
+        printf 'What should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let talking = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty())
+                .cloned()
+        })
+        .await;
+
+    assert!(
+        talking.running && !talking.idle,
+        "a session that has just printed is working, not idle: {talking:?}"
+    );
+
+    // And three seconds later it has said nothing more, which is what the empty
+    // circle is for.
+    let quiet = fixture
+        .until(|view| output(view).filter(|output| output.idle).cloned())
+        .await;
+
+    assert!(
+        quiet.running,
+        "idle is a thing a running session is, so the two travel together"
+    );
+
+    // Then it speaks again, and the row says so without anything having had to
+    // remember to put it back.
+    let woken = fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| output.running && !output.idle)
+                .cloned()
+        })
+        .await;
+
+    assert_eq!(
+        woken.latest, "What should happen when the queue is full?",
+        "the statement that woke it is the one the row now reads"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the crossing is announced, because it is the one change a session makes
+/// by doing nothing.
+///
+/// Every other thing a Timeline says moves because a session printed, and
+/// printing is what nudges an open page into reading it back. A session going
+/// quiet is exactly when that stops — so an open page would sit on a turning
+/// ring until something else happened to the Conversation, which for a grilling
+/// on a blocking ask is the human answering it.
+#[tokio::test]
+async fn a_session_falling_quiet_is_announced_to_the_open_pages() {
+    let fixture = grilling(
+        r#"
+        printf 'Reading the brief.\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // Opened over a session that has said its piece and is now sitting there:
+    // what it printed has already been flushed and announced, so the next Nudge
+    // down this stream is the one this test is about.
+    fixture
+        .until(|view| {
+            output(view)
+                .filter(|output| !output.latest.is_empty() && !output.idle)
+                .map(|_| ())
+        })
+        .await;
+
+    let mut page = Listening::open(&fixture.app).await;
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Conversation {
+            conversation: fixture.id
+        },
+        "the session printed nothing more, so the only thing that moved is that \
+         it stopped — announced on the Conversation's own kind, which is what \
+         reaches the Timeline row and the sidebar card alike"
+    );
+
+    let quiet = output(&fixture.view().await)
+        .expect("the session's Event is on the Timeline")
+        .clone();
+
+    assert!(
+        quiet.running && quiet.idle,
+        "and the page reading it back on that Nudge finds it idle: {quiet:?}"
     );
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
@@ -1663,6 +1859,106 @@ async fn a_conversation_reports_that_it_is_working_while_its_session_runs() {
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
 
     fixture.row_until(|row| (!row.working).then_some(())).await;
+}
+
+/// And the ring on that card goes empty while the session sits there, which is
+/// the card saying what the row it opens already says.
+///
+/// The case it exists for is a grilling on a blocking ask: the session is alive
+/// and will be for as long as the human takes, and a spinner turning for an hour
+/// says something is happening when nothing is. It goes back the moment the
+/// session speaks, off nothing having had to remember to clear it — the flag is
+/// the quiet clock read at the moment the sidebar is drawn.
+#[tokio::test]
+async fn a_conversation_whose_session_has_gone_quiet_says_so_on_its_card() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\n'
+        sleep 6
+        printf 'what should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // A session that is printing is working rather than idle, which is the
+    // ordinary turning ring.
+    let talking = fixture
+        .row_until(|row| (row.working && !row.idle).then(|| row.clone()))
+        .await;
+    assert!(
+        !talking.waiting,
+        "nothing is being asked, so what the card draws is the ring",
+    );
+
+    // Then it stops, and three seconds of nothing is what the empty ring says.
+    let quiet = fixture.row_until(|row| row.idle.then(|| row.clone())).await;
+    assert!(
+        quiet.working,
+        "idle is a thing a running session is, so the two travel together: \
+         {quiet:?}"
+    );
+    assert!(
+        !quiet.waiting,
+        "and waiting still outranks both, so a card with nothing to answer is \
+         where this can be seen at all",
+    );
+
+    // And back to the turning one when it speaks again.
+    fixture
+        .row_until(|row| (row.working && !row.idle).then_some(()))
+        .await;
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+}
+
+/// And the crossing back out of the silence is announced, which is what the
+/// sidebar hears it on.
+///
+/// The other half of the crossing *into* quiet being announced. What a session
+/// prints is announced on the Screen's kind, which is about the Conversation
+/// being watched rather than the list of them — so a card left on the empty ring
+/// would stay on it until something else happened to the Conversation, which for
+/// a grilling on a blocking ask is the human answering it.
+#[tokio::test]
+async fn a_session_speaking_again_is_announced_to_the_open_pages() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\n'
+        sleep 6
+        printf 'what should happen when the queue is full?\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // Opened well past the crossing into quiet — the announcement of *that* has
+    // been and gone, so the next thing down this stream is the one this test is
+    // about.
+    fixture.row_until(|row| row.idle.then_some(())).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut page = Listening::open(&fixture.app).await;
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Conversation {
+            conversation: fixture.id
+        },
+        "the session speaking again is announced on the Conversation's own kind, \
+         before what it printed goes out on the Screen's — because the Screen's \
+         is not what a sidebar reads",
+    );
+
+    let woken = fixture.row().await;
+
+    assert!(
+        woken.working && !woken.idle,
+        "and the sidebar reading itself back on that Nudge finds the turning \
+         ring: {woken:?}"
+    );
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
 }
 
 /// And the sidebar's dot, for the source a Conversation can only get to by
@@ -3465,6 +3761,86 @@ async fn review_settled(fixture: &Grilling) -> bool {
     pool.close().await;
 
     settled.contains(&verkstead_server::store::WaitingOn::Review)
+}
+
+/// An open page, listening on the Nudge stream.
+///
+/// The stream's own tests are in `nudges.rs`, which is where what a Nudge says
+/// and when belongs. This is the one thing they cannot ask: a Nudge that is
+/// sent because a *session* did nothing, which needs a session to be running.
+struct Listening {
+    body: Body,
+
+    /// What has been read off the stream and is not a whole frame yet. SSE
+    /// frames are not the chunks they arrive in.
+    buffered: String,
+}
+
+impl Listening {
+    /// Open the stream the way a page does. Returns once the response is in
+    /// hand, which is after the handler has subscribed — so anything that
+    /// happens next is something this page is listening for.
+    async fn open(app: &Router) -> Self {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/ui/nudges")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        Self {
+            body: response.into_body(),
+            buffered: String::new(),
+        }
+    }
+
+    /// The next Nudge, past the keep-alives that are the stream's other
+    /// traffic, as the page reads it: the JSON of the `data` line.
+    async fn nudge(&mut self) -> verkstead_schema::Nudge {
+        let waited_for = tokio::time::timeout(PATIENCE, async {
+            loop {
+                let frame = self.frame().await;
+
+                if let Some(data) = frame
+                    .starts_with("event: nudge")
+                    .then(|| frame.lines().find_map(|line| line.strip_prefix("data: ")))
+                    .flatten()
+                {
+                    return serde_json::from_str(data).unwrap_or_else(|error| {
+                        panic!("a Nudge should be readable as one: {data:?} — {error}")
+                    });
+                }
+            }
+        });
+
+        waited_for.await.expect("waited for a Nudge in vain")
+    }
+
+    /// The next whole frame off the stream, whatever kind it is.
+    async fn frame(&mut self) -> String {
+        loop {
+            if let Some(end) = self.buffered.find("\n\n") {
+                return self.buffered.drain(..end + 2).collect();
+            }
+
+            let chunk = self
+                .body
+                .frame()
+                .await
+                .expect("the stream ended")
+                .unwrap()
+                .into_data()
+                .expect("the stream carries data frames");
+
+            self.buffered.push_str(std::str::from_utf8(&chunk).unwrap());
+        }
+    }
 }
 
 /// Wait until a session has written its prompt down, and hand back what is
@@ -5703,6 +6079,22 @@ impl Watcher {
             .expect("the socket to take a keystroke");
     }
 
+    /// Move the mouse over it, which is the input that takes nothing.
+    ///
+    /// The report a terminal makes of a move, a click or a scroll, because that
+    /// is what the browser sends: a session whose interface tracks the mouse is
+    /// sent one of these per movement over its Screen, and the browser says it
+    /// is the mouse rather than leaving the server to guess from bytes that look
+    /// exactly like an arrow key.
+    async fn mouses(&mut self, report: &str) {
+        let said = serde_json::to_string(&Watching::Moused(report.to_owned())).unwrap();
+
+        self.socket
+            .send(Message::Text(said.into()))
+            .await
+            .expect("the socket to take a mouse report");
+    }
+
     /// This watcher's window is now that big — which is the Screen's size from
     /// here on, for everybody watching it.
     async fn resize(&mut self, columns: u16, rows: u16) {
@@ -6008,6 +6400,83 @@ async fn typing_into_a_screen_reaches_the_session_and_takes_the_hold() {
         view.blocked_on,
         Some(event),
         "and the Conversation carries *blocked on you*, pointing at it",
+    );
+}
+
+/// And the mouse over one reaches the session and takes nothing.
+///
+/// A session whose interface tracks the mouse is sent a report of every move,
+/// click and scroll over its Screen, down the path a keystroke takes. They have
+/// to arrive — an interface that draws a cursor and never sees one is broken —
+/// and they must not take the Hold: a Hold stops Verkstead ending sessions, and
+/// glancing a cursor across a live Screen would otherwise stop the whole run by
+/// accident.
+///
+/// The stub reads its terminal a byte at a time and prints what it read with the
+/// escapes made visible, because that is the claim: the report arrived at the
+/// session rather than at the Screen alone.
+#[tokio::test]
+async fn mousing_over_a_screen_reaches_the_session_and_takes_nothing() {
+    let fixture = grilling(
+        r#"
+        stty -icanon -echo min 1 time 0
+        printf 'ready
+'
+        cat -v
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher.until(|grid| grid.contains("ready")).await;
+
+    // A cursor crossing the pane, as a terminal reports one.
+    watcher.mouses("\u{1b}[<35;12;24M").await;
+
+    let showing = watcher.until(|grid| grid.contains("^[[<35;12;24M")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("^[[<35;12;24M")),
+        "the session should have read the mouse report: {showing:?}",
+    );
+
+    // Long enough for a Hold to have been taken if one were going to be.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = fixture.view().await;
+    assert!(
+        view.held.is_none(),
+        "the mouse took the Hold, and nothing but the keyboard may",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "and the Conversation is not blocked on anybody for a cursor going past",
+    );
+
+    // The keyboard still takes it, exactly as before.
+    watcher.types("hello\r").await;
+
+    assert_eq!(
+        fixture.until(|view| view.held).await,
+        event,
+        "the first keystroke should have taken the Hold",
+    );
+
+    // And the mouse goes on flowing while it is held: a human mid-intervention
+    // is using the mouse as much as the keyboard.
+    watcher.mouses("\u{1b}[<35;40;12M").await;
+
+    let showing = watcher.until(|grid| grid.contains("^[[<35;40;12M")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("hello")),
+        "what was typed should have reached it too: {showing:?}",
+    );
+    assert_eq!(
+        fixture.view().await.held,
+        Some(event),
+        "and the Hold is where the keystroke left it",
     );
 }
 

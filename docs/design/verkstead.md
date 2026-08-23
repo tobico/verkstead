@@ -216,7 +216,11 @@ flowchart LR
   2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
   the sandbox for push/PR as today.
 - **Full Captures** are stored per session; the timeline event summarizes
-  (line count + latest statement), the details pane shows everything.
+  (turn count + latest statement), the details pane shows everything. The turns
+  are the session's own Transcript, counted as the pane draws them, and a
+  session that keeps no log shows no count at all — a line count off the
+  terminal read 0 for every session whose interface redraws itself (*refined
+  2026-08-23, building agent-output-polish*).
 
 ## UI
 
@@ -228,7 +232,7 @@ Timeline events:
 | Event | In timeline | In details pane |
 |---|---|---|
 | Brief | inline, always | — |
-| Agent output | line count + latest statement | Transcript or Screen |
+| Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |
 | Task list | inline, pinned | — |
@@ -239,6 +243,18 @@ Timeline events:
 
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin.
+- **A session's liveness is a mark rather than a word**, and the same mark
+  everywhere it is said — the sidebar card, the agent-output row and the
+  details pane above the record. A slowly turning ring while the session is
+  working, the same ring empty once it has gone quiet, and nothing at all once
+  it is over; `prefers-reduced-motion` holds it still. Quiet is the server's
+  judgement, three seconds with nothing printed, computed on every read and
+  announced at both crossings — a session going quiet is exactly when it stops
+  producing the nudges that would carry the news, and what carries it speaking
+  again reaches the conversation being watched rather than the sidebar's list.
+  On the card the waiting dot still outranks both rings, so a grilling sitting
+  on an open set is drawn as waiting rather than as idle (*settled 2026-08-23,
+  building agent-output-polish*).
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,
