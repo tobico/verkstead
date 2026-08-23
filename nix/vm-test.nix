@@ -3,7 +3,7 @@
 # The round trip itself — a Set submitted, a Response posted back, the CLI
 # printing it and exiting 0 — is already covered in-process by the crate tests.
 # Doing it again here is only worth the VM for what wraps around it, which no
-# in-process test can see: a unit that starts itself at boot, a state directory
+# in-process test can see: a unit that starts itself at boot, a Data Directory
 # systemd creates and hands over, a database that outlives the process that made
 # it, a server binary running from the store rather than a working tree, and the
 # CLI on `PATH` with nothing set in the environment at all.
@@ -29,8 +29,9 @@ let
   grillingRepo = "/srv/repos/grilling";
   account = "/srv/repos/account";
 
-  # The service's home, which is the module's default and where a session reads
-  # the machine's git identity and gh login from.
+  # The service's home, which is the module's default. Nothing is read out of it
+  # any more — the git identity and the gh login are settings files now — so what
+  # it holds here is what has to stay outside a sandbox.
   home = "/var/lib/verkstead/home";
 in
 
@@ -141,7 +142,7 @@ testers.runNixOSTest {
         # would be the test agreeing with itself about it.
         worktree=$(echo /var/lib/verkstead/worktrees/*)
         if [ ! -d "$worktree" ]; then
-            echo "no worktree under the state directory" >&2
+            echo "no worktree under the data directory" >&2
             exit 1
         fi
 
@@ -158,8 +159,6 @@ testers.runNixOSTest {
             --bind ${grillingRepo}/.git ${grillingRepo}/.git \
             --bind ${account}/.claude "$HOME/.claude" \
             --bind ${account}/.claude.json "$HOME/.claude.json" \
-            --ro-bind "$HOME/.gitconfig" "$HOME/.gitconfig" \
-            --ro-bind "$HOME/.config/gh" "$HOME/.config/gh" \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
             --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
@@ -256,7 +255,7 @@ testers.runNixOSTest {
               text: Did the service come up on its own?
               options:
                 - n: 1
-                  text: It did, and its database is in the state directory.
+                  text: It did, and its database is in the data directory.
                   recommended: true
                 - n: 2
                   text: It did not.
@@ -287,12 +286,16 @@ testers.runNixOSTest {
           comment = "Posted through the same API the web UI posts through.\n";
         };
 
-        # What the human puts in the service's home, and the two things a session
-        # reads out of it: who a commit is by, and what `gh` is logged in as.
+        # A gitconfig and a gh login of the machine's own, neither of which a
+        # session has any business seeing: who a commit is by and what `gh` is
+        # logged in as are settings files in the Data Directory now, and reach a
+        # session in its environment. Both are here so that "no credentials of
+        # the host's inside" is a claim about files that exist rather than about
+        # ones nobody made.
         "verkstead-vm-test/gitconfig".text = ''
           [user]
-          	name = Verkstead VM
-          	email = vm@verkstead.invalid
+          	name = Whoever The Host Is
+          	email = host@verkstead.invalid
         '';
 
         "verkstead-vm-test/gh-hosts.yml".text = ''
@@ -468,7 +471,7 @@ testers.runNixOSTest {
         machine.wait_for_open_port(8422)
         machine.succeed("curl -sf http://127.0.0.1:8422/api/v1/health")
 
-    with subtest("the database is in the state directory, owned by the service"):
+    with subtest("the database is in the data directory, owned by the service"):
         # The server opens the database before it binds, so the open port above
         # already says the file exists; what is asserted here is where it is and
         # whose it is.
@@ -476,7 +479,7 @@ testers.runNixOSTest {
         assert owner == "verkstead:verkstead", f"the database is owned by {owner}"
 
         directory = machine.succeed("stat -c %U:%G:%a /var/lib/verkstead").strip()
-        assert directory == "verkstead:verkstead:750", f"the state directory is {directory}"
+        assert directory == "verkstead:verkstead:750", f"the data directory is {directory}"
 
     with subtest("the server run from the store serves the viewer built into it"):
         # The viewer is inside the binary rather than beside it, so there is
@@ -672,7 +675,7 @@ testers.runNixOSTest {
 
         assert "recovered its wait" in printed, f"the CLI printed:\n{printed}"
 
-    with subtest("the running service makes a worktree in its state directory"):
+    with subtest("the running service makes a worktree in its data directory"):
         # Everything a grilling needs, done through the same endpoints the
         # workbench presses — so what makes the worktree is the service, from
         # inside its own hardening, and not the test reaching around it.
@@ -755,9 +758,9 @@ testers.runNixOSTest {
         )
 
     with subtest("a sandbox starts under the service's own hardening"):
-        # The service's home as the human would leave it: the two files a
-        # session reads out of it, and something of the machine's that is none
-        # of a session's business.
+        # The service's home with the machine's own credentials left lying in
+        # it — a gitconfig, a gh login and a private key — none of which a
+        # session has any business seeing.
         machine.succeed("mkdir -p ${home}/.config/gh")
         machine.succeed(
             "install -m 0644 /etc/verkstead-vm-test/gitconfig ${home}/.gitconfig"
@@ -794,10 +797,16 @@ testers.runNixOSTest {
         assert reported["claude-dir"] == "write"
         assert reported["claude-config"] == "write"
         assert reported["nix"] == "read"
-        assert reported["gitconfig"] == "read", (
-            "who a session commits as is the human's to set, not the session's to change"
+        assert reported["gitconfig"] == "absent", (
+            "nothing of the host's git identity comes in: who a session commits as "
+            "is the configured author, handed to it as GIT_CONFIG_* — which is the "
+            "sandbox tests' to check, an environment variable being nothing this "
+            "unit's hardening can reach"
         )
-        assert reported["gh"] == "read"
+        assert reported["gh"] == "absent", (
+            "and nothing of the host's gh login either: GitHub auth is the "
+            "configured token, handed to a session as `GH_TOKEN`"
+        )
         # The two listings come back without the separator the probe put after
         # the last entry, because the journal trims a line's trailing
         # whitespace. Nothing to work around — just what to compare against.
@@ -808,7 +817,7 @@ testers.runNixOSTest {
         assert reported["sibling"] == "absent", (
             "another repository under the same Watched Path is another Conversation's"
         )
-        assert reported["home"] == ".claude .claude.json .config .gitconfig", (
+        assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"
         )
 

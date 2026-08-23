@@ -70,7 +70,12 @@ syntect = { version = "5", default-features = false, features = [
     "regex-fancy",
 ] }
 tempfile = "3"
+# Every stamp the store writes is SQLite's own, so `parsing` is what reads one
+# back. `formatting` is for the one stamp that comes from somewhere else: when
+# the secrets file was last written, which is the filesystem's answer and has to
+# be worded as RFC 3339 like all the rest.
 time = { version = "0.3", default-features = false, features = [
+    "formatting",
     "parsing",
     "std",
 ] }

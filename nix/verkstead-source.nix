@@ -55,8 +55,9 @@ rustPlatform.buildRustPackage {
   doCheck = false;
 
   # The CLI shells out to git for the project, the branch and the Diff. The server
-  # needs nothing set at all: the viewer is inside it, and where its database and
-  # socket are — `VERKSTEAD_DATABASE`, `VERKSTEAD_LISTEN` — stays the caller's to say.
+  # needs nothing set at all: the viewer is inside it, and where its data directory
+  # and socket are — `VERKSTEAD_DATA_DIR`, `VERKSTEAD_LISTEN` — stays the caller's
+  # to say.
   postInstall = ''
     wrapProgram $out/bin/verkstead \
       --prefix PATH : ${lib.makeBinPath [ git ]}

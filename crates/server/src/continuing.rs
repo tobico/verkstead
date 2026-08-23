@@ -220,7 +220,7 @@ async fn start(
         return gave_up(state, id).await;
     }
 
-    let path = worktrees::worktree_path(&state.state_dir, id, &conversation.repo.name, &branch);
+    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
 
     let made = tokio::task::spawn_blocking({
         let path = path.clone();

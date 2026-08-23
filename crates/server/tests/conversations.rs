@@ -7,7 +7,7 @@
 //! that checked either would be a courtesy.
 //!
 //! Starting the grilling is where that stops being true: the branch and the
-//! worktree are made against a real repository, in a real state directory, and
+//! worktree are made against a real repository, in a real data directory, and
 //! what these assert is what git was actually left holding.
 
 use std::path::{Path, PathBuf};
@@ -27,19 +27,19 @@ use verkstead_render::{
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
 /// A router watching `watched`, plus the directory holding its database and its
-/// state directory alive.
+/// data directory alive.
 ///
-/// The state directory is the database's own, which is where it falls for the
-/// real server: `--state-dir` defaults beside `--database`.
+/// One directory holds both, which is what the real server does: the database is
+/// `verkstead.db` inside the Data Directory.
 async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
         .unwrap();
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
-    let state_dir = dir.path().to_owned();
+    let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, state_dir))
+    (dir, router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -606,7 +606,7 @@ fn worktrees(repo: &Path) -> Vec<PathBuf> {
 }
 
 /// The whole of what pressing the button does: a branch off the base commit, a
-/// worktree registered with it under the state directory, and a Conversation
+/// worktree registered with it under the data directory, and a Conversation
 /// that says it is grilling.
 #[tokio::test]
 async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
@@ -635,7 +635,7 @@ async fn starting_a_grilling_makes_the_branch_and_the_worktree() {
         "the branch should be in the repository git already had"
     );
 
-    // Named for the Repo and the branch, under the state directory — which is
+    // Named for the Repo and the branch, under the data directory — which is
     // where the database is, and not inside any Watched Path.
     let worktree = view
         .worktree
@@ -1177,7 +1177,7 @@ async fn answered(
 }
 
 /// Write a handoff where a grilling session would have written one: inside the
-/// Conversation's own directory under the State Directory, which is bound into
+/// Conversation's own directory under the Data Directory, which is bound into
 /// its sandbox at `/tmp/verkstead`.
 ///
 /// Written from out here because there is no session in these tests to write it
@@ -2037,7 +2037,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
         tip,
     );
 
-    // And the worktree is git's, under the state directory.
+    // And the worktree is git's, under the data directory.
     let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
 
     assert!(worktree.starts_with(dir.path()));

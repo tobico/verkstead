@@ -15,8 +15,11 @@
 //! The agent type is not offered. There is one, and a select with a single
 //! option is theatre; the discriminator is real because it is on the record, and
 //! the picker arrives when there is something to pick between.
+//!
+//! A section of the settings page rather than a page of its own: which accounts
+//! a session may be run under is settled once and then left alone, which is the
+//! same kind of thing as everything else on it.
 
-import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
@@ -81,8 +84,8 @@ const BLANK: ProfileEdit = {
 export function ProfileList(): JSX.Element {
   const queries = useQueryClient();
 
-  // Read once when the page opens, like the Repos: nothing here changes on its
-  // own, and what does change is this page's own doing.
+  // Read once when the page opens, like the Repos under it: nothing here
+  // changes on its own, and what does change is this section's own doing.
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
@@ -174,19 +177,11 @@ export function ProfileList(): JSX.Element {
   };
 
   return (
-    <div class="list-page">
-      {/* The way back to the workbench, in the slot every page keeps for where
-          else there is to go — this list is reached from its sidebar, which is
-          where a profile is chosen for a conversation. */}
-      <A class="back" href="/">
-        ← Workbench
-      </A>
-      <div class="page-head">
-        <h1>Agent profiles</h1>
-      </div>
+    <section class="profiles">
+      <h2>Agent profiles</h2>
 
       <form class="edit-profile" onSubmit={submit}>
-        <h2>{rewriting() === null ? "Add a profile" : "Edit profile"}</h2>
+        <h3>{rewriting() === null ? "Add a profile" : "Edit profile"}</h3>
 
         <label for="profile-name">Name</label>
         <input
@@ -311,7 +306,7 @@ export function ProfileList(): JSX.Element {
           )}
         </Match>
       </Switch>
-    </div>
+    </section>
   );
 }
 

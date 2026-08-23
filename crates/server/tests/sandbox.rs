@@ -22,6 +22,7 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
 
@@ -58,12 +59,18 @@ struct Grilling {
     pool: sqlx::SqlitePool,
 
     /// The bundled skills, installed where the server installs them: under the
-    /// State Directory, at startup.
+    /// Data Directory, at startup.
     skills: Skills,
 
     /// And where the handoff documents go, which is a root under the same
     /// directory — one directory per Conversation, made as its sandbox is built.
     handoffs: Handoffs,
+
+    /// The settings files, in that directory again. Nothing is in them until a
+    /// test says so — see [`Grilling::configure_github_token`] and
+    /// [`Grilling::configure_git_author`] — which is what an installation nobody
+    /// has been to the settings page of looks like.
+    settings: Settings,
 }
 
 impl Grilling {
@@ -83,22 +90,32 @@ impl Grilling {
             &Reachable::at(listening),
             &self.skills,
             &self.handoffs,
+            // Read here rather than at startup, which is where the server reads
+            // them too: a sandbox carries the token and the author that were
+            // configured when it was built.
+            &self.settings.secrets(),
+            &self.settings.config(),
             extra,
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
     }
 
-    /// The host home the sandbox reads out of — the fixture's rather than
+    /// Write `secrets.yaml` as the settings page would, so that the sandboxes
+    /// built after this carry the token.
+    fn configure_github_token(&self, yaml: &str) {
+        std::fs::write(self.settings.secrets_path(), yaml).unwrap();
+    }
+
+    /// And `config.yaml`, which is who those sandboxes commit as.
+    fn configure_git_author(&self, yaml: &str) {
+        std::fs::write(self.settings.config_path(), yaml).unwrap();
+    }
+
+    /// The host home a sandbox is built around — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
-    ///
-    /// The gh config is deliberately not at `~/.config/gh`, which is what an
-    /// `XDG_CONFIG_HOME` set to anything else means: inside the sandbox it has
-    /// to arrive where `gh` looks regardless, because there is no
-    /// `XDG_CONFIG_HOME` in there to point it anywhere else.
     fn home(&self) -> Home {
         Home {
             path: self.home.path().to_owned(),
-            gh_config: self.home.path().join(".xdg-config/gh"),
         }
     }
 
@@ -121,18 +138,25 @@ async fn grilling() -> Grilling {
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // The two host files every sandbox reads and never writes.
+    // A gitconfig of the machine's, which sandboxes used to be given and are
+    // not: who a session commits as is configured now, so this is here to be
+    // absent from inside rather than to be found there.
     std::fs::write(
         home.path().join(".gitconfig"),
-        "[user]\n\tname = Verkstead Test\n",
+        "[user]\n\tname = Whoever The Host Is\n\temail = host@verkstead.invalid\n",
     )
     .unwrap();
-    std::fs::create_dir_all(home.path().join(".xdg-config/gh")).unwrap();
-    std::fs::write(
-        home.path().join(".xdg-config/gh/hosts.yml"),
-        "github.com:\n    user: nobody\n",
-    )
-    .unwrap();
+
+    // And a gh login of the machine's, in both the places gh keeps one: no
+    // session has any business seeing either, whatever the host is logged in as.
+    for config in [".config/gh", ".xdg-config/gh"] {
+        std::fs::create_dir_all(home.path().join(config)).unwrap();
+        std::fs::write(
+            home.path().join(config).join("hosts.yml"),
+            "github.com:\n    user: nobody\n",
+        )
+        .unwrap();
+    }
 
     // Something in HOME that is none of the sandbox's business, so that "the
     // rest of HOME is absent" is a claim about this run rather than about an
@@ -234,6 +258,7 @@ async fn grilling() -> Grilling {
 
     let skills = Skills::installed(state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
+    let settings = Settings::in_data_dir(state.path());
 
     Grilling {
         watched,
@@ -246,15 +271,31 @@ async fn grilling() -> Grilling {
         pool,
         skills,
         handoffs,
+        settings,
     }
 }
 
-/// A git repository at `path`, with one commit on `main`.
+/// A git repository at `path`, with one commit on `main` and a GitHub remote it
+/// was cloned over SSH from.
+///
+/// Both of those are what the sandbox has to be able to override. The local
+/// identity is the one a repository happens to carry, and the SSH remote is the
+/// one there are no keys inside a sandbox for — see
+/// [`an_ssh_github_remote_resolves_to_https_and_the_token_is_what_pushes_it`].
 fn repository(path: PathBuf) -> PathBuf {
     std::fs::create_dir_all(&path).unwrap();
     git(&path, &["init", "--initial-branch", "main"]);
-    git(&path, &["config", "user.email", "test@verkstead.invalid"]);
-    git(&path, &["config", "user.name", "Verkstead Test"]);
+    git(&path, &["config", "user.email", "local@verkstead.invalid"]);
+    git(&path, &["config", "user.name", "Whatever The Repo Says"]);
+    git(
+        &path,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:tobico/verkstead.git",
+        ],
+    );
     std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
     git(&path, &["add", "README.md"]);
     git(&path, &["commit", "-m", "first"]);
@@ -416,7 +457,7 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
 }
 
 #[tokio::test]
-async fn the_system_and_the_hosts_two_files_come_in_read_only() {
+async fn the_system_comes_in_read_only_and_the_hosts_gitconfig_not_at_all() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
@@ -426,27 +467,229 @@ async fn the_system_and_the_hosts_two_files_come_in_read_only() {
             r#"
             dir /nix nix
             file {gitconfig} gitconfig
-            file "$HOME/.config/gh/hosts.yml" gh
-            dir {outside} gh-where-the-host-keeps-it
             "#,
             gitconfig = quoted(&fixture.home_path().join(".gitconfig")),
-            outside = quoted(&fixture.home_path().join(".xdg-config")),
         ),
     );
 
     assert_eq!(reported["nix"], "read");
     assert_eq!(
-        reported["gitconfig"], "read",
-        "who a session commits as is the human's to set, not the session's to change"
+        reported["gitconfig"], "absent",
+        "who a session commits as is configured rather than found lying about in a home directory"
+    );
+}
+
+/// Who a session commits as: the configured author, proved by a commit made
+/// inside and read back outside.
+///
+/// The repository has an identity of its own and the host has a gitconfig, and
+/// neither is what lands on the commit — which is the point of configuring one
+/// at all. A session works in a checkout somebody else made, and what it commits
+/// as should be a fact about the installation rather than about whatever that
+/// checkout was left holding.
+#[tokio::test]
+async fn a_commit_made_inside_is_by_the_configured_author() {
+    let fixture = grilling().await;
+    fixture.configure_git_author("git_author:\n  name: Tobias Cohen\n  email: tobi@tobico.net\n");
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            if {git} commit --quiet --allow-empty -m 'from inside' 2>/tmp/git-said; then
+                say committed yes
+            else
+                say committed "no: $(cat /tmp/git-said)"
+            fi
+            "#,
+            git = quoted(&on_the_host("git")),
+        ),
+    );
+
+    assert_eq!(reported["committed"], "yes");
+
+    // Read outside, off the branch the worktree is on: the commit is in the
+    // Repo's object database, which is what the session was given to write into.
+    assert_eq!(
+        git(fixture.worktree(), &["log", "-1", "--format=%an <%ae>"]).trim(),
+        "Tobias Cohen <tobi@tobico.net>",
+        "the commit is by whoever config.yaml says, not by the repository's own \
+         local identity and not by the host's gitconfig"
+    );
+}
+
+/// And with nobody configured, git's own refusal stands. No author is invented
+/// — a commit by `verkstead@localhost` is the one nobody notices — and the
+/// settings page is where the missing state gets surfaced.
+///
+/// The repository's own identity is taken away first, because a checkout that
+/// carries one is not the case being asked about: what has to be true is that a
+/// session with nothing to commit as says so rather than committing as
+/// something.
+#[tokio::test]
+async fn no_author_configured_is_git_asking_to_be_told_who_you_are() {
+    let fixture = grilling().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            {git} config --unset user.name
+            {git} config --unset user.email
+
+            if {git} commit --quiet --allow-empty -m 'from inside' 2>/tmp/git-said; then
+                say committed yes
+            else
+                say committed no
+            fi
+
+            say said "$({grep} -c 'tell me who you are' /tmp/git-said)"
+            "#,
+            git = quoted(&on_the_host("git")),
+            grep = quoted(&on_the_host("grep")),
+        ),
+    );
+
+    assert_eq!(
+        reported["committed"], "no",
+        "with nobody configured anywhere there is nobody to commit as"
     );
     assert_eq!(
-        reported["gh"], "read",
-        "the gh login arrives where gh looks for it, there being no XDG_CONFIG_HOME inside"
+        reported["said"], "1",
+        "and what a session is left with is git's own answer, which says what to configure"
+    );
+}
+
+/// A push out of a sandbox goes over HTTPS with the token, whatever the remote
+/// the repository was cloned from says.
+///
+/// There are no SSH keys inside a sandbox and there is not going to be one: the
+/// credentials are the token, and an SSH remote would fail on a key that is not
+/// there rather than fall back to anything. So the URL is rewritten as git
+/// resolves it — the repository's own `.git/config` is left saying exactly what
+/// the human cloned — and the credential helper is `gh`'s, which answers out of
+/// `GH_TOKEN`.
+///
+/// Asked of git inside rather than of the flags, like everything else here: what
+/// settles it is git resolving the remote and naming the helper it would ask.
+#[tokio::test]
+async fn an_ssh_github_remote_resolves_to_https_and_the_token_is_what_pushes_it() {
+    let fixture = grilling().await;
+    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            say remote "$({git} ls-remote --get-url origin)"
+            say written-down "$({git} config --get remote.origin.url)"
+            say helper "$({git} config --get-urlmatch credential.helper https://github.com)"
+            say token "${{GH_TOKEN-unset}}"
+            say prompt "${{GIT_TERMINAL_PROMPT-unset}}"
+            "#,
+            git = quoted(&on_the_host("git")),
+        ),
+    );
+
+    assert_eq!(
+        reported["remote"], "https://github.com/tobico/verkstead.git",
+        "an SSH remote is resolved to the HTTPS one the token is any use for"
     );
     assert_eq!(
-        reported["gh-where-the-host-keeps-it"], "absent",
-        "and nowhere else: what the host calls it is the host's business"
+        reported["written-down"], "git@github.com:tobico/verkstead.git",
+        "and the repository still says what the human cloned"
     );
+    assert_eq!(
+        reported["helper"], "!gh auth git-credential",
+        "which is what turns GH_TOKEN into an authenticated push"
+    );
+    assert_eq!(reported["token"], "ghp_theconfiguredone");
+    assert_eq!(
+        reported["prompt"], "0",
+        "and a push that cannot authenticate says so rather than asking a terminal \
+         nobody is sitting at"
+    );
+}
+
+/// The other spelling of the same remote, which a `.gitmodules` or an older
+/// clone is as likely to hold.
+#[tokio::test]
+async fn the_url_form_of_an_ssh_github_remote_is_rewritten_too() {
+    let fixture = grilling().await;
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        &format!(
+            r#"
+            {git} remote set-url origin ssh://git@github.com/tobico/verkstead.git
+            say remote "$({git} ls-remote --get-url origin)"
+            "#,
+            git = quoted(&on_the_host("git")),
+        ),
+    );
+
+    assert_eq!(
+        reported["remote"], "https://github.com/tobico/verkstead.git",
+        "`ssh://git@github.com/` is the same remote written another way"
+    );
+}
+
+/// GitHub auth is said rather than found: the token the human configured, in
+/// the environment `gh` reads it out of, and no gh files anywhere.
+#[tokio::test]
+async fn the_configured_token_is_in_the_environment_and_the_hosts_gh_login_is_not_inside() {
+    let fixture = grilling().await;
+    fixture.configure_github_token("github_token: ghp_theconfiguredone\n");
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            say token "${{GH_TOKEN-unset}}"
+            file "$HOME/.config/gh/hosts.yml" gh
+            dir "$HOME/.config/gh" gh-dir
+            dir {outside} gh-where-the-host-might-keep-it
+            "#,
+            outside = quoted(&fixture.home_path().join(".xdg-config")),
+        ),
+    );
+
+    assert_eq!(
+        reported["token"], "ghp_theconfiguredone",
+        "`gh` inside authenticates as whoever the settings file says"
+    );
+    assert_eq!(
+        reported["gh"], "absent",
+        "nothing of the host's gh login comes in: the token is the whole of it"
+    );
+    assert_eq!(reported["gh-dir"], "absent");
+    assert_eq!(
+        reported["gh-where-the-host-might-keep-it"], "absent",
+        "and not under whatever the host's XDG_CONFIG_HOME called it either"
+    );
+}
+
+/// The three ways there is no token — no file, an empty one, and one nothing
+/// can parse — are one answer: a session that starts, with `gh` inside saying
+/// for itself that it is not logged in.
+#[tokio::test]
+async fn no_token_configured_is_a_session_that_starts_with_no_gh_token() {
+    for configured in [None, Some(""), Some("github_token: [oh\n")] {
+        let fixture = grilling().await;
+
+        if let Some(yaml) = configured {
+            fixture.configure_github_token(yaml);
+        }
+
+        let reported = probe(&fixture.sandbox(vec![]), r#"say token "${GH_TOKEN-unset}""#);
+
+        assert_eq!(
+            reported["token"], "unset",
+            "with {configured:?} in secrets.yaml the variable should not be there at all: \
+             an empty GH_TOKEN is a login gh fails on obscurely"
+        );
+    }
 }
 
 #[tokio::test]
@@ -475,7 +718,7 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     assert_eq!(reported["private-key"], "absent");
     assert_eq!(reported["history"], "absent");
     assert_eq!(
-        reported["home"], ".claude .claude.json .config .gitconfig ",
+        reported["home"], ".claude .claude.json ",
         "everything else in HOME is simply not there"
     );
 }

@@ -40,19 +40,21 @@ _Avoid_: task, session, job, thread, ticket
 The checkout a Conversation's work is done in, made when grilling starts along
 with the branch it holds, and removed when the Conversation is aborted — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
-Named for the Repo and the branch, and it lives in the State Directory rather
+Named for the Repo and the branch, and it lives in the Data Directory rather
 than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
 things.
 _Avoid_: checkout, working copy, sandbox (that's what runs *in* it), clone
 
-**State Directory**:
-The one directory Verkstead keeps what it makes in — the Worktrees, the
-installed Skills, the handoff directories, and whatever later stages need to put
-somewhere. Beside the database by default,
-because that is the directory a packaged unit is already given to write. Not a
-Watched Path and not the same kind of thing: a Watched Path bounds what the
-human may point Verkstead at, and this is Verkstead's own.
-_Avoid_: data dir, work dir, scratch space, cache
+**Data Directory**:
+The one directory Verkstead keeps what it makes in — the database, at
+`verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
+directories, the settings files it is told the human's credentials and identity
+in, and whatever later stages need to put somewhere. Said once, as
+`--data-dir`, and the working directory when nothing says otherwise; everything
+in it is named by Verkstead rather than by whoever started it. Not a Watched
+Path and not the same kind of thing: a Watched Path bounds what the human may
+point Verkstead at, and this is Verkstead's own.
+_Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
@@ -77,7 +79,7 @@ _Avoid_: sandbox settings, mounts, extra paths
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
 breaking down and working a Step now, the rest as the stages that need them
 arrive. Verkstead's
-own: shipped inside the binary, installed under the State Directory at startup
+own: shipped inside the binary, installed under the Data Directory at startup
 and mounted read-only over `~/.claude/skills`, so a session's behaviour is the
 product's rather than whatever the machine or the account happens to keep. A
 session is put inside one by the prompt it is started on, which names the Skill
@@ -222,7 +224,7 @@ The handoff is the inline tail's artifact: its presence, plus quiet, is what
 ends the grilling session.
 
 Verkstead's document rather than the project's, so it is written outside the
-Worktree — in a directory of the Conversation's own under the State Directory,
+Worktree — in a directory of the Conversation's own under the Data Directory,
 bound into every one of its Sandboxes. A handoff in the checkout would be a file
 the next `git add -A` swept into the human's repository, and instructing an
 agent not to commit something is worth less than the file not being there.

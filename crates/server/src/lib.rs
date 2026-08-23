@@ -57,6 +57,13 @@ pub mod sandbox;
 mod screen;
 mod sessions;
 mod sets;
+/// What Verkstead was told about the human's credentials and identity: the
+/// settings files under the Data Directory.
+///
+/// Public for the reason the sandbox is — what a session authenticates and
+/// commits as is the product's business rather than an endpoint's, and standing
+/// a router up that runs sessions means saying where both are read from.
+pub mod settings;
 mod settling;
 /// What a session is grilled by: the skills Verkstead ships and installs into
 /// every sandbox.
@@ -168,26 +175,50 @@ pub(crate) struct AppState {
     watched: WatchedPaths,
 
     /// How Verkstead itself asks GitHub about a pull request — the host's `gh`,
-    /// reusing whatever auth the machine already has.
+    /// authenticating as the configured token.
     github: Gh,
+
+    /// The two files the human tells Verkstead their credentials and their
+    /// identity in. A handle rather than what is in them: the files are read at
+    /// the moment they are wanted, so the settings page and the next session to
+    /// spawn see the same thing — see [`settings`].
+    settings: settings::Settings,
 
     /// Where Verkstead keeps what it makes — the worktrees, for now — which is
     /// not a Watched Path and is not meant to be: the Watched Paths bound what
     /// the human may point Verkstead at, and this is the directory Verkstead was
     /// given for its own things.
-    state_dir: PathBuf,
+    data_dir: PathBuf,
 }
 
-/// How the server is pointed at its database and its socket. There is no
+/// The one name the database is ever kept under, inside the Data Directory.
+/// Fixed rather than configurable: the directory is what an operator points
+/// Verkstead at, and a file inside it is Verkstead's own business.
+const DATABASE_NAME: &str = "verkstead.db";
+
+/// How the server is pointed at its data directory and its socket. There is no
 /// app-level auth: the tailnet is the perimeter, so the defaults keep the
 /// server on the loopback interface until told otherwise.
 #[derive(Debug, Clone, clap::Parser)]
 #[command(name = "verkstead serve", version, about = "Verkstead server")]
 pub struct Config {
-    /// Path to the SQLite database. Created, with its parent directory, if
-    /// it does not exist.
-    #[arg(long, env = "VERKSTEAD_DATABASE", default_value = "verkstead.db")]
-    pub database: PathBuf,
+    /// Where Verkstead keeps everything it makes: the database, at
+    /// `verkstead.db` inside it, the Conversations' worktrees, the installed
+    /// Skills, the handoff directories and the settings files. Created if it
+    /// does not exist.
+    ///
+    /// This is the Data Directory. Not a Watched Path and not one to point at a
+    /// directory the human works in: the Watched Paths bound what Verkstead may
+    /// be pointed at, and this is Verkstead's own. It defaults to the working
+    /// directory, which is what running the server out of a checkout means
+    /// everywhere else here.
+    #[arg(
+        long,
+        env = "VERKSTEAD_DATA_DIR",
+        default_value = ".",
+        value_name = "DIR"
+    )]
+    pub data_dir: PathBuf,
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
@@ -210,17 +241,6 @@ pub struct Config {
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
-
-    /// Where Verkstead keeps what it makes: the Conversations' worktrees, and
-    /// whatever later stages need to put somewhere. Created if it does not
-    /// exist.
-    ///
-    /// Not a Watched Path and not one to point at a directory the human works
-    /// in: the Watched Paths bound what Verkstead may be pointed at, and this is
-    /// its own scratch space. It defaults beside the database, because that is
-    /// the one directory a packaged unit is already given to write.
-    #[arg(long, env = "VERKSTEAD_STATE_DIR", value_name = "DIR")]
-    pub state_dir: Option<PathBuf>,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
@@ -264,22 +284,11 @@ impl Config {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
 
-    /// Where Verkstead keeps what it makes, as configured or as it falls out of
-    /// where the database is.
-    ///
-    /// The database's own directory by default, which is what "beside the
-    /// database" means. A database named with no directory at all — the bare
-    /// default, `verkstead.db` — leaves the working directory, which is what
-    /// running the server out of a directory already means everywhere else here.
-    pub fn state_dir(&self) -> PathBuf {
-        if let Some(state_dir) = &self.state_dir {
-            return state_dir.clone();
-        }
-
-        match self.database.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent.to_owned(),
-            _ => PathBuf::from("."),
-        }
+    /// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory
+    /// and is never anywhere else: one directory is what an operator says, and
+    /// everything in it is Verkstead's to name.
+    pub fn database(&self) -> PathBuf {
+        self.data_dir.join(DATABASE_NAME)
     }
 }
 
@@ -304,17 +313,17 @@ pub fn router(pool: SqlitePool) -> Router {
 }
 
 /// The same, permitted inside `watched` — the directories a Repo may be
-/// registered from — and keeping what it makes in `state_dir`.
+/// registered from — and keeping what it makes in `data_dir`.
 ///
 /// It runs no sessions: starting a grilling makes the branch and the worktree
 /// and records that it did, and there is nothing here to launch inside them.
 /// See [`router_running_sessions`] for the one that does.
-pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathBuf) -> Router {
+pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBuf) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::none(),
         Gh::on_path(),
     )
@@ -330,7 +339,7 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, state_dir: PathB
 pub fn router_running_sessions(
     pool: SqlitePool,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
 ) -> Router {
@@ -338,13 +347,31 @@ pub fn router_running_sessions(
         pool,
         updates::Updates::nothing_learned(),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::under(agents),
         gh,
     )
 }
 
-/// The state directory of a router that has no use for one.
+/// A router keeping its files in `data_dir` and reaching GitHub through `gh`,
+/// running no session at all.
+///
+/// What the settings endpoints are stood up over: saving a GitHub token asks
+/// GitHub who it authenticates as, and asking the real one would be a test that
+/// needed a network and somebody's account — so the `gh` is a parameter here for
+/// the reason it is one on [`router_running_sessions`].
+pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        WatchedPaths::none(),
+        data_dir,
+        sessions::Sessions::none(),
+        gh,
+    )
+}
+
+/// The data directory of a router that has no use for one.
 ///
 /// The empty path, which nothing is created in — and nothing tries: a router
 /// watching nothing can register no Repo, so it has no Conversation to start and
@@ -376,12 +403,13 @@ fn routed(
     pool: SqlitePool,
     updates: updates::Updates,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     sessions: sessions::Sessions,
     github: Gh,
 ) -> Router {
     let state = AppState {
         pool,
+        settings: settings::Settings::in_data_dir(&data_dir),
         nudges: nudge::Nudges::new(),
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
@@ -391,7 +419,7 @@ fn routed(
         updates,
         watched,
         github,
-        state_dir,
+        data_dir,
     };
 
     // Before anything is served, because both are about what was already
@@ -448,7 +476,7 @@ pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
     watched: WatchedPaths,
-    state_dir: PathBuf,
+    data_dir: PathBuf,
     agents: Agents,
     gh: Gh,
 ) -> Router {
@@ -456,7 +484,7 @@ pub fn router_with_ui(
         pool,
         updates::watching(releases),
         watched,
-        state_dir,
+        data_dir,
         sessions::Sessions::under(agents),
         gh,
     )
@@ -481,33 +509,41 @@ pub async fn run(config: Config) -> Result<()> {
     // Both resolved at startup for the reason the Watched Paths are: a bind that
     // names nothing, and a HOME the unit never said, are misconfigurations to
     // report now rather than sessions that fail to start weeks later with nobody
-    // watching. The home is where a sandbox reads who git commits as and what
-    // `gh` is logged in as, so a server without one can run no session at all.
+    // watching. The home is where a sandbox reads who git commits as, and it is
+    // what `~` means inside one, so a server without one can run no session at
+    // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
     let home = sandbox::Home::of_the_server().context(
-        "no HOME is set: a session reads the machine's git identity and gh login out of \
-         the home directory of whoever runs Verkstead, so the unit has to say what it is",
+        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
+         and the machine's git identity is read out of it, so the unit has to say what it is",
     )?;
 
     // Made at startup for the reason the Watched Paths are resolved at startup:
     // a directory Verkstead cannot write to is a misconfiguration to report now
     // rather than one to discover as a failed grilling weeks later.
-    let state_dir = config.state_dir();
-    std::fs::create_dir_all(&state_dir)
-        .with_context(|| format!("creating state directory {}", state_dir.display()))?;
+    let data_dir = config.data_dir.clone();
+    std::fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
     // every sandbox gets, whatever an earlier one left there.
-    let skills = skills::Skills::installed(&state_dir)
+    let skills = skills::Skills::installed(&data_dir)
         .context("installing the skills every sandbox is given")?;
 
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first
     // session starts.
-    let handoffs = handoffs::Handoffs::under(&state_dir);
+    let handoffs = handoffs::Handoffs::under(&data_dir);
 
-    let pool = open_database(&config.database).await?;
+    // And where the credentials are read from, which is the same directory
+    // again — both the ones a session runs with and the one the server's own
+    // `gh` authenticates as. Nothing is read here: the files are read as each
+    // session is spawned and as each `gh` is run, so what the human saves
+    // through the settings page applies without a restart — see [`settings`].
+    let settings = settings::Settings::in_data_dir(&data_dir);
+
+    let pool = open_database(&config.database()).await?;
 
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
@@ -515,8 +551,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     tracing::info!(
         listen = %config.listen,
-        database = %config.database.display(),
-        state_dir = %state_dir.display(),
+        data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         home = %home.path.display(),
@@ -531,17 +566,19 @@ pub async fn run(config: Config) -> Result<()> {
             pool,
             config.releases(),
             watched,
-            state_dir,
+            data_dir,
             Agents::new(
                 home,
                 sandbox::Reachable::at(config.listen),
                 binds,
                 skills,
                 handoffs,
+                settings.clone(),
             ),
-            // Whatever `gh` this machine has, logged in as whoever it is logged
-            // in as: Verkstead keeps no token of its own.
-            Gh::on_path(),
+            // Whatever `gh` this machine has, authenticating as the configured
+            // token — the same one the sessions get, so one token is the whole
+            // of Verkstead's GitHub auth.
+            Gh::on_path().authenticated_by(settings),
         ),
     )
     .await

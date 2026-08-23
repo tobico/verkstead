@@ -1,0 +1,17 @@
+{
+  "settings": {
+    "git_author": {
+      "email": "ada@example.com",
+      "name": "Ada Lovelace"
+    },
+    "github_token": {
+      "at": "2026-08-03T09:07:11.000Z",
+      "last_four": "cdef"
+    }
+  },
+  "verified": {
+    "Account": {
+      "login": "ada"
+    }
+  }
+}

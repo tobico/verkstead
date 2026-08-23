@@ -15,8 +15,10 @@ self:
 let
   cfg = config.services.verkstead;
 
-  # systemd creates and owns this, and the database defaults inside it. Named
-  # once because the sandbox, the working directory and that default all say it.
+  # systemd creates and owns this, and it is what the server is given as its
+  # Data Directory: the database and everything else Verkstead makes live in it.
+  # Named once because the sandbox, the working directory and `--data-dir` all
+  # say it.
   stateDir = "/var/lib/verkstead";
 
   # The directory half of a `sandboxBinds` entry: a plain path is the whole of
@@ -82,23 +84,6 @@ in
       '';
     };
 
-    database = lib.mkOption {
-      type = lib.types.path;
-      default = "${stateDir}/verkstead.db";
-      defaultText = lib.literalExpression ''"${stateDir}/verkstead.db"'';
-      description = ''
-        SQLite file, as `VERKSTEAD_DATABASE`. Created, with its parent directory,
-        on first run; it holds the Question Sets, the Archive, the push
-        subscriptions and the VAPID keypair, so it is the whole of the service's
-        state.
-
-        The default is the server's own filename inside the service's state
-        directory. Pointing it elsewhere means the sandbox has to be opened up
-        for that path, which this module does by directory — so the directory
-        has to exist, even though the file need not.
-      '';
-    };
-
     home = lib.mkOption {
       type = lib.types.path;
       default = "${stateDir}/home";
@@ -107,22 +92,22 @@ in
         The home directory the service runs with, as `HOME`, and what `~` means
         inside a session's sandbox.
 
-        Two files are read out of it and mounted into every sandbox read-only:
-        `.gitconfig` and `.config/gh`. They are the two things a coding agent
-        cannot work without — who a commit is by, and what `gh` is logged in as
-        — and they are the machine's, configured once here rather than per
-        Conversation. Nothing else of this directory is ever exposed to a
-        session, and the service itself only ever reads it.
+        Nothing is read out of it and nothing of it is mounted into a sandbox.
+        Credentials and identity are said rather than found: the GitHub token is
+        `github_token` in `secrets.yaml` in the service's data directory, and who
+        a commit is by is `git_author` in `config.yaml` beside it. Each reaches a
+        session in its environment — `GH_TOKEN`, and git's own `GIT_CONFIG_*` —
+        so there is nothing to provision here, and a credential left in this
+        directory stays outside every sandbox.
 
         Said outright because systemd would otherwise derive it from the
-        `verkstead` user's passwd entry, which is `/var/empty`: a session there
-        commits as nobody and has no GitHub login.
+        `verkstead` user's passwd entry, which is `/var/empty`: a home that is
+        not writable is one a tool with a cache of its own trips over.
 
         The default is a directory under the state directory, which systemd
-        creates and hands over — put the two there and every session gets them.
-        Pointing this at a human's own home works too, as long as the
-        `verkstead` user can read them; it is bound in read-only, so it has to
-        exist.
+        creates and hands over. Pointing this at a human's own home works too, as
+        long as the `verkstead` user can read it; it is bound in read-only, so it
+        has to exist.
       '';
     };
 
@@ -252,8 +237,8 @@ in
             "serve"
             "--listen"
             cfg.listen
-            "--database"
-            "${cfg.database}"
+            "--data-dir"
+            stateDir
           ]
           # One flag per directory rather than the `:`-separated form the
           # environment variable takes: a path with a colon in it would split
@@ -400,11 +385,8 @@ in
         UMask = "0077";
 
         # `ProtectSystem = "strict"` leaves the state directory writable and
-        # nothing else, so a database put elsewhere needs its directory saying
-        # so. Under the state directory this would be redundant.
-        ReadWritePaths = lib.optional (!lib.hasPrefix "${stateDir}/" "${cfg.database}") (
-          builtins.dirOf "${cfg.database}"
-        );
+        # nothing else, which is the whole of what the server writes: the Data
+        # Directory is that directory, so there is nothing else to permit.
 
         # The Watched Paths, and nothing else of the filesystem they sit in.
         #
@@ -425,9 +407,11 @@ in
 
         # A home the human named somewhere of their own, bound in for the reason
         # a Watched Path is: it is usually under `/home`, which `ProtectHome`
-        # replaces with an empty tmpfs. Read-only, because the two files read
-        # out of it are the two the service only ever reads. Under the state
-        # directory there is nothing to bind — systemd made it.
+        # replaces with an empty tmpfs, and a HOME that is not there is what a
+        # tool reaching for one fails obscurely on. Read-only, because nothing is
+        # read out of it any more and a service writing into somebody's own home
+        # is not what naming one here asks for. Under the state directory there
+        # is nothing to bind — systemd made it, and it is the service's own.
         BindReadOnlyPaths = lib.optional (!homeIsOurs) "${cfg.home}";
       };
     };

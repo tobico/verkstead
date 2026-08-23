@@ -12,7 +12,7 @@
 //! file every `git add -A` after it swept into the human's repository, and no
 //! amount of instructing an agent not to commit something is as good as the file
 //! not being there. So each Conversation gets a directory of Verkstead's own,
-//! under the State Directory beside the worktrees, bound into every one of its
+//! under the Data Directory beside the worktrees, bound into every one of its
 //! sandboxes at [`INSIDE`] — which is under `/tmp` because that is where a
 //! session already expects to find what is neither the checkout nor its home.
 //!
@@ -41,7 +41,7 @@ pub(crate) const HANDOFF_INSIDE: &str = "/tmp/verkstead/handoff.md";
 
 /// The directories Conversations' sessions are given outside their worktrees.
 ///
-/// A root under the State Directory and nothing else: which directory belongs to
+/// A root under the Data Directory and nothing else: which directory belongs to
 /// which Conversation is its id, so there is nothing to keep in a table.
 #[derive(Debug, Clone)]
 pub struct Handoffs {
@@ -49,11 +49,11 @@ pub struct Handoffs {
 }
 
 impl Handoffs {
-    /// The root under `state_dir`, beside the worktrees — both are things
+    /// The root under `data_dir`, beside the worktrees — both are things
     /// Verkstead made rather than things the human pointed it at.
-    pub fn under(state_dir: &Path) -> Handoffs {
+    pub fn under(data_dir: &Path) -> Handoffs {
         Handoffs {
-            root: state_dir.join("handoffs"),
+            root: data_dir.join("handoffs"),
         }
     }
 

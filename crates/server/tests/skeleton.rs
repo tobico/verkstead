@@ -69,7 +69,11 @@ fn config_defaults_to_localhost() {
     let config = Config::parse_from(["verkstead serve", "--watched-path", "/srv/repos"]);
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
-    assert!(!config.database.as_os_str().is_empty());
+
+    // The working directory, so a dev run out of a checkout keeps everything it
+    // makes there — with the database at the one name it is ever kept under.
+    assert_eq!(config.data_dir.to_str().unwrap(), ".");
+    assert_eq!(config.database().to_str().unwrap(), "./verkstead.db");
 }
 
 #[test]
@@ -78,14 +82,18 @@ fn config_is_overridable_by_flag() {
         "verkstead serve",
         "--listen",
         "0.0.0.0:9999",
-        "--database",
-        "/srv/verkstead/state.db",
+        "--data-dir",
+        "/srv/verkstead",
         "--watched-path",
         "/srv/repos",
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
-    assert_eq!(config.database.to_str().unwrap(), "/srv/verkstead/state.db");
+    assert_eq!(config.data_dir.to_str().unwrap(), "/srv/verkstead");
+    assert_eq!(
+        config.database().to_str().unwrap(),
+        "/srv/verkstead/verkstead.db"
+    );
 }
 
 /// The one piece of configuration with no default: what Verkstead may touch is

@@ -1,7 +1,7 @@
 //! `verkstead serve`: the verb that runs the server out of the same binary the
 //! agent asks with. What it is judged on is that the process an operator starts
 //! answers the agent API, hands over the viewer, and is pointed at its socket
-//! and its database exactly as the server binary this verb replaced was.
+//! and its data directory exactly as the server binary this verb replaced was.
 
 mod support;
 
@@ -49,7 +49,7 @@ fn free_port() -> u16 {
 }
 
 /// `verkstead serve` as an operator runs it: a child process with its own
-/// database, killed when the test is done with it.
+/// data directory, killed when the test is done with it.
 struct Serve {
     child: Option<Child>,
     url: String,
@@ -90,15 +90,15 @@ impl Serve {
     /// `dir` is the Watched Path as well as the working directory. The server
     /// refuses to start without one, and a test that is not about the boundary
     /// still has to give it something real to watch.
-    fn with_flags(dir: &Path, port: u16, database: &Path) -> Self {
+    fn with_flags(dir: &Path, port: u16, data_dir: &Path) -> Self {
         Self::start(
             dir,
             port,
             &[
                 "--listen",
                 &format!("127.0.0.1:{port}"),
-                "--database",
-                database.to_str().unwrap(),
+                "--data-dir",
+                data_dir.to_str().unwrap(),
                 "--watched-path",
                 dir.to_str().unwrap(),
             ],
@@ -258,7 +258,7 @@ fn refused_to_start(args: &[&str]) -> String {
         .args(args)
         .env_remove("RUST_LOG")
         .env_remove("VERKSTEAD_WATCHED_PATHS")
-        .env_remove("VERKSTEAD_DATABASE")
+        .env_remove("VERKSTEAD_DATA_DIR")
         .env_remove("VERKSTEAD_LISTEN")
         .output()
         .expect("the verkstead binary should be built for its own tests");
@@ -297,8 +297,8 @@ fn serving_with_a_watched_path_that_is_not_there_refuses_to_start() {
     let refusal = refused_to_start(&[
         "--listen",
         &format!("127.0.0.1:{}", free_port()),
-        "--database",
-        tmp.path().join("unused.db").to_str().unwrap(),
+        "--data-dir",
+        tmp.path().to_str().unwrap(),
         "--watched-path",
         missing.to_str().unwrap(),
     ]);
@@ -316,9 +316,9 @@ fn stdout(output: &Output) -> String {
 #[test]
 fn the_served_api_round_trips_an_ask() {
     let tmp = tempfile::tempdir().unwrap();
-    let database = tmp.path().join("state/verkstead.db");
+    let data_dir = tmp.path().join("data");
     let port = free_port();
-    let mut serving = Serve::with_flags(tmp.path(), port, &database);
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
 
     let conversation = serving.asking_from(&repo_with_a_commit(tmp.path()));
 
@@ -341,9 +341,10 @@ fn the_served_api_round_trips_an_ask() {
         .unwrap_or_else(|error| panic!("stdout should be a Response: {error}\n{printed}"));
     assert_eq!(response.answers[0].selected, Some(1));
 
+    let database = data_dir.join("verkstead.db");
     assert!(
         database.exists(),
-        "--database is where the store should have been created, and {} is not there",
+        "the store belongs at `verkstead.db` inside --data-dir, and {} is not there",
         database.display()
     );
 
@@ -358,7 +359,7 @@ fn the_served_api_round_trips_an_ask() {
 fn the_viewer_is_served_beside_the_api() {
     let tmp = tempfile::tempdir().unwrap();
     let port = free_port();
-    let mut serving = Serve::with_flags(tmp.path(), port, &tmp.path().join("verkstead.db"));
+    let mut serving = Serve::with_flags(tmp.path(), port, tmp.path());
 
     match ureq::get(format!("{}/", serving.url)).call() {
         Ok(mut document) => {
@@ -381,9 +382,9 @@ fn the_viewer_is_served_beside_the_api() {
 }
 
 #[test]
-fn the_listen_address_and_database_come_from_the_environment_too() {
+fn the_listen_address_and_data_directory_come_from_the_environment_too() {
     let tmp = tempfile::tempdir().unwrap();
-    let database = tmp.path().join("from-the-environment.db");
+    let data_dir = tmp.path().join("from-the-environment");
     let port = free_port();
 
     let mut serving = Serve::start(
@@ -392,16 +393,17 @@ fn the_listen_address_and_database_come_from_the_environment_too() {
         &[],
         &[
             ("VERKSTEAD_LISTEN", &format!("127.0.0.1:{port}")),
-            ("VERKSTEAD_DATABASE", database.to_str().unwrap()),
+            ("VERKSTEAD_DATA_DIR", data_dir.to_str().unwrap()),
             ("VERKSTEAD_WATCHED_PATHS", tmp.path().to_str().unwrap()),
         ],
     );
 
     // Reaching the health endpoint at all is `VERKSTEAD_LISTEN` having been
     // honoured: `Serve::start` blocked until this port answered.
+    let database = data_dir.join("verkstead.db");
     assert!(
         database.exists(),
-        "VERKSTEAD_DATABASE should have been created at {}",
+        "VERKSTEAD_DATA_DIR should have been made, with the database in it at {}",
         database.display()
     );
 
@@ -414,10 +416,10 @@ fn the_help_describes_the_flags_and_their_defaults() {
 
     for phrase in [
         "--listen",
-        "--database",
+        "--data-dir",
         "--watched-path",
         "VERKSTEAD_LISTEN",
-        "VERKSTEAD_DATABASE",
+        "VERKSTEAD_DATA_DIR",
         "VERKSTEAD_WATCHED_PATHS",
         "127.0.0.1:8422",
         "verkstead.db",
@@ -428,6 +430,32 @@ fn the_help_describes_the_flags_and_their_defaults() {
              of what an operator reads before starting the server, got:\n{help}"
         );
     }
+}
+
+/// The two options the Data Directory replaced are gone rather than deprecated:
+/// one directory says where everything Verkstead makes lives, and a flag that
+/// still took a database path would be a second answer to the same question.
+#[test]
+fn the_options_the_data_directory_replaced_are_gone() {
+    let help = stdout(&run(&["serve", "--help"]));
+
+    for phrase in [
+        "--database",
+        "--state-dir",
+        "VERKSTEAD_DATABASE",
+        "VERKSTEAD_STATE_DIR",
+    ] {
+        assert!(
+            !help.contains(phrase),
+            "`verkstead serve --help` should no longer mention {phrase:?}, got:\n{help}"
+        );
+    }
+
+    let refusal = refused_to_start(&["--database", "verkstead.db", "--watched-path", "."]);
+    assert!(
+        refusal.contains("--database"),
+        "starting with the old flag should be refused by name, got:\n{refusal}"
+    );
 }
 
 /// The verb is one subcommand among the agent-facing ones, and adding it must
@@ -449,16 +477,16 @@ fn serve_is_listed_without_displacing_the_guide() {
 }
 
 #[test]
-fn startup_logs_the_listen_address_and_the_database_path() {
+fn startup_logs_the_listen_address_and_the_data_directory() {
     let tmp = tempfile::tempdir().unwrap();
-    let database = tmp.path().join("logged.db");
+    let data_dir = tmp.path().join("logged");
     let port = free_port();
-    let mut serving = Serve::with_flags(tmp.path(), port, &database);
+    let mut serving = Serve::with_flags(tmp.path(), port, &data_dir);
 
     let logged = serving.stop();
 
     assert!(
-        logged.contains(&format!("127.0.0.1:{port}")) && logged.contains("logged.db"),
+        logged.contains(&format!("127.0.0.1:{port}")) && logged.contains("logged"),
         "the operator's one confirmation that the server came up where they \
          asked is this line, got:\n{logged}"
     );
@@ -474,8 +502,8 @@ fn rust_log_overrides_the_default_filter() {
         &[
             "--listen",
             &format!("127.0.0.1:{port}"),
-            "--database",
-            tmp.path().join("quiet.db").to_str().unwrap(),
+            "--data-dir",
+            tmp.path().to_str().unwrap(),
             "--watched-path",
             tmp.path().to_str().unwrap(),
         ],

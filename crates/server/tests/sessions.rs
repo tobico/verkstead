@@ -52,6 +52,7 @@ use verkstead_render::{
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
+use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
 
@@ -246,12 +247,12 @@ impl Grilling {
                 vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
                 Home {
                     path: self.home.path().to_owned(),
-                    gh_config: self.home.path().join(".config/gh"),
                 },
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
                 Handoffs::under(self.state.path()),
+                Settings::in_data_dir(self.state.path()),
             )
             .at_pace(BRISKLY),
             gh_stub(gh),
@@ -882,27 +883,28 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // Who a session commits as, which every sandbox reads out of the home of
-    // whoever runs the server.
+    // Who a session commits as: a settings file in the Data Directory, which is
+    // where every sandbox is configured out of.
     std::fs::write(
-        home.path().join(".gitconfig"),
-        "[user]\n\tname = Verkstead Test\n\temail = test@verkstead.invalid\n",
+        state.path().join("config.yaml"),
+        "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
     )
     .unwrap();
 
     let database = state.path().join("verkstead.db");
+
     let pool = open_database(&database).await.unwrap();
 
     let agents = Agents::running(
         vec!["/bin/sh".to_owned(), "-c".to_owned(), stub.to_owned()],
         Home {
             path: home.path().to_owned(),
-            gh_config: home.path().join(".config/gh"),
         },
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
         Handoffs::under(state.path()),
+        Settings::in_data_dir(state.path()),
     )
     .at_pace(pace);
 
@@ -1738,12 +1740,12 @@ async fn a_capture_survives_the_server_restarting() {
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
             Home {
                 path: PathBuf::from("/nonexistent"),
-                gh_config: PathBuf::from("/nonexistent/.config/gh"),
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             Handoffs::under(fixture.state.path()),
+            Settings::in_data_dir(fixture.state.path()),
         ),
         gh_stub(PULL_REQUEST),
     );
@@ -3310,12 +3312,12 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             vec!["/bin/sh".to_owned(), "-c".to_owned(), "true".to_owned()],
             Home {
                 path: PathBuf::from("/nonexistent"),
-                gh_config: PathBuf::from("/nonexistent/.config/gh"),
             },
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             Handoffs::under(fixture.state.path()),
+            Settings::in_data_dir(fixture.state.path()),
         )
         .at_pace(BRISKLY),
         gh_stub(&gh_checking("SUCCESS")),

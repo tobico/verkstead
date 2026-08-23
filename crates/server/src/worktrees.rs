@@ -1,7 +1,7 @@
 //! Where a Conversation's work is done: the branch it is on and the worktree it
 //! is checked out in, made when grilling starts and removed when it is aborted.
 //!
-//! Worktrees live under Verkstead's own state directory rather than inside a
+//! Worktrees live under Verkstead's own data directory rather than inside a
 //! Watched Path. The Watched Paths are the boundary on what the *human* may
 //! point Verkstead at — repositories to register, accounts to run under — and a
 //! worktree is neither: it is something Verkstead made, in the one directory the
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::repos::git;
 
-/// The directory a worktree goes in, under `state`.
+/// The directory a worktree goes in, under `data`.
 ///
 /// Named for the Repo and the branch, which is what the human calls the work —
 /// and what an agent working inside it sees itself working in. The branch may
@@ -27,8 +27,8 @@ use crate::repos::git;
 /// component: everything that is not a plain name character becomes a hyphen,
 /// and a name already taken falls back to one with the Conversation's id on the
 /// end, which nothing else can collide with.
-pub(crate) fn worktree_path(state: &Path, id: i64, repo: &str, branch: &str) -> PathBuf {
-    let worktrees = state.join("worktrees");
+pub(crate) fn worktree_path(data: &Path, id: i64, repo: &str, branch: &str) -> PathBuf {
+    let worktrees = data.join("worktrees");
     let stem = format!("{}-{}", component(repo), component(branch));
 
     let named = worktrees.join(&stem);
