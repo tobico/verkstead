@@ -25,7 +25,12 @@ import type {
   Response as Decided,
   Submitted,
 } from "../api/types";
-import { DIRECTION, DIRECTION_NOTE, DIRECTIONS } from "../directions";
+import {
+  DIRECTION,
+  DIRECTION_LABEL,
+  DIRECTION_NOTE,
+  DIRECTIONS,
+} from "../directions";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
 import { anchor } from "./outline";
@@ -345,11 +350,15 @@ function Choosing(props: {
 }): JSX.Element {
   return (
     <section class="direction-pick" id="direction">
-      <h2 class="section-heading">Direction</h2>
-      <div
-        class="proposal markdown"
-        innerHTML={props.proposal.rationale_html}
-      />
+      {/* Asked as a Question is asked: the label floated in the accent with the
+          agent's argument running beside it, and the three to pick from under
+          it where a Question's Options are. */}
+      <div class="ask">
+        <AskText
+          name={DIRECTION_LABEL}
+          html={props.proposal.rationale_html}
+        />
+      </div>
       <ul class="directions">
         <For each={DIRECTIONS}>
           {(offered) => {

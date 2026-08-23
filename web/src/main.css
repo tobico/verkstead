@@ -569,11 +569,10 @@ textarea::placeholder {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Which one the form above is about, said with the accent down the near edge —
-   the same mark the open conversation carries. */
+/* Which one the form above is about, said in the accent border — the same mark
+   the open conversation carries. */
 .profile-row.editing {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 /* A profile whose pair has gone. Said in the row rather than only in the words
@@ -1074,19 +1073,21 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-/* Which one is open, said with the accent down the near edge rather than with a
-   fill: the row is read, and a wash behind it would fight the words. */
+/* Which one is open, said in the accent border alone: the border is the mark
+   everywhere something is selected, and a card that also carried a stripe down
+   its near edge read as heavier than the rest of the list rather than as the one
+   being looked at. A fill is no better — the row is read, and a wash behind it
+   would fight the words. */
 .conversation-row.selected button {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 /* A draft: nothing about it has been settled, so the card is drawn as the
    outline of one rather than as one.
 
-   `border-style` alone, so a selected draft is still the accent down its near
-   edge — a dotted accent border is a draft that is open, which is both things at
-   once and is what it should look like. */
+   `border-style` alone, so a selected draft still takes the accent — a dotted
+   accent border is a draft that is open, which is both things at once and is
+   what it should look like. */
 .conversation-row.draft button {
   border-style: dotted;
 }
@@ -1095,13 +1096,14 @@ main:has(.workbench) {
    details pane's to say, and what the sidebar is saying is that there is nothing
    here to do. Still a row to press: a Done Conversation can be reopened.
 
-   0.65 rather than lower, because it is the card that should recede and not the
-   words in it: dimmed that far, `--ink` on this card lands almost exactly where
-   `--ink-soft` sits undimmed, so the name reads as small print rather than as
-   something failing. Which is why the line under it is lifted to `--ink` below —
-   left soft it would be dimmed twice. */
+   Far enough down that the card reads as closed at a glance rather than merely
+   quiet: a list of live work with a Done conversation in it should not have to be
+   read to tell which is which. The line under the name is lifted to `--ink`
+   below all the same — left soft it would be dimmed twice, and the card is what
+   should recede and not the words in it. Still a card to press: a Done
+   Conversation can be reopened. */
 .conversation-row.ended button {
-  opacity: 0.65;
+  opacity: 0.45;
 }
 
 .conversation-row.ended .meta {
@@ -1277,11 +1279,33 @@ main:has(.workbench) {
   text-overflow: ellipsis;
 }
 
+/* Whether the entry is finished, drawn where the file it is read out of writes
+   it: a box at the head of the row rather than a word at the far end of it. A
+   column of boxes is read down in one pass, which is what a list of tasks is
+   ever looked at for. */
+.pinned .task-list .box,
+.pinned .stage-list .box {
+  flex: none;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+
+/* And the word the box replaced, kept for the readers that need words: out of
+   the layout and still in the document, so a row read aloud or copied out says
+   which entries are finished. Not `display: none`, which would take it out of
+   the accessibility tree along with the layout. */
 .pinned .task-list .state,
 .pinned .stage-list .state {
-  margin-left: auto;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* One that is done is struck through and taken down, the way a checked item
@@ -1665,14 +1689,20 @@ main:has(.workbench) {
   color: var(--added);
 }
 
-/* A move: the conversation changing hands. A line rather than a card, because
-   there is nothing to it but the fact — so it is drawn out of the run of cards
-   the other events make, as something that happened between them. */
+/* A move: the conversation changing hands, written as the transition itself —
+   `Grilling → Implementing`. A line rather than a card, because there is nothing
+   to it but the fact, so it is drawn out of the run of cards the other events
+   make, as something that happened between them.
+
+   Centred, which is the other half of that: a line down the middle belongs to
+   the gap between two cards rather than to either of them, and the small dim
+   type keeps it a join and not an entry. */
 .timeline-event > .moved {
   margin: 0;
   padding: 0.15rem 0;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
+  text-align: center;
   background: none;
   border: 0;
   border-radius: 0;
@@ -1785,10 +1815,11 @@ main:has(.workbench) {
 }
 
 /* One still waiting on the human is the one thing on a timeline that is asking
-   for something, so it says so rather than sitting among the record. */
+   for something, so it says so rather than sitting among the record. The accent
+   border and the badge in the head, which is the mark twice over — the stripe
+   that used to run down its near edge has gone with every other one. */
 .timeline-event > .question-set.waiting {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 .question-set .event-head {
@@ -1955,11 +1986,11 @@ main:has(.workbench) {
 }
 
 /* One nobody has answered is the other thing on a timeline that is asking for
-   something, so it is marked the way a waiting question set is — in the colour
-   that means stopped rather than the one that means happening. */
+   something, so it is marked the way a waiting question set is — the border
+   alone, and in the colour that means stopped rather than the one that means
+   happening. */
 .timeline-event > .interruption.open {
   border-color: var(--stopped);
-  box-shadow: inset 0.2rem 0 0 var(--stopped);
 }
 
 .interruption .event-head {
@@ -4106,22 +4137,15 @@ div.meta .error {
 }
 
 /* The direction chooser, injected under the Questions of a Set that carried a
-   proposal. Drawn as the Options are drawn, because it is the same gesture: a
-   radio group where the recommendation is marked with the same ★ and nothing is
-   picked until it is picked. What is its own is the reasoning above it and the
-   line under it saying what picking does — the one control on the page whose
-   meaning is not in its label. */
+   proposal. Drawn as a Question is drawn, because that is what it is: the
+   agent's argument is the ask, labelled and floated by the `.ask` rules above —
+   the box it is in wears that class, so there is nothing to set for it here —
+   and the three under it are a radio group where the recommendation is marked
+   with the same ★ and nothing is picked until it is picked. What is its own is
+   the line at the foot saying what picking does, this being the one control on
+   the page whose meaning is not in its label. */
 .direction-pick {
   margin-top: 1.5rem;
-}
-
-/* The agent's argument, set apart from the choices so it reads as something to
-   take in before making one. The Timeline's chooser sets it the same way. */
-.direction-pick .proposal {
-  margin-bottom: 0.75rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--edge);
-  color: var(--ink-soft);
 }
 
 .direction-pick .directions {
@@ -4650,7 +4674,8 @@ div.meta .error {
      paragraph starts on the axis like every other block, with the label beside
      it rather than in front of it. Which is why the margin that used to hold the
      words off the label goes — the Gutter is the whole of the gap now. */
-  .question > .ask > .text > .label {
+  .question > .ask > .text > .label,
+  .direction-pick > .ask > .text > .label {
     width: var(--gutter);
     margin: 0 0 0 calc(-1 * var(--gutter));
   }

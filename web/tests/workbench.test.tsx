@@ -460,6 +460,22 @@ describe("how a card says where its conversation has got to", () => {
     ]);
   });
 
+  /// How far down is the stylesheet's, and jsdom lays nothing out: what these
+  /// two say is that a closed card recedes far enough to read as closed, and
+  /// that being the open one is the accent border and nothing beside it.
+  it("takes a closed card well down, and marks the open one with a border", () => {
+    expect(stylesheet).toContain(
+      ".conversation-row.ended button {\n  opacity: 0.45;\n}",
+    );
+    expect(stylesheet).toContain(
+      ".conversation-row.selected button {\n  border-color: var(--accent);\n}",
+    );
+    expect(
+      stylesheet,
+      "the inset stripe is retired everywhere it was drawn",
+    ).not.toContain("box-shadow: inset 0.2rem");
+  });
+
   /// Dimmed and still a row to press: a Done Conversation can be reopened.
   it("opens a dimmed conversation like any other", async () => {
     theSidebar({ state: "Done" });
@@ -1925,19 +1941,21 @@ describe("starting the grilling", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await waitFor(() => screen.getByText("Started grilling"));
+    await waitFor(() => screen.getByText("Draft → Grilling"));
     expect(container.querySelector(".start-grilling")).toBeNull();
   });
 });
 
 describe("a move on the timeline", () => {
-  it("draws the state the conversation moved to, as something that happened", async () => {
+  /// Both ends of it: the record keeps only the state moved to, and the one it
+  /// moved from is the move before it — or drafting, where it is the first.
+  it("draws the move as the transition it was", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const moved = await drawn(container, ".timeline-event .moved");
 
-    expect(moved.textContent).toBe("Started grilling");
+    expect(moved.textContent).toBe("Draft → Grilling");
     expect(moved.classList).toContain("grilling");
   });
 
@@ -1947,7 +1965,7 @@ describe("a move on the timeline", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await waitFor(() => screen.getByText("Started grilling"));
+    await waitFor(() => screen.getByText("Draft → Grilling"));
 
     expect(
       [...container.querySelectorAll(".timeline-event > *")].map(
@@ -3311,7 +3329,29 @@ describe("a grilling that has handed over", () => {
       ...container.querySelectorAll(".timeline-event > .moved"),
     ].map((line) => line.textContent);
 
-    expect(moved).toEqual(["Started grilling", "Started implementing"]);
+    expect(moved).toEqual(["Draft → Grilling", "Grilling → Implementing"]);
+  });
+
+  /// A move records only the state it went to, and an abort is off the ladder
+  /// rather than on it — so what it stopped in is the move before it, which is
+  /// the whole of what makes the line worth reading.
+  it("names the state an abort stopped in", async () => {
+    theBuilding({
+      state: "Aborted",
+      timeline: [
+        ...BUILDING.timeline,
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Aborted" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, ".timeline");
+
+    const moved = [
+      ...container.querySelectorAll(".timeline-event > .moved"),
+    ].map((line) => line.textContent);
+
+    expect(moved.at(-1)).toBe("Implementing → Aborted");
   });
 
   it("draws the handoff the grilling wrote as the document it is", async () => {
@@ -3617,9 +3657,21 @@ describe("the pinned task list", () => {
       BACKLOG.tasks.map((task) => task.done),
     );
 
-    // In words as well as in a class, so a row read aloud says it too.
+    // Drawn the way the file it is read out of writes it, a box per row.
+    expect(rows.map((row) => row.querySelector(".box")!.textContent)).toEqual(
+      BACKLOG.tasks.map((task) => (task.done ? "☑" : "☐")),
+    );
+
+    // In words as well as in a class, so a row read aloud says it too — the box
+    // is the look of it and the word is what anything reading gets, which is
+    // why it is out of the layout rather than out of the document.
     expect(rows.map((row) => row.querySelector(".state")!.textContent)).toEqual(
       BACKLOG.tasks.map((task) => (task.done ? "done" : "to do")),
+    );
+    expect(stylesheet).toContain(
+      ".pinned .task-list .state,\n" +
+        ".pinned .stage-list .state {\n" +
+        "  position: absolute;",
     );
   });
 
@@ -3768,7 +3820,10 @@ describe("the pinned stage list", () => {
       ROADMAP.stages.map((stage) => stage.done),
     );
 
-    // In words as well as in a class, as a task's row is.
+    // Boxes and words both, as a task's row carries them.
+    expect(rows.map((row) => row.querySelector(".box")!.textContent)).toEqual(
+      ROADMAP.stages.map((stage) => (stage.done ? "☑" : "☐")),
+    );
     expect(rows.map((row) => row.querySelector(".state")!.textContent)).toEqual(
       ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")),
     );
@@ -4200,7 +4255,7 @@ describe("the pinned pull request", () => {
     const moves = [...container.querySelectorAll(".timeline .moved")].map(
       (line) => line.textContent,
     );
-    expect(moves.at(-1)).toBe("Moved to wrapping up");
+    expect(moves.at(-1)).toBe("Implementing → Wrapping");
   });
 
   it("shows what is on it in the details pane, fetched rather than remembered", async () => {

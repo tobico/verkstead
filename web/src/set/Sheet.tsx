@@ -33,7 +33,7 @@ import type {
   SetView,
 } from "../api/types";
 import { setWrapping, wrapping } from "../device";
-import { DIRECTION, DIRECTIONS } from "../directions";
+import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
 import { Answering } from "./Answering";
 import { AskText } from "./AskText";
 import { Contents, PageHeader, navigation } from "./Contents";
@@ -361,8 +361,16 @@ function Chosen(props: {
 }): JSX.Element {
   return (
     <section class="direction-pick decided" id="direction">
-      <h2 class="section-heading">Direction</h2>
-      <div class="proposal markdown" innerHTML={props.proposal.rationale_html} />
+      {/* Asked as a Question is asked, and read back the same way: the label
+          floated in the accent with the agent's argument running beside it. It
+          is a question — what should become of this — so it is drawn as one
+          rather than as a section of furniture with a heading over it. */}
+      <div class="ask">
+        <AskText
+          name={DIRECTION_LABEL}
+          html={props.proposal.rationale_html}
+        />
+      </div>
       <ul class="directions">
         <For each={DIRECTIONS}>
           {(offered) => (

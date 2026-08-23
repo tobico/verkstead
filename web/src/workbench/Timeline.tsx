@@ -71,6 +71,7 @@ import type {
   QuestionSetEvent,
   StageListEvent,
   TaskListEvent,
+  TimelineEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
 import * as pairing from "../pairing";
@@ -156,15 +157,21 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
-/// What a move reads as. The state moved *to*, said as something that happened.
-const MOVED: Record<Lifecycle, string> = {
-  Draft: "Went back to drafting",
-  Grilling: "Started grilling",
-  Implementing: "Started implementing",
-  Wrapping: "Moved to wrapping up",
-  Done: "Finished",
-  Aborted: "Aborted",
-};
+/// The state a move came *from*: the state the move before it went to, and
+/// `Draft` where there is no move before it, since a Conversation starts
+/// drafting and its first move is the one out of that.
+///
+/// A move records only the state it went to, so the other half of the
+/// transition is the Timeline's own to work out by reading back up itself.
+function movedFrom(timeline: TimelineEvent[], index: number): Lifecycle {
+  for (const event of timeline.slice(0, index).reverse()) {
+    if ("Moved" in event) {
+      return event.Moved.state;
+    }
+  }
+
+  return "Draft";
+}
 
 /// How many lines of a document a card shows before it is cut off.
 ///
@@ -324,7 +331,7 @@ export function Timeline(props: {
 
       <ol class="timeline">
         <For each={props.conversation.timeline}>
-          {(event) => (
+          {(event, index) => (
             <li class="timeline-event">
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
@@ -341,7 +348,12 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"Moved" in event && event.Moved}>
-                  {(moved) => <Moved moved={moved()} />}
+                  {(moved) => (
+                    <Moved
+                      from={movedFrom(props.conversation.timeline, index())}
+                      moved={moved()}
+                    />
+                  )}
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
@@ -703,6 +715,20 @@ function PullRequest(props: {
   );
 }
 
+/// Whether one entry of a list is finished, drawn the way the file it is read
+/// out of writes it: an empty box, or a checked one.
+///
+/// The glyph and nothing else — it is the same fact the row's own `state` word
+/// carries, so it is hidden from anything that reads rather than looks, and the
+/// word is what those get.
+function Box(props: { done: boolean }): JSX.Element {
+  return (
+    <span class="box" aria-hidden="true">
+      {props.done ? "☑" : "☐"}
+    </span>
+  );
+}
+
 /// The backlog: every task of it, and how far through it the work has got.
 ///
 /// The whole list rather than a summary, because the whole list is short and it
@@ -732,6 +758,7 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
         <For each={props.tasks.tasks}>
           {(task) => (
             <li classList={{ done: task.done }}>
+              <Box done={task.done} />
               <span class="n">{task.number}</span>
               <span class="what">{task.title}</span>
               {/* The word travels with the row rather than being drawn by the
@@ -772,6 +799,7 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
         <For each={props.stages.stages}>
           {(stage) => (
             <li classList={{ done: stage.done }}>
+              <Box done={stage.done} />
               <span class="n">{stage.number}</span>
               <span class="what">{stage.title}</span>
               {/* The word travels with the row rather than being drawn by the
@@ -856,14 +884,21 @@ function ManualTask(props: {
   );
 }
 
-/// A move: the Conversation changing hands, said in a line.
+/// A move: the Conversation changing hands, said as the transition itself.
 ///
 /// A line and not a card, because there is nothing to it but the fact and the
-/// time — everything a move has to say is already in the two.
-function Moved(props: { moved: MovedEvent }): JSX.Element {
+/// time — everything a move has to say is already in the two. Centred, so the
+/// run of cards is what the eye follows and the moves read as the joins between
+/// them.
+///
+/// Both states, `Grilling → Implementing`, rather than a verb phrase for the one
+/// that was moved to: where the work has got to is a step from somewhere, and a
+/// line saying only where it arrived leaves the reader to remember where it
+/// was. The state it came from is [`movedFrom`]'s to say.
+function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
   return (
     <p class="moved" classList={{ [props.moved.state.toLowerCase()]: true }}>
-      {MOVED[props.moved.state]}
+      {props.from} → {props.moved.state}
     </p>
   );
 }
