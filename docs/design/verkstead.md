@@ -75,9 +75,17 @@ flowchart LR
   has no default entry: the profile says what is available and the pick is made
   where a session is set up. Account separation works as in the
   current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox. Each conversation fixes **two**
-  profiles before grilling starts: one for grilling, one for implementation
-  work (today's split: grill on fable, implement on opus).
+  `~/.claude.json` inside the sandbox.
+- **Pairings.** What runs a conversation's sessions is a profile *and* one of
+  that profile's models, picked together. Each conversation fixes **two** of
+  them before grilling starts: one for grilling, one for implementation work
+  (today's split: grill on fable, implement on opus). Every picker offers the
+  pairings as one flat list, a row per profile-and-model combination — a
+  two-stage profile-then-model picker was considered and rejected, since it
+  costs a tap every time and the counts stay small. Both are fixed when
+  grilling starts, alongside the branch, the base commit and the brief: what
+  runs the work is settled before the work begins rather than swapped
+  underneath it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —
@@ -95,7 +103,7 @@ flowchart LR
 ## Workflow
 
 - **Grilling.** "Start grilling" creates the branch + worktree and launches a
-  grilling session under the conversation's grilling profile. Question sets
+  grilling session under the conversation's grilling pairing. Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
   a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
@@ -104,8 +112,8 @@ flowchart LR
   the `.tasks/` backlog, the `docs/roadmaps/` staging, or (for **inline**) a
   handoff document — and the artifact landing plus quiet is what moves the
   conversation on. Inline needs the handoff because its builder is a fresh
-  session under the implementation profile: the grilling session cannot simply
-  continue, the profiles differ (ADR-0008).
+  session under the implementation pairing: the grilling session cannot simply
+  continue, the accounts differ (ADR-0008).
 - **Two kinds of ask.** *Blocking* asks work as in askance: the session idles
   until the answer arrives. *Deferred* asks don't block; they sit in the
   timeline awaiting answers, which are folded into a later session's prompt.

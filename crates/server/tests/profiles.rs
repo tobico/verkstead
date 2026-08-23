@@ -22,7 +22,7 @@ use verkstead_render::{
     AgentType, BriefSaved, Broken, ConversationView, ProfileChosen, ProfileDeleted, ProfileEntry,
     ProfileSaved, Registered, Started,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A watched directory, the app over it, and the directory holding the database
 /// alive.
@@ -69,16 +69,19 @@ async fn save(app: &Router, body: &serde_json::Value) -> ProfileSaved {
     post(app, "/api/ui/profiles", body).await
 }
 
+/// Two models apiece, so that a Pairing below can name one that is not the
+/// first of the list — which is the whole of what a Pairing adds to a Profile.
+const MODELS: [&str; 2] = ["claude-opus-5", "claude-fable-5"];
+
+/// The one the Pairings here are made with: the second, for the reason above.
+const MODEL: &str = MODELS[1];
+
 /// Save one that ought to work, and hand back the row it became.
 async fn saved(app: &Router, watched: &Path, name: &str) -> ProfileEntry {
     let (claude_dir, config_file) = pair(watched, name);
 
     assert_eq!(
-        save(
-            app,
-            &edit(name, &claude_dir, &config_file, &["claude-opus-5"])
-        )
-        .await,
+        save(app, &edit(name, &claude_dir, &config_file, &MODELS)).await,
         ProfileSaved::Saved
     );
 
@@ -168,20 +171,25 @@ async fn opened(app: &Router, id: i64) -> ConversationView {
     get(app, &format!("/api/ui/conversations/{id}")).await
 }
 
-async fn choose_grilling(app: &Router, id: i64, profile_id: i64) -> ProfileChosen {
+async fn choose_grilling(app: &Router, id: i64, profile_id: i64, model: &str) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/grilling-profile"),
-        &serde_json::json!({ "profile_id": profile_id }),
+        &format!("/api/ui/conversations/{id}/grilling-pairing"),
+        &serde_json::json!({ "profile_id": profile_id, "model": model }),
     )
     .await
 }
 
-async fn choose_implementation(app: &Router, id: i64, profile_id: i64) -> ProfileChosen {
+async fn choose_implementation(
+    app: &Router,
+    id: i64,
+    profile_id: i64,
+    model: &str,
+) -> ProfileChosen {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/implementation-profile"),
-        &serde_json::json!({ "profile_id": profile_id }),
+        &format!("/api/ui/conversations/{id}/implementation-pairing"),
+        &serde_json::json!({ "profile_id": profile_id, "model": model }),
     )
     .await
 }
@@ -231,7 +239,7 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
     let profile = saved(&app, watched.path(), "work").await;
 
     assert_eq!(profile.name, "work");
-    assert_eq!(profile.models, &["claude-opus-5"]);
+    assert_eq!(profile.models, MODELS);
     assert_eq!(profile.agent_type, AgentType::Claude);
 
     // The resolved paths, which are what will be bind-mounted.
@@ -552,44 +560,92 @@ async fn a_pair_that_now_points_out_of_the_watched_paths_reads_as_broken() {
 /// They are separate choices because they are genuinely separate accounts and
 /// models — grill on fable, implement on opus.
 #[tokio::test]
-async fn a_conversation_chooses_its_two_profiles_independently() {
+async fn a_conversation_chooses_its_two_pairings_independently() {
     let (watched, _dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let fable = saved(&app, watched.path(), "fable").await;
     let opus = saved(&app, watched.path(), "opus").await;
 
     assert_eq!(
-        choose_grilling(&app, id, fable.id).await,
+        choose_grilling(&app, id, fable.id, MODEL).await,
         ProfileChosen::Chosen
     );
 
     let half = opened(&app, id).await;
     assert_eq!(
-        half.grilling_profile.as_ref().map(|p| p.name.as_str()),
+        half.grilling_pairing
+            .as_ref()
+            .map(|p| p.profile.name.as_str()),
         Some("fable")
     );
-    assert_eq!(half.implementation_profile, None);
+    assert_eq!(half.implementation_pairing, None);
 
     assert_eq!(
-        choose_implementation(&app, id, opus.id).await,
+        choose_implementation(&app, id, opus.id, MODEL).await,
         ProfileChosen::Chosen
     );
 
     let both = opened(&app, id).await;
     assert_eq!(
-        both.grilling_profile.map(|p| p.name),
+        both.grilling_pairing.map(|p| p.profile.name),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_profile.map(|p| p.name),
+        both.implementation_pairing.map(|p| p.profile.name),
         Some("opus".to_owned())
     );
 }
 
-/// The whole point of the record: a Conversation missing either Profile is not
+/// The model is half of the choice and it is the half that is picked: the pane
+/// says back the model that was paired rather than whatever the Profile lists
+/// first.
+#[tokio::test]
+async fn a_pairing_says_back_the_model_it_was_chosen_with() {
+    let (watched, _dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let work = saved(&app, watched.path(), "work").await;
+
+    choose_grilling(&app, id, work.id, MODELS[1]).await;
+    choose_implementation(&app, id, work.id, MODELS[0]).await;
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.grilling_pairing.and_then(|p| p.model),
+        Some(MODELS[1].to_owned())
+    );
+    assert_eq!(
+        view.implementation_pairing.and_then(|p| p.model),
+        Some(MODELS[0].to_owned())
+    );
+}
+
+/// A model that Profile does not list is refused, the way a Profile that is not
+/// there is: a list edited between the page being drawn and the pick would
+/// otherwise launch a session on something the account cannot run.
+#[tokio::test]
+async fn a_model_the_profile_does_not_list_cannot_be_paired_with_it() {
+    let (watched, _dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let work = saved(&app, watched.path(), "work").await;
+
+    assert_eq!(
+        choose_grilling(&app, id, work.id, "claude-haiku-4-5").await,
+        ProfileChosen::NoSuchModel
+    );
+    assert_eq!(
+        choose_implementation(&app, id, work.id, "claude-haiku-4-5").await,
+        ProfileChosen::NoSuchModel
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.grilling_pairing, None);
+    assert_eq!(view.implementation_pairing, None);
+}
+
+/// The whole point of the record: a Conversation missing either Pairing is not
 /// something the next stage will grill.
 #[tokio::test]
-async fn a_conversation_is_not_ready_to_grill_until_both_profiles_are_chosen() {
+async fn a_conversation_is_not_ready_to_grill_until_both_pairings_are_chosen() {
     let (watched, _dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let fable = saved(&app, watched.path(), "fable").await;
@@ -600,14 +656,42 @@ async fn a_conversation_is_not_ready_to_grill_until_both_profiles_are_chosen() {
         "a fresh Conversation has chosen neither"
     );
 
-    choose_grilling(&app, id, fable.id).await;
+    choose_grilling(&app, id, fable.id, MODEL).await;
     assert!(
         !opened(&app, id).await.ready_to_grill,
         "one of the two is not both of them"
     );
 
-    choose_implementation(&app, id, opus.id).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
+}
+
+/// A Profile chosen before pairings existed has no model beside it, so it is
+/// not a Pairing: while the Conversation is drafting that is a choice to make
+/// again, and the pane reads it as one.
+#[tokio::test]
+async fn a_drafting_conversation_with_an_unpaired_profile_is_not_ready_to_grill() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let work = saved(&app, watched.path(), "work").await;
+
+    choose_grilling(&app, id, work.id, MODEL).await;
+    choose_implementation(&app, id, work.id, MODEL).await;
+    assert!(opened(&app, id).await.ready_to_grill);
+
+    // The shape an old choice left behind: the Profile, and no model beside it.
+    // Written through the store because there is no endpoint that will make one
+    // any more — a Pairing is picked whole from here on.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    store::set_grilling_pairing(&pool, id, work.id, None)
+        .await
+        .unwrap();
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.grilling_pairing.and_then(|p| p.model), None);
+    assert!(!view.ready_to_grill);
 }
 
 /// A Profile whose pair has gone is not one to launch a session under, so
@@ -619,15 +703,15 @@ async fn a_conversation_holding_a_broken_profile_is_not_ready_to_grill() {
     let fable = saved(&app, watched.path(), "fable").await;
     let opus = saved(&app, watched.path(), "opus").await;
 
-    choose_grilling(&app, id, fable.id).await;
-    choose_implementation(&app, id, opus.id).await;
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
     assert!(opened(&app, id).await.ready_to_grill);
 
     std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
 
     let view = opened(&app, id).await;
     assert_eq!(
-        view.implementation_profile.map(|p| p.broken),
+        view.implementation_pairing.map(|p| p.profile.broken),
         Some(Some(Broken::ConfigMissing)),
         "the pane says which Profile it is, and what is wrong with it"
     );
@@ -642,12 +726,15 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
     let id = conversation(&app, watched.path()).await;
     let only = saved(&app, watched.path(), "work").await;
 
-    choose_grilling(&app, id, only.id).await;
-    choose_implementation(&app, id, only.id).await;
+    choose_grilling(&app, id, only.id, MODEL).await;
+    choose_implementation(&app, id, only.id, MODEL).await;
 
     let view = opened(&app, id).await;
-    assert_eq!(view.grilling_profile.map(|p| p.id), Some(only.id));
-    assert_eq!(view.implementation_profile.map(|p| p.id), Some(only.id));
+    assert_eq!(view.grilling_pairing.map(|p| p.profile.id), Some(only.id));
+    assert_eq!(
+        view.implementation_pairing.map(|p| p.profile.id),
+        Some(only.id)
+    );
     assert!(view.ready_to_grill);
 }
 
@@ -660,11 +747,11 @@ async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
     let id = conversation(&app, watched.path()).await;
     let profile = saved(&app, watched.path(), "work").await;
 
-    choose_grilling(&app, id, profile.id).await;
+    choose_grilling(&app, id, profile.id, MODEL).await;
 
     assert_eq!(remove(&app, profile.id).await, ProfileDeleted::InUse);
     assert_eq!(listed(&app).await.len(), 1);
-    assert!(opened(&app, id).await.grilling_profile.is_some());
+    assert!(opened(&app, id).await.grilling_pairing.is_some());
 }
 
 #[tokio::test]
@@ -685,11 +772,11 @@ async fn a_profile_that_is_not_there_says_so_however_it_is_asked_about() {
 
     // Chosen between the list a page read and the choice it made from it.
     assert_eq!(
-        choose_grilling(&app, id, 404).await,
+        choose_grilling(&app, id, 404, MODEL).await,
         ProfileChosen::NoSuchProfile
     );
     assert_eq!(
-        choose_implementation(&app, id, 404).await,
+        choose_implementation(&app, id, 404, MODEL).await,
         ProfileChosen::NoSuchProfile
     );
 }
@@ -700,11 +787,11 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
     let profile = saved(&app, watched.path(), "work").await;
 
     assert_eq!(
-        choose_grilling(&app, 404, profile.id).await,
+        choose_grilling(&app, 404, profile.id, MODEL).await,
         ProfileChosen::NoSuchConversation
     );
     assert_eq!(
-        choose_implementation(&app, 404, profile.id).await,
+        choose_implementation(&app, 404, profile.id, MODEL).await,
         ProfileChosen::NoSuchConversation
     );
 }

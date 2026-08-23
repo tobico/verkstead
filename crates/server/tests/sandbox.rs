@@ -224,10 +224,10 @@ async fn grilling() -> Grilling {
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_profile(&pool, id, profile.id)
+    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
         .await
         .unwrap();
-    store::set_implementation_profile(&pool, id, profile.id)
+    store::set_implementation_pairing(&pool, id, profile.id, profile.model())
         .await
         .unwrap();
 

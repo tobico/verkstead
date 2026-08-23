@@ -182,17 +182,17 @@ describe("what a Nudge leaves standing", () => {
     survived(options, nodes(container, "#against option"));
   });
 
-  it("keeps both profile pickers' options", async () => {
+  it("keeps both pairing pickers' options", async () => {
     theWorkbench();
     const { container, client } = mount(`/conversations/${OPEN.id}`);
-    await drawn(container, "#grilling-profile option");
-    const grilling = nodes(container, "#grilling-profile option");
-    const implementing = nodes(container, "#implementation-profile option");
+    await drawn(container, "#grilling-pairing option");
+    const grilling = nodes(container, "#grilling-pairing option");
+    const implementing = nodes(container, "#implementation-pairing option");
 
     await nudged(client);
 
-    survived(grilling, nodes(container, "#grilling-profile option"));
-    survived(implementing, nodes(container, "#implementation-profile option"));
+    survived(grilling, nodes(container, "#grilling-pairing option"));
+    survived(implementing, nodes(container, "#implementation-pairing option"));
   });
 
   /// The third picker, and the one a Nudge is loudest around: it sits under a
@@ -202,12 +202,12 @@ describe("what a Nudge leaves standing", () => {
       whenever(`/api/ui/conversations/${BUILDING.id}`, json(BUILDING)),
     );
     const { container, client } = mount(`/conversations/${BUILDING.id}`);
-    await drawn(container, "#manual-task-profile option");
-    const options = nodes(container, "#manual-task-profile option");
+    await drawn(container, "#manual-task-pairing option");
+    const options = nodes(container, "#manual-task-pairing option");
 
     await nudged(client);
 
-    survived(options, nodes(container, "#manual-task-profile option"));
+    survived(options, nodes(container, "#manual-task-pairing option"));
   });
 });
 
@@ -257,23 +257,48 @@ describe("what a picker shows and what it would send", () => {
   });
 
   /// The same guarantee on the pane where the choice is the server's rather than
-  /// the page's: a profile that has been deleted is not swapped for whichever
-  /// one happens to be first, because that is a session running under an account
-  /// nobody chose.
-  it("shows no profile at all when the chosen one is deleted", async () => {
+  /// the page's: a pairing whose profile has been deleted is not swapped for
+  /// whichever one happens to be first, because that is a session running under
+  /// an account nobody chose.
+  it("shows no pairing at all when the chosen profile is deleted", async () => {
+    const chosen = OPEN.grilling_pairing!;
     const standing = { profiles: PROFILES };
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
     const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
-    expect(grilling.value).toBe(String(OPEN.grilling_profile!.id));
+    expect(grilling.value).toBe(`${chosen.profile.id}:${chosen.model}`);
 
     standing.profiles = PROFILES.filter(
-      (profile) => profile.id !== OPEN.grilling_profile!.id,
+      (profile) => profile.id !== chosen.profile.id,
     );
     await nudged(client);
 
     expect(grilling.value).toBe("");
     expect(grilling.selectedOptions[0]!.textContent).toBe("Not chosen");
+  });
+
+  /// And the same when the profile is still there but no longer lists the model
+  /// it was paired with: half a pairing is not a pairing, so what is shown is
+  /// nothing rather than the same account on a model nobody chose.
+  it("shows no pairing at all when the chosen model leaves the list", async () => {
+    const chosen = OPEN.grilling_pairing!;
+    const standing = { profiles: PROFILES };
+    theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
+    const { client } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    const grilling = screen.getByLabelText("Grilling") as HTMLSelectElement;
+
+    standing.profiles = PROFILES.map((profile) =>
+      profile.id === chosen.profile.id
+        ? {
+            ...profile,
+            models: profile.models.filter((model) => model !== chosen.model),
+          }
+        : profile,
+    );
+    await nudged(client);
+
+    expect(grilling.value).toBe("");
   });
 });

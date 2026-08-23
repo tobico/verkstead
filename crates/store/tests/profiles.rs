@@ -1,5 +1,6 @@
 //! Agent Profiles: what saving one records, what removing one refuses, and the
-//! two a Conversation chooses before it can be grilled.
+//! two Pairings — a Profile and one of its models — a Conversation chooses
+//! before it can be grilled.
 //!
 //! Nothing here checks a path against the filesystem or against the Watched
 //! Paths. That is decided above the store, where the boundary lives — these
@@ -10,8 +11,8 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     AgentType, Chosen, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
-    load_conversation, load_profile, open_database, profiles, register_repo, set_grilling_profile,
-    set_implementation_profile, start_conversation, update_profile,
+    load_conversation, load_profile, open_database, profiles, register_repo, set_grilling_pairing,
+    set_implementation_pairing, start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -41,6 +42,10 @@ async fn saved(pool: &SqlitePool, name: &str) -> Profile {
         .unwrap()
         .expect("nothing is called that yet")
 }
+
+/// The model every made-up Profile here lists, which is the one a Pairing is
+/// made of unless a test says otherwise.
+const MODEL: &str = "claude-opus-5";
 
 /// A Conversation to hang the two choices off.
 async fn conversation(pool: &SqlitePool) -> i64 {
@@ -294,8 +299,10 @@ async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
     let grilling = saved(&pool, "fable").await;
     let implementing = saved(&pool, "opus").await;
 
-    set_grilling_profile(&pool, id, grilling.id).await.unwrap();
-    set_implementation_profile(&pool, id, implementing.id)
+    set_grilling_pairing(&pool, id, grilling.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, implementing.id, Some(MODEL))
         .await
         .unwrap();
 
@@ -313,25 +320,30 @@ async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
 /// The two are separate choices because they are genuinely separate accounts and
 /// models — grill on fable, implement on opus.
 #[tokio::test]
-async fn a_conversation_chooses_its_two_profiles_independently() {
+async fn a_conversation_chooses_its_two_pairings_independently() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
 
     assert_eq!(
-        set_grilling_profile(&pool, id, fable.id).await.unwrap(),
+        set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+            .await
+            .unwrap(),
         Chosen::Chosen
     );
 
     // One chosen and not the other, which is the state the next stage refuses to
     // grill from.
     let half = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(half.grilling_profile.as_ref().map(|p| p.id), Some(fable.id));
-    assert_eq!(half.implementation_profile, None);
+    assert_eq!(
+        half.grilling_pairing.as_ref().map(|p| p.profile.id),
+        Some(fable.id)
+    );
+    assert_eq!(half.implementation_pairing, None);
 
     assert_eq!(
-        set_implementation_profile(&pool, id, opus.id)
+        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::Chosen
@@ -339,12 +351,139 @@ async fn a_conversation_chooses_its_two_profiles_independently() {
 
     let both = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        both.grilling_profile.map(|p| p.name),
+        both.grilling_pairing.map(|p| p.profile.name),
         Some("fable".to_owned())
     );
     assert_eq!(
-        both.implementation_profile.map(|p| p.name),
+        both.implementation_pairing.map(|p| p.profile.name),
         Some("opus".to_owned())
+    );
+}
+
+/// Both halves of the choice come back, and the model is the one that was
+/// paired rather than whatever the Profile lists first.
+#[tokio::test]
+async fn a_pairing_holds_the_model_it_was_chosen_with() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let profile = create_profile(
+        &pool,
+        &ProfileFacts {
+            models: vec!["claude-opus-5".to_owned(), "claude-fable-5".to_owned()],
+            ..facts("work")
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    set_grilling_pairing(&pool, id, profile.id, Some("claude-fable-5"))
+        .await
+        .unwrap();
+
+    let pairing = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .grilling_pairing
+        .unwrap();
+
+    assert_eq!(pairing.model.as_deref(), Some("claude-fable-5"));
+    assert_eq!(pairing.runs_on(), Some("claude-fable-5"));
+
+    // And choosing again replaces both halves rather than leaving the old model
+    // beside the new Profile.
+    set_grilling_pairing(&pool, id, profile.id, Some("claude-opus-5"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .grilling_pairing
+            .and_then(|pairing| pairing.model),
+        Some("claude-opus-5".to_owned())
+    );
+}
+
+/// A Conversation that chose a Profile before there was a model to choose
+/// beside it goes on running what that Profile carries — which is what carries
+/// every Conversation started before pairings existed across.
+#[tokio::test]
+async fn a_profile_chosen_before_pairings_runs_on_the_model_it_carried() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let profile = saved(&pool, "work").await;
+
+    // The column alone, which is the whole of what an old choice wrote.
+    sqlx::query("UPDATE conversations SET grilling_profile_id = ? WHERE id = ?")
+        .bind(profile.id)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let pairing = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .unwrap()
+        .grilling_pairing
+        .unwrap();
+
+    assert_eq!(pairing.model, None);
+    assert_eq!(pairing.runs_on(), Some(MODEL));
+}
+
+/// Both Pairings are fixed when grilling starts, the way the branch, the base
+/// commit and the Brief are: what runs the work is settled before the work
+/// begins rather than swapped underneath it.
+#[tokio::test]
+async fn a_pairing_cannot_be_chosen_once_grilling_has_started() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        set_grilling_pairing(&pool, id, opus.id, Some(MODEL))
+            .await
+            .unwrap(),
+        Chosen::NotDrafting
+    );
+    assert_eq!(
+        set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
+            .await
+            .unwrap(),
+        Chosen::NotDrafting
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(
+        conversation.grilling_pairing.map(|p| p.profile.name),
+        Some("fable".to_owned())
+    );
+    assert_eq!(
+        conversation.implementation_pairing.map(|p| p.profile.name),
+        Some("fable".to_owned())
     );
 }
 
@@ -356,15 +495,20 @@ async fn one_profile_can_be_both_of_a_conversations_choices() {
     let id = conversation(&pool).await;
     let only = saved(&pool, "work").await;
 
-    set_grilling_profile(&pool, id, only.id).await.unwrap();
-    set_implementation_profile(&pool, id, only.id)
+    set_grilling_pairing(&pool, id, only.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, only.id, Some(MODEL))
         .await
         .unwrap();
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_profile.map(|p| p.id), Some(only.id));
     assert_eq!(
-        conversation.implementation_profile.map(|p| p.id),
+        conversation.grilling_pairing.map(|p| p.profile.id),
+        Some(only.id)
+    );
+    assert_eq!(
+        conversation.implementation_pairing.map(|p| p.profile.id),
         Some(only.id)
     );
 }
@@ -377,17 +521,21 @@ async fn a_profile_that_is_not_there_cannot_be_chosen() {
     let id = conversation(&pool).await;
 
     assert_eq!(
-        set_grilling_profile(&pool, id, 404).await.unwrap(),
+        set_grilling_pairing(&pool, id, 404, Some(MODEL))
+            .await
+            .unwrap(),
         Chosen::NoSuchProfile
     );
     assert_eq!(
-        set_implementation_profile(&pool, id, 404).await.unwrap(),
+        set_implementation_pairing(&pool, id, 404, Some(MODEL))
+            .await
+            .unwrap(),
         Chosen::NoSuchProfile
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_profile, None);
-    assert_eq!(conversation.implementation_profile, None);
+    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.implementation_pairing, None);
 }
 
 #[tokio::test]
@@ -396,11 +544,13 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
     let profile = saved(&pool, "work").await;
 
     assert_eq!(
-        set_grilling_profile(&pool, 404, profile.id).await.unwrap(),
+        set_grilling_pairing(&pool, 404, profile.id, Some(MODEL))
+            .await
+            .unwrap(),
         Chosen::NoSuchConversation
     );
     assert_eq!(
-        set_implementation_profile(&pool, 404, profile.id)
+        set_implementation_pairing(&pool, 404, profile.id, Some(MODEL))
             .await
             .unwrap(),
         Chosen::NoSuchConversation
@@ -410,13 +560,13 @@ async fn choosing_on_a_conversation_that_is_not_there_says_so() {
 /// A Conversation starts with neither, which is what makes it not ready to
 /// grill: the human chooses both before the next stage will run anything.
 #[tokio::test]
-async fn a_started_conversation_has_chosen_neither_profile() {
+async fn a_started_conversation_has_chosen_neither_pairing() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.grilling_profile, None);
-    assert_eq!(conversation.implementation_profile, None);
+    assert_eq!(conversation.grilling_pairing, None);
+    assert_eq!(conversation.implementation_pairing, None);
 }
 
 /// The point of it being in SQLite rather than in a page's memory: the server is
@@ -430,8 +580,10 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     let id = conversation(&pool).await;
     let fable = saved(&pool, "fable").await;
     let opus = saved(&pool, "opus").await;
-    set_grilling_profile(&pool, id, fable.id).await.unwrap();
-    set_implementation_profile(&pool, id, opus.id)
+    set_grilling_pairing(&pool, id, fable.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, opus.id, Some(MODEL))
         .await
         .unwrap();
     pool.close().await;
@@ -441,12 +593,17 @@ async fn profiles_and_the_choices_made_of_them_survive_a_restart() {
     assert_eq!(profiles(&pool).await.unwrap().len(), 2);
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(
-        conversation.grilling_profile.map(|p| p.name),
+        conversation.grilling_pairing.map(|p| p.profile.name),
         Some("fable".to_owned())
     );
     assert_eq!(
-        conversation.implementation_profile.map(|p| p.models),
-        Some(vec!["claude-opus-5".to_owned()])
+        conversation
+            .implementation_pairing
+            .map(|p| (p.profile.models, p.model)),
+        Some((
+            vec!["claude-opus-5".to_owned()],
+            Some("claude-opus-5".to_owned())
+        ))
     );
 }
 

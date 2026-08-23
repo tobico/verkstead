@@ -26,6 +26,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
+  ProfileEntry,
   PullRequestDetails,
   RemedySettled,
   Screen,
@@ -1151,15 +1152,19 @@ describe("a conversation's details", () => {
 
 /// The last thing a conversation settles before anything will run it: which
 /// account and model grills, and which implements.
-describe("a conversation's agent profiles", () => {
+describe("a conversation's pairings", () => {
   /// A conversation showing neither choice, which is what a freshly started one
   /// looks like.
   const UNCHOSEN: ConversationView = {
     ...OPEN,
-    grilling_profile: null,
-    implementation_profile: null,
+    grilling_pairing: null,
+    implementation_pairing: null,
     ready_to_grill: false,
   };
+
+  /// What one row of a picker sends, as the picker writes it.
+  const pairing = (profile: ProfileEntry, model: string) =>
+    `${profile.id}:${model}`;
 
   function withConversation(
     view: ConversationView,
@@ -1174,7 +1179,7 @@ describe("a conversation's agent profiles", () => {
     );
   }
 
-  it("shows the two profiles the conversation has chosen", async () => {
+  it("shows the two pairings the conversation has chosen", async () => {
     theWorkbench();
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
@@ -1186,9 +1191,35 @@ describe("a conversation's agent profiles", () => {
 
     // Separate choices, and in the fixture genuinely separate accounts: grill on
     // fable, implement on opus.
-    expect(grilling.value).toBe(String(OPEN.grilling_profile!.id));
-    expect(implementing.value).toBe(String(OPEN.implementation_profile!.id));
+    expect(grilling.value).toBe(
+      pairing(OPEN.grilling_pairing!.profile, OPEN.grilling_pairing!.model!),
+    );
+    expect(implementing.value).toBe(
+      pairing(
+        OPEN.implementation_pairing!.profile,
+        OPEN.implementation_pairing!.model!,
+      ),
+    );
     expect(grilling.value).not.toBe(implementing.value);
+  });
+
+  /// One flat row per profile-and-model combination, labelled with both — a
+  /// profile listing two models is two rows, because a session runs one of
+  /// them and the pick says which.
+  it("offers every profile-and-model combination as one flat list", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    const options = Array.from(
+      (screen.getByLabelText("Grilling") as HTMLSelectElement).options,
+    ).map((option) => option.text);
+
+    expect(options).toEqual(
+      PROFILES.flatMap((profile) =>
+        profile.models.map((model) => `${profile.name} — ${model}`),
+      ),
+    );
   });
 
   it("sends each choice on its own, to its own role", async () => {
@@ -1197,24 +1228,67 @@ describe("a conversation's agent profiles", () => {
     await waitFor(() => screen.getByLabelText("Grilling"));
 
     fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: String(PROFILES[0]!.id) },
+      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
     });
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-profile`),
-      ).toEqual({ profile_id: PROFILES[0]!.id }),
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+      ).toEqual({
+        profile_id: PROFILES[0]!.id,
+        model: PROFILES[0]!.models[0],
+      }),
     );
 
+    // The second of a profile's models, which is the half of the choice a
+    // profile alone could never have said.
     fireEvent.change(screen.getByLabelText("Implementation"), {
-      target: { value: String(PROFILES[1]!.id) },
+      target: { value: pairing(PROFILES[1]!, PROFILES[1]!.models[1]!) },
     });
     await waitFor(() =>
       expect(
         sent(
           fetching,
-          `/api/ui/conversations/${OPEN.id}/implementation-profile`,
+          `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
         ),
-      ).toEqual({ profile_id: PROFILES[1]!.id }),
+      ).toEqual({
+        profile_id: PROFILES[1]!.id,
+        model: PROFILES[1]!.models[1],
+      }),
+    );
+  });
+
+  /// A profile chosen before models were paired with them is half a choice: the
+  /// picker draws it as none, and says so where it would have been shown.
+  it("reads a profile with no model beside it as nothing chosen", async () => {
+    withConversation({
+      ...OPEN,
+      grilling_pairing: { ...OPEN.grilling_pairing!, model: null },
+      ready_to_grill: false,
+    });
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    expect((screen.getByLabelText("Grilling") as HTMLSelectElement).value).toBe(
+      "",
+    );
+    await waitFor(() => screen.getByText(/was chosen before models were/));
+  });
+
+  /// Both pairings are fixed when grilling starts, and the refusal is the
+  /// server's to make: the picker is drawn the same and says what came back.
+  it("says a choice was refused once the grilling has started", async () => {
+    withConversation(OPEN, json("NotDrafting"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    fireEvent.change(screen.getByLabelText("Grilling"), {
+      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
+    });
+
+    await waitFor(() =>
+      screen.getByText(
+        "The grilling has started, so who runs this conversation is settled.",
+      ),
     );
   });
 
@@ -1247,9 +1321,12 @@ describe("a conversation's agent profiles", () => {
   it("says what is wrong with a chosen profile that has broken", async () => {
     const broken: ConversationView = {
       ...OPEN,
-      implementation_profile: {
-        ...OPEN.implementation_profile!,
-        broken: "ConfigMissing",
+      implementation_pairing: {
+        ...OPEN.implementation_pairing!,
+        profile: {
+          ...OPEN.implementation_pairing!.profile,
+          broken: "ConfigMissing",
+        },
       },
       ready_to_grill: false,
     };
@@ -1266,7 +1343,7 @@ describe("a conversation's agent profiles", () => {
     await waitFor(() => screen.getByLabelText("Grilling"));
 
     fireEvent.change(screen.getByLabelText("Grilling"), {
-      target: { value: String(PROFILES[0]!.id) },
+      target: { value: pairing(PROFILES[0]!, PROFILES[0]!.models[0]!) },
     });
 
     await waitFor(() => screen.getByText("That profile has been removed."));
@@ -4119,12 +4196,18 @@ describe("a manual task", () => {
 /// Where a manual task is submitted from.
 const SET_GOING = `/api/ui/conversations/${WRAPPING.id}/manual-task`;
 
-/// The conversation's own implementation profile, which is what the composer
+/// The conversation's own implementation pairing, which is what the composer
 /// starts on.
-const IMPLEMENTATION = WRAPPING.implementation_profile!;
+const IMPLEMENTATION = WRAPPING.implementation_pairing!;
 
-/// And the other saved one, which is what a one-off pick picks.
-const OTHER = PROFILES.find((profile) => profile.id !== IMPLEMENTATION.id)!;
+/// And a pairing of another saved profile, which is what a one-off pick picks.
+const OTHER = PROFILES.find(
+  (profile) => profile.id !== IMPLEMENTATION.profile.id,
+)!;
+
+/// One row of a pairing picker, as the picker writes its value.
+const running = (profile: ProfileEntry, model: string) =>
+  `${profile.id}:${model}`;
 
 describe("the manual task composer", () => {
   /// Offered wherever nothing is running: this conversation is wrapping up, and
@@ -4169,9 +4252,10 @@ describe("the manual task composer", () => {
     expect(container.querySelector(".manual-task-composer")).toBeNull();
   });
 
-  /// The dropdown starts on the conversation's implementation profile, because
+  /// The dropdown starts on the conversation's implementation pairing, because
   /// that is what its work runs under — but it is a start rather than a rule.
-  it("starts on the conversation's implementation profile", async () => {
+  /// What it offers is every profile-and-model combination, one flat row each.
+  it("starts on the conversation's implementation pairing", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
@@ -4180,15 +4264,19 @@ describe("the manual task composer", () => {
       ".manual-task-composer select",
     );
 
-    expect(picker.value).toBe(String(IMPLEMENTATION.id));
+    expect(picker.value).toBe(
+      running(IMPLEMENTATION.profile, IMPLEMENTATION.model!),
+    );
     expect([...picker.options].map((option) => option.textContent)).toEqual(
-      PROFILES.map((profile) => `${profile.name} — ${profile.models.join(", ")}`),
+      PROFILES.flatMap((profile) =>
+        profile.models.map((model) => `${profile.name} — ${model}`),
+      ),
     );
   });
 
-  /// The instruction and the profile, on the wire together. One press does both:
+  /// The instruction and the pairing, on the wire together. One press does both:
   /// what it says and what it runs as are the whole of a manual task.
-  it("sends what was typed and the profile picked beside it", async () => {
+  it("sends what was typed and the pairing picked beside it", async () => {
     const fetching = theWrapping(
       {},
       whenever(SET_GOING, json("Started" as ManualTaskStarted), "POST"),
@@ -4203,13 +4291,16 @@ describe("the manual task composer", () => {
     fireEvent.input(composer.querySelector("textarea")!, {
       target: { value: "Rebase onto main." },
     });
-    fireEvent.change(picker, { target: { value: String(OTHER.id) } });
+    fireEvent.change(picker, {
+      target: { value: running(OTHER, OTHER.models[0]!) },
+    });
     fireEvent.click(composer.querySelector(".start-manual-task")!);
 
     await waitFor(() =>
       expect(sent(fetching, SET_GOING)).toEqual({
         instruction: "Rebase onto main.",
         profile_id: OTHER.id,
+        model: OTHER.models[0],
       }),
     );
 
@@ -4218,7 +4309,7 @@ describe("the manual task composer", () => {
     expect(
       askedFor(
         fetching,
-        `/api/ui/conversations/${WRAPPING.id}/implementation-profile`,
+        `/api/ui/conversations/${WRAPPING.id}/implementation-pairing`,
       ),
     ).toBe(0);
   });

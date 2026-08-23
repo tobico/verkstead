@@ -21,6 +21,7 @@ import type {
   GrillingStarted,
   HandedBack,
   ManualTaskStarted,
+  ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -334,25 +335,25 @@ export function settleInterruption(
   );
 }
 
-/// Set a manual task going: this one instruction, under the profile picked
+/// Set a manual task going: this one instruction, under the pairing picked
 /// beside it, in a session of its own.
 ///
 /// Outside the pipeline, so nothing about the conversation moves. What it leaves
 /// behind is the instruction on the timeline, whatever the session printed, and
 /// whatever that committed.
 ///
-/// The profile is sent rather than left to the server to read off the
+/// The pairing is sent rather than left to the server to read off the
 /// conversation, because the pick is one-off: it is what *this* task runs under
-/// and never becomes the conversation's own implementation profile.
+/// and never becomes the conversation's own implementation pairing.
 export function startManualTask(
   id: number,
   instruction: string,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ManualTaskStarted> {
-  return post<ManualTaskStarted>(
-    `/api/ui/conversations/${id}/manual-task`,
-    { instruction, profile_id: profileId },
-  );
+  return post<ManualTaskStarted>(`/api/ui/conversations/${id}/manual-task`, {
+    instruction,
+    ...pairing,
+  });
 }
 
 /// The Agent Profiles a session can be run under, by name.
@@ -387,24 +388,25 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 }
 
 /// Choose which account and model a conversation's grilling session runs under.
-export function chooseGrillingProfile(
+export function chooseGrillingPairing(
   id: number,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
-  return post<ProfileChosen>(`/api/ui/conversations/${id}/grilling-profile`, {
-    profile_id: profileId,
-  });
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/grilling-pairing`,
+    pairing,
+  );
 }
 
 /// And the one its implementation runs under, which is a separate choice: the
 /// implementation session cannot simply carry the grilling one on.
-export function chooseImplementationProfile(
+export function chooseImplementationPairing(
   id: number,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    `/api/ui/conversations/${id}/implementation-profile`,
-    { profile_id: profileId },
+    `/api/ui/conversations/${id}/implementation-pairing`,
+    pairing,
   );
 }
 

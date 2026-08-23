@@ -36,9 +36,10 @@ export const ADOPT_REFUSAL: Record<Adopted, string> = {
   NotDrafting: "This conversation has already been adopted.",
   NotAdopting:
     "This conversation is adopting nothing, so it has no roadmap to take a stage from.",
-  NoGrillingProfile: "Choose a grilling profile first, in the details pane.",
+  NoGrillingProfile:
+    "Choose a grilling profile and model first, in the details pane.",
   NoImplementationProfile:
-    "Choose an implementation profile first, in the details pane.",
+    "Choose an implementation profile and model first, in the details pane.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   NoBaseCommit: "The repo has nothing to branch from any more.",

@@ -87,14 +87,50 @@ pub struct Profile {
 }
 
 impl Profile {
-    /// The model to run on where nothing has picked one yet.
+    /// The model to run on where nothing paired one with it.
     ///
     /// The first of the list, which is a Profile's only model in the ordinary
-    /// case and stands in for a pick until there is somewhere to make one.
-    /// `None` is a Profile with no models at all — refused above the store, so
-    /// what it means here is a row somebody edited by hand.
+    /// case. Nothing picks this any more — a session runs on the model its
+    /// Pairing names — so what is left for it is the Conversation that chose a
+    /// Profile before there was a model to choose beside it: see
+    /// [`Pairing::runs_on`]. `None` is a Profile with no models at all —
+    /// refused above the store, so what it means here is a row somebody edited
+    /// by hand.
     pub fn model(&self) -> Option<&str> {
         self.models.first().map(String::as_str)
+    }
+}
+
+/// What a Conversation has settled about one of its two roles: a Profile, and
+/// the one of that Profile's models its sessions run on.
+///
+/// The pair rather than the Profile alone, because a Profile's list says what
+/// its account *can* launch and a session runs one thing. Both halves are
+/// chosen together, in one press, and both are fixed when grilling starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pairing {
+    pub profile: Profile,
+
+    /// The model paired with it, where one was paired.
+    ///
+    /// `None` is a choice made before pairings existed: the Profile was picked
+    /// alone and the model was whatever that Profile carried. Left as a state
+    /// to be in rather than filled in on the way out, because the two are
+    /// different things to a Conversation still drafting — an unpaired choice
+    /// is one to make again — and see [`Pairing::runs_on`] for what a
+    /// Conversation past drafting runs on instead.
+    pub model: Option<String>,
+}
+
+impl Pairing {
+    /// What a session under this Pairing is launched on.
+    ///
+    /// The paired model, and the Profile's own where nothing was paired — which
+    /// is the model that Profile would have been run on at the time the choice
+    /// was made, so a Conversation that chose before pairings existed goes on
+    /// exactly as it did.
+    pub fn runs_on(&self) -> Option<&str> {
+        self.model.as_deref().or_else(|| self.profile.model())
     }
 }
 

@@ -22,7 +22,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, GrillingStarted,
-    ProfileEntry, Started, Worktree,
+    PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -521,9 +521,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
-    let grilling = crate::profiles::entry(watched, conversation.grilling_profile.clone()).await?;
+    let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
+        crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
         return Ok(refusal.grilling());
@@ -601,14 +601,14 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // What it is started on is the Brief under the line that sends it into the
     // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
     // session is for, so the prompt is where it is said — see [`crate::skills`].
-    if let Some(profile) = conversation.grilling_profile.clone()
+    if let Some(pairing) = conversation.grilling_pairing.clone()
         && let Err(error) = state
             .sessions
             .start(
                 pool,
                 &state.nudges,
                 &conversation,
-                &profile,
+                &pairing,
                 &skills::grilling(&brief),
             )
             .await
@@ -681,9 +681,9 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // Both, rather than only the one the work runs under: a stage inherits both
     // from its predecessor, so what this one is adopted with is what every stage
     // after it starts with.
-    let grilling = crate::profiles::entry(watched, conversation.grilling_profile.clone()).await?;
+    let grilling = crate::profiles::pairing(watched, conversation.grilling_pairing.clone()).await?;
     let implementation =
-        crate::profiles::entry(watched, conversation.implementation_profile.clone()).await?;
+        crate::profiles::pairing(watched, conversation.implementation_pairing.clone()).await?;
 
     if let Some(refusal) = unready(grilling.as_ref(), implementation.as_ref()) {
         return Ok(refusal.adopting());
@@ -864,33 +864,37 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
     })
 }
 
-/// Why these two Profiles are not a pair of accounts to run under, or `None`
+/// Why these two Pairings are not something to run the work under, or `None`
 /// where they are.
 ///
 /// The same rule [`crate::profiles::ready_to_grill`] answers for the pane, said
 /// the other way round: that one says whether to offer the button, this one says
 /// what was wrong when it was pressed. Each is named separately, because
-/// choosing a Profile and mending a broken one are different jobs.
+/// choosing a Pairing and mending a broken Profile are different jobs.
+///
+/// A Profile chosen with no model beside it is unpaired and reads here as
+/// nothing chosen, which is what it is: the pick to make again is the whole
+/// Pairing, Profile and model together.
 ///
 /// The rule rather than either button's answer, because both buttons ask it:
-/// starting a grilling and adopting a stage each want a pair of Profiles fixed
+/// starting a grilling and adopting a stage each want both Pairings fixed
 /// before they will do anything, and each says so in its own words — see
 /// [`Unready::grilling`] and [`Unready::adopting`].
 fn unready(
-    grilling: Option<&ProfileEntry>,
-    implementation: Option<&ProfileEntry>,
+    grilling: Option<&PairingView>,
+    implementation: Option<&PairingView>,
 ) -> Option<Unready> {
-    let Some(grilling) = grilling else {
+    let Some(grilling) = grilling.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoGrillingProfile);
     };
 
-    let Some(implementation) = implementation else {
+    let Some(implementation) = implementation.filter(|pairing| pairing.model.is_some()) else {
         return Some(Unready::NoImplementationProfile);
     };
 
     [grilling, implementation]
         .into_iter()
-        .any(|profile| profile.broken.is_some())
+        .any(|pairing| pairing.profile.broken.is_some())
         .then_some(Unready::ProfileBroken)
 }
 
@@ -997,15 +1001,15 @@ pub(crate) async fn worktree(path: Option<PathBuf>) -> Result<Option<Worktree>> 
 }
 
 /// Whether everything needed before grilling starts is settled, as the pane
-/// reads it: the two Profiles, and a Brief with something in it.
+/// reads it: the two Pairings, and a Brief with something in it.
 ///
 /// Answered against what the endpoint has already read rather than by loading
 /// the Conversation again — and it deliberately says nothing about the branch or
 /// the base commit, which are decided against git when the button is pressed.
 pub(crate) fn ready_to_grill(
     state: store::Lifecycle,
-    grilling: Option<&ProfileEntry>,
-    implementation: Option<&ProfileEntry>,
+    grilling: Option<&PairingView>,
+    implementation: Option<&PairingView>,
     brief: &str,
 ) -> bool {
     state == store::Lifecycle::Draft

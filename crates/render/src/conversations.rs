@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, ProfileEntry, RepoEntry, Standing};
+use crate::{DiffView, PairingView, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -206,17 +206,18 @@ pub struct ConversationView {
 
     pub state: Lifecycle,
 
-    /// The Agent Profile the grilling session will run under, whole rather than
-    /// by id: the pane says what it is, and whether it is still runnable.
-    pub grilling_profile: Option<ProfileEntry>,
+    /// The Profile and model the grilling session will run under, whole rather
+    /// than by id: the pane says what they are, and whether the Profile is
+    /// still runnable.
+    pub grilling_pairing: Option<PairingView>,
 
-    /// And the one the implementation will run under. Chosen separately because
-    /// it is genuinely a separate account and model.
-    pub implementation_profile: Option<ProfileEntry>,
+    /// And the ones the implementation will run under. Chosen separately
+    /// because it is genuinely a separate account and model.
+    pub implementation_pairing: Option<PairingView>,
 
     /// Whether everything needed before grilling will start is settled: both
-    /// Profiles chosen and neither broken, a Brief with something in it, and a
-    /// Conversation still drafting.
+    /// Pairings complete and neither Profile broken, a Brief with something in
+    /// it, and a Conversation still drafting.
     ///
     /// The server's rule rather than something the page works out from the
     /// fields around it. Every one of the refusals is checked again when the
@@ -1586,6 +1587,11 @@ pub struct ManualTaskSubmission {
 
     /// Which saved Profile the one-off session runs as.
     pub profile_id: i64,
+
+    /// And which of that Profile's models it runs on. The composer prefills the
+    /// Conversation's implementation Pairing and otherwise demands a pick:
+    /// there is no default model anywhere.
+    pub model: String,
 }
 
 /// What became of submitting one.
@@ -1617,6 +1623,10 @@ pub enum ManualTaskStarted {
     /// The picked Profile has gone — deleted between the page being drawn and
     /// the press.
     NoSuchProfile,
+
+    /// It is still there and no longer lists the model picked beside it — its
+    /// list was edited between the page being drawn and the press.
+    NoSuchModel,
 
     /// The instruction is on the Timeline and no session could be started for
     /// it. The reason is in the server's log, as a worktree git refused is: this

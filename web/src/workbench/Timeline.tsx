@@ -59,6 +59,7 @@ import type {
   TaskListEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
+import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
@@ -92,9 +93,10 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile: "Choose a grilling profile first, in the details pane.",
+  NoGrillingProfile:
+    "Choose a grilling profile and model first, in the details pane.",
   NoImplementationProfile:
-    "Choose an implementation profile first, in the details pane.",
+    "Choose an implementation profile and model first, in the details pane.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the grilling starts from.",
@@ -128,6 +130,7 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
     "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
   EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
   NoSuchProfile: "That profile has been removed.",
+  NoSuchModel: "That profile no longer lists that model.",
   NotStarted:
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
@@ -306,7 +309,7 @@ export function Timeline(props: {
   );
 }
 
-/// The way to move a conversation by hand: an instruction, a profile to run it
+/// The way to move a conversation by hand: an instruction, a pairing to run it
 /// under, and a submit.
 ///
 /// Drawn whenever there is a worktree to run in, the conversation is neither
@@ -320,7 +323,7 @@ export function Timeline(props: {
 /// Drafting and aborted are the two states with no worktree, so those are the
 /// two it is never offered in — there is nowhere for a session to run.
 ///
-/// The profile starts on the conversation's implementation one and picking
+/// The pairing starts on the conversation's implementation one and picking
 /// another is one-off: it is what this task runs under, and it never becomes the
 /// conversation's own. Nothing here writes it back.
 function ManualTaskComposer(props: {
@@ -329,7 +332,7 @@ function ManualTaskComposer(props: {
   const queries = useQueryClient();
 
   const [instruction, setInstruction] = createSignal("");
-  const [picked, setPicked] = createSignal<number | null>(null);
+  const [picked, setPicked] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
 
   /// The profile list, read here rather than passed down, the way the details
@@ -344,10 +347,15 @@ function ManualTaskComposer(props: {
     freshness: { reconcile: "id" },
   }));
 
-  /// Which profile is selected: whatever the human picked, and the
+  /// Which pairing is selected: whatever the human picked, and the
   /// conversation's implementation one until they pick anything.
+  ///
+  /// The empty string is nothing selected, which is where the composer opens on
+  /// a conversation whose implementation profile was chosen before models were
+  /// paired with them: there is no default model anywhere, so the pick is the
+  /// human's to make.
   const running = () =>
-    picked() ?? props.conversation.implementation_profile?.id ?? null;
+    picked() ?? pairing.chosen(props.conversation.implementation_pairing);
 
   /// Whether the composer belongs on this conversation at all.
   const offered = () =>
@@ -357,8 +365,12 @@ function ManualTaskComposer(props: {
     !props.conversation.working;
 
   const submit = useMutation(() => ({
-    mutationFn: (profileId: number) =>
-      startManualTask(props.conversation.id, instruction(), profileId),
+    mutationFn: (chosen: string) =>
+      startManualTask(
+        props.conversation.id,
+        instruction(),
+        pairing.choice(chosen),
+      ),
     onSuccess: (outcome: ManualTaskStarted) => {
       if (outcome !== "Started") {
         setRefused(outcome);
@@ -404,7 +416,7 @@ function ManualTaskComposer(props: {
             are: a select whose value is set before its options exist is a
             select showing nothing. */}
         <div class="manual-task-profile">
-          <label for="manual-task-profile">Run it as</label>
+          <label for="manual-task-pairing">Run it as</label>
           <Show
             when={profiles.data}
             fallback={
@@ -418,18 +430,18 @@ function ManualTaskComposer(props: {
             {(saved) => (
               /* A [`Picker`] rather than a `<select>`, the way the details
                  pane's pickers are: what this shows and what the press below
-                 runs the task as are the same profile, list or no list — see
+                 runs the task as are the same pairing, list or no list — see
                  `src/picking.tsx`. */
               <Picker
-                id="manual-task-profile"
-                options={saved()}
-                value={(profile) => String(profile.id)}
-                label={(profile) => `${profile.name} — ${profile.models.join(", ")}`}
-                chosen={running() === null ? "" : String(running())}
-                pick={(chosen) => setPicked(Number(chosen))}
+                id="manual-task-pairing"
+                options={pairing.pairings(saved())}
+                value={pairing.value}
+                label={pairing.label}
+                chosen={running()}
+                pick={setPicked}
                 // The one-off pick is gone from the list: it is dropped, and
                 // `running` falls back to the conversation's own implementation
-                // profile — which is where the composer opened.
+                // pairing — which is where the composer opened.
                 gone={() => setPicked(null)}
                 disabled={submit.isPending}
               />
@@ -441,14 +453,12 @@ function ManualTaskComposer(props: {
           type="button"
           class="start-manual-task"
           disabled={
-            submit.isPending ||
-            instruction().trim() === "" ||
-            running() === null
+            submit.isPending || instruction().trim() === "" || running() === ""
           }
           onClick={() => {
-            const profileId = running();
-            if (profileId !== null) {
-              submit.mutate(profileId);
+            const chosen = running();
+            if (chosen !== "") {
+              submit.mutate(chosen);
             }
           }}
         >

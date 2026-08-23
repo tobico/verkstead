@@ -1641,6 +1641,14 @@ main:has(.workbench) {
   font-size: 0.85rem;
 }
 
+/* A profile chosen before models were paired with them, which is half a choice:
+   the select shows nothing, and this is what it is showing nothing about. */
+.profile-choice .unpaired {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* Whether this conversation will grill. The server's rule rather than a count of
    the two fields above, so it is stated rather than inferred. */
 .readiness.ready {

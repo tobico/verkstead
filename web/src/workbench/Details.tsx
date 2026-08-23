@@ -7,12 +7,14 @@
 //! long as it is still drafting — which is why the pane that is neither the list
 //! nor the record is where they are settled.
 //!
-//! The two agent profiles are settled here too, for the same reason: which
-//! account and model the grilling runs under, and which the implementation runs
-//! under, are facts about the conversation rather than about any one event. They
-//! are separate choices because they are genuinely separate accounts — grill on
+//! The two pairings are settled here too, for the same reason: which account and
+//! model the grilling runs under, and which the implementation runs under, are
+//! facts about the conversation rather than about any one event. They are
+//! separate choices because they are genuinely separate accounts — grill on
 //! fable, implement on opus — and because the implementation session cannot
-//! simply carry the grilling one on.
+//! simply carry the grilling one on. Both are fixed when grilling starts, the
+//! way the branch and the base commit are: the server refuses either after that,
+//! and the refusal is what this pane says.
 //!
 //! The Brief has no place here on purpose: it is inline in the Timeline, because
 //! there is nothing of it the Timeline does not already show. What stands here
@@ -25,8 +27,8 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
-  chooseGrillingProfile,
-  chooseImplementationProfile,
+  chooseGrillingPairing,
+  chooseImplementationPairing,
   listProfiles,
   renameBranch,
   setBaseCommit,
@@ -35,10 +37,13 @@ import type {
   BaseRecorded,
   BranchRenamed,
   ConversationView,
+  PairingView,
+  ProfileChoice,
   ProfileChosen,
   ProfileEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
+import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 
@@ -59,11 +64,14 @@ export const BASE_REFUSAL: Record<BaseRecorded, string> = {
   NoSuchCommit: "That repo has nothing by that name.",
 };
 
-/// And a profile choice.
+/// And a pairing choice.
 export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
   Chosen: "",
   NoSuchConversation: "This conversation is gone.",
   NoSuchProfile: "That profile has been removed.",
+  NoSuchModel: "That profile no longer lists that model.",
+  NotDrafting:
+    "The grilling has started, so who runs this conversation is settled.",
 };
 
 export function Details(props: {
@@ -137,11 +145,13 @@ function Worktree(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The two accounts the work will run under, and whether everything grilling
+/// The two pairings the work will run under, and whether everything grilling
 /// needs is settled.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
-/// whole wherever they are drawn — the sidebar does the same with the repos.
+/// whole wherever they are drawn — the sidebar does the same with the repos. The
+/// pairings are made of it here: a row per profile-and-model combination, which
+/// is what a picker offers.
 function Profiles(props: { conversation: ConversationView }): JSX.Element {
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
@@ -174,21 +184,21 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         <Match when={profiles.data}>
           {(saved) => (
             <>
-              <ProfilePicker
+              <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="grilling"
                 label="Grilling"
-                chosen={props.conversation.grilling_profile}
-                choose={chooseGrillingProfile}
+                chosen={props.conversation.grilling_pairing}
+                choose={chooseGrillingPairing}
               />
-              <ProfilePicker
+              <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
                 role="implementation"
                 label="Implementation"
-                chosen={props.conversation.implementation_profile}
-                choose={chooseImplementationProfile}
+                chosen={props.conversation.implementation_pairing}
+                choose={chooseImplementationPairing}
               />
             </>
           )}
@@ -198,17 +208,17 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
       {/* Whether this conversation will grill, which is the server's rule and
           not a count of the two fields above: a profile whose pair has gone is
           not one to launch a session under, and there is more to being ready
-          than the profiles. Said here because this is where the profiles are
+          than the pairings. Said here because this is where the pairings are
           fixed; the button it gates is in the timeline.
 
           An adopting conversation never grills, so that verdict is not the one
           to draw for it — it would read as needing a brief nobody here writes.
-          What stands instead is why both profiles are fixed all the same. */}
+          What stands instead is why both pairings are fixed all the same. */}
       <Show
         when={!props.conversation.adopting}
         fallback={
           <p class="note">
-            Both profiles are fixed before adopting: the implementation one is
+            Both pairings are fixed before adopting: the implementation one is
             what the work runs under, and the grilling one is carried, because
             the stages after this one inherit both from it.
           </p>
@@ -222,7 +232,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
             when={props.conversation.ready_to_grill}
             fallback={
               <>
-                Not ready to grill: this needs a brief, and both profiles chosen
+                Not ready to grill: this needs a brief, and both pairings chosen
                 and working.
               </>
             }
@@ -235,26 +245,28 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// One of the two choices: which saved profile fills this role.
+/// One of the two choices: which profile-and-model pairing fills this role.
 ///
-/// A select rather than a list of buttons, because the profiles are a short list
+/// A select rather than a list of buttons, because the pairings are a short list
 /// that barely changes and the choice is one of them — the same control the
-/// sidebar picks a repo with.
-function ProfilePicker(props: {
+/// sidebar picks a repo with. One flat row per pairing rather than a profile
+/// picker with a model picker after it: the counts stay small, and two stages
+/// would cost a tap every time.
+function PairingPicker(props: {
   conversation: ConversationView;
   saved: ProfileEntry[];
   role: string;
   label: string;
-  chosen: ProfileEntry | null;
-  choose: (id: number, profileId: number) => Promise<ProfileChosen>;
+  chosen: PairingView | null;
+  choose: (id: number, choice: ProfileChoice) => Promise<ProfileChosen>;
 }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
   const choose = useMutation(() => ({
-    mutationFn: (profileId: number) =>
-      props.choose(props.conversation.id, profileId),
+    mutationFn: (choice: ProfileChoice) =>
+      props.choose(props.conversation.id, choice),
     onSuccess: (outcome: ProfileChosen) => {
       if (outcome !== "Chosen") {
         setRefused(outcome);
@@ -271,29 +283,40 @@ function ProfilePicker(props: {
 
   return (
     <div class="profile-choice">
-      <label for={`${props.role}-profile`}>{props.label}</label>
+      <label for={`${props.role}-pairing`}>{props.label}</label>
       {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
-          profile while the mutation below would choose another — see
+          pairing while the mutation below would choose another — see
           `src/picking.tsx`.
 
           The empty value is the state of having chosen nothing, and it is not
-          an option to go back to: a conversation with no profile is one that
+          an option to go back to: a conversation with no pairing is one that
           will not grill, so the placeholder disappears once one is picked. It
-          comes back if the profile that was picked is deleted, which is the
-          honest reading of it — and nothing is said upwards about that, the
-          choice being the server's record rather than this pane's to clear. */}
+          comes back if the profile that was picked is deleted, or if it stopped
+          listing the model it was paired with, which is the honest reading of
+          it — and nothing is said upwards about that, the choice being the
+          server's record rather than this pane's to clear. */}
       <Picker
-        id={`${props.role}-profile`}
-        options={props.saved}
-        value={(profile) => String(profile.id)}
-        label={(profile) => `${profile.name} — ${profile.models.join(", ")}`}
-        chosen={props.chosen ? String(props.chosen.id) : ""}
-        pick={(picked) => choose.mutate(Number(picked))}
+        id={`${props.role}-pairing`}
+        options={pairing.pairings(props.saved)}
+        value={pairing.value}
+        label={pairing.label}
+        chosen={pairing.chosen(props.chosen)}
+        pick={(picked) => choose.mutate(pairing.choice(picked))}
         disabled={choose.isPending}
       />
 
+      {/* A profile chosen before models were paired with them: half a choice,
+          which the picker draws as none. Said in words rather than left as a
+          bare placeholder, because the conversation does have a profile. */}
+      <Show when={props.chosen && !props.chosen.model}>
+        <p class="note unpaired">
+          {props.chosen?.profile.name} was chosen before models were picked
+          beside them. Pick one to pair.
+        </p>
+      </Show>
+
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
-      <Show when={props.chosen?.broken}>
+      <Show when={props.chosen?.profile.broken}>
         {(broken) => <p class="error broken">{BROKEN[broken()]}</p>}
       </Show>
       <Show when={refused()}>

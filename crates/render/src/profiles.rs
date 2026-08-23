@@ -161,11 +161,37 @@ pub enum ProfileDeleted {
     InUse,
 }
 
-/// Which Profile a Conversation is choosing for one of its two roles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// One of a Conversation's two Pairings, as the page shows it: the Profile
+/// whole, and the model paired with it.
+///
+/// The Profile whole rather than by id because the pane says what it is and
+/// whether it is still runnable — and the model beside it because a Pairing is
+/// both halves, and either half alone is not something to launch a session
+/// with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PairingView {
+    pub profile: ProfileEntry,
+
+    /// The model of that Profile's list this Conversation's sessions run on.
+    ///
+    /// `null` is a Profile chosen before pairings existed, which is not a
+    /// Pairing: the page draws it as nothing chosen, because while the
+    /// Conversation is drafting that is a choice to make again. One past
+    /// drafting keeps running on the model its Profile carried, which nothing
+    /// here has to say — its Pairings are fixed and there is no picking left.
+    pub model: Option<String>,
+}
+
+/// Which Profile and model a Conversation is pairing for one of its two roles.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ProfileChoice {
     pub profile_id: i64,
+
+    /// One of that Profile's models. Never absent: there is no default model
+    /// anywhere, so a Pairing is picked whole or not at all.
+    pub model: String,
 }
 
 /// What became of choosing one.
@@ -178,4 +204,11 @@ pub enum ProfileChosen {
     /// There is no Profile with that id — it was removed between the list this
     /// page read and the choice it made from it.
     NoSuchProfile,
+
+    /// That Profile does not list that model, for the same reason: its list was
+    /// edited between the read and the pick.
+    NoSuchModel,
+
+    /// The Conversation is past drafting, so both its Pairings are fixed.
+    NotDrafting,
 }
