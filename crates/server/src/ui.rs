@@ -28,8 +28,8 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use verkstead_render::{
     Adopted, Archived, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, DirectionChoice, DirectionChosen, GrillingStarted,
-    HandedBack, Lifecycle, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
+    ConversationEntry, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted,
+    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
     PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, Standing, Submitted,
     Subscribed, Subscription, Unsubscribe, UpdateNotice,
 };
@@ -119,13 +119,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // — so what ends one is a request of its own, which any device on the
         // tailnet can make and which outlives whatever was watching.
         .route("/api/ui/conversations/{id}/hand-back", post(hand_back))
-        // How the work gets built, once the grilling has proposed wrapping up.
-        // What moved the Conversation here was a Question Set being answered —
-        // see [`store::submit_response`] — so there is no route for that.
-        .route(
-            "/api/ui/conversations/{id}/direction",
-            post(choose_direction),
-        )
+        // No route for how the work gets built: the direction rides the closing
+        // Question Set, and answering one is answering a Set — see
+        // [`store::submit_response`].
+        //
         // And what the human does about a run that stopped. Per Event rather
         // than per Conversation, because that is what is being answered: the
         // Timeline is where the question was put, and a route that took only
@@ -134,6 +131,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/interruption/{event}",
             post(settle_interruption),
+        )
+        // And what the human sets going by hand, wherever nothing is running.
+        // Per Conversation rather than per Event, unlike settling an
+        // Interruption: a Manual Task answers nothing on the Timeline — it is a
+        // new thing to do, and the Event it becomes is written by this.
+        .route(
+            "/api/ui/conversations/{id}/manual-task",
+            post(start_manual_task),
         )
         .route(
             "/api/ui/conversations/{id}/grilling-profile",
@@ -216,24 +221,6 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     let view: SetView = verkstead_render::set_view(stored.id, conversation, stored.set, standing);
 
     Json(view).into_response()
-}
-
-/// The wrap-up proposal a Set carried, where it carried one *and* the human
-/// accepted it.
-///
-/// The same reading the store settles the move by — see
-/// [`store::submit_response`] — so the Conversation being in Direction and the
-/// chooser having something to draw are the one fact rather than two that could
-/// come apart. A Set still waiting on the human has not been accepted either:
-/// nobody has answered it yet.
-fn accepted_proposal(asked: &store::SetOnTimeline) -> Option<&verkstead_schema::Proposal> {
-    let proposal = asked.set.proposal.as_ref()?;
-
-    let Some(store::Settlement::Answered(answered)) = &asked.settlement else {
-        return None;
-    };
-
-    proposal.accepted(&answered.response).then_some(proposal)
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
@@ -399,6 +386,13 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 }
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
+///
+/// Two facts ride out on every row beyond what the store holds: whether a
+/// session is running on it, and whether it is waiting on the human. Both are
+/// read here at the moment the list is drawn, and neither is stored — a running
+/// session is a process this server holds, and what is waiting is an `OR` the
+/// store computes over rows that move on their own. Which mark either one comes
+/// out as is the viewer's, and the rule there is one line: waiting wins.
 async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
@@ -408,6 +402,12 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
         }
     };
 
+    // Read once for the whole list rather than per row: which Conversations are
+    // running is one lock away, and asking it per row would take that lock as
+    // many times as there are Conversations for an answer that cannot change
+    // between them any more meaningfully than it changes between reads.
+    let working = state.sessions.working();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| ConversationEntry {
@@ -415,6 +415,8 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
             branch: conversation.branch,
             repo: conversation.repo,
             state: lifecycle(conversation.state),
+            working: working.contains(&conversation.id),
+            waiting: conversation.waiting,
         })
         .collect();
 
@@ -611,27 +613,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ),
     };
 
-    // What the grilling proposed on its way out, read off the Timeline for the
-    // reason the Brief is: it is already here, and a second read would be a
-    // second opinion about which proposal is in force.
-    //
-    // Only an *accepted* one. A grilling proposes as often as it takes, and a
-    // proposal the human sent back is a thing that was declined rather than a
-    // thing in force — drawing its reasoning beside the chooser would credit the
-    // decision to the wrong argument. The last accepted one wins, so a grilling
-    // that was sent back and proposed again is about what it proposed the second
-    // time.
-    let proposal = timeline
-        .iter()
-        .rev()
-        .find_map(|event| match &event.event {
-            store::Event::QuestionSet(asked) => accepted_proposal(asked),
-            _ => None,
-        })
-        .map(verkstead_render::proposal_view);
-
     // What the work has stopped on, read off the Timeline for the reason the
-    // Brief and the proposal are: it is already here. The store's index makes at
+    // Brief is: it is already here. The store's index makes at
     // most one open, so the last one that is unsettled is the one — and it is
     // the *only* one, which is what makes *the run stops here* a fact rather
     // than a promise.
@@ -678,11 +661,16 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         grilling_profile,
         implementation_profile,
         worktree,
-        proposal,
         direction: conversation.direction,
         pinned,
         blocked_on,
         held,
+        // The same reading the Events above are drawn against, said as a fact
+        // about the Conversation: the Timeline offers the Manual Task composer
+        // exactly where nothing is running, and one Event of a session's is not
+        // the question — a Conversation whose session has ended is not working,
+        // whichever Event it was writing into.
+        working: writing.is_some(),
         timeline: timeline
             .into_iter()
             // `filter_map` rather than `map`, for the one Event that is on the
@@ -728,11 +716,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             standing,
                         )
                     }
-                    // One of three words, like a move — and drawn as a line for the
-                    // same reason.
-                    store::Event::Directed(direction) => {
-                        verkstead_render::directed_event(event.id, event.at, direction)
-                    }
                     // Rendered like the Brief, and inline like it: a document to
                     // read, with nothing of it a details pane would add.
                     store::Event::Handoff(markdown) => {
@@ -769,6 +752,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // anything about.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
+                    }
+                    // And what the human asked for by hand, rendered like the
+                    // handoff and inline like it: the instruction is the whole
+                    // of what a Manual Task is on the record, and what its
+                    // session did lands beside it as its own Events.
+                    store::Event::ManualTask(instruction) => {
+                        verkstead_render::manual_task_event(event.id, event.at, &instruction)
                     }
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
@@ -1136,35 +1126,10 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/direction` — how the work gets built, and
-/// the work starting.
-///
-/// One press for both, because there is no second decision in between: choosing
-/// inline sets a session going under the implementation Profile. Roadmap is
-/// refused here as well as greyed out in the chooser — see
-/// [`crate::conversations::choose_direction`].
-async fn choose_direction(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(choice): Json<DirectionChoice>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(DirectionChosen::NoSuchConversation).into_response();
-    };
-
-    match crate::conversations::choose_direction(&state, id, choice.direction).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a direction failed");
-            unavailable("the direction could not be chosen")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/interruption/{event}` — what the human is
 /// doing about a run that stopped.
 ///
-/// One press for the choice and the doing, as the direction chooser is: retry
+/// One press for the choice and the doing: retry
 /// launches a fresh session for the same step, taking whatever was written
 /// alongside; take over stops Verkstead driving; abort ends the run. In every
 /// case the repository is left as the session left it.
@@ -1190,6 +1155,35 @@ async fn settle_interruption(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "settling an Interruption failed");
             unavailable("the interruption could not be settled")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
+///
+/// The instruction goes on the Timeline and a one-off session starts on it under
+/// the Profile the human picked beside it. Nothing about the Conversation moves:
+/// a Manual Task is outside the pipeline, and what it leaves behind is its
+/// instruction, what its session printed and whatever that committed.
+///
+/// `AlreadyRunning` is an outcome rather than an error, for the reason every
+/// other named outcome here is one: the composer that was pressed was drawn a
+/// moment ago, and an agent having started since is something to say in words
+/// rather than something to retry.
+async fn start_manual_task(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(submission): Json<ManualTaskSubmission>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ManualTaskStarted::NoSuchConversation).into_response();
+    };
+
+    match crate::manual::submit(&state, id, &submission.instruction, submission.profile_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
+            unavailable("the manual task could not be started")
         }
     }
 }
@@ -1384,7 +1378,6 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
     match state {
         store::Lifecycle::Draft => Lifecycle::Draft,
         store::Lifecycle::Grilling => Lifecycle::Grilling,
-        store::Lifecycle::Direction => Lifecycle::Direction,
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::Done => Lifecycle::Done,

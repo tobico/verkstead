@@ -31,7 +31,6 @@ use crate::{DiffView, ProfileEntry, RepoEntry, Standing};
 pub enum Lifecycle {
     Draft,
     Grilling,
-    Direction,
     Implementing,
     Wrapping,
     Done,
@@ -45,6 +44,13 @@ pub enum Lifecycle {
 ///
 /// The branch is the row's name: a Conversation has no title of its own, and of
 /// what it does have the branch is the short line the human chose.
+///
+/// Where it has got to is drawn rather than worded — a spinner for a session
+/// that is running, a dot for one that wants answering, a dotted border for a
+/// draft and a dimmed card for work that has stopped. Which is why the two facts
+/// below are facts and not one collapsed verdict: the row says what is true of
+/// the Conversation, and which mark that comes out as is the one rule the viewer
+/// keeps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ConversationEntry {
@@ -55,6 +61,20 @@ pub struct ConversationEntry {
     pub repo: String,
 
     pub state: Lifecycle,
+
+    /// Whether a session is running on this Conversation right now.
+    ///
+    /// The server's own registry of running processes and nothing else, so a
+    /// server that restarted says no about work it is no longer doing.
+    pub working: bool,
+
+    /// Whether something about this Conversation is waiting on the human: an ask
+    /// left open, or a run stopped on an Interruption.
+    ///
+    /// Folded from every source before it leaves, so the viewer holds no list of
+    /// them. A Draft is never one of them: it is drawn as a draft, and that is
+    /// the whole of what a draft has to say.
+    pub waiting: bool,
 }
 
 /// One Repo's notice under the new-conversation box: the roadmaps in it that
@@ -208,18 +228,12 @@ pub struct ConversationView {
     /// Conversation has none, which are the same fact about it.
     pub worktree: Option<Worktree>,
 
-    /// What the grilling proposed on its way out, once it has proposed anything.
+    /// The latest pick: how the human most recently said the work should be
+    /// built, on a proposal Set of this Conversation's.
     ///
-    /// Lifted out of the Timeline rather than left for the page to go looking
-    /// for: the chooser draws the recommendation marked and the reasoning beside
-    /// it, and a page that had to walk its own Timeline for the last Set carrying
-    /// one would be a second opinion about which proposal is in force.
-    pub proposal: Option<ProposalView>,
-
-    /// How the human chose to have the work built, once they have chosen.
-    ///
-    /// `null` while the choice is still open, which is what the chooser draws
-    /// its buttons for.
+    /// `null` until a proposal has been put to them and picked on. What the page
+    /// *draws* of the choice is the answered Set on the Timeline, which is where
+    /// it was made; this is the fact about the Conversation itself.
     pub direction: Option<Direction>,
 
     /// Which Event the Conversation is blocked on, or `null` where nothing is
@@ -252,6 +266,19 @@ pub struct ConversationView {
     /// running server every time the Conversation is.
     pub held: Option<i64>,
 
+    /// Whether a session is registered for this Conversation as of this read.
+    ///
+    /// The same fact the sidebar draws its working indicator from, said here
+    /// because the Timeline has its own use for it: the Manual Task composer is
+    /// offered exactly where nothing is running, and the states it is offered in
+    /// are the ones a session may or may not be running in.
+    ///
+    /// A question about a process rather than about the record, so it is true
+    /// only as of the moment it was read — and a restarted server has no
+    /// sessions at all, so every Conversation then reads as not working, which
+    /// is what each of them is.
+    pub working: bool,
+
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 
@@ -264,8 +291,8 @@ pub struct ConversationView {
     pub pinned: Vec<PinnedEvent>,
 }
 
-/// The grilling's closing proposal as the chooser draws it: which direction was
-/// recommended, and why.
+/// The grilling's closing proposal as the Set it rides draws it: which direction
+/// was recommended, and why.
 ///
 /// The rationale arrives as HTML like every other piece of agent markdown on this
 /// wire — the parser and the sanitizer are the server's.
@@ -277,28 +304,6 @@ pub struct ProposalView {
 
     /// Why, rendered and sanitized by the server on the way out.
     pub rationale_html: String,
-}
-
-/// Which direction the human is choosing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct DirectionChoice {
-    pub direction: Direction,
-}
-
-/// What became of choosing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum DirectionChosen {
-    /// Recorded, and the choice is on the Timeline.
-    Chosen,
-
-    NoSuchConversation,
-
-    /// The Conversation is not in Direction, so there is nothing here to choose:
-    /// either the grilling has not proposed wrapping up yet, or the work is past
-    /// the point where this was the human's call.
-    NotChoosing,
 }
 
 /// A Conversation's worktree: where it is, and whether it is still there.
@@ -345,11 +350,6 @@ pub enum TimelineEvent {
     /// Set page reads.
     QuestionSet(QuestionSetEvent),
 
-    /// The human chose how the work gets built. Beside a move rather than one of
-    /// them: the move into Direction says the choosing began, and this says how
-    /// it came out.
-    Directed(DirectedEvent),
-
     /// The handoff the grilling wrote on its way out, rendered inline like the
     /// Brief — and for the same reason: it is a document to read, and there is
     /// nothing of it a details pane would show that the Timeline does not.
@@ -381,6 +381,16 @@ pub enum TimelineEvent {
     /// wrote it and no human pressed anything for it. It is how an unattended run
     /// says what it decided while nobody was watching.
     Notice(NoticeEvent),
+
+    /// A Manual Task the human set going by hand, rendered inline like the
+    /// handoff — and for the same reason: it is what they asked for, in their
+    /// own words, with nothing of it a details pane would add.
+    ///
+    /// What the session it started went on to do is not here. That lands as the
+    /// Events any work lands as — what it printed, what it asked, what it
+    /// committed — so this is the instruction alone, which is the part of a
+    /// Manual Task nothing else on the Timeline records.
+    ManualTask(ManualTaskEvent),
 }
 
 /// One of the three things the human can do about an Interruption.
@@ -761,19 +771,22 @@ pub struct NoticeEvent {
     pub html: String,
 }
 
-/// The direction the human chose, as the page receives it.
+/// A Manual Task as the page receives it: what the human asked for, and when.
 ///
-/// No rendered body, like a move: there is no markdown in a choice of one of
-/// three. What the Timeline draws is a sentence of the viewer's own making.
+/// HTML alone, like the handoff and unlike the Brief: it is a moment on the
+/// record rather than a document anybody goes back and edits — what a second
+/// thought produces is a second Manual Task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct DirectedEvent {
+pub struct ManualTaskEvent {
     pub id: i64,
 
-    /// When it was chosen, RFC 3339.
+    /// When it was asked for, RFC 3339.
     pub at: String,
 
-    pub direction: Direction,
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// markdown on this wire is.
+    pub html: String,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -1023,14 +1036,8 @@ pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {
     TimelineEvent::Moved(MovedEvent { id, at, state })
 }
 
-/// The human's choice as an Event. Nothing to render — the direction is one of
-/// three words — and here beside the move for the same reason.
-pub fn directed_event(id: i64, at: String, direction: Direction) -> TimelineEvent {
-    TimelineEvent::Directed(DirectedEvent { id, at, direction })
-}
-
-/// The grilling's proposal as the chooser needs it, with the rationale rendered
-/// on the way.
+/// The grilling's proposal as the Set carrying it needs it, with the rationale
+/// rendered on the way.
 ///
 /// Here rather than in the server for the reason the Brief's rendering is: this
 /// is the crate with the markdown parser in it.
@@ -1346,6 +1353,16 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
     })
 }
 
+/// A Manual Task as an Event, rendered the same way and for the same reason: it
+/// is what the human asked for, written for somebody to read back.
+pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEvent {
+    TimelineEvent::ManualTask(ManualTaskEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(instruction),
+    })
+}
+
 /// Starting a Conversation: the Repo it is against, and nothing else.
 ///
 /// The branch name is not the browser's to send. It is prefilled randomly, and a
@@ -1492,6 +1509,60 @@ pub enum GrillingStarted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+}
+
+/// What the human typed into the Manual Task composer: the instruction, and the
+/// Agent Profile to run it under.
+///
+/// The Profile travels with the instruction rather than being read off the
+/// Conversation, because the pick is one-off. The composer starts on the
+/// Conversation's implementation Profile and a different choice belongs to this
+/// submission alone — it never becomes the Conversation's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ManualTaskSubmission {
+    /// What to do, in the human's own markdown. Nothing here interprets it — it
+    /// goes on the Timeline whole and into the prompt whole.
+    pub instruction: String,
+
+    /// Which saved Profile the one-off session runs as.
+    pub profile_id: i64,
+}
+
+/// What became of submitting one.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
+/// each of them is something different for the human to go and do, and a single
+/// "cannot start" would leave them guessing which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ManualTaskStarted {
+    /// The instruction is on the Timeline and a session is running on it.
+    Started,
+
+    NoSuchConversation,
+
+    /// It is drafting or aborted, so it has no Worktree for a session to run in.
+    /// The two states the composer is never offered in.
+    NowhereToWork,
+
+    /// A session was registered when this arrived, so the composer that was
+    /// pressed was stale. Nothing is queued: an instruction written against a
+    /// world that has since moved may no longer be the thing to do.
+    AlreadyRunning,
+
+    /// Nothing was typed, and an instruction is the whole of what a Manual Task
+    /// is.
+    EmptyInstruction,
+
+    /// The picked Profile has gone — deleted between the page being drawn and
+    /// the press.
+    NoSuchProfile,
+
+    /// The instruction is on the Timeline and no session could be started for
+    /// it. The reason is in the server's log, as a worktree git refused is: this
+    /// is the one refusal with nothing for the human to correct.
+    NotStarted,
 }
 
 /// What became of pressing Adopt.

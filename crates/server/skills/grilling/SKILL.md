@@ -21,31 +21,13 @@ understanding.
 
 You end it, not them. There is no button anywhere that stops a grilling: once
 you and the human have reached that shared understanding, the closing move is
-**the handoff document, and then one final Question Set that proposes wrapping
-up**. Answering that Set is what moves the work on to being built.
+**one final Question Set that proposes wrapping up**. Picking a direction on
+that Set is how the human settles the way the work gets built — and whichever
+one they pick, the next piece of it is yours.
 
-### The handoff document
-
-Whoever builds this is not you. The work runs under a different account and
-model, in a fresh session that has none of this conversation — so everything you
-learned grilling has to be written down first, or it is gone.
-
-**Write it to `/tmp/verkstead/handoff.md`, before you put the closing Set.**
-That path is outside the checkout on purpose: it is Verkstead's document rather
-than the project's, so it never reaches a commit. Verkstead takes it from there,
-puts it on the Timeline for the human, and primes the implementation session
-with it.
-
-Markdown, and as long as it needs to be. Write it for a competent agent who has
-read the Brief and nothing else:
-
-- **What is being built**, and what it is for.
-- **Every decision the grilling settled**, with the reasoning that settled it —
-  including the options you rejected and why, so they are not reopened.
-- **What was deliberately left open**, and who decides it when it comes up.
-- **Where in the codebase it lands**: the files, the patterns to follow, the
-  tests that cover it.
-- **What would count as done.**
+Write nothing before you put it. A proposal they send back costs you the round
+that follows and nothing else, so the Set is cheap to send: what the pick asks
+for is written afterwards, once you know which of the three it is.
 
 ### The closing Set
 
@@ -56,21 +38,11 @@ direction you recommend and why:
 title: Ready to build the rate limiter
 preface: |
   I think we have this. Here is what we settled …
-
-  Answering **yes** ends the grilling and hands over to the build. Anything
-  else keeps us here — say what is still open and I will pick it up.
 questions:
   - label: Q14
-    text: Ready to build it this way?
-    options:
-      - n: 1
-        text: Yes, go ahead
-        recommended: true
-      - n: 2
-        text: Not yet — more to work through
+    text: Anything in the above you want changed before we build it?
 proposal:
   direction: task-list
-  accepted_by: Q14.1
   rationale: |
     Six changes across the limiter, the config and the migration, each
     independently testable. Inline would be one session holding all of it;
@@ -84,24 +56,120 @@ proposal:
 - **`rationale` is markdown, and the human reads it.** It is shown beside the
   three choices as your reasoning for the one you picked, so write it as an
   argument rather than a label. A `proposal` without one is refused.
-- **`accepted_by` names the Option that means *go ahead*** — `Q14.1` for a
-  Question's, `Q14a.1` for a Sub-question's. It has to be an Option your Set
-  actually offers, or the Set is refused: nothing else can end the grilling, so
-  a proposal nobody can accept is one that would grill forever.
-- **Put a `proposal` on one Set and no others.** It is the closing move, not a
-  running recommendation; an ordinary round of grilling carries no `proposal`
-  block at all.
-- **The choice of direction is not yours.** You recommend one; the human picks
-  afterwards, and may well pick another. Nothing about the Answer to your
-  question changes that.
+- **Ask no question about whether to go ahead.** The workbench draws the
+  chooser on any Set carrying a `proposal` — all three directions, yours marked
+  as the recommendation, your rationale beside them — and says what picking one
+  does. A Question asking the same thing is a second place to answer it, and the
+  chooser is the one that counts. Ask about what is still uncertain, or ask
+  nothing at all.
+- **One `proposal` in flight at a time.** It is the closing move, not a running
+  recommendation, and an ordinary round of grilling carries no `proposal` block
+  at all. A grilling may put more than one over its life — a refused proposal is
+  followed by another, and so is a pick you decide is not settled enough to act
+  on — but never a second while one is still unanswered.
+- **The choice of direction is not yours.** You recommend one; the human picks,
+  and may well pick another. What they pick is what runs — your recommendation
+  changes nothing about that.
+
+### After they pick
+
+A pick lets you proceed. It does not make you.
+
+The whole Response comes back to you, the pick with the rest of it, and you are
+still holding the thread. Read all of it and judge for yourself whether
+everything is clear. **Proceeding is producing the picked direction's
+artifact** — the handoff, the committed backlog or the committed roadmap, as the
+three branches below set out. Nothing else you could do moves this on: Verkstead
+watches for that artifact and for you to go quiet, and for nothing else.
+
+So there is no hurry in it. If something they wrote beside the pick opens a gap,
+**go back and ask** — an ordinary Set, no `proposal` block — and write nothing
+until it is closed. The pick keeps standing while you do.
+
+And if what you now think is that the direction itself is wrong, **propose
+again**: a fresh `proposal` block on the Set you go back with, arguing for the
+other one. A pick on that supersedes the one before it, and the latest is what
+Verkstead watches for.
+
+**Arguing with a pick by writing a different artifact is the one thing you may
+never do.** A backlog where they picked inline is not a counter-argument, it is
+you deciding in their place — and it is the decision the chooser exists to take
+out of your hands. Propose again, or proceed on what they picked.
+
+### When they pick inline
+
+The pick comes back as `direction` on the Response, beside the `answers`. On an
+`inline` pick this session has one thing left to do, and then it is over: **write
+the handoff document.**
+
+Whoever builds this is not you. The work runs under a different account and
+model, in a fresh session that has none of this conversation — so everything you
+learned grilling has to be written down first, or it is gone. This is the one
+direction where that is true: a task list and a roadmap are written by you, into
+the repository, and whoever picks them up reads what you committed.
+
+**Write it to `/tmp/verkstead/handoff.md`.** That path is outside the checkout
+on purpose: it is Verkstead's document rather than the project's, so it never
+reaches a commit. Verkstead takes it from there, puts it on the Timeline for the
+human, and primes the implementation session with it.
+
+Markdown, and as long as it needs to be. Write it for a competent agent who has
+read the Brief and nothing else:
+
+- **What is being built**, and what it is for.
+- **Every decision the grilling settled**, with the reasoning that settled it —
+  including the options you rejected and why, so they are not reopened.
+- **What was deliberately left open**, and who decides it when it comes up.
+- **Where in the codebase it lands**: the files, the patterns to follow, the
+  tests that cover it.
+- **What would count as done.**
+
+Whatever they wrote beside the pick is part of what the handoff has to say —
+read the whole Response before you write it. Then stop: the handoff plus your
+going quiet is what ends this session, and Verkstead starts the build. Do not
+start the work yourself.
+
+### When they pick a task list
+
+A `task-list` pick writes no handoff at all, because the backlog *is* the plan
+and the plan is best written by the context that settled it. So this session
+does not end at the pick either. The work is yours.
+
+**Read `~/.claude/skills/breaking-down/SKILL.md` and follow it from *Ground the
+plan in the code* onward.** The branch is made, the worktree is this one, and
+the agreement is this conversation rather than a document somebody handed you.
+Whatever they wrote beside the pick is part of what the backlog has to answer
+to — read the whole Response before you draft anything.
+
+The plan commit is what ends this session. Verkstead watches for `.tasks/`
+committed to the branch and then for you to go quiet, and runs the backlog from
+there — a fresh session per task, under the account that builds. Do not start
+task 01.
+
+### When they pick a roadmap
+
+The same again, and for the same reason one level up: a roadmap is planning
+above all, and its stage briefs are worth what the context that settled them can
+put in them. No handoff here either — each stage is a Conversation with a
+grilling of its own, and what this one settled goes in the briefs.
+
+**Read `~/.claude/skills/staging/SKILL.md` and follow it from *Ground the plan
+in the code* onward.** Same worktree, same branch, same agreement — this
+conversation, and whatever they wrote beside the pick.
+
+That skill goes further than the breaking-down one does: it ends with the
+roadmap committed *and* the branch carried to a pull request, the way this
+repository's own review process says. Both are yours to do here, and neither
+waits on approval. Verkstead watches for the roadmap on the branch and then for
+you to go quiet, and takes the Conversation on to wrapping that pull request
+up. **Do not start stage 01** — Verkstead runs each stage as a Conversation of
+its own, on a branch of its own.
 
 ### When they don't accept
 
-Any other Answer keeps the Conversation grilling: a different Option, an answer
-in their own words instead of an Option, or the question left open. That is how
-they disagree, and it is the only way back — so **say in the Preface what
-answering yes does**, as the example does. A human who did not realise the
-Option ended the grilling cannot un-answer it.
+**A `direction` is the proposal accepted; no `direction` is the proposal sent
+back** — an answer in their own words, questions left open, anything at all
+without a pick. That is how they disagree, and it is the whole way back.
 
 You get their Response either way, and you are still holding the whole thread.
 Read it and decide for yourself what it calls for:
@@ -116,9 +184,9 @@ Read it and decide for yourself what it calls for:
 Do not treat a refusal as a reason to stop, and never put the same proposal
 again unchanged: they said no to that one.
 
-**Rewrite the handoff before you propose again.** Whatever came out of the round
-that followed the refusal is part of what was settled, and the handoff standing
-where it is would hand over the understanding you had before they disagreed.
+Nothing was written on the strength of the proposal, so nothing has to be
+unwritten: a refused round costs you the round, and the next proposal goes out
+as cheaply as the first did.
 
 ## How the questions reach them
 

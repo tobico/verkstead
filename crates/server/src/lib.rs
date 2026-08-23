@@ -19,12 +19,16 @@ mod comments;
 mod commits;
 mod continuing;
 mod conversations;
+mod drivers;
+mod followers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
 /// Public for the reason [`sandbox`] is — what Verkstead reaches out to is the
 /// product's business rather than an endpoint's, and standing a router up is
 /// choosing which `gh` it runs.
 pub mod github;
+/// Grilling a Conversation again, where the session that was grilling it died.
+mod grillings;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///
@@ -34,6 +38,7 @@ pub mod github;
 pub mod handoffs;
 mod hold;
 mod interruptions;
+mod manual;
 mod nudge;
 mod profiles;
 mod push;
@@ -61,6 +66,9 @@ mod settling;
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
 mod stages;
+/// The check that says when a Conversation has Stalled: in a driven state,
+/// with nothing driving it and nothing asking the human about it.
+mod stalls;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one
 /// `script` made inside the sandbox.
@@ -134,7 +142,8 @@ const SETTLEMENT_BACKLOG: usize = 64;
 
 /// What the handlers share: the store, word of what has just moved — so held
 /// waits need not poll for a Set arriving and open pages hear about everything
-/// else — which Sets a wait is being held on, which sessions are running,
+/// else — which Sets a wait is being held on, which sessions are running, which
+/// of them a pick has armed a watcher on, what is driving each Conversation,
 /// whether a newer Verkstead has been released than this one, and which
 /// directories any of it may touch.
 #[derive(Clone)]
@@ -144,6 +153,17 @@ pub(crate) struct AppState {
     settlements: Settlements,
     waits: Waits,
     sessions: sessions::Sessions,
+
+    /// The watcher each Conversation's latest pick armed — see [`followers`].
+    /// Beside the sessions rather than inside them, because a watcher is a task
+    /// of Verkstead's own and a session is an agent's process.
+    followers: followers::Followers,
+
+    /// And what is driving each of them, which is the other half of the same
+    /// question: a session is one agent running, and a driver is the task that
+    /// keeps starting them — see [`drivers`].
+    drivers: drivers::Drivers,
+
     updates: updates::Updates,
     watched: WatchedPaths,
 
@@ -366,17 +386,27 @@ fn routed(
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
         sessions,
+        followers: followers::Followers::new(),
+        drivers: drivers::Drivers::new(),
         updates,
         watched,
         github,
         state_dir,
     };
 
-    // Before anything is served, because it is about what was already happening
-    // rather than about anything a request will start: a Conversation left
-    // wrapping up by a server that stopped has a pull request GitHub has gone on
-    // building, and nobody but this is going to look at it.
-    wrapping::resume(&state);
+    // Before anything is served, because both are about what was already
+    // happening rather than about anything a request will start: a Conversation
+    // left wrapping up by a server that stopped has a pull request GitHub has
+    // gone on building, and a Conversation left grilling on a pick was waiting
+    // on an artifact from a session that stopped with the server. Nobody but
+    // these is going to look at either.
+    let resumed = vec![wrapping::resume(&state), conversations::resume(&state)];
+
+    // And then, once both are done, the check for the Conversations nothing took
+    // up: a restart holds no driver registrations at all, so what is still
+    // undriven after everything that resumes has resumed is what genuinely has
+    // nobody — see [`stalls`].
+    stalls::sweeping(&state, resumed);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

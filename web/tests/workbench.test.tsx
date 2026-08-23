@@ -27,6 +27,7 @@ import type {
   ConversationEntry,
   ConversationView,
   GrillingStarted,
+  ManualTaskStarted,
   ProfileEntry,
   PullRequestDetails,
   RemedySettled,
@@ -40,12 +41,13 @@ import type {
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import { MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
 import { Workbench } from "../src/workbench/Workbench";
 import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import conversation from "./fixtures/conversation.json" with { type: "json" };
-import direction from "./fixtures/conversation-direction.json" with { type: "json" };
+import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
@@ -136,6 +138,10 @@ function readAgain(): void {
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in
 /// the app.
+///
+/// The client comes back with the render: `invalidateQueries()` on it is
+/// exactly what a Nudge does to the page — see `lookAgain` in `src/nudge.ts` —
+/// so a test about one needs no fake `EventSource`.
 function mount(at = "/") {
   // No retries: a test that asked for a refusal should see it at once, rather
   // than after the three attempts a real page is right to make.
@@ -156,6 +162,7 @@ function mount(at = "/") {
       </QueryClientProvider>
     )),
     history,
+    client,
   };
 }
 
@@ -257,7 +264,7 @@ describe("the workbench", () => {
     ).toEqual(SIDEBAR.map((entry) => entry.branch));
   });
 
-  it("says of each conversation which repo it is in and where it has got to", async () => {
+  it("says of each conversation which repo it is in", async () => {
     theWorkbench();
     mount();
 
@@ -266,7 +273,10 @@ describe("the workbench", () => {
     )!;
 
     expect(row.querySelector(".repo")!.textContent).toBe(DRAFTING.repo);
-    expect(row.querySelector(".state")!.textContent).toBe(DRAFTING.state);
+
+    // And nothing about where it has got to, in words: that is drawn now — see
+    // *how a card says where its conversation has got to*.
+    expect(row.querySelector(".state")).toBeNull();
   });
 
   it("says so plainly when nothing is being worked on", async () => {
@@ -303,6 +313,175 @@ describe("the workbench", () => {
     expect(container.querySelector(".start-conversation")).toBeNull();
     expect(screen.getByText("register one").getAttribute("href")).toBe(
       "/repos",
+    );
+  });
+});
+
+/// The sidebar drawn over a sidebar of this test's own making, so that a row can
+/// be given facts no fixture happens to carry.
+///
+/// The rows are the fixture's, altered: what is being asked here is what a card
+/// does with `state`, `working` and `waiting`, and everything else about a row
+/// should stay whatever the server really said.
+function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
+  return theWorkbench(
+    whenever(
+      "/api/ui/conversations",
+      json(
+        rows.map((row, n) => ({
+          ...SIDEBAR[0]!,
+          id: n + 1,
+          branch: `b${n}`,
+          ...row,
+        })),
+      ),
+    ),
+  );
+}
+
+/// The cards of a sidebar drawn that way, in the order they were given.
+async function cards(container: ParentNode): Promise<HTMLElement[]> {
+  await drawn(container, ".conversation-row");
+  return [...container.querySelectorAll<HTMLElement>(".conversation-row")];
+}
+
+/// How a card says where its Conversation has got to, now that it no longer says
+/// it in words: a mark at the right edge for what is happening to it now, and
+/// the card's own treatment for a draft and for work that has stopped.
+///
+/// Which specific active state it is in — grilling, implementing, wrapping — is
+/// deliberately not drawn. What the sidebar is for is finding the Conversation to
+/// look at, and all three of those are *this one is under way*.
+describe("how a card says where its conversation has got to", () => {
+  it("turns a spinner on a conversation whose session is running", async () => {
+    theSidebar({ state: "Implementing", working: true, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.working")).toBeTruthy();
+    expect(card!.querySelector(".mark.waiting")).toBeNull();
+  });
+
+  it("shows a dot on a conversation waiting on the human", async () => {
+    theSidebar({ state: "Grilling", working: false, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  /// A Blocking Ask is exactly this: the session that asked is still alive and
+  /// idling on the answer. Of the two things true of it, the one the human can do
+  /// something about is the ask.
+  it("shows the dot and not the spinner when it is both", async () => {
+    theSidebar({ state: "Grilling", working: true, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.working")).toBeNull();
+  });
+
+  it("marks nothing on a conversation that is neither", async () => {
+    theSidebar({ state: "Implementing", working: false, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.querySelector(".mark")).toBeNull();
+  });
+
+  it("draws a draft as a draft, and marks nothing on it", async () => {
+    theSidebar({ state: "Draft", working: false, waiting: false });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(card!.classList.contains("draft")).toBe(true);
+    expect(card!.querySelector(".mark")).toBeNull();
+
+    // What "draft" means is the stylesheet's, and jsdom lays nothing out.
+    expect(stylesheet).toContain(
+      ".conversation-row.draft button {\n  border-style: dotted;\n}",
+    );
+  });
+
+  /// Which of the two it was is the details pane's to say. The sidebar's business
+  /// is that there is nothing here to do.
+  it("dims finished and aborted work identically", async () => {
+    theSidebar({ state: "Done" }, { state: "Aborted" }, { state: "Wrapping" });
+    const { container } = mount();
+
+    expect((await cards(container)).map((card) => card.className)).toEqual([
+      "conversation-row ended",
+      "conversation-row ended",
+      "conversation-row",
+    ]);
+  });
+
+  /// Dimmed and still a row to press: a Done Conversation can be reopened.
+  it("opens a dimmed conversation like any other", async () => {
+    theSidebar({ state: "Done" });
+    const { container, history } = mount();
+
+    const [card] = await cards(container);
+    fireEvent.click(card!.querySelector("button")!);
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/1"));
+  });
+
+  /// The marks are nothing to a screen reader, so the whole of what the card says
+  /// goes on the button's label — including the state that used to be written
+  /// under the name.
+  it("keeps every one of them readable aloud", async () => {
+    theSidebar(
+      {
+        branch: "spinning",
+        repo: "verkstead",
+        state: "Implementing",
+        working: true,
+        waiting: false,
+      },
+      {
+        branch: "asking",
+        repo: "askance",
+        state: "Grilling",
+        working: true,
+        waiting: true,
+      },
+      {
+        branch: "quiet",
+        repo: "verkstead",
+        state: "Done",
+        working: false,
+        waiting: false,
+      },
+    );
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector("button")!.getAttribute("aria-label"),
+      ),
+    ).toEqual([
+      "spinning, verkstead, Implementing, a session is running",
+      "asking, askance, Grilling, waiting on you",
+      "quiet, verkstead, Done",
+    ]);
+  });
+
+  /// The spinner is motion, and motion is something to be able to turn off.
+  it("holds the spinner still where motion is unwelcome", () => {
+    expect(stylesheet).toContain(
+      "@media (prefers-reduced-motion: reduce) {\n" +
+        "  .conversation-row .mark.working {\n" +
+        "    animation: none;\n" +
+        "  }\n" +
+        "}",
     );
   });
 });
@@ -1281,7 +1460,10 @@ function theSpeaking(...answers: Parameters<typeof serving>) {
 /// fixture holds, a running session being one: a fixture is a payload rather
 /// than a moment, and one that said it was running would have a page drawing a
 /// spinner over something that has not moved since 2026.
-function theGrillingOutput(over: Partial<AgentOutputEvent>) {
+function theGrillingOutput(
+  over: Partial<AgentOutputEvent>,
+  ...answers: Parameters<typeof serving>
+) {
   const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
     "AgentOutput" in event
       ? { AgentOutput: { ...event.AgentOutput, ...over } }
@@ -1299,6 +1481,9 @@ function theGrillingOutput(over: Partial<AgentOutputEvent>) {
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
     whenever(SCREEN_OF_IT, json(SCREEN)),
+    // Last, so a test can hold one of those paths to an answer of its own: a
+    // later answer for a path replaces the earlier.
+    ...answers,
   );
 }
 
@@ -1333,6 +1518,8 @@ function theHeld(running: boolean, ...answers: Parameters<typeof serving>) {
     whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
     whenever(CAPTURE_OF_IT, json(CAPTURE)),
     whenever(SCREEN_OF_IT, json(SCREEN)),
+    // Last, so a test can hold one of those paths to an answer of its own: a
+    // later answer for a path replaces the earlier.
     ...answers,
   );
 }
@@ -1702,6 +1889,77 @@ describe("a session's output on the timeline", () => {
 
     expect(unread.open).toBe(false);
     expect(unread.querySelector("pre")!.textContent).toContain("divination");
+  });
+
+  /// The regression this shape of wire is for: a Nudge invalidates every
+  /// active query (ADR-0005), so an open pane re-reads a running session's
+  /// Transcript — and every fold in it used to snap shut with the rows the
+  /// re-read rebuilt, because a `details` keeps its open state in the DOM and
+  /// nowhere else. The turns reconcile by `id` now, so a row that did not
+  /// change is left alone, folds and all.
+  it("keeps a fold open across a Nudge, while new turns arrive beneath it", async () => {
+    // The transcript again, one turn longer: a session still talking.
+    const GROWN: TranscriptView = {
+      ...TRANSCRIPT,
+      turns: [
+        ...TRANSCRIPT.turns,
+        {
+          kind: "Prose",
+          id: TRANSCRIPT.turns.length + 1,
+          html: "<p>And the drain is the place to change it.</p>\n",
+        },
+      ],
+    };
+
+    let grown = false;
+    // Running, so the Transcript is live and read again on every Nudge —
+    // which is exactly when a fold has to hold.
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, () => json(grown ? GROWN : TRANSCRIPT)()),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    const reasoning = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.reasoning details",
+    );
+    reasoning.open = true;
+
+    grown = true;
+    await client.invalidateQueries();
+
+    // The new turn has been drawn under the fold…
+    await waitFor(() =>
+      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+        GROWN.turns.length,
+      ),
+    );
+    // …and the fold is the same element it was, still open.
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane .turn.reasoning details",
+      ),
+    ).toBe(reasoning);
+    expect(reasoning.open).toBe(true);
+  });
+
+  /// A session already over when the pane opened is over for good, so its
+  /// record is read once and never again — not even on a Nudge, whose
+  /// invalidation beats any finite staleTime.
+  it("does not read a finished session's transcript again on a Nudge", async () => {
+    const fetching = theSpeaking();
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .turn.prose");
+
+    expect(OUTPUT.running).toBe(false);
+    const before = askedFor(fetching, TRANSCRIPT_OF_IT);
+    await client.invalidateQueries();
+
+    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(before);
   });
 
   /// The Capture belongs to the pane, and what the conversation is comes
@@ -2314,11 +2572,12 @@ describe("a question set on the timeline", () => {
 });
 
 /// The third shape the middle pane draws: a conversation the grilling has handed
-/// over, with the agent's proposal on it and the choice still open.
-const DIRECTING = direction as ConversationView;
+/// over, its closing proposal answered with a direction picked on it, and the
+/// work being built.
+const BUILDING = building as ConversationView;
 
 /// The workbench with that conversation open.
-function theDirecting(
+function theBuilding(
   over: Partial<ConversationView> = {},
   ...answers: Parameters<typeof serving>
 ) {
@@ -2327,149 +2586,54 @@ function theDirecting(
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
-      `/api/ui/conversations/${DIRECTING.id}`,
-      json({ ...DIRECTING, ...over }),
+      `/api/ui/conversations/${BUILDING.id}`,
+      json({ ...BUILDING, ...over }),
     ),
     ...answers,
   );
 }
 
-describe("choosing a direction", () => {
-  it("draws the chooser once the grilling has proposed wrapping up", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+describe("a grilling that has handed over", () => {
+  it("draws no chooser anywhere: the pick rode the closing set", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
-    const chooser = await drawn(container, ".direction-chooser");
-
-    expect(DIRECTING.state).toBe("Direction");
-    expect(chooser.textContent).toContain("How should this be built?");
-  });
-
-  it("does not draw it while the conversation is still grilling", async () => {
-    theGrilling();
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    // The timeline is up, so the pane has drawn what it was handed.
+    // The timeline is up, so the pane has drawn the whole of what it was handed.
     await drawn(container, ".timeline");
 
-    expect(GRILLING.state).toBe("Grilling");
+    expect(BUILDING.state).toBe("Implementing");
     expect(container.querySelector(".direction-chooser")).toBeNull();
+    expect(container.querySelector(".directions")).toBeNull();
   });
 
-  it("shows the agent's reasoning, as the server rendered it", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+  it("shows the answered proposal set as the record of the choice", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
-    const proposal = await drawn(container, ".direction-chooser .proposal");
+    const asked = await drawn(container, ".timeline-event > .question-set");
 
-    // Straight out of the fixture: the server has the markdown parser, and this
-    // side only puts the HTML in the page.
-    expect(DIRECTING.proposal).toBeTruthy();
-    expect(proposal.innerHTML).toBe(DIRECTING.proposal!.rationale_html);
-    expect(proposal.querySelector("strong")).toBeTruthy();
+    // Answered, and answered with a pick: what the human decided is on the set
+    // they decided it on, and there is no second event beside it saying so.
+    expect(asked.querySelector(".live")).toBeNull();
+    expect(asked.textContent).toContain("Ready to build the usage-limit pause");
   });
 
-  it("marks the recommended direction without choosing it", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+  it("goes from grilling to implementing with no rung in between", async () => {
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
-    const marked = await drawn(container, ".directions .recommended");
+    await drawn(container, ".timeline");
 
-    expect(DIRECTING.proposal!.direction).toBe("task-list");
-    expect(marked.textContent).toContain("Break into a task list");
-    expect(marked.querySelector(".mark")!.textContent).toContain("Recommended");
+    const moved = [
+      ...container.querySelectorAll(".timeline-event > .moved"),
+    ].map((line) => line.textContent);
 
-    // Marked and not chosen: nothing is settled until the human presses one.
-    expect(DIRECTING.direction).toBeNull();
-    expect(container.querySelector(".directions .chosen")).toBeNull();
-    expect(container.querySelector(".chosen-note")).toBeNull();
-  });
-
-  it("offers all three, every one of them pressable", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    await drawn(container, ".direction-chooser");
-
-    const buttons = [
-      ...container.querySelectorAll<HTMLButtonElement>(".directions .direction"),
-    ];
-    const labelled = buttons.map((button) => button.textContent);
-
-    expect(labelled).toEqual([
-      "Implement inline",
-      "Break into a task list",
-      "Stage a roadmap",
-    ]);
-    expect(buttons.map((button) => button.disabled)).toEqual([
-      false,
-      false,
-      false,
-    ]);
-
-    // Each starts as soon as it is chosen: the press is the choice and the
-    // start together, and the note beside each says so.
-    const roadmap = buttons[2]!.closest("li")!;
-    expect(roadmap.textContent).toContain("docs/roadmaps/");
-    expect(roadmap.textContent).toContain("Starts as soon as you choose it");
-  });
-
-  it("sends a staged roadmap like any other direction", async () => {
-    const fetching = theDirecting({}, json("Chosen"));
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const buttons = await drawn(container, ".directions");
-    fireEvent.click(buttons.querySelectorAll(".direction")[2]!);
-
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${DIRECTING.id}/direction`),
-      ).toEqual({ direction: "roadmap" }),
-    );
-  });
-
-  it("sends the direction the human pressed", async () => {
-    const fetching = theDirecting({}, json("Chosen"));
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const buttons = await drawn(container, ".directions");
-    fireEvent.click(buttons.querySelectorAll(".direction")[0]!);
-
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${DIRECTING.id}/direction`),
-      ).toEqual({ direction: "inline" }),
-    );
-  });
-
-  // A conversation still in this chooser with a direction on it is one whose
-  // session never started: both runnable directions take it past the chooser
-  // altogether.
-  it("says what was chosen, where nothing started off it", async () => {
-    theDirecting({ direction: "task-list" });
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const note = await drawn(container, ".direction-chooser .chosen-note");
-
-    expect(note.textContent).toContain("break into a task list");
-    expect(note.textContent).toContain("Nothing started off it");
-    expect(container.querySelector(".directions .chosen")).toBeTruthy();
-  });
-
-  it("says that both runnable directions start as soon as they are chosen", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const directions = await drawn(container, ".directions");
-    const [inline, taskList] = directions.querySelectorAll("li");
-
-    expect(inline!.textContent).toContain("Starts as soon as you choose it");
-    expect(taskList!.textContent).toContain("Starts as soon as you choose it");
+    expect(moved).toEqual(["Started grilling", "Started implementing"]);
   });
 
   it("draws the handoff the grilling wrote as the document it is", async () => {
-    theDirecting();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    theBuilding();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const handoff = await drawn(container, ".timeline-event > .handoff");
 
@@ -2482,55 +2646,14 @@ describe("choosing a direction", () => {
     // conversation that is over.
     expect(handoff.querySelector("button")).toBeNull();
   });
-
-  it("says in words why a direction was refused", async () => {
-    const fetching = theDirecting({}, json("NotChoosing"));
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const buttons = await drawn(container, ".directions");
-    fireEvent.click(buttons.querySelectorAll(".direction")[0]!);
-
-    await waitFor(() =>
-      screen.getByText(/not choosing a direction/i),
-    );
-    expect(askedFor(fetching, `/api/ui/conversations/${DIRECTING.id}`)).toBeGreaterThan(1);
-  });
-
-  it("draws the choice on the timeline as the line it is", async () => {
-    const chosen: TimelineEvent[] = [
-      ...DIRECTING.timeline,
-      { Directed: { id: 99, at: "2026-08-03T11:45:00.000Z", direction: "task-list" } },
-    ];
-    theDirecting({ timeline: chosen, direction: "task-list" });
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const line = await drawn(container, ".timeline-event > .directed");
-
-    expect(line.textContent).toContain("Chose to break into a task list");
-  });
-
-  it("says so where the grilling left no recommendation at all", async () => {
-    theDirecting({ proposal: null });
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
-
-    const chooser = await drawn(container, ".direction-chooser");
-
-    expect(chooser.textContent).toContain("left no recommendation");
-    expect(container.querySelector(".directions .recommended")).toBeNull();
-
-    // The buttons are still there: the choice is the human's whether or not
-    // anything recommended one.
-    expect(container.querySelectorAll(".directions .direction")).toHaveLength(3);
-  });
 });
 
 describe("disagreeing with a proposal", () => {
   it("draws no chooser while the grilling is still running", async () => {
     // What a refused proposal leaves behind: the set is on the timeline and
-    // answered, the conversation is still grilling, and nothing was proposed
-    // *in force* — the server only lifts an accepted one onto the view.
-    theDirecting({ state: "Grilling", proposal: null });
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    // answered, and the conversation is still grilling.
+    theBuilding({ state: "Grilling", direction: null });
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, ".timeline");
 
@@ -2541,7 +2664,7 @@ describe("disagreeing with a proposal", () => {
 
 /// The commits on that conversation's timeline: what a session leaves behind
 /// besides its output.
-const COMMITS = DIRECTING.timeline.flatMap((event) =>
+const COMMITS = BUILDING.timeline.flatMap((event) =>
   "Commit" in event ? [event.Commit] : [],
 );
 
@@ -2554,17 +2677,17 @@ const COMMITS = DIRECTING.timeline.flatMap((event) =>
 const COMMIT_DIFF: CommitDiff = { diff: (answeringSet as SetView).diff };
 
 /// Where the details pane fetches it from.
-const DIFF_OF_IT = `/api/ui/conversations/${DIRECTING.id}/commit/${COMMITS[0]!.id}`;
+const DIFF_OF_IT = `/api/ui/conversations/${BUILDING.id}/commit/${COMMITS[0]!.id}`;
 
 /// The workbench with that conversation open and its commits' diffs to hand.
 function theCommits(...answers: Parameters<typeof serving>) {
-  return theDirecting({}, whenever(DIFF_OF_IT, json(COMMIT_DIFF)), ...answers);
+  return theBuilding({}, whenever(DIFF_OF_IT, json(COMMIT_DIFF)), ...answers);
 }
 
 describe("a commit on the timeline", () => {
   it("summarises as what it was called and how much it moved", async () => {
     theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const row = await drawn(container, ".timeline-event > .commit");
     const commit = COMMITS[0]!;
@@ -2586,7 +2709,7 @@ describe("a commit on the timeline", () => {
 
   it("draws one row per commit, in timeline order", async () => {
     theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, ".timeline-event > .commit");
 
@@ -2603,7 +2726,7 @@ describe("a commit on the timeline", () => {
   /// row opens a diff and offers nothing else.
   it("asks the human for nothing", async () => {
     theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const row = await drawn(container, ".timeline-event > .commit");
 
@@ -2613,7 +2736,7 @@ describe("a commit on the timeline", () => {
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
     const fetching = theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
@@ -2636,7 +2759,7 @@ describe("a commit on the timeline", () => {
   /// the renderer splits on `diff --git` and would drop anything above it.
   it("says which commit it is above the diff", async () => {
     theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
@@ -2647,8 +2770,8 @@ describe("a commit on the timeline", () => {
   });
 
   it("says so plainly when the commit changed no files", async () => {
-    theDirecting({}, whenever(DIFF_OF_IT, json({ diff: null })));
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    theBuilding({}, whenever(DIFF_OF_IT, json({ diff: null })));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
@@ -2666,7 +2789,7 @@ describe("a commit on the timeline", () => {
   /// A commit whose repository no longer has it is a 404, and the pane says the
   /// server's own words rather than drawing an empty diff.
   it("shows the server's wording when the diff cannot be read", async () => {
-    theDirecting(
+    theBuilding(
       {},
       whenever(DIFF_OF_IT, () =>
         Promise.resolve(
@@ -2679,7 +2802,7 @@ describe("a commit on the timeline", () => {
         ),
       ),
     );
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
@@ -2690,11 +2813,39 @@ describe("a commit on the timeline", () => {
     );
   });
 
+  /// A commit's diff cannot change, so it is read once and never again — not
+  /// even on a Nudge, whose invalidation beats any finite staleTime. What that
+  /// buys besides the request is the per-file folds: the diff's markup is
+  /// reassigned wholesale whenever the query's data moves, and data that is
+  /// never re-read never moves.
+  it("does not read the diff again on a Nudge, so its folds hold", async () => {
+    const fetching = theCommits();
+    const { container, client } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    const fold = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane details.diff-file",
+    );
+    fold.open = false;
+
+    const before = askedFor(fetching, DIFF_OF_IT);
+    await client.invalidateQueries();
+
+    expect(askedFor(fetching, DIFF_OF_IT)).toBe(before);
+    expect(
+      container.querySelector<HTMLDetailsElement>(
+        ".details-pane details.diff-file",
+      ),
+    ).toBe(fold);
+    expect(fold.open).toBe(false);
+  });
+
   /// The event that is open is the one the timeline says is open, so a narrow
   /// window walking back out can see which it came from.
   it("marks the commit the details pane is showing", async () => {
     theCommits();
-    const { container } = mount(`/conversations/${DIRECTING.id}`);
+    const { container } = mount(`/conversations/${BUILDING.id}`);
 
     const row = await drawn(container, ".timeline-event > .commit");
     expect(row.classList).not.toContain("selected");
@@ -3384,5 +3535,225 @@ describe("the pinned pull request", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Details" }));
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
+  });
+});
+
+/// What the human asked for by hand, which the same conversation carries on the
+/// end of its record: a manual task, set going outside the pipeline.
+const ASKED_BY_HAND = (() => {
+  const event = WRAPPING.timeline.find((entry) => "ManualTask" in entry);
+  if (!event || !("ManualTask" in event)) {
+    throw new Error("the fixture should carry a manual task");
+  }
+  return event.ManualTask;
+})();
+
+describe("a manual task", () => {
+  /// A card in the record, like the brief and the handoff: it is a document
+  /// somebody wrote, and the words are the whole of it.
+  it("draws what was asked for as a card in the record", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".event-head")!.textContent).toContain(
+      "Manual task",
+    );
+    expect(asked.closest(".timeline")).not.toBeNull();
+  });
+
+  /// Put in the page as the server rendered it, like every other piece of
+  /// markdown on this wire — so what the human set in backticks reads as code
+  /// rather than as backticks.
+  it("shows the instruction as the server rendered it", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".markdown")!.innerHTML).toBe(
+      ASKED_BY_HAND.html,
+    );
+    expect(asked.querySelector("code")!.textContent).toBe("main");
+  });
+
+  /// Read-only, and nothing to open: what its session went on to do arrives as
+  /// the events any work arrives as, under this one.
+  it("asks the human for nothing", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelectorAll("button")).toHaveLength(0);
+    expect(asked.querySelectorAll("textarea")).toHaveLength(0);
+  });
+});
+
+/// Where a manual task is submitted from.
+const SET_GOING = `/api/ui/conversations/${WRAPPING.id}/manual-task`;
+
+/// The conversation's own implementation profile, which is what the composer
+/// starts on.
+const IMPLEMENTATION = WRAPPING.implementation_profile!;
+
+/// And the other saved one, which is what a one-off pick picks.
+const OTHER = PROFILES.find((profile) => profile.id !== IMPLEMENTATION.id)!;
+
+describe("the manual task composer", () => {
+  /// Offered wherever nothing is running: this conversation is wrapping up, and
+  /// a wrapping lull is exactly the quiet moment it is there for.
+  it("is drawn at the end of the timeline when nothing is running", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, ".manual-task-composer select");
+    const composer = container.querySelector(".manual-task-composer")!;
+
+    expect(composer.querySelector("textarea")).toBeTruthy();
+    expect(
+      composer.querySelector(".start-manual-task")!.textContent,
+    ).toContain("Set it going");
+    expect(
+      composer.compareDocumentPosition(container.querySelector(".timeline")!) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+  });
+
+  /// And gone while one runs. The rule is the register and nothing else: an
+  /// agent is in the worktree, and a second one would be two editing each
+  /// other's files.
+  it("goes while a session is running", async () => {
+    theWrapping({ working: true });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".manual-task-composer")).toBeNull();
+  });
+
+  /// Drafting is one of the two states with no worktree, so there is nowhere
+  /// for a session to run and nothing to offer.
+  it("is not drawn on a conversation with no worktree", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, ".start-grilling");
+
+    expect(container.querySelector(".manual-task-composer")).toBeNull();
+  });
+
+  /// The dropdown starts on the conversation's implementation profile, because
+  /// that is what its work runs under — but it is a start rather than a rule.
+  it("starts on the conversation's implementation profile", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const picker = await drawn<HTMLSelectElement>(
+      container,
+      ".manual-task-composer select",
+    );
+
+    expect(picker.value).toBe(String(IMPLEMENTATION.id));
+    expect([...picker.options].map((option) => option.textContent)).toEqual(
+      PROFILES.map((profile) => `${profile.name} — ${profile.model}`),
+    );
+  });
+
+  /// The instruction and the profile, on the wire together. One press does both:
+  /// what it says and what it runs as are the whole of a manual task.
+  it("sends what was typed and the profile picked beside it", async () => {
+    const fetching = theWrapping(
+      {},
+      whenever(SET_GOING, json("Started" as ManualTaskStarted), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const picker = await drawn<HTMLSelectElement>(
+      container,
+      ".manual-task-composer select",
+    );
+    const composer = container.querySelector(".manual-task-composer")!;
+    fireEvent.input(composer.querySelector("textarea")!, {
+      target: { value: "Rebase onto main." },
+    });
+    fireEvent.change(picker, { target: { value: String(OTHER.id) } });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    await waitFor(() =>
+      expect(sent(fetching, SET_GOING)).toEqual({
+        instruction: "Rebase onto main.",
+        profile_id: OTHER.id,
+      }),
+    );
+
+    // The pick is one-off: it is what this task runs as, and nothing writes it
+    // back to the conversation.
+    expect(
+      askedFor(
+        fetching,
+        `/api/ui/conversations/${WRAPPING.id}/implementation-profile`,
+      ),
+    ).toBe(0);
+  });
+
+  /// Emptied on the way out, because the instruction is on the timeline now:
+  /// what is left in the box would otherwise read as something still to ask for.
+  it("empties the box once the task is going", async () => {
+    theWrapping({}, whenever(SET_GOING, json("Started"), "POST"));
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+    const typing = composer.querySelector<HTMLTextAreaElement>("textarea")!;
+    fireEvent.input(typing, { target: { value: "Rebase onto main." } });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    await waitFor(() => expect(typing.value).toBe(""));
+  });
+
+  /// Nothing typed is nothing to ask for, and the button says so by not being
+  /// pressable rather than by refusing afterwards.
+  it("will not submit an empty instruction", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+
+    expect(
+      composer.querySelector<HTMLButtonElement>(".start-manual-task")!.disabled,
+    ).toBe(true);
+  });
+
+  /// A submit that raced a session loses, and the page says which of the named
+  /// refusals it was: the composer that was pressed was drawn a moment ago.
+  it("says in words that an agent was already running", async () => {
+    theWrapping(
+      {},
+      whenever(SET_GOING, json("AlreadyRunning" as ManualTaskStarted), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const composer = await drawn(container, ".manual-task-composer");
+    fireEvent.input(composer.querySelector("textarea")!, {
+      target: { value: "Rebase onto main." },
+    });
+    fireEvent.click(composer.querySelector(".start-manual-task")!);
+
+    const refused = await drawn(container, ".manual-task-composer .error");
+
+    expect(refused.textContent).toBe(MANUAL_TASK_REFUSAL.AlreadyRunning);
+    expect(refused.textContent).toContain("already running");
+  });
+
+  /// Every named refusal has words of its own, because each of them is
+  /// something different to go and do about it.
+  it("has a sentence for every way of being refused", () => {
+    for (const [outcome, said] of Object.entries(MANUAL_TASK_REFUSAL)) {
+      if (outcome === "Started") {
+        continue;
+      }
+      expect(said, `${outcome} should say something`).not.toBe("");
+    }
   });
 });

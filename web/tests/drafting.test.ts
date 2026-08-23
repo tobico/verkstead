@@ -35,6 +35,7 @@ function partWay(): Draft {
       filled("Q2a", null, ""),
     ],
     comment: "back in an hour",
+    direction: null,
   };
 }
 
@@ -186,6 +187,7 @@ describe("a draft between visits", () => {
     const draft: Draft = {
       filled: [filled("Q1", null, ""), filled("Q2", 1, "")],
       comment: "",
+      direction: null,
     };
 
     const restored = restorable(JSON.stringify(draft), ["Q1", "Q2"])!;
@@ -230,6 +232,7 @@ describe("a draft between visits", () => {
     const nothing: Draft = {
       filled: [filled("Q1", null, ""), filled("Q2", null, "  \n")],
       comment: "   ",
+      direction: null,
     };
     expect(empty(nothing), "whitespace is not an answer here either").toBe(
       true,
@@ -240,6 +243,7 @@ describe("a draft between visits", () => {
       empty({
         filled: [filled("Q1", null, "")],
         comment: "why not cache it upstream?",
+        direction: null,
       }),
       "a comment on its own is a draft: it is a whole counter-question",
     ).toBe(false);

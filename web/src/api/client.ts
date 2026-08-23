@@ -18,10 +18,9 @@ import type {
   ConversationAborted,
   ConversationEntry,
   ConversationView,
-  Direction,
-  DirectionChosen,
   GrillingStarted,
   HandedBack,
+  ManualTaskStarted,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -296,24 +295,10 @@ export function handBack(id: number): Promise<HandedBack> {
   return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
 }
 
-/// Say how the work gets built, once the grilling has proposed wrapping up.
-///
-/// The conversation stays in Direction: this settles *how*, and starting is a
-/// move of its own. There is no call for the move that got it here — answering
-/// the grilling's closing question set is what did that.
-export function chooseDirection(
-  id: number,
-  direction: Direction,
-): Promise<DirectionChosen> {
-  return post<DirectionChosen>(`/api/ui/conversations/${id}/direction`, {
-    direction,
-  });
-}
-
 /// Say what to do about a run that stopped: run the step again, take it on
 /// manually, or end the run.
 ///
-/// One press for the choice and the doing, as choosing a direction is. The note
+/// One press for the choice and the doing. The note
 /// is what a retried session is told alongside — "try again but leave the
 /// migration alone" — and is sent for the other two as well: a human who wrote
 /// why they were taking over has said something worth keeping on the record.
@@ -330,6 +315,27 @@ export function settleInterruption(
   return post<RemedySettled>(
     `/api/ui/conversations/${id}/interruption/${event}`,
     { remedy, note },
+  );
+}
+
+/// Set a manual task going: this one instruction, under the profile picked
+/// beside it, in a session of its own.
+///
+/// Outside the pipeline, so nothing about the conversation moves. What it leaves
+/// behind is the instruction on the timeline, whatever the session printed, and
+/// whatever that committed.
+///
+/// The profile is sent rather than left to the server to read off the
+/// conversation, because the pick is one-off: it is what *this* task runs under
+/// and never becomes the conversation's own implementation profile.
+export function startManualTask(
+  id: number,
+  instruction: string,
+  profileId: number,
+): Promise<ManualTaskStarted> {
+  return post<ManualTaskStarted>(
+    `/api/ui/conversations/${id}/manual-task`,
+    { instruction, profile_id: profileId },
   );
 }
 

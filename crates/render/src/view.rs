@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use verkstead_schema::{Liveness, Response};
 
+use crate::conversations::ProposalView;
+
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
@@ -56,6 +58,18 @@ pub struct SetView {
     /// so it travels with the Set rather than being fetched once the page is
     /// already up.
     pub standing: Standing,
+
+    /// The wrap-up proposal this Set carries, on the one Set that carries one.
+    ///
+    /// What the page draws the direction chooser from: the recommendation to
+    /// mark, and the reasoning to put beside the three choices. `null` on every
+    /// ordinary Set, which is what leaves the chooser off it.
+    ///
+    /// It travels with the Set rather than being looked up beside it for the
+    /// reason the Conversation does: the decision and what it is a decision
+    /// about arrive together, so the page never draws the Questions above a
+    /// chooser that has not turned up yet.
+    pub proposal: Option<ProposalView>,
 }
 
 /// The Diff as the browser receives it: the HTML the server rendered, and the
@@ -209,6 +223,10 @@ pub fn set_view(
 
     let questions = viewed(set.questions);
 
+    // The chooser's own material, rendered here with everything else the agent
+    // wrote — see [`crate::conversations::proposal_view`].
+    let proposal = set.proposal.as_ref().map(crate::proposal_view);
+
     SetView {
         id,
         conversation,
@@ -218,8 +236,11 @@ pub fn set_view(
         // Asked of all of them together, and before any is given away: one
         // Diagram anywhere on the page is what the renderer is loaded for.
         diagrams: diagrammed(
-            preface_html.as_deref(),
-            postscript_html.as_deref(),
+            [
+                preface_html.as_deref(),
+                postscript_html.as_deref(),
+                proposal.as_ref().map(|proposal| &*proposal.rationale_html),
+            ],
             &questions,
         ),
         preface_html,
@@ -230,6 +251,7 @@ pub fn set_view(
         diff: set.diff.as_deref().and_then(diff::to_html),
         questions,
         standing,
+        proposal,
     }
 }
 
@@ -273,8 +295,9 @@ fn viewed(questions: Vec<verkstead_schema::Question>) -> Vec<QuestionView> {
         .collect()
 }
 
-/// Whether any of this Set's rendered markdown holds a Diagram: the Preface, the
-/// Postscript, and every Question's and Sub-question's text.
+/// Whether any of this Set's rendered markdown holds a Diagram: its blocks of
+/// `prose` — the Preface, the Postscript, a proposal's rationale — and every
+/// Question's and Sub-question's text.
 ///
 /// The Options are not asked, because there is nothing to find in one: an
 /// Option's text is rendered inline, and a fence in there is flattened into the
@@ -283,14 +306,10 @@ fn viewed(questions: Vec<verkstead_schema::Question>) -> Vec<QuestionView> {
 /// Asked of the rendered HTML rather than of the markdown, which is what keeps
 /// this answer and the renderer's own reading of the page from ever disagreeing —
 /// see [`crate::markdown::holds_diagram`].
-fn diagrammed(
-    preface_html: Option<&str>,
-    postscript_html: Option<&str>,
-    questions: &[QuestionView],
-) -> bool {
+fn diagrammed<const N: usize>(prose: [Option<&str>; N], questions: &[QuestionView]) -> bool {
     use crate::markdown;
 
-    let mut prose = [preface_html, postscript_html].into_iter().flatten();
+    let mut prose = prose.into_iter().flatten();
     let mut asked = questions
         .iter()
         .flat_map(|question| std::iter::once(&question.ask).chain(&question.subquestions));

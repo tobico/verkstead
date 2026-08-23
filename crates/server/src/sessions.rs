@@ -22,14 +22,14 @@
 //! at all, and that is exactly what a Conversation should then say rather than
 //! reading back a live one out of a database.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::process::{Child, Command};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 
 use crate::capture::Reading;
@@ -213,6 +213,11 @@ pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
 /// and when it is over. Both are about *this* session — a Conversation whose
 /// session ended and was replaced would answer both questions about the wrong
 /// one.
+///
+/// Handed out more than once, at that: a grilling session is started by the
+/// button and driven later by whoever the human's pick arms — see
+/// [`Sessions::following`] — so what a driver holds has to be a second view of
+/// one session rather than the only one.
 pub(crate) struct Session {
     /// The Timeline Event it is printing into.
     pub(crate) event_id: i64,
@@ -223,12 +228,11 @@ pub(crate) struct Session {
     /// Word that it is over, and how it ended.
     ///
     /// Sent as the last thing a relay does, and read through the *closing* of
-    /// this rather than through the message arriving: a relay that panicked
-    /// would drop its end without sending, and a driver waiting on a message
-    /// would then wait on a session that had already gone. So the channel
-    /// closing is what says *over* — and the value it carries, where there is
-    /// one, is what says how.
-    ended: oneshot::Receiver<Ended>,
+    /// this as well as through the value arriving: a relay that panicked would
+    /// drop its end without sending, and a driver waiting on a value alone would
+    /// then wait on a session that had already gone. So the channel closing says
+    /// *over* too — and the value, where there is one, is what says how.
+    ended: watch::Receiver<Option<Ended>>,
 }
 
 /// How a session ended, as whoever was driving it hears.
@@ -289,7 +293,10 @@ impl Session {
     pub(crate) async fn ended(&mut self) -> Ended {
         // A relay that dropped its end without sending is a relay that panicked,
         // and a session nothing can account for is exactly [`Ended::Unknown`].
-        (&mut self.ended).await.unwrap_or(Ended::Unknown)
+        match self.ended.wait_for(Option::is_some).await {
+            Ok(ended) => ended.clone().unwrap_or(Ended::Unknown),
+            Err(_) => Ended::Unknown,
+        }
     }
 }
 
@@ -368,6 +375,11 @@ struct Running {
     /// it is the same fact: a Screen that is live is a session that is running,
     /// and the two would only ever be looked up together.
     screen: Live,
+
+    /// The two halves a driver is handed, kept so that a session already running
+    /// can be given one — see [`Sessions::following`].
+    quiet: Quiet,
+    ended: watch::Receiver<Option<Ended>>,
 }
 
 impl Sessions {
@@ -460,6 +472,45 @@ impl Sessions {
             .get(&conversation_id)
             .filter(|running| running.event_id == event_id)
             .map(|running| running.screen.clone())
+    }
+
+    /// A driver's hold on the session a Conversation already has running, or
+    /// `None` where it has none.
+    ///
+    /// What the grilling session is picked up by. It was started by the button
+    /// and nothing was driving it, because until the human picks a Direction
+    /// there is nothing to watch it for; the pick is what arms a driver, and by
+    /// then the only place that session exists is this register.
+    ///
+    /// A second hold on one session rather than a transfer: the two halves it is
+    /// made of — the relay's own quiet clock, and word that the relay has
+    /// finished — are both shared, so a driver handed one here waits on exactly
+    /// what a driver handed one at the start waits on.
+    pub(crate) fn following(&self, conversation_id: i64) -> Option<Session> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .map(|running| Session {
+                event_id: running.event_id,
+                quiet: running.quiet.clone(),
+                ended: running.ended.clone(),
+            })
+    }
+
+    /// Which Conversations have a session running right now.
+    ///
+    /// The whole set at once rather than a question per Conversation, because
+    /// the one thing that asks is the sidebar and the sidebar is a list: taking
+    /// the lock once and reading it once is what keeps drawing a list of
+    /// Conversations from being a list of lock acquisitions.
+    pub(crate) fn working(&self) -> HashSet<i64> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .keys()
+            .copied()
+            .collect()
     }
 
     /// The pace the runner works a backlog at — see [`Agents::pace`].
@@ -637,9 +688,11 @@ impl Sessions {
         let (stop, stopping) = oneshot::channel();
 
         // The two halves of what a driver holds a session by: the clock the
-        // relay keeps as it reads, and the word that the relay has finished.
+        // relay keeps as it reads, and the word that the relay has finished. A
+        // watch rather than a oneshot, because one session may be handed to more
+        // than one driver over its life — see [`Sessions::following`].
         let quiet = Quiet::started();
-        let (over, ended) = oneshot::channel();
+        let (over, ended) = watch::channel(None);
 
         // What the session is about to commit, which is the other half of what
         // it leaves behind. Watched for as long as it runs and once more as it
@@ -737,7 +790,7 @@ impl Sessions {
                     //
                     // A send that fails is a driver that has gone, which is every
                     // session nothing is following.
-                    let _ = over.send(ended);
+                    let _ = over.send(Some(ended));
                 }
             });
 
@@ -748,6 +801,8 @@ impl Sessions {
                     stop,
                     relay,
                     screen,
+                    quiet: quiet.clone(),
+                    ended: ended.clone(),
                 },
             );
         }

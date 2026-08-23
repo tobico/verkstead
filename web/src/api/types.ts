@@ -265,6 +265,11 @@ export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "
  */
 export type Bookkeeping = { 
 /**
+ * The line's place among the bookkeeping, counted from 1 — its own count,
+ * not the conversation's.
+ */
+id: number, 
+/**
  * What the log called it.
  */
 kind: string, 
@@ -398,12 +403,35 @@ export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversa
  *
  * The branch is the row's name: a Conversation has no title of its own, and of
  * what it does have the branch is the short line the human chose.
+ *
+ * Where it has got to is drawn rather than worded — a spinner for a session
+ * that is running, a dot for one that wants answering, a dotted border for a
+ * draft and a dimmed card for work that has stopped. Which is why the two facts
+ * below are facts and not one collapsed verdict: the row says what is true of
+ * the Conversation, and which mark that comes out as is the one rule the viewer
+ * keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
 /**
  * What the Repo this Conversation is against is called.
  */
-repo: string, state: Lifecycle, };
+repo: string, state: Lifecycle, 
+/**
+ * Whether a session is running on this Conversation right now.
+ *
+ * The server's own registry of running processes and nothing else, so a
+ * server that restarted says no about work it is no longer doing.
+ */
+working: boolean, 
+/**
+ * Whether something about this Conversation is waiting on the human: an ask
+ * left open, or a run stopped on an Interruption.
+ *
+ * Folded from every source before it leaves, so the viewer holds no list of
+ * them. A Draft is never one of them: it is drawn as a draft, and that is
+ * the whole of what a draft has to say.
+ */
+waiting: boolean, };
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
@@ -461,19 +489,12 @@ adopting: AdoptionView | null,
  */
 worktree: Worktree | null, 
 /**
- * What the grilling proposed on its way out, once it has proposed anything.
+ * The latest pick: how the human most recently said the work should be
+ * built, on a proposal Set of this Conversation's.
  *
- * Lifted out of the Timeline rather than left for the page to go looking
- * for: the chooser draws the recommendation marked and the reasoning beside
- * it, and a page that had to walk its own Timeline for the last Set carrying
- * one would be a second opinion about which proposal is in force.
- */
-proposal: ProposalView | null, 
-/**
- * How the human chose to have the work built, once they have chosen.
- *
- * `null` while the choice is still open, which is what the chooser draws
- * its buttons for.
+ * `null` until a proposal has been put to them and picked on. What the page
+ * *draws* of the choice is the answered Set on the Timeline, which is where
+ * it was made; this is the fact about the Conversation itself.
  */
 direction: Direction | null, 
 /**
@@ -509,6 +530,20 @@ blocked_on: number | null,
  */
 held: number | null, 
 /**
+ * Whether a session is registered for this Conversation as of this read.
+ *
+ * The same fact the sidebar draws its working indicator from, said here
+ * because the Timeline has its own use for it: the Manual Task composer is
+ * offered exactly where nothing is running, and the states it is offered in
+ * are the ones a session may or may not be running in.
+ *
+ * A question about a process rather than about the record, so it is true
+ * only as of the moment it was read — and a restarted server has no
+ * sessions at all, so every Conversation then reads as not working, which
+ * is what each of them is.
+ */
+working: boolean, 
+/**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, 
@@ -537,34 +572,12 @@ pinned: Array<PinnedEvent>, };
 export type DiffView = { html: string, paths: Array<string>, };
 
 /**
- * The direction the human chose, as the page receives it.
- *
- * No rendered body, like a move: there is no markdown in a choice of one of
- * three. What the Timeline draws is a sentence of the viewer's own making.
- */
-export type DirectedEvent = { id: number, 
-/**
- * When it was chosen, RFC 3339.
- */
-at: string, direction: Direction, };
-
-/**
  * One of the three ways the work can be built.
  *
  * Named on the wire in the words the design uses for them, so a Set is
  * readable as written: `inline`, `task-list`, `roadmap`.
  */
 export type Direction = "inline" | "task-list" | "roadmap";
-
-/**
- * Which direction the human is choosing.
- */
-export type DirectionChoice = { direction: Direction, };
-
-/**
- * What became of choosing one.
- */
-export type DirectionChosen = "Chosen" | "NoSuchConversation" | "NotChoosing";
 
 /**
  * What became of starting a Conversation grilling.
@@ -651,7 +664,7 @@ settled: RemedyTaken | null, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "Wrapping" | "Done" | "Aborted";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Aborted";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -665,6 +678,53 @@ export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "W
  * the registry of held waits; the browser only draws what it is told.
  */
 export type Liveness = "waiting" | "disconnected";
+
+/**
+ * A Manual Task as the page receives it: what the human asked for, and when.
+ *
+ * HTML alone, like the handoff and unlike the Brief: it is a moment on the
+ * record rather than a document anybody goes back and edits — what a second
+ * thought produces is a second Manual Task.
+ */
+export type ManualTaskEvent = { id: number, 
+/**
+ * When it was asked for, RFC 3339.
+ */
+at: string, 
+/**
+ * Rendered and sanitized by the server on the way out, as every piece of
+ * markdown on this wire is.
+ */
+html: string, };
+
+/**
+ * What became of submitting one.
+ *
+ * Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
+ * each of them is something different for the human to go and do, and a single
+ * "cannot start" would leave them guessing which.
+ */
+export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NotStarted";
+
+/**
+ * What the human typed into the Manual Task composer: the instruction, and the
+ * Agent Profile to run it under.
+ *
+ * The Profile travels with the instruction rather than being read off the
+ * Conversation, because the pick is one-off. The composer starts on the
+ * Conversation's implementation Profile and a different choice belongs to this
+ * submission alone — it never becomes the Conversation's.
+ */
+export type ManualTaskSubmission = { 
+/**
+ * What to do, in the human's own markdown. Nothing here interprets it — it
+ * goes on the Timeline whole and into the prompt whole.
+ */
+instruction: string, 
+/**
+ * Which saved Profile the one-off session runs as.
+ */
+profile_id: number, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -812,8 +872,8 @@ broken: Broken | null, };
 export type ProfileSaved = "Saved" | "NoSuchProfile" | "Nameless" | "Modelless" | "NameTaken" | "DirNotAbsolute" | "DirMissing" | "DirOutsideWatchedPaths" | "NotADirectory" | "ConfigNotAbsolute" | "ConfigMissing" | "ConfigOutsideWatchedPaths" | "NotAFile";
 
 /**
- * The grilling's closing proposal as the chooser draws it: which direction was
- * recommended, and why.
+ * The grilling's closing proposal as the Set it rides draws it: which direction
+ * was recommended, and why.
  *
  * The rationale arrives as HTML like every other piece of agent markdown on this
  * wire — the parser and the sanitizer are the server's.
@@ -831,7 +891,12 @@ rationale_html: string, };
 /**
  * The agent's prose, rendered.
  */
-export type Prose = { html: string, };
+export type Prose = { 
+/**
+ * The turn's place in the conversation, counted from 1 — what the viewer
+ * reconciles rows by, so a fold opened on one survives a re-read.
+ */
+id: number, html: string, };
 
 /**
  * One comment on a pull request: who said it, when, and what they said.
@@ -933,7 +998,11 @@ export type PushKey = { key: string, };
 /**
  * A turn put to the agent, rendered.
  */
-export type Put = { html: string, };
+export type Put = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, html: string, };
 
 /**
  * A Question Set as the Timeline shows it: what it was called, the table of
@@ -999,7 +1068,11 @@ nav_text: string, };
 /**
  * The agent's reasoning, rendered.
  */
-export type Reasoning = { html: string, };
+export type Reasoning = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, html: string, };
 
 /**
  * What became of a registration.
@@ -1073,7 +1146,8 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
- * Set, plus an optional set-level comment.
+ * Set, plus an optional set-level comment — and, on a Set carrying a proposal,
+ * the direction the human picked.
  *
  * The invariant is explicitness, not completeness: every Question and
  * Sub-question in the Set appears in `answers` one way or the other, so the
@@ -1089,7 +1163,23 @@ answers: Array<Answer>,
 /**
  * What the human wants to say about the Set as a whole.
  */
-comment?: string | null, };
+comment?: string | null, 
+/**
+ * How the human chose to have the work built, on the one Set that carries
+ * a [`crate::set::Proposal`].
+ *
+ * A field of its own rather than an ordinary Answer, because it answers no
+ * Question: the chooser is the viewer's, injected onto any Set carrying a
+ * proposal, and the three directions it offers are the same three every
+ * time. An Answer here would be a Question the agent never asked and would
+ * have to be excluded from every rule that counts them.
+ *
+ * Picking is the whole of accepting the proposal. Every other way of
+ * answering sends it back — an answer in the human's own words, questions
+ * left open, anything without a pick — so `None` on a proposal Set is the
+ * human disagreeing, and `None` anywhere else is every ordinary Response.
+ */
+direction?: Direction | null, };
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.
@@ -1177,7 +1267,20 @@ diagrams: boolean,
  * so it travels with the Set rather than being fetched once the page is
  * already up.
  */
-standing: Standing, };
+standing: Standing, 
+/**
+ * The wrap-up proposal this Set carries, on the one Set that carries one.
+ *
+ * What the page draws the direction chooser from: the recommendation to
+ * mark, and the reasoning to put beside the three choices. `null` on every
+ * ordinary Set, which is what leaves the chooser off it.
+ *
+ * It travels with the Set rather than being looked up beside it for the
+ * reason the Conversation does: the decision and what it is a decision
+ * about arrive together, so the page never draws the Questions above a
+ * chooser that has not turned up yet.
+ */
+proposal: ProposalView | null, };
 
 /**
  * What the server says down a live Screen's socket.
@@ -1320,12 +1423,16 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What a tool answered.
  */
 export type ToolResult = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, 
 /**
  * Whether the tool failed.
  */
@@ -1339,6 +1446,10 @@ text: string, };
  * A tool call, as one line plus what it was called with.
  */
 export type ToolUse = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, 
 /**
  * What the tool is called.
  */
@@ -1368,13 +1479,22 @@ bookkeeping: Array<Bookkeeping>, };
 
 /**
  * One thing that was said, or done, or put.
+ *
+ * Flat on the wire — `{"id": 3, "kind": "Prose", "html": "…"}` — rather than
+ * wrapped in the variant's name, because the viewer reconciles turns by `id`
+ * and reconcile reads its key off the element itself: an id one level down
+ * would match nothing and fall back to matching by position, silently.
  */
-export type Turn = { "Prose": Prose } | { "Reasoning": Reasoning } | { "ToolUse": ToolUse } | { "ToolResult": ToolResult } | { "Put": Put } | { "Unread": Unread };
+export type Turn = { "kind": "Prose" } & Prose | { "kind": "Reasoning" } & Reasoning | { "kind": "ToolUse" } & ToolUse | { "kind": "ToolResult" } & ToolResult | { "kind": "Put" } & Put | { "kind": "Unread" } & Unread;
 
 /**
  * A line nothing here knows how to draw.
  */
-export type Unread = { line: string, };
+export type Unread = { 
+/**
+ * The turn's place in the conversation, counted from 1.
+ */
+id: number, line: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

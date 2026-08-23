@@ -25,7 +25,6 @@
     "name": "opus"
   },
   "pinned": [],
-  "proposal": null,
   "ready_to_grill": false,
   "repo": {
     "default_branch": "main",
@@ -174,6 +173,7 @@
       }
     }
   ],
+  "working": false,
   "worktree": {
     "missing": false,
     "path": "/var/lib/verkstead/worktrees/verkstead-outbound-retries"

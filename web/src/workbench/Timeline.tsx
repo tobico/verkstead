@@ -1,7 +1,7 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
 //! The kinds of Event so far — the Brief, a move, what a session printed, a
-//! Question Set, the direction the human chose, the handoff, and the commits a
+//! Question Set, the handoff, and the commits a
 //! session lands on the branch — drawn as a list of Events rather than as a
 //! Brief with a list under it. The stages after this one put interruptions on
 //! the same list.
@@ -19,24 +19,25 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! Two of them live there, one per state — `Start grilling` under the Brief it
-//! will freeze, and the direction chooser under the proposal that ended the
-//! grilling. Aborting is in neither place and not in the list: it is not a step
+//! One of them lives there — `Start grilling` under the Brief it will freeze.
+//! Aborting is in neither place and not in the list: it is not a step
 //! in the work but a way of ending it, so it hangs off the header behind a menu,
 //! where a destructive action is not one stray click away.
 //!
-//! Nothing here ends the grilling. That is the agent's own closing move — a
-//! marked Question Set, answered — which is why the chooser appears without any
-//! button on this page having been pressed.
+//! Nothing here ends the grilling, and nothing here chooses a direction. That is
+//! the agent's own closing move — a Question Set carrying a proposal, with the
+//! chooser drawn on the Set itself — so both happen on the page the Set is
+//! answered on and land here as the answered Set.
 
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import {
   abortConversation,
-  chooseDirection,
+  listProfiles,
   saveBrief,
   startGrilling,
+  startManualTask,
 } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -45,12 +46,11 @@ import type {
   CommitEvent,
   ConversationAborted,
   ConversationView,
-  DirectedEvent,
-  Direction,
-  DirectionChosen,
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
+  ManualTaskEvent,
+  ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
   PullRequestEvent,
@@ -109,30 +109,30 @@ export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
     "The worktree could not be removed, so nothing was changed. The server log says why.",
 };
 
-/// And each way of being refused a direction.
-export const DIRECTION_REFUSAL: Record<DirectionChosen, string> = {
-  Chosen: "",
-  NoSuchConversation: "This conversation is gone.",
-  NotChoosing:
-    "This conversation is not choosing a direction — the grilling has not proposed wrapping up, or the work is past this point.",
-};
-
-/// What each direction is called, wherever one is named: on a button in the
-/// chooser, and in the line the timeline gives the choice afterwards.
+/// And each way of being refused a manual task.
 ///
-/// One record for both, so the thing the human pressed and the thing they read
-/// back cannot come to be called different things.
-export const DIRECTION: Record<Direction, string> = {
-  inline: "Implement inline",
-  "task-list": "Break into a task list",
-  roadmap: "Stage a roadmap",
+/// `AlreadyRunning` is the one worth reading twice: the composer is drawn
+/// wherever nothing is running, so a submit that arrives to find something
+/// running was pressed against a page a moment out of date. Nothing is queued,
+/// because an instruction written against a worktree that has since moved may no
+/// longer be the thing to do.
+export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
+  Started: "",
+  NoSuchConversation: "This conversation is gone.",
+  NowhereToWork:
+    "This conversation has no worktree to run in — start the grilling first.",
+  AlreadyRunning:
+    "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
+  EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
+  NoSuchProfile: "That profile has been removed.",
+  NotStarted:
+    "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
 /// What a move reads as. The state moved *to*, said as something that happened.
 const MOVED: Record<Lifecycle, string> = {
   Draft: "Went back to drafting",
   Grilling: "Started grilling",
-  Direction: "Moved to choosing a direction",
   Implementing: "Started implementing",
   Wrapping: "Moved to wrapping up",
   Done: "Finished",
@@ -207,14 +207,14 @@ export function Timeline(props: {
                 <Match when={"Moved" in event && event.Moved}>
                   {(moved) => <Moved moved={moved()} />}
                 </Match>
-                <Match when={"Directed" in event && event.Directed}>
-                  {(directed) => <Directed directed={directed()} />}
-                </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => <Handoff handoff={handoff()} />}
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
                   {(notice) => <Notice notice={notice()} />}
+                </Match>
+                <Match when={"ManualTask" in event && event.ManualTask}>
+                  {(manual) => <ManualTask manual={manual()} />}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -284,8 +284,181 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      <DirectionChooser conversation={props.conversation} />
+      {/* And under that, the way to move the conversation by hand. It is not
+          one of the two above — neither is it for one state, nor is it the one
+          thing there is to do from here. It is what is offered *whenever
+          nothing is running*, which is a quiet moment between steps as much as
+          it is a run that has stopped, so it sits below whichever of the two is
+          drawn rather than instead of it. */}
+      <ManualTaskComposer conversation={props.conversation} />
     </>
+  );
+}
+
+/// The way to move a conversation by hand: an instruction, a profile to run it
+/// under, and a submit.
+///
+/// Drawn whenever there is a worktree to run in, the conversation is neither
+/// drafting nor aborted, and no session is registered for it. That is the
+/// literal rule and it is deliberate: the gaps between an unattended run's
+/// steps, a wrapping lull, a grilling waiting on a pick, a finished
+/// conversation and a run stopped on an interruption all show it, because the
+/// point of it is to get a stuck conversation moving. After a server restart
+/// nothing is running anywhere, so it shows everywhere, and that is wanted too.
+///
+/// Drafting and aborted are the two states with no worktree, so those are the
+/// two it is never offered in — there is nowhere for a session to run.
+///
+/// The profile starts on the conversation's implementation one and picking
+/// another is one-off: it is what this task runs under, and it never becomes the
+/// conversation's own. Nothing here writes it back.
+function ManualTaskComposer(props: {
+  conversation: ConversationView;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [instruction, setInstruction] = createSignal("");
+  const [picked, setPicked] = createSignal<number | null>(null);
+  const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
+
+  /// The profile list, read here rather than passed down, the way the details
+  /// pane's pickers read it: the control is whole wherever it is drawn.
+  const profiles = useQuery(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+  }));
+
+  /// Which profile is selected: whatever the human picked, and the
+  /// conversation's implementation one until they pick anything.
+  const running = () =>
+    picked() ?? props.conversation.implementation_profile?.id ?? null;
+
+  /// Whether the composer belongs on this conversation at all.
+  const offered = () =>
+    props.conversation.worktree !== null &&
+    props.conversation.state !== "Draft" &&
+    props.conversation.state !== "Aborted" &&
+    !props.conversation.working;
+
+  const submit = useMutation(() => ({
+    mutationFn: (profileId: number) =>
+      startManualTask(props.conversation.id, instruction(), profileId),
+    onSuccess: (outcome: ManualTaskStarted) => {
+      if (outcome !== "Started") {
+        setRefused(outcome);
+        // Refused against a picture of the world this page read a moment ago:
+        // reading it again is both the correction and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        void queries.invalidateQueries({ queryKey: ["profiles"] });
+        return;
+      }
+
+      // It is on the timeline now, which is where it is read back from: the box
+      // is emptied so what is in it is always something not yet asked for.
+      setRefused(null);
+      setInstruction("");
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <Show when={offered()}>
+      <div class="manual-task-composer">
+        <h2>Do something by hand</h2>
+
+        <label for="manual-task">What should the agent do?</label>
+        {/* A copy of what has been typed gives the field its height — see
+            `.grow`, which the brief's field and an interruption's note use for
+            the same reason. */}
+        <div class="grow" data-value={instruction()}>
+          <textarea
+            id="manual-task"
+            rows="1"
+            placeholder="Rebase this onto main and force-push"
+            value={instruction()}
+            onInput={(ev) => {
+              setInstruction(ev.currentTarget.value);
+              setRefused(null);
+            }}
+          />
+        </div>
+
+        {/* Drawn only once the list is here, the way the details pane's pickers
+            are: a select whose value is set before its options exist is a
+            select showing nothing. */}
+        <div class="manual-task-profile">
+          <label for="manual-task-profile">Run it as</label>
+          <Show
+            when={profiles.data}
+            fallback={
+              <p class="note">
+                {profiles.isError
+                  ? `Could not read the agent profiles: ${profiles.error?.message}`
+                  : "Reading the agent profiles…"}
+              </p>
+            }
+          >
+            {(saved) => (
+              <select
+                id="manual-task-profile"
+                value={running() === null ? "" : String(running())}
+                disabled={submit.isPending}
+                onChange={(ev) => {
+                  const chosen = Number(ev.currentTarget.value);
+                  if (chosen) {
+                    setPicked(chosen);
+                  }
+                }}
+              >
+                <Show when={running() === null}>
+                  <option value="">Not chosen</option>
+                </Show>
+                <For each={saved()}>
+                  {(profile) => (
+                    <option value={profile.id}>
+                      {profile.name} — {profile.model}
+                    </option>
+                  )}
+                </For>
+              </select>
+            )}
+          </Show>
+        </div>
+
+        <button
+          type="button"
+          class="start-manual-task"
+          disabled={
+            submit.isPending ||
+            instruction().trim() === "" ||
+            running() === null
+          }
+          onClick={() => {
+            const profileId = running();
+            if (profileId !== null) {
+              submit.mutate(profileId);
+            }
+          }}
+        >
+          {submit.isPending ? "Starting…" : "Set it going"}
+        </button>
+
+        <p class="note">
+          One session, outside the grilling and the implementation. Nothing about
+          the conversation moves — what it leaves behind is what it commits.
+        </p>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{MANUAL_TASK_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={submit.isError}>
+          <p class="error">
+            The manual task could not be started: {submit.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
   );
 }
 
@@ -452,20 +625,6 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
   );
 }
 
-/// The direction the human chose, said in a line.
-///
-/// A line and not a card, like a move, and for the same reason: there is nothing
-/// to it but the fact and the time. It sits below the move into Direction rather
-/// than replacing it — the move says the choosing began and this says how it came
-/// out, and a human who changed their mind has both on the record.
-function Directed(props: { directed: DirectedEvent }): JSX.Element {
-  return (
-    <p class="directed" classList={{ [props.directed.direction]: true }}>
-      Chose to {DIRECTION[props.directed.direction].toLowerCase()}
-    </p>
-  );
-}
-
 /// The handoff the grilling wrote on its way out.
 ///
 /// A card and not a line, because it is a document: what the grilling settled,
@@ -497,6 +656,28 @@ function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
 /// prose around it.
 function Notice(props: { notice: NoticeEvent }): JSX.Element {
   return <div class="notice markdown" innerHTML={props.notice.html} />;
+}
+
+/// What the human asked for by hand: the instruction a Manual Task was set
+/// going with.
+///
+/// A card and not a line, unlike the notice above it: it is what somebody asked
+/// for in their own words, and the words are the whole of it. Read-only, like
+/// the handoff — it is a moment on the record rather than a document to go back
+/// to, and what a second thought produces is a second Manual Task.
+///
+/// What the session it started went on to do is not drawn here. That arrives as
+/// the events any work arrives as — what it printed, what it asked, what it
+/// committed — under this one and in the order it happened.
+function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+  return (
+    <article class="manual-task">
+      <div class="event-head">
+        <h2>Manual task</h2>
+      </div>
+      <div class="markdown" innerHTML={props.manual.html} />
+    </article>
+  );
 }
 
 /// A move: the Conversation changing hands, said in a line.
@@ -736,140 +917,6 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show when={start.isError}>
           <p class="error">
             The grilling could not be started: {start.error?.message}
-          </p>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
-/// The three ways the work can be built, in the order the design names them.
-///
-/// All three run. Each starts as soon as it is chosen — the press is the choice
-/// and the start together — and what differs is which pipeline it sets going.
-const DIRECTIONS: { direction: Direction; note: string }[] = [
-  {
-    direction: "inline",
-    note: "One fresh session under the implementation profile, primed with the handoff. Starts as soon as you choose it.",
-  },
-  {
-    direction: "task-list",
-    note: "Broken into .tasks/ in the worktree by a session of its own, then one fresh session per task. Starts as soon as you choose it.",
-  },
-  {
-    direction: "roadmap",
-    note: "Staged under docs/roadmaps/ by a session of its own, a feature per stage. Starts as soon as you choose it.",
-  },
-];
-
-/// Where the grilling hands over: what the agent proposed, and the human's
-/// choice of how the work gets built.
-///
-/// Drawn only while the conversation is choosing. What moved it here was the
-/// grilling's closing question set being answered — there is no button for that,
-/// which is the whole point of the agent proposing rather than the human
-/// declaring.
-///
-/// The recommendation is marked rather than preselected. Nothing is chosen until
-/// the human presses something, and a control that arrived already set would be
-/// the agent deciding in their place.
-function DirectionChooser(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<DirectionChosen | null>(null);
-
-  const choose = useMutation(() => ({
-    mutationFn: (direction: Direction) =>
-      chooseDirection(props.conversation.id, direction),
-    onSuccess: (outcome: DirectionChosen) => {
-      if (outcome !== "Chosen") {
-        setRefused(outcome);
-        // Refused against a picture of the world this page read a moment ago:
-        // reading it again is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
-        return;
-      }
-
-      setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-    },
-  }));
-
-  /// Whether this direction is the one the grilling recommended.
-  const recommended = (direction: Direction) =>
-    props.conversation.proposal?.direction === direction;
-
-  return (
-    <Show when={props.conversation.state === "Direction"}>
-      <div class="direction-chooser">
-        <h2>How should this be built?</h2>
-
-        {/* The agent's reasoning, which is what the human is deciding against.
-            A conversation that reached Direction some other way has none, and
-            says so rather than drawing an empty box. */}
-        <Show
-          when={props.conversation.proposal}
-          fallback={
-            <p class="empty">
-              The grilling left no recommendation, so this is an open choice.
-            </p>
-          }
-        >
-          {(proposal) => (
-            <div
-              class="proposal markdown"
-              innerHTML={proposal().rationale_html}
-            />
-          )}
-        </Show>
-
-        <ul class="directions">
-          <For each={DIRECTIONS}>
-            {(offered) => (
-              <li
-                classList={{
-                  recommended: recommended(offered.direction),
-                  chosen: props.conversation.direction === offered.direction,
-                }}
-              >
-                <button
-                  type="button"
-                  class="direction"
-                  disabled={choose.isPending}
-                  aria-pressed={props.conversation.direction === offered.direction}
-                  onClick={() => choose.mutate(offered.direction)}
-                >
-                  {DIRECTION[offered.direction]}
-                </button>
-                <Show when={recommended(offered.direction)}>
-                  <span class="mark">Recommended</span>
-                </Show>
-                <p class="note">{offered.note}</p>
-              </li>
-            )}
-          </For>
-        </ul>
-
-        {/* What was chosen, said where it was chosen — which is only read when
-            the session that should have followed never started. Both runnable
-            directions take the conversation past this chooser, so a chooser
-            still drawing one is a launch that did not happen. Saying so is
-            better than a button that looks broken. */}
-        <Show when={props.conversation.direction}>
-          {(direction) => (
-            <p class="note chosen-note">
-              Chosen: {DIRECTION[direction()].toLowerCase()}. Nothing started
-              off it — press again.
-            </p>
-          )}
-        </Show>
-
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{DIRECTION_REFUSAL[outcome()]}</p>}
-        </Show>
-        <Show when={choose.isError}>
-          <p class="error">
-            The direction could not be chosen: {choose.error?.message}
           </p>
         </Show>
       </div>

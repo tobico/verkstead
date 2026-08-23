@@ -141,6 +141,12 @@ export function outline(set: SetView): Section[] {
     })),
   });
 
+  // Under the Questions, where the chooser is drawn — on the one Set that
+  // carries a proposal, and on no other.
+  if (set.proposal !== null) {
+    sections.push({ anchor: "direction", name: "Direction", entries: [] });
+  }
+
   const close = closes(set);
   if (close !== null) {
     sections.push({ anchor: "postscript", name: close, entries: [] });

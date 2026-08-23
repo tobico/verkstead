@@ -24,13 +24,16 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-j
 import type {
   Answer,
   AskView,
+  Direction,
   Liveness,
   OptionView,
+  ProposalView,
   QuestionView,
   Response,
   SetView,
 } from "../api/types";
 import { setWrapping, wrapping } from "../device";
+import { DIRECTION, DIRECTIONS } from "../directions";
 import { Answering } from "./Answering";
 import { AskText } from "./AskText";
 import { Contents, PageHeader, navigation } from "./Contents";
@@ -237,6 +240,7 @@ export function Sheet(props: {
             id={props.set.id}
             questions={props.set.questions}
             postscript={props.set.postscript_html}
+            proposal={props.set.proposal}
           />
         }
       >
@@ -244,6 +248,7 @@ export function Sheet(props: {
           questions={props.set.questions}
           response={response()}
           postscript={props.set.postscript_html}
+          proposal={props.set.proposal}
         />
       </Show>
     </>
@@ -261,6 +266,7 @@ function Questions(props: {
   questions: QuestionView[];
   response: Response | null;
   postscript: string | null;
+  proposal: ProposalView | null;
 }): JSX.Element {
   /// A Set that settled with no Response behind it, which is the one standing
   /// that was never answered by anybody.
@@ -308,6 +314,15 @@ function Questions(props: {
           )}
         </For>
       </ol>
+      {/* What became of the chooser, on the one Set that carried a proposal:
+          the same three, with the recommendation still marked and the pick
+          beside it. What was turned down is half of the decision here as it is
+          on an Option. */}
+      <Show when={props.proposal}>
+        {(proposal) => (
+          <Chosen proposal={proposal()} picked={props.response?.direction ?? null} />
+        )}
+      </Show>
       {/* Drawn whether or not anything came back in the box: the Postscript is
           what the agent closed with, so it belongs above the comment on a Set
           that has one and above where the comment would have been on a Set that
@@ -328,6 +343,55 @@ function Questions(props: {
         </Postscript>
       </Show>
     </>
+  );
+}
+
+/// The direction chooser as the record of what was decided: the three that were
+/// offered, the one the agent recommended, and the one the human picked.
+///
+/// The two marks are the two an Option's record carries, and are as deliberately
+/// different to read: the ★ is what was suggested and the outline is what was
+/// decided. A Set that went back with nothing picked says so in a line — that is
+/// the proposal refused, which is a decision as much as accepting it was, and a
+/// record showing three unmarked directions would read as a page whose answer
+/// failed to arrive.
+function Chosen(props: {
+  proposal: ProposalView;
+  picked: Direction | null;
+}): JSX.Element {
+  return (
+    <section class="direction-pick decided" id="direction">
+      <h2 class="section-heading">Direction</h2>
+      <div class="proposal markdown" innerHTML={props.proposal.rationale_html} />
+      <ul class="directions">
+        <For each={DIRECTIONS}>
+          {(offered) => (
+            <li
+              class="direction"
+              classList={{
+                recommended: props.proposal.direction === offered,
+                chosen: props.picked === offered,
+              }}
+            >
+              <span class="direction-name">{DIRECTION[offered]}</span>
+              <Show when={props.proposal.direction === offered}>
+                <span class="star" title="the agent's Recommendation">
+                  ★
+                </span>
+              </Show>
+              <Show when={props.picked === offered}>
+                <span class="chose">chosen</span>
+              </Show>
+            </li>
+          )}
+        </For>
+      </ul>
+      <Show when={props.picked === null}>
+        <p class="semantics">
+          No direction was picked, so the proposal went back to the agent.
+        </p>
+      </Show>
+    </section>
   );
 }
 

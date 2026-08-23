@@ -25,7 +25,6 @@
     "name": "opus"
   },
   "pinned": [],
-  "proposal": null,
   "ready_to_grill": true,
   "repo": {
     "default_branch": "main",
@@ -44,5 +43,6 @@
       }
     }
   ],
+  "working": false,
   "worktree": null
 }

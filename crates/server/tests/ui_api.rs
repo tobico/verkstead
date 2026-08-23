@@ -244,6 +244,7 @@ fn confirmed_with_three_left_open() -> Response {
     Response {
         answers: vec![answered("Q1", Some(2)), left_open("Q2a"), left_open("Q2b")],
         comment: None,
+        direction: None,
     }
 }
 
@@ -253,6 +254,7 @@ fn decided() -> Response {
     Response {
         answers: QUESTIONS.iter().map(|label| left_open(label)).collect(),
         comment: Some("Neither — why is this not just a cache in front?".to_owned()),
+        direction: None,
     }
 }
 
@@ -585,6 +587,7 @@ async fn a_response_that_misses_a_question_comes_back_naming_it() {
     let short = Response {
         answers: vec![answered("Q1", Some(1)), left_open("Q2a")],
         comment: None,
+        direction: None,
     };
 
     let outcome: Submitted = post(

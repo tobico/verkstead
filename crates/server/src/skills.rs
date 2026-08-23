@@ -76,6 +76,10 @@ const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
 /// wrote it ever saw.
 const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
 
+/// And the manual-task skill's, which the one-off session a human sets going by
+/// hand runs inside — the one skill nothing in the pipeline ever launches.
+const MANUAL_TASK: &str = "~/.claude/skills/manual-task/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -162,6 +166,36 @@ pub(crate) fn grilling(brief: &str) -> String {
     )
 }
 
+/// And what a grilling relaunched on a stalled Conversation is started on: the
+/// same Brief, and under it whatever the human has already settled.
+///
+/// A grilling that died takes its interview with it — see [`crate::grillings`] —
+/// so the relaunch is a grilling from the beginning, which is what the Brief
+/// alone gives it. What the digest adds is the one part of an interview that
+/// outlives the session having it: the Questions that were asked and the Answers
+/// that came back.
+///
+/// Under the Brief, where the retry note goes and for its reason: the Brief says
+/// what the work is, and this says what has already been decided about it — the
+/// newer and the less general of the two, so it goes second. The note the human
+/// wrote goes after both, being newer and less general still.
+///
+/// A Conversation with nothing answered yet is the Brief and nothing else. A
+/// heading over an empty digest would tell the session that something had been
+/// said.
+pub(crate) fn grilling_again(brief: &str, settled: &str) -> String {
+    let settled = settled.trim();
+
+    if settled.is_empty() {
+        return grilling(brief);
+    }
+
+    format!(
+        "{}\n\n# What has already been asked, and what I said\n\n{settled}\n",
+        grilling(brief).trim_end(),
+    )
+}
+
 /// What an inline implementation session is started on: the two documents it is
 /// building from, under the line that sends the agent into the implementation
 /// skill.
@@ -183,38 +217,40 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
-/// What a task-list session is started on: the same two documents, under the
-/// line that sends the agent into the breakdown skill instead.
+/// What a retried task-list tail is started on: the Brief, under the line that
+/// sends the agent into the breakdown skill.
 ///
-/// The same documents because it is the same work, read for a different purpose:
-/// this session is not building it but deciding how it splits, and a breakdown
-/// drawn from anything less than what the grilling settled would be a backlog for
-/// some other piece of work.
-pub(crate) fn breaking_down(brief: &str, handoff: Option<&str>) -> String {
+/// One document rather than two, unlike the sessions that build. A task list
+/// writes no handoff — the backlog *is* what the grilling settled, committed to
+/// the branch — so there is never one for this to carry. The ordinary way into
+/// the breakdown is the grilling session reading on with the whole thread still
+/// in its context and no prompt sent at all; this is the retry, which grounds
+/// itself in the Brief, the repository, and whatever the human wrote when they
+/// asked for the tail to be run again.
+pub(crate) fn breaking_down(brief: &str) -> String {
     on_the_documents(
         &format!(
             "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
         ),
         brief,
-        handoff,
+        None,
     )
 }
 
-/// What a roadmap session is started on: the same two documents again, under
-/// the line that sends the agent into the staging fork.
+/// What a retried roadmap tail is started on: the Brief again, under the line
+/// that sends the agent into the staging fork.
 ///
-/// The same documents for the reason the breakdown gets them: it is the same
-/// work, read for a different purpose again. This session is not building it and
-/// not slicing it into one feature's tasks, but deciding where the *features*
-/// fall — and a staging drawn from anything less than what the grilling settled
-/// would be a roadmap for some other piece of work.
-pub(crate) fn staging(brief: &str, handoff: Option<&str>) -> String {
+/// One document for the reason the breakdown gets one, one level up: the stage
+/// briefs are what the grilling settled, and nothing crosses out of this
+/// Conversation that has to be told anything else. The ordinary way in is the
+/// grilling session reading on; this is the retry.
+pub(crate) fn staging(brief: &str) -> String {
     on_the_documents(
         &format!(
             "Read {STAGING} and stage the work described below into a roadmap, the way it says."
         ),
         brief,
-        handoff,
+        None,
     )
 }
 
@@ -326,6 +362,26 @@ pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> 
     )
 }
 
+/// What a Manual Task's session is started on: the instruction the human typed,
+/// under the line that sends the agent into the manual-task skill.
+///
+/// The instruction and nothing else — alone among these, no Brief and no
+/// handoff. A Manual Task is outside the pipeline in every sense: it is not a
+/// slice of the work the two documents describe, and a session primed with them
+/// would be one told that the thing it was asked to do was part of something
+/// else. What the human typed is the whole of what they meant.
+///
+/// It goes last and whole, where every other prompt's last thing goes: it is
+/// the human's own markdown, and nothing here interprets it.
+pub(crate) fn manual_task(instruction: &str) -> String {
+    format!(
+        "Read {MANUAL_TASK} and do what I have asked for below, the way it says. \
+         Nothing else in this session tells you how to reach me.\n\n\
+         # What I have asked for\n\n{}\n",
+        instruction.trim()
+    )
+}
+
 /// The same prompt, with what the human said when they asked for the step to be
 /// tried again.
 ///
@@ -426,6 +482,93 @@ mod tests {
         );
     }
 
+    /// A pick lets the session proceed and never makes it, so the skill has to
+    /// say what proceeding *is* and what the way back is.
+    ///
+    /// Nothing enforces this end of it. Verkstead watches for the picked
+    /// direction's artifact and for nothing else, so a session that answered a
+    /// pick by writing one of the other two would have decided the direction in
+    /// the human's place — and the only thing standing between it and that is
+    /// the skill saying so.
+    #[test]
+    fn the_grilling_skill_says_a_pick_is_argued_with_by_proposing_again() {
+        let grilling = skill("grilling/SKILL.md");
+
+        let (_, after) = grilling
+            .split_once("### After they pick")
+            .expect("what a pick means is a thing the skill carries");
+        let (picked, _) = after
+            .split_once("### When they pick inline")
+            .expect("with the three branches after it");
+
+        assert!(
+            picked.contains("does not make you"),
+            "a pick lets the session proceed and never makes it: {picked}"
+        );
+        assert!(
+            picked.contains("propose again") || picked.contains("Propose again"),
+            "and the way to argue with one is another proposal: {picked}"
+        );
+        assert!(
+            picked.contains("never do"),
+            "which leaves writing a different artifact as the thing it may not \
+             do — the decision the chooser exists to take out of its hands: \
+             {picked}"
+        );
+        assert!(
+            !grilling.contains("on one Set and no others"),
+            "and a proposal is no longer one-per-grilling: a refused round is \
+             followed by another, and so is a pick that leaves something open: \
+             {grilling}"
+        );
+    }
+
+    /// A task-list pick does not end the grilling: the same session writes the
+    /// backlog, holding everything the grilling settled. Nothing else tells it so
+    /// — no second prompt is sent, because no second session is started — so the
+    /// skill it is already inside has to carry the branch and name the skill it
+    /// reads on into.
+    #[test]
+    fn the_grilling_skill_says_to_break_the_work_down_where_a_task_list_is_picked() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains(BREAKING_DOWN),
+            "the branch is a skill to read, named by the path the sandbox mounts it at: \
+             {grilling}"
+        );
+        assert!(
+            grilling.contains("Do not start\ntask 01"),
+            "the backlog is where this session stops: the tasks are the runner's, \
+             a fresh session each: {grilling}"
+        );
+    }
+
+    /// Nor does a roadmap pick, and for the same reason one level up: the stage
+    /// briefs are worth what the context that settled them can put in them. Same
+    /// branch to carry, and one thing more to say — this tail goes past the
+    /// artifact to the pull request, where the breakdown's stops at the commit.
+    #[test]
+    fn the_grilling_skill_says_to_stage_the_work_where_a_roadmap_is_picked() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains(STAGING),
+            "the branch is a skill to read, named by the path the sandbox mounts it at: \
+             {grilling}"
+        );
+        assert!(
+            grilling.contains("pull request"),
+            "and this one carries the branch the rest of the way, which the session \
+             has to know before it stops at the commit: {grilling}"
+        );
+        assert!(
+            grilling.contains("Do not start stage 01"),
+            "the roadmap is where this session stops: each stage is a Conversation of \
+             its own, on a branch of its own: {grilling}"
+        );
+    }
+
     /// A session is pointed at the skill by the prompt, and nothing else in the
     /// sandbox says what it is for.
     #[test]
@@ -445,6 +588,11 @@ mod tests {
     /// The handoff is the whole reason an inline implementation is a fresh
     /// session, so the skill that ends a grilling has to say where it goes —
     /// and it is the path the sandbox mounts, not one an agent may improvise.
+    ///
+    /// On the far side of the pick, which is the other half of it: an inline
+    /// pick is what the handoff is written *for*, and one written before the
+    /// closing Set would be handing over an understanding the human had not yet
+    /// answered.
     #[test]
     fn the_grilling_skill_says_where_the_handoff_is_written() {
         let grilling = skill("grilling/SKILL.md");
@@ -457,6 +605,47 @@ mod tests {
             grilling.contains("handoff"),
             "and call it what the Timeline and the workbench call it"
         );
+
+        let (before, after) = grilling
+            .split_once("### When they pick inline")
+            .expect("the inline pick is a branch the skill carries");
+
+        assert!(
+            !before.contains(crate::handoffs::HANDOFF_INSIDE),
+            "nothing is written before the pick: a refused proposal would cost a \
+             rewrite, and the Set is meant to be cheap to send — {before}"
+        );
+        assert!(
+            after.contains(crate::handoffs::HANDOFF_INSIDE),
+            "and the inline branch is where it is written: {after}"
+        );
+    }
+
+    /// And the other two pick no handoff up at all. What they settle is the
+    /// artifact they commit, so a handoff on either path would be a second
+    /// record of the plan that nothing downstream reads.
+    #[test]
+    fn the_grilling_skill_writes_no_handoff_on_the_picks_that_commit_one() {
+        let grilling = skill("grilling/SKILL.md");
+
+        let (_, tails) = grilling
+            .split_once("### When they pick a task list")
+            .expect("the task-list pick is a branch the skill carries");
+
+        let (task_list, rest) = tails
+            .split_once("### When they pick a roadmap")
+            .expect("and the roadmap pick is the one after it");
+        let (roadmap, _) = rest
+            .split_once("### When they don't accept")
+            .expect("with the refusal branch after that");
+
+        for (named, branch) in [("task list", task_list), ("roadmap", roadmap)] {
+            assert!(
+                !branch.contains(crate::handoffs::HANDOFF_INSIDE),
+                "a {named} pick writes the plan into the repository and no handoff \
+                 anywhere: {branch}"
+            );
+        }
     }
 
     /// No gate anywhere in the implementation: the agent commits on its own,
@@ -519,6 +708,30 @@ mod tests {
             !breaking_down.contains("/next-task") && !breaking_down.contains("/clear"),
             "nobody is at a terminal to run a slash command, and Verkstead runs the \
              backlog itself: {breaking_down}"
+        );
+    }
+
+    /// Two sessions can be reading this: the grilling one carrying on from the
+    /// pick, and a fresh one launched because that tail was retried. They differ
+    /// in what the reader has to ground itself in — its own conversation, or the
+    /// Brief and the repository — so the skill has to say both.
+    #[test]
+    fn the_breakdown_skill_works_from_both_ways_in() {
+        let breaking_down = skill("breaking-down/SKILL.md");
+
+        assert!(
+            breaking_down.contains("the grilling session, reading on"),
+            "the ordinary way in is the session that settled the work carrying on: \
+             {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("a fresh session"),
+            "and the other is a retried tail: {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("there is no handoff document"),
+            "which is grounded in the Brief, the repository and the retry note — a \
+             task list writes no handoff for it to have been handed: {breaking_down}"
         );
     }
 
@@ -634,6 +847,30 @@ mod tests {
         );
     }
 
+    /// Two sessions can be reading this one too: the grilling session carrying on
+    /// from the pick, and a fresh one launched because that tail was retried.
+    /// They differ in what the reader has to ground itself in, so the skill has
+    /// to say both.
+    #[test]
+    fn the_staging_skill_works_from_both_ways_in() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("the grilling session, reading on"),
+            "the ordinary way in is the session that settled the work carrying on: \
+             {staging}"
+        );
+        assert!(
+            staging.contains("a fresh session"),
+            "and the other is a retried tail: {staging}"
+        );
+        assert!(
+            staging.contains("there is no handoff document"),
+            "which is grounded in the Brief, the repository and the retry note — a \
+             roadmap writes no handoff for it to have been handed: {staging}"
+        );
+    }
+
     /// The stage list is the human's decision to make, and it reaches them the
     /// only way anything does.
     #[test]
@@ -651,14 +888,11 @@ mod tests {
         );
     }
 
-    /// The same two documents, into the third skill. What differs is the line
-    /// above them, which is the whole of what sends a session one way or another.
+    /// The Brief, into the third skill. What differs is the line above it, which
+    /// is the whole of what sends a session one way or another.
     #[test]
-    fn a_roadmap_session_is_started_on_the_same_documents_inside_the_fork() {
-        let prompt = staging(
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-        );
+    fn a_roadmap_session_is_started_on_the_brief_inside_the_fork() {
+        let prompt = staging("# Rate limiting\n\nThe API has none.\n");
 
         assert!(
             prompt.contains(STAGING),
@@ -669,8 +903,12 @@ mod tests {
             "and nothing sends this session to build or slice the work instead: {prompt:?}"
         );
         assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
+            prompt.contains("The API has none."),
+            "the Brief goes in whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "and nothing is said about a document a roadmap never has: {prompt:?}"
         );
     }
 
@@ -1132,15 +1370,11 @@ mod tests {
         );
     }
 
-    /// The same two documents, into the other skill. What differs is the line
-    /// above them, which is the whole of what sends a session one way or the
-    /// other.
+    /// The Brief, into the other skill. What differs is the line above it, which
+    /// is the whole of what sends a session one way or the other.
     #[test]
-    fn a_breakdown_session_is_started_on_the_same_documents_inside_the_fork() {
-        let prompt = breaking_down(
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-        );
+    fn a_breakdown_session_is_started_on_the_brief_inside_the_fork() {
+        let prompt = breaking_down("# Rate limiting\n\nThe API has none.\n");
 
         assert!(
             prompt.contains(BREAKING_DOWN),
@@ -1151,8 +1385,146 @@ mod tests {
             "and nothing sends this session to build the work instead: {prompt:?}"
         );
         assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
+            prompt.contains("The API has none."),
+            "the Brief goes in whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "and nothing is said about a document a task list never has: {prompt:?}"
+        );
+    }
+
+    /// What a manual task's session has to leave behind, and the gate it does
+    /// not stop at — the same two things every other working skill here says,
+    /// because it is implementation-flavoured rather than grilling-flavoured.
+    #[test]
+    fn the_manual_task_skill_says_to_commit_without_asking() {
+        let manual_task = skill("manual-task/SKILL.md");
+
+        assert!(
+            manual_task.contains("git commit"),
+            "committing what it changed is how a manual task reports: {manual_task}"
+        );
+        assert!(
+            manual_task.contains("Nothing waits on approval"),
+            "and there is no gate in front of it, as there is in front of none: {manual_task}"
+        );
+        assert!(
+            !manual_task.contains("gh pr create"),
+            "what happens to the branch after a manual task is the human's to decide: \
+             {manual_task}"
+        );
+    }
+
+    /// The one thing this skill says differently from every other: it *may* ask,
+    /// and nothing compels it to. A manual task is usually one instruction that
+    /// already says what it means, and a session that asked about work it
+    /// understood would idle for hours over nothing.
+    #[test]
+    fn the_manual_task_skill_leaves_asking_to_the_agents_judgement() {
+        let manual_task = skill("manual-task/SKILL.md");
+
+        assert!(
+            manual_task.contains("verkstead guide") && manual_task.contains("verkstead ask"),
+            "the one way to the human, for an instruction that cannot be carried out as \
+             it stands: {manual_task}"
+        );
+        assert!(
+            manual_task.contains("may** put a Question Set")
+                && manual_task.contains("nothing here says you have to"),
+            "asking is offered rather than required: {manual_task}"
+        );
+        assert!(
+            !manual_task.contains("proposal:"),
+            "and this is not a grilling: the `proposal` block is a grilling's closing \
+             move, and a manual task is outside the pipeline altogether — {manual_task}"
+        );
+    }
+
+    /// The scope is the instruction and nothing beside it, which is what makes a
+    /// manual task reviewable against what the human actually typed.
+    #[test]
+    fn the_manual_task_skill_keeps_the_work_to_the_instruction() {
+        let manual_task = skill("manual-task/SKILL.md");
+
+        assert!(
+            manual_task.contains("Keep to what was asked"),
+            "anything else it notices is another manual task: {manual_task}"
+        );
+        assert!(
+            manual_task.contains("commit nothing"),
+            "and an instruction that changes no files is a manual task done rather than \
+             one failed: {manual_task}"
+        );
+    }
+
+    /// A manual session is put inside the skill the same way every other is, and
+    /// primed with the instruction *alone* — which is the one thing that makes
+    /// this prompt different from all of them.
+    #[test]
+    fn a_manual_session_is_started_on_the_instruction_and_nothing_else() {
+        let prompt = manual_task("Rebase this onto `main` and force-push.\n");
+
+        assert!(
+            prompt.contains(MANUAL_TASK),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("Rebase this onto `main` and force-push.\n"),
+            "and the instruction is what follows, whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("The Brief this started from")
+                && !prompt.contains("What the grilling settled"),
+            "neither document goes in: a manual task is not a slice of the work they \
+             describe — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(IMPLEMENTING) && !prompt.contains(NEXT_TASK),
+            "and nothing sends this session to build the work or work a task instead: \
+             {prompt:?}"
+        );
+    }
+
+    /// A grilling started again is the same grilling — the same skill and the
+    /// same Brief — with the log of what has already been settled under it, so
+    /// that it does not open by asking what the human answered yesterday.
+    #[test]
+    fn a_relaunched_grilling_is_told_what_has_already_been_settled() {
+        let prompt = grilling_again(
+            "# Rate limiting\n\nThe API has none.\n",
+            "## How it counts\n\n**Q1** Per key or per address?\n\nPer key\n",
+        );
+
+        assert!(
+            prompt.contains(GRILLING),
+            "it is a grilling, started the way every grilling is: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none."),
+            "on the Brief it was always about: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("# What has already been asked, and what I said"),
+            "under a heading that says what the digest is: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("**Q1** Per key or per address?\n\nPer key\n"),
+            "and the digest goes last, being the least general thing said: {prompt:?}"
+        );
+    }
+
+    /// And a grilling that died before its first Set came back is the Brief
+    /// alone. A heading over nothing would tell the session that something had
+    /// been said, which is exactly the thing this is for.
+    #[test]
+    fn a_relaunched_grilling_with_nothing_answered_is_started_on_the_brief_alone() {
+        let brief = "# Rate limiting\n\nThe API has none.\n";
+
+        assert_eq!(
+            grilling_again(brief, "   \n"),
+            grilling(brief),
+            "nothing is added to the prompt at all",
         );
     }
 

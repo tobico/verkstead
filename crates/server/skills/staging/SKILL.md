@@ -1,23 +1,39 @@
 ---
 name: staging
-description: Write a staged roadmap under docs/roadmaps/ from settled work, and carry the branch to a pull request. Use when a Conversation's direction is a staged roadmap, and the session is primed with a Brief and the handoff document the grilling wrote.
+description: Write a staged roadmap under docs/roadmaps/ from settled work, and carry the branch to a pull request. Use when a Conversation's direction is a staged roadmap — read on from the grilling that settled it, or in a fresh session primed with the Brief.
 ---
 
-Break the work described in the prompt — the Brief it started from, and the
-handoff document the grilling session wrote — into sequential **stages** under
-`docs/roadmaps/<name>/`, commit them, and get the branch onto a pull request.
+Break the settled work into sequential **stages** under `docs/roadmaps/<name>/`,
+commit them, and get the branch onto a pull request.
 
 A roadmap is to stages what a task list is to tasks, one level up: each stage is
 later one feature of its own, on a branch of its own, reviewed as a unit of its
 own. What you are deciding here is where those boundaries fall.
 
-The handoff is the agreement. Everything in it was settled with the human over a
-whole grilling, so it is the plan you are staging rather than a proposal to
-re-open.
-
 You start in a worktree of the repository, on a branch of its own. The branch is
 already made and this is already the work: there is nothing to create, nothing to
 switch to, and no other plan in flight to check for.
+
+## Where the agreement is
+
+Two ways in, differing only in where what was settled is written down.
+
+**You are the grilling session, reading on.** The human picked `roadmap` on your
+closing Set, and the agreement is this conversation — you are the one who settled
+it. Trust your own context over any summary of it, and read what they wrote
+beside the pick as part of what the staging has to answer to. Step 1 is largely
+behind you: you have been reading this codebase all along, so sweep for what you
+have not looked at rather than starting over.
+
+**You are a fresh session.** The grilling that settled this work is over and its
+context is gone: the earlier attempt at this staging ended without a roadmap,
+and the human asked for it to be run again. The prompt carries the Brief and
+whatever they wrote alongside the retry, and there is no handoff document — what
+you have besides those is the repository. Ground the plan in it thoroughly
+before you draft anything, and put what you cannot settle from it to the human
+in the Set below rather than guessing.
+
+Either way, the direction is settled and the staging is what is left.
 
 ## Why briefs rather than task files
 
@@ -36,8 +52,8 @@ codebase moves. A roadmap splits the difference:
 Read the codebase before drafting anything. Stage titles and briefs should use
 the project's own vocabulary — its `CLAUDE.md`, its `CONTEXT.md` glossary if it
 has one, the ADRs under `docs/adr/` covering what you are touching — and the
-staging should match how the code is actually laid out rather than how the
-handoff imagined it.
+staging should match how the code is actually laid out rather than how the plan
+imagined it.
 
 If the plan's decisions are not already written down somewhere durable — a
 design document, the ADRs, `CONTEXT.md` — get them written first. Briefs
@@ -62,17 +78,18 @@ Split the effort into sequential stages. Each one must be:
 ## 3. Put the stage list to the human
 
 The staging is a decision they own, so it goes to them as an ordinary Question
-Set — the same blocking ask the grilling used, and the way described under *How
-the questions reach them* below.
+Set — the same blocking ask a grilling uses, and the way described under *How the
+questions reach them* below.
 
 Give the whole stage list in the Preface: each stage's title and a one-line
 goal. That is the context the questions are read against. Then ask about it:
 whether the boundaries and the order feel right, whether anything should be
 merged, split or reordered — plus whatever drift step 1 turned up.
 
-Iterate until they approve it. Every round is an ordinary Set: the direction is
-already settled, so there is no closing move to make here and nothing in this
-session ends anything.
+Iterate until they approve it. Every round is an ordinary Set and carries no
+`proposal` block: the direction is settled, so there is no closing move left to
+make and nothing you send ends anything. What ends this session is the pull
+request below.
 
 ## 4. Write the roadmap
 
@@ -184,7 +201,9 @@ the roadmap —
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
-was theirs. Then stop.
+was theirs. Then stop — that is also what ends this session: Verkstead sees the
+roadmap land, waits for you to go quiet, and takes the Conversation on to
+wrapping the pull request up.
 
 ## How the questions reach them
 

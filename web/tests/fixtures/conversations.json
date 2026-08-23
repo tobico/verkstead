@@ -3,30 +3,40 @@
     "branch": "task-runner",
     "id": 5,
     "repo": "verkstead",
-    "state": "Implementing"
+    "state": "Implementing",
+    "waiting": false,
+    "working": false
   },
   {
     "branch": "usage-limits",
     "id": 4,
     "repo": "verkstead",
-    "state": "Direction"
+    "state": "Implementing",
+    "waiting": false,
+    "working": false
   },
   {
     "branch": "outbound-retries",
     "id": 3,
     "repo": "verkstead",
-    "state": "Grilling"
+    "state": "Grilling",
+    "waiting": true,
+    "working": false
   },
   {
     "branch": "amber-kestrel",
     "id": 2,
     "repo": "askance",
-    "state": "Draft"
+    "state": "Draft",
+    "waiting": false,
+    "working": false
   },
   {
     "branch": "rate-limiting",
     "id": 1,
     "repo": "verkstead",
-    "state": "Draft"
+    "state": "Draft",
+    "waiting": false,
+    "working": false
   }
 ]
