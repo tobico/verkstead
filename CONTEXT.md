@@ -121,6 +121,16 @@ Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
+**Commit Summary**:
+The agent-written account a code commit carries as its message body — a delta
+Diagram first, prose after — kept by the sweep with its trailers stripped,
+rendered above the diff in the commit's details pane, and clamped to a prose
+snippet on its Timeline card. Written for commits that deliver work; pure
+bookkeeping commits carry none, and a commit without one draws as it always
+did.
+_Avoid_: commit message (the summary is its body, not the whole), description,
+gate summary (the gate is gone), changelog entry
+
 **Notice**:
 The one kind of Event Verkstead writes on its own account: which Stage it
 started and where that Stage's branch went, or that a roadmap has no Stage left
