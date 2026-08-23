@@ -36,6 +36,7 @@ import {
 } from "../api/client";
 import type { ConversationEntry, Started } from "../api/types";
 import { useReading } from "../freshness";
+import { Picker } from "../picking";
 
 export function Conversations(props: {
   selected: string;
@@ -119,15 +120,21 @@ export function Conversations(props: {
             >
               <label for="against">New conversation in</label>
               <div class="start-conversation-line">
-                <select
+                {/* A [`Picker`] rather than a `<select>`, so what this shows and
+                    what the press below sends are the same repository even when
+                    the list moved under it — see `src/picking.tsx`. */}
+                <Picker
                   id="against"
-                  value={chosen()}
-                  onChange={(ev) => setAgainst(ev.currentTarget.value)}
-                >
-                  <For each={registered()}>
-                    {(repo) => <option value={repo.id}>{repo.name}</option>}
-                  </For>
-                </select>
+                  options={registered()}
+                  value={(repo) => String(repo.id)}
+                  label={(repo) => repo.name}
+                  chosen={chosen()}
+                  pick={setAgainst}
+                  // The Repo that was picked is gone from the list: the choice
+                  // goes with it, and `chosen` falls back to the first row that
+                  // is left — which is the state this box opened in.
+                  gone={() => setAgainst("")}
+                />
                 <button type="submit" disabled={start.isPending}>
                   Start
                 </button>

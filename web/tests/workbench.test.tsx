@@ -12,9 +12,7 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { MemoryRouter, Route, createMemoryHistory } from "@solidjs/router";
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
-import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
+import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -28,10 +26,8 @@ import type {
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
-  ProfileEntry,
   PullRequestDetails,
   RemedySettled,
-  RepoEntry,
   Screen,
   Shown,
   SetView,
@@ -42,17 +38,21 @@ import type {
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import { MANUAL_TASK_REFUSAL } from "../src/workbench/Timeline";
-import { Workbench } from "../src/workbench/Workbench";
+import {
+  OPEN,
+  PROFILES,
+  REPOS,
+  SIDEBAR,
+  drawn,
+  mount,
+  theWorkbench,
+} from "./bench";
 import { askedFor, json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
-import conversation from "./fixtures/conversation.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
-import conversations from "./fixtures/conversations.json" with { type: "json" };
-import profiles from "./fixtures/profiles.json" with { type: "json" };
-import repos from "./fixtures/repos.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
@@ -87,15 +87,11 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
-const SIDEBAR = conversations as ConversationEntry[];
-const OPEN = conversation as ConversationView;
-const REPOS = repos as RepoEntry[];
 const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The conversation that clicking one of those roadmaps made: a draft adopting
 /// `mvp`, on the page shaped for adopting.
 const ADOPTING = adopting as ConversationView;
-const PROFILES = profiles as ProfileEntry[];
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
@@ -135,71 +131,9 @@ function readAgain(): void {
   }
 }
 
-/// The workbench on its own routes, so the Conversation it reads is the one the
-/// URL names — and so that opening one is a navigation, which is what it is in
-/// the app.
-///
-/// The client comes back with the render: `invalidateQueries()` on it is
-/// exactly what a Nudge does to the page — see `lookAgain` in `src/nudge.ts` —
-/// so a test about one needs no fake `EventSource`.
-function mount(at = "/") {
-  // No retries: a test that asked for a refusal should see it at once, rather
-  // than after the three attempts a real page is right to make.
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-
-  const history = createMemoryHistory();
-  history.set({ value: at });
-
-  return {
-    ...render(() => (
-      <QueryClientProvider client={client}>
-        <MemoryRouter history={history}>
-          <Route path="/" component={Workbench} />
-          <Route path="/conversations/:id" component={Workbench} />
-        </MemoryRouter>
-      </QueryClientProvider>
-    )),
-    history,
-    client,
-  };
-}
-
-/// The lists every pane of the workbench is drawn over, in whatever order a page
-/// happens to ask for them.
-function theWorkbench(...answers: Parameters<typeof serving>) {
-  return serving(
-    whenever("/api/ui/conversations", json(SIDEBAR)),
-    whenever("/api/ui/repos", json(REPOS)),
-    whenever("/api/ui/profiles", json(PROFILES)),
-    whenever("/api/ui/abandoned-roadmaps", json([])),
-    whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
-    ...answers,
-  );
-}
-
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
   return container.querySelector(".workbench")!;
-}
-
-/// Wait for an element to be drawn, by selector.
-///
-/// Throwing rather than returning null when it is not there yet, because that is
-/// what `waitFor` retries on — a callback that hands back null has answered, and
-/// the wait ends on the first try with nothing.
-function drawn<T extends Element>(
-  container: ParentNode,
-  selector: string,
-): Promise<T> {
-  return waitFor(() => {
-    const found = container.querySelector<T>(selector);
-    if (!found) {
-      throw new Error(`nothing matching ${selector} has been drawn`);
-    }
-    return found;
-  });
 }
 
 /// Open the conversation's action menu, the way a click on its summary does.
