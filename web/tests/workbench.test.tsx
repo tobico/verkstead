@@ -3074,31 +3074,54 @@ function theGrillingSets(...answers: Parameters<typeof serving>) {
   );
 }
 
-/// The rows of one Question Set's summary, as the three columns the design gives
-/// it: the number, the question, and what became of it.
-function summarised(card: ParentNode): string[][] {
-  return [...card.querySelectorAll(".asked tr")].map((row) =>
-    [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? ""),
+/// One Question Set's summary as the interview it reads as: a line per
+/// question, each the label it answers to, what it asked, and what became of it.
+function interviewed(card: ParentNode): string[][] {
+  return [...card.querySelectorAll(".asked .ask")].map((ask) =>
+    [".n", ".question", ".answer"].map(
+      (part) => ask.querySelector(part)?.textContent ?? "",
+    ),
   );
 }
 
 describe("a question set on the timeline", () => {
-  it("is summarised as the table of number, question and answer", async () => {
+  it("reads as an interview of question line and answer line", async () => {
     theGrillingSets();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const card = await drawn(container, ".question-set");
 
-    expect(summarised(card)).toEqual(
+    expect(interviewed(card)).toEqual(
       ANSWERED_SET.rows.map((row) => [
         row.name,
         row.question,
         // A question the human left open — and the Heading, which was never
-        // asked. The row says so rather than leaving a blank, because a blank
+        // asked. The line says so rather than leaving a blank, because a blank
         // on a settled Set would read as an Answer of nothing.
         row.answer === "" ? "unanswered" : row.answer,
       ]),
     );
+
+    // Every pair of the Set, and no table: a long set earns a long card, and
+    // the columns never fit the middle pane.
+    expect(interviewed(card)).toHaveLength(ANSWERED_SET.rows.length);
+    expect(card.querySelector("table")).toBeNull();
+  });
+
+  /// The one thing the old table said about the shape of a Set, kept: a
+  /// Sub-question sits under the Question it belongs to, its lettered label and
+  /// its answer carried in with it.
+  it("sets a sub-question under the question it belongs to", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, ".question-set");
+
+    expect(
+      [...card.querySelectorAll(".asked .ask")].map((ask) =>
+        ask.classList.contains("nested"),
+      ),
+    ).toEqual(ANSWERED_SET.rows.map((row) => row.nested));
   });
 
   it("says which set it is, so a timeline of rounds reads as a conversation", async () => {
@@ -3137,7 +3160,7 @@ describe("a question set on the timeline", () => {
     const waiting = [...container.querySelectorAll(".question-set")][1]!;
 
     expect(
-      summarised(waiting).map(([, , answer]) => answer),
+      interviewed(waiting).map(([, , answer]) => answer),
     ).toEqual(WAITING_SET.rows.map(() => "—"));
   });
 

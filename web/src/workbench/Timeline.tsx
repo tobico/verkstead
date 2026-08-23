@@ -922,17 +922,25 @@ function AgentOutput(props: {
   );
 }
 
-/// A Question Set the session put to the human: the table of what was asked
-/// against what was decided.
+/// A Question Set the session put to the human, read as the interview it was:
+/// a question line and the answer line under it, pair after pair.
+///
+/// Not a table any more. Three columns never fitted the middle pane, and what
+/// they were holding apart is two lines of one exchange: the label leads the
+/// question the way the detail page has it lead one, and the answer is set in
+/// far enough to clear the label, so the two texts share a left edge and the
+/// card reads down rather than across.
+///
+/// Every pair is drawn — a long Set earns a long card. Nothing is clamped here
+/// the way a document card is: a document has a first paragraph that stands for
+/// the rest of it, and a Set that showed four of its questions would be a Set
+/// with questions hidden in it.
 ///
 /// A button, as a session's output is, and for the same reason: the whole
-/// document is in the details pane, and this is how it is opened. What the row
-/// shows is the design's summary — the number, the question and the answer —
-/// which is what makes a Timeline readable as the record of a conversation
-/// rather than as a list of things to go and open.
+/// document is in the details pane, and this is how it is opened.
 ///
 /// A Set still waiting says so instead of drawing a column of blanks: nothing
-/// has been decided yet, and an empty answer column would read as a Set that was
+/// has been decided yet, and an empty answer would read as a Set that was
 /// answered with nothing.
 function QuestionSet(props: {
   asked: QuestionSetEvent;
@@ -961,28 +969,29 @@ function QuestionSet(props: {
         </Show>
       </span>
 
-      <table class="asked">
-        <tbody>
-          <For each={props.asked.rows}>
-            {(row) => (
-              <tr classList={{ nested: row.nested }}>
-                <td class="n">{row.name}</td>
-                <td class="question">{row.question}</td>
-                <td class="answer">
-                  <Show
-                    when={row.answer !== ""}
-                    fallback={
-                      <span class="open">{waiting() ? "—" : "unanswered"}</span>
-                    }
-                  >
-                    {row.answer}
-                  </Show>
-                </td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
+      {/* Spans rather than the blocks this reads as, laid out as blocks by the
+          stylesheet: everything here is inside a button, and a button holds
+          phrasing. */}
+      <span class="asked">
+        <For each={props.asked.rows}>
+          {(row) => (
+            <span class="ask" classList={{ nested: row.nested }}>
+              <span class="n">{row.name}</span>
+              <span class="question">{row.question}</span>
+              <span class="answer">
+                <Show
+                  when={row.answer !== ""}
+                  fallback={
+                    <span class="open">{waiting() ? "—" : "unanswered"}</span>
+                  }
+                >
+                  {row.answer}
+                </Show>
+              </span>
+            </span>
+          )}
+        </For>
+      </span>
     </button>
   );
 }

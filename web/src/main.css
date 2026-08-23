@@ -1767,10 +1767,10 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* A Question Set the session put to the human: the table of what was asked
-   against what was decided. A button, as a session's output is, and for the same
-   reason — the whole document is in the details pane and this is how it is
-   opened. */
+/* A Question Set the session put to the human, read as the interview it was: a
+   question line and its answer under it, pair after pair. A button, as a
+   session's output is, and for the same reason — the whole document is in the
+   details pane and this is how it is opened. */
 .timeline-event > .question-set {
   display: block;
   width: 100%;
@@ -1816,46 +1816,53 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The summary itself: the number, the question and the answer. Fixed layout so
-   the three columns keep their proportions whatever the longest answer is, and
-   every cell clipped to its line — the whole of any of it is a click away. */
+/* The interview itself: a question line and its answer under it, pair after
+   pair, every pair of the Set. */
 .question-set .asked {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
+  display: block;
   font-size: 0.85rem;
 }
 
-.question-set .asked td {
-  padding: 0.15rem 0.4rem 0.15rem 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  vertical-align: baseline;
+/* One exchange. A two-column grid rather than an indent on the answer, so the
+   width the label is given is stated once and both lines are measured against
+   it: the question text and the answer text start on the same edge however wide
+   a label like `Q12a` turns out to be. */
+.question-set .asked .ask {
+  --asked-label: 2.6rem;
+  display: grid;
+  grid-template-columns: var(--asked-label) 1fr;
+  padding: 0.15rem 0;
 }
 
+/* The label, as the detail page sets one: monospace, semibold and in the accent,
+   so a question is recognisable as the same question in either place. */
 .question-set .asked .n {
-  width: 3.5rem;
+  grid-column: 1;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--ink-soft);
+  font-weight: 600;
+  color: var(--accent);
 }
 
-/* A sub-question sits under the question it belongs to, which is the one thing
-   the table has to say about the shape of a Set. */
-.question-set .asked tr.nested .n {
-  padding-left: 0.9rem;
-}
-
-.question-set .asked .question {
-  width: 50%;
+/* Both texts in the second column: the question beside the label, the answer on
+   the row under it and so clear of the label without being told a width. */
+.question-set .asked .question,
+.question-set .asked .answer {
+  grid-column: 2;
 }
 
 .question-set .asked .answer {
   color: var(--ink-soft);
 }
 
-/* Nothing decided here. On a waiting Set that is every row and means "not yet";
-   on a settled one it is the question the human left open. */
+/* A sub-question sits under the question it belongs to, which is the one thing
+   the summary has to say about the shape of a Set. The whole pair moves, so its
+   own two lines keep the edge they share. */
+.question-set .asked .ask.nested {
+  padding-left: 0.9rem;
+}
+
+/* Nothing decided here. On a waiting Set that is every question and means "not
+   yet"; on a settled one it is the question the human left open. */
 .question-set .asked .open {
   opacity: 0.6;
 }
