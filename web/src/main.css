@@ -1264,6 +1264,14 @@ main:has(.workbench) {
   max-width: var(--measure);
 }
 
+/* And a manual task is the same kind of card again, prose at the same measure:
+   what the human asked for by hand, in the words they asked for it in. Nothing
+   to press here either — what its session did arrives under it as the events
+   any work arrives as. */
+.manual-task > .markdown {
+  max-width: var(--measure);
+}
+
 /* What a conversation is, beside what has happened to it: the repo it is
    attached to, and where it has got to. Read rather than changed — a
    conversation is attached to a repo when it is started. */

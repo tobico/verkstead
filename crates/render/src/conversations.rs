@@ -385,6 +385,16 @@ pub enum TimelineEvent {
     /// wrote it and no human pressed anything for it. It is how an unattended run
     /// says what it decided while nobody was watching.
     Notice(NoticeEvent),
+
+    /// A Manual Task the human set going by hand, rendered inline like the
+    /// handoff — and for the same reason: it is what they asked for, in their
+    /// own words, with nothing of it a details pane would add.
+    ///
+    /// What the session it started went on to do is not here. That lands as the
+    /// Events any work lands as — what it printed, what it asked, what it
+    /// committed — so this is the instruction alone, which is the part of a
+    /// Manual Task nothing else on the Timeline records.
+    ManualTask(ManualTaskEvent),
 }
 
 /// One of the three things the human can do about an Interruption.
@@ -758,6 +768,24 @@ pub struct NoticeEvent {
     pub id: i64,
 
     /// When it was said, RFC 3339.
+    pub at: String,
+
+    /// Rendered and sanitized by the server on the way out, as every piece of
+    /// markdown on this wire is.
+    pub html: String,
+}
+
+/// A Manual Task as the page receives it: what the human asked for, and when.
+///
+/// HTML alone, like the handoff and unlike the Brief: it is a moment on the
+/// record rather than a document anybody goes back and edits — what a second
+/// thought produces is a second Manual Task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ManualTaskEvent {
+    pub id: i64,
+
+    /// When it was asked for, RFC 3339.
     pub at: String,
 
     /// Rendered and sanitized by the server on the way out, as every piece of
@@ -1252,6 +1280,16 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
         id,
         at,
         html: crate::markdown::to_html(markdown),
+    })
+}
+
+/// A Manual Task as an Event, rendered the same way and for the same reason: it
+/// is what the human asked for, written for somebody to read back.
+pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEvent {
+    TimelineEvent::ManualTask(ManualTaskEvent {
+        id,
+        at,
+        html: crate::markdown::to_html(instruction),
     })
 }
 

@@ -318,6 +318,20 @@ pub enum Event {
     /// Never something to do about — an Interruption is what an open question
     /// looks like, and this is closed by the time it is written.
     Notice(String),
+
+    /// A Manual Task: the instruction the human typed at the end of the
+    /// Timeline for a one-off session to carry out.
+    ///
+    /// Markdown in the `body` column like the Brief and the handoff, because
+    /// that is what it is — one document, written by a human for an agent to
+    /// read. Nothing is joined in beside it: a Manual Task is its instruction,
+    /// and what the session it starts does lands as the Events that work lands
+    /// as.
+    ///
+    /// Beside the run rather than a step of it. It moves no state, and it is
+    /// not a [`Step`](super::Step) — the unattended unit a done file ends —
+    /// however much the two look alike from the session's end.
+    ManualTask(String),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -356,6 +370,7 @@ impl Event {
             Self::PullRequest(_) => PULL_REQUEST,
             Self::Interruption(_) => super::interruptions::INTERRUPTION,
             Self::Notice(_) => "notice",
+            Self::ManualTask(_) => "manual-task",
         }
     }
 
@@ -380,6 +395,7 @@ impl Event {
             // Nothing either, and for the commit's reason.
             Self::Interruption(_) => "",
             Self::Notice(markdown) => markdown,
+            Self::ManualTask(instruction) => instruction,
         }
     }
 
@@ -423,6 +439,7 @@ impl Event {
                 })?))
             }
             "notice" => Self::Notice(body),
+            "manual-task" => Self::ManualTask(body),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -1789,6 +1806,33 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
     .execute(pool)
     .await
     .with_context(|| format!("putting a notice on the Timeline of Conversation {id}"))?
+    .rows_affected();
+
+    Ok(written > 0)
+}
+
+/// Put a Manual Task's instruction on a Conversation's Timeline.
+///
+/// `false` means there is no such Conversation, by the same insert-from-select
+/// every other Event is written with.
+///
+/// The record of what was asked for by hand, written as it is asked and never
+/// rewritten: a Manual Task is a moment on the Timeline like the rest of them,
+/// and what its session goes on to do lands beside it as its own Events.
+pub async fn record_manual_task(pool: &SqlitePool, id: i64, instruction: &str) -> Result<bool> {
+    let event = Event::ManualTask(instruction.to_owned());
+
+    let written = sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
+         FROM conversations WHERE id = ?",
+    )
+    .bind(event.kind())
+    .bind(event.body())
+    .bind(id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("putting a manual task on the Timeline of Conversation {id}"))?
     .rows_affected();
 
     Ok(written > 0)

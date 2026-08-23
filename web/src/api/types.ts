@@ -668,6 +668,24 @@ export type Lifecycle = "Draft" | "Grilling" | "Direction" | "Implementing" | "W
 export type Liveness = "waiting" | "disconnected";
 
 /**
+ * A Manual Task as the page receives it: what the human asked for, and when.
+ *
+ * HTML alone, like the handoff and unlike the Brief: it is a moment on the
+ * record rather than a document anybody goes back and edits — what a second
+ * thought produces is a second Manual Task.
+ */
+export type ManualTaskEvent = { id: number, 
+/**
+ * When it was asked for, RFC 3339.
+ */
+at: string, 
+/**
+ * Rendered and sanitized by the server on the way out, as every piece of
+ * markdown on this wire is.
+ */
+html: string, };
+
+/**
  * A move as the page receives it: when, and to what.
  *
  * No rendered body, unlike the Brief — there is no markdown in a move. What the
@@ -1299,7 +1317,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Directed": DirectedEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What a tool answered.

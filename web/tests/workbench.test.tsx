@@ -3196,3 +3196,56 @@ describe("the pinned pull request", () => {
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
   });
 });
+
+/// What the human asked for by hand, which the same conversation carries on the
+/// end of its record: a manual task, set going outside the pipeline.
+const ASKED_BY_HAND = (() => {
+  const event = WRAPPING.timeline.find((entry) => "ManualTask" in entry);
+  if (!event || !("ManualTask" in event)) {
+    throw new Error("the fixture should carry a manual task");
+  }
+  return event.ManualTask;
+})();
+
+describe("a manual task", () => {
+  /// A card in the record, like the brief and the handoff: it is a document
+  /// somebody wrote, and the words are the whole of it.
+  it("draws what was asked for as a card in the record", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".event-head")!.textContent).toContain(
+      "Manual task",
+    );
+    expect(asked.closest(".timeline")).not.toBeNull();
+  });
+
+  /// Put in the page as the server rendered it, like every other piece of
+  /// markdown on this wire — so what the human set in backticks reads as code
+  /// rather than as backticks.
+  it("shows the instruction as the server rendered it", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelector(".markdown")!.innerHTML).toBe(
+      ASKED_BY_HAND.html,
+    );
+    expect(asked.querySelector("code")!.textContent).toBe("main");
+  });
+
+  /// Read-only, and nothing to open: what its session went on to do arrives as
+  /// the events any work arrives as, under this one.
+  it("asks the human for nothing", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const asked = await drawn(container, ".timeline-event > .manual-task");
+
+    expect(asked.querySelectorAll("button")).toHaveLength(0);
+    expect(asked.querySelectorAll("textarea")).toHaveLength(0);
+  });
+});

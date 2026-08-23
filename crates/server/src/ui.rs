@@ -749,6 +749,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
                     }
+                    // And what the human asked for by hand, rendered like the
+                    // handoff and inline like it: the instruction is the whole
+                    // of what a Manual Task is on the record, and what its
+                    // session did lands beside it as its own Events.
+                    store::Event::ManualTask(instruction) => {
+                        verkstead_render::manual_task_event(event.id, event.at, &instruction)
+                    }
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
                     // a catch-all, so a kind added later has to be decided about

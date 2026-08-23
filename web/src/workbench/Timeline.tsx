@@ -51,6 +51,7 @@ import type {
   GrillingStarted,
   HandoffEvent,
   Lifecycle,
+  ManualTaskEvent,
   MovedEvent,
   NoticeEvent,
   PullRequestEvent,
@@ -215,6 +216,9 @@ export function Timeline(props: {
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
                   {(notice) => <Notice notice={notice()} />}
+                </Match>
+                <Match when={"ManualTask" in event && event.ManualTask}>
+                  {(manual) => <ManualTask manual={manual()} />}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -497,6 +501,28 @@ function Handoff(props: { handoff: HandoffEvent }): JSX.Element {
 /// prose around it.
 function Notice(props: { notice: NoticeEvent }): JSX.Element {
   return <div class="notice markdown" innerHTML={props.notice.html} />;
+}
+
+/// What the human asked for by hand: the instruction a Manual Task was set
+/// going with.
+///
+/// A card and not a line, unlike the notice above it: it is what somebody asked
+/// for in their own words, and the words are the whole of it. Read-only, like
+/// the handoff — it is a moment on the record rather than a document to go back
+/// to, and what a second thought produces is a second Manual Task.
+///
+/// What the session it started went on to do is not drawn here. That arrives as
+/// the events any work arrives as — what it printed, what it asked, what it
+/// committed — under this one and in the order it happened.
+function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+  return (
+    <article class="manual-task">
+      <div class="event-head">
+        <h2>Manual task</h2>
+      </div>
+      <div class="markdown" innerHTML={props.manual.html} />
+    </article>
+  );
 }
 
 /// A move: the Conversation changing hands, said in a line.
