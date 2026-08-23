@@ -28,8 +28,9 @@ _Avoid_: project, codebase, checkout
 **Conversation**:
 The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
-Grilling → Direction → Implementing → Wrapping → Done, and can be aborted from
-any of them or reopened once Done. *Blocked on you* is a badge on an active
+Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
+straight from Grilling to Wrapping, its building belonging to its Stages — and
+can be aborted from any of them or reopened once Done. *Blocked on you* is a badge on an active
 state, never a state of its own — where **Aborted** is a state of its own, off
 the ladder rather than on it: every other state is somewhere the work has got
 to, and aborting is the work stopping wherever it was.
@@ -160,58 +161,65 @@ _Avoid_: account, identity, persona, agent config
 **Grilling Profile** / **Implementation Profile**:
 The two Agent Profiles a Conversation fixes before grilling starts — one for
 the grilling session, one for the implementation work. They are roles a Profile
-is used in, not kinds of Profile: the same Profile may fill both. Distinct
-Profiles are why an inline implementation is a fresh session rather than the
-grilling session carrying on.
+is used in, not kinds of Profile: the same Profile may fill both. The line
+between them is planning against building: the grilling session's tail —
+writing the handoff, the backlog or the roadmap — is the Grilling Profile's,
+and the Implementation Profile drives what builds. Distinct Profiles are why
+an inline implementation is a fresh session rather than the grilling session
+carrying on.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent
 
 **Direction**:
 How a Conversation's work gets built — **inline**, **task list** or **roadmap**
-— chosen by the human in the workbench once the grilling has proposed wrapping
-up. One of the three and never a mixture: the choice is which pipeline runs the
-work, and a Conversation that had picked two would be two pieces of work. It is
-also the state that choosing happens in, which is the same word on purpose:
-Direction is where the Conversation is and the Direction is what comes out of
-it.
+— picked by the human on a Proposal's own Set, never anywhere else. One of the
+three and never a mixture: the choice is which pipeline runs the work, and a
+Conversation that had picked two would be two pieces of work.
 
-Choosing is one press, and what follows from it is the pipeline it named
-starting. The choice and the start stay separate things on the record — the
-Direction is an Event and the work beginning is a move — but there is no second
-button between them: the human has decided, and a Conversation sitting on a
-settled Direction with nothing running would be waiting for nobody. All three
-start as they are chosen — inline on a session that builds the work, a task list
-on one that breaks it into `.tasks/` first, a roadmap on one that stages it into
-`docs/roadmaps/` — and the Conversation is Implementing every way round, because
-writing a plan for the work is the work when it is the work that was chosen.
+The pick informs the agent; artifacts move the machine. A pick is delivered to
+the grilling session with the rest of the Response, and what proceeds from it
+is that session producing the picked Direction's artifact — the handoff for
+inline, the committed backlog for a task list, the committed roadmap for a
+staged one. Verkstead moves on the artifact landing and the session going
+quiet, never on the answer itself, so between pick and artifact the session may
+come back with another Set instead, and a later Proposal's pick supersedes:
+the latest pick is the one watched for. The answered Set is the record of the
+choice — no Event of its own, and no state to sit in.
 _Avoid_: mode, strategy, plan, execution path
 
 **Proposal**:
-The grilling agent's closing move: a recommended Direction, the reasoning for it,
-and the Option that means *go ahead*, carried as a block on one Question Set.
-What can end a grilling rather than continue it — no button anywhere ends one.
-Ordinary grilling Sets carry none.
+The grilling agent's closing move: a recommended Direction and the reasoning
+for it, carried as a block on a Question Set. What can end a grilling rather
+than continue it — no button anywhere ends one. Ordinary grilling Sets carry
+none, and at most one Proposal is ever in flight.
 
-Only picking the named Option accepts a Proposal and moves the Conversation to
-Direction. **Every other way of answering sends it back**: another Option, an
-answer in the human's own words, or the question left open. That is how the
-human disagrees, and it is the whole way back — the session that proposed is
-still holding the thread, and takes their Response to decide for itself whether
-to keep grilling or propose again. A Proposal that was sent back is not in force
-and is not what the chooser draws; the latest accepted one is.
+A Set carrying a Proposal is drawn with the Direction chooser on it: all three
+Directions offered every time, the recommendation marked and never preselected,
+the rationale beside them, and the chooser itself saying what picking does.
+Picking a Direction accepts the Proposal. **Every other way of answering sends
+it back**: an answer in the human's own words, questions left open, anything
+without a pick. That is how the human disagrees, and it is the whole way back.
 
-The recommendation is marked in the chooser and never preselected: accepting the
-Proposal settles that the work is understood, not which Direction it takes, and
-the human may pick any of the three.
+Accepting is soft either way: the whole Response returns to the session that
+proposed, which judges for itself whether everything is clear — proceeding is
+producing the picked Direction's artifact, and coming back is another Set,
+with a fresh Proposal if it wants the Direction reconsidered. The Direction is
+still never the agent's to change: it proceeds on the pick or argues by
+proposing again.
 _Avoid_: wrap-up request, handover, recommendation (that is the part, not the
 whole), final question
 
 **Handoff**:
-The document a grilling session writes before it proposes: everything it
-settled with the human, written down for whoever builds the work. The other
-half of the closing move, and the reason an inline implementation can be a
-fresh session at all — the two run under different Profiles, and a session
-cannot change the account it is running as, so what the grilling knows is
-written down or it is gone.
+The document a grilling session writes after an inline pick, and only then:
+everything it settled with the human, written down for the fresh session that
+builds the work. Inline's alone, because inline is the one Direction whose
+builder crosses a context boundary — the two run under different Profiles, and
+a session cannot change the account it is running as, so what the grilling
+knows is written down or it is gone. A task list or roadmap needs none: the
+committed backlog or roadmap is the plan, written by the context that settled
+it. Written after the choice rather than before it, so a refused Proposal
+costs no rewrite and the human's words beside the pick shape what is written.
+The handoff is the inline tail's artifact: its presence, plus quiet, is what
+ends the grilling session.
 
 Verkstead's document rather than the project's, so it is written outside the
 Worktree — in a directory of the Conversation's own under the State Directory,
@@ -219,17 +227,17 @@ bound into every one of its Sandboxes. A handoff in the checkout would be a file
 the next `git add -A` swept into the human's repository, and instructing an
 agent not to commit something is worth less than the file not being there.
 
-Taken onto the Timeline as an Event when the proposal is accepted, and taken
-rather than copied: the Timeline holds the only one from then on. One per
-grilling round — a proposal sent back leaves it where it is, to be rewritten
-before the next one.
+Taken onto the Timeline as an Event when the grilling session ends — the one
+moment it is certainly finished — and taken rather than copied: the Timeline
+holds the only one from then on.
 _Avoid_: handover document, context dump, summary, notes
 
 **Step**:
 One piece of unattended work a session is launched for and ended after: a task
-of a Conversation's backlog, the breakdown that writes that backlog, the finish
-that follows the last task, or an inline implementation, which is the whole of
-the work in one Step. What is next is read from the Repo and nowhere else — the
+of a Conversation's backlog, the finish that follows the last task, an inline
+implementation, which is the whole of the work in one Step, or a planning tail
+retried in a fresh session — the ordinary breakdown or staging is the grilling
+session's own tail rather than a Step, and becomes one only when retried. What is next is read from the Repo and nowhere else — the
 lowest-numbered task file left in `.tasks/`, or `TODO.md` on its own — so the
 Steps are the backlog's, and Verkstead keeps no list of its own to disagree with
 it.
