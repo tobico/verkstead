@@ -867,6 +867,30 @@ main:has(.workbench) {
   z-index: 1;
 }
 
+/* The sidebar leads with the mark rather than with a title of its own: this pane
+   is the whole of what Verkstead is entered by, so what belongs over the list is
+   the thing the list is part of, and *Conversations* only named what was under
+   it a second time. The icon and the word together rather than either alone —
+   the icon by itself is a shape nobody has been taught yet, and the word by
+   itself is what every other pane's title already looks like.
+
+   Heading-sized, and still an `<h1>`, so the pane keeps a heading at the top of
+   it for a screen reader to find. */
+.pane-head .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pane-head .wordmark img {
+  width: 1.4rem;
+  height: 1.4rem;
+  /* The artwork is full-bleed — a square of cold iron with the anvil on it —
+     so at this size it is an app icon rather than a glyph, and it is cornered
+     like one. */
+  border-radius: 0.3rem;
+}
+
 /* The ways between the panes: back out of this level, and on to the next.
    Buttons rather than links, because moving between panes is not going
    anywhere — the workbench is one page, and the URL follows the conversation

@@ -182,6 +182,29 @@ describe("the workbench", () => {
     expect(screen.getByLabelText("Details")).toBeTruthy();
   });
 
+  /// The sidebar is where Verkstead is entered, so what stands over the list is
+  /// the mark: the icon and the name, in the line the word *Conversations* used
+  /// to hold. Still a heading, so the pane has one for a screen reader to find,
+  /// and the pane's own label is untouched — the test above reads it.
+  it("leads with the mark rather than a title of its own", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    const heading = await drawn(container, ".conversations-pane h1");
+
+    expect(heading.textContent).toContain("Verkstead");
+    expect(heading.textContent).not.toContain("Conversations");
+
+    // The one icon source, served from `assets/` at the site root — the file the
+    // favicon is, rather than a copy of it under `web/`.
+    const icon = heading.querySelector("img")!;
+    expect(icon.getAttribute("src")).toBe("/icons/verkstead.svg");
+
+    // Nothing for a screen reader to read: the word beside it is the name, and
+    // an alt that repeated it would have the heading say it twice.
+    expect(icon.getAttribute("alt")).toBe("");
+  });
+
   it("lists the conversations the server gave it, in that order", async () => {
     const fetching = theWorkbench();
     const { container } = mount();
