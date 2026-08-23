@@ -57,13 +57,18 @@ import { settledAge, utcStamp } from "./when";
 /// is on, or the pane header of the Timeline Event it belongs to. Nothing is
 /// drawn where there is none.
 ///
-/// `contents` is the table of contents down the margin, which is the page's and
-/// not the pane's: it is a description of a column the whole window wide, and a
-/// details pane is a column beside two others.
+/// `contents` is where the table of contents is being drawn, and what decides
+/// which width it picks its shape from: the window on a page, and the pane's own
+/// width in a details pane — where the 60rem cap leaves a margin of its own for
+/// the sidebar to stand in. `"none"` is a sheet drawn without one at all.
+///
+/// The floating header belongs to the page alone. It names where the reader is
+/// across the top of the column, and a pane already has a header of its own
+/// there.
 export function Sheet(props: {
   set: SetView;
   lead?: JSX.Element;
-  contents?: boolean;
+  contents?: "page" | "pane" | "none";
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
   // other: mermaid is megabytes, so a Set without one loads none of them. What a
@@ -166,9 +171,12 @@ export function Sheet(props: {
     return null;
   };
 
-  /// Whether the table of contents is drawn at all — on by default, because the
+  /// Where the table of contents is drawn — the page by default, because the
   /// page is what a Set is usually read as.
-  const listed = () => props.contents !== false;
+  const where = () => props.contents ?? "page";
+
+  /// Whether it is drawn at all.
+  const listed = () => where() !== "none";
 
   return (
     <>
@@ -179,11 +187,24 @@ export function Sheet(props: {
           the stylesheet, so where it sits here is a reading order rather than
           a position. */}
       <Show when={listed()}>
-        <Contents sections={sections()} watched={watched()} nav={nav} />
+        <Contents
+          sections={sections()}
+          watched={watched()}
+          nav={nav}
+          paned={where() === "pane"}
+        />
         {/* Under the nav in reading order and pinned to the top edge by the
             stylesheet, which is also what keeps it off a narrow viewport: there
-            the nav's own bar is already doing this job. */}
-        <PageHeader watched={watched()} nav={nav} wrapped={wrapped()} flip={flip} />
+            the nav's own bar is already doing this job. And off a pane, which
+            has the pane header across its top already. */}
+        <Show when={where() === "page"}>
+          <PageHeader
+            watched={watched()}
+            nav={nav}
+            wrapped={wrapped()}
+            flip={flip}
+          />
+        </Show>
       </Show>
       {/* One line about the Set rather than from it: where it came from at the
           near end, and how it stands at the far end — the date it settled, or

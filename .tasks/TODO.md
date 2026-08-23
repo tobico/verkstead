@@ -24,6 +24,6 @@ dependency.
 - [x] 08: Pinned carousel — [details](08-pinned-carousel.md)
 - [x] 09: Interruption as an answer sheet — [details](09-interruption-answer-sheet.md)
 - [x] 10: Pane sizing — [details](10-pane-sizing.md)
-- [ ] 11: Diff contents — [details](11-diff-contents.md)
+- [x] 11: Diff contents — [details](11-diff-contents.md)
 - [ ] 12: Transcript command cards — [details](12-transcript-command-cards.md)
 - [ ] 13: New-conversation menu — [details](13-new-conversation-menu.md)

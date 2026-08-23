@@ -13,7 +13,7 @@
 //! typed and say in words what came back.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AbandonedRepo,
@@ -3249,9 +3249,10 @@ describe("a question set on the timeline", () => {
     });
   });
 
-  /// The table of contents is a description of a column the whole window wide,
-  /// and a details pane is a column beside two others.
-  it("leaves the page's own table of contents to the page", async () => {
+  /// The pane caps what it holds at the same 60rem every other column is read
+  /// at and centres it, so there is a margin here for the nav to stand in —
+  /// which is what a Set as long as this one is read with anywhere else.
+  it("brings the page's own table of contents into the pane", async () => {
     theGrillingSets();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -3264,7 +3265,33 @@ describe("a question set on the timeline", () => {
       }
     });
 
-    expect(pane.querySelector(".contents")).toBeNull();
+    const nav = pane.querySelector("nav.contents");
+    expect(nav, "expected the Set's contents in the pane").toBeTruthy();
+
+    // The same entries the page lists, in the same order — this is the Set
+    // page's own nav rather than a second reading of the document.
+    expect(
+      [...nav!.querySelectorAll("a.contents-link")].map((line) =>
+        line.getAttribute("href"),
+      ),
+    ).toEqual(["#preface", "#questions", "#q1", "#q2", "#q3", "#postscript"]);
+
+    // And it picks its shape from the pane rather than from the window.
+    expect(nav!.classList.contains("contents-paned")).toBe(true);
+  });
+
+  /// The floating header names where the reader is across the top of the column
+  /// it belongs to. The pane has a header of its own up there already.
+  it("leaves the floating header to the page", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".question-set"));
+
+    const pane = screen.getByLabelText("Details");
+    await drawn(pane, "nav.contents");
+
+    expect(pane.querySelector(".page-header")).toBeNull();
   });
 });
 
@@ -3602,6 +3629,176 @@ describe("a commit on the timeline", () => {
 
     await waitFor(() => expect(row.classList).toContain("selected"));
     expect(row.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+/// The table of contents in a details pane, on the two panes that hold one: a
+/// commit's diff and a Question Set.
+///
+/// The nav itself is the Set page's own — its entries, its scroll-spy and its
+/// jump are asked about where the page is — so what these ask is what the pane
+/// adds: that a commit's folds are listed at all, and that which of the two
+/// shapes is drawn is the pane's width's answer rather than the window's.
+describe("the contents of a details pane", () => {
+  /// What jsdom lays out, which is nothing: every element is nought wide, so a
+  /// nav measuring the pane it is in would always fold into its bar. This
+  /// answers for the pane alone and leaves everything else the nothing jsdom
+  /// knows about it.
+  const measured = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "clientWidth",
+  );
+
+  /// How wide the details pane is standing, in rem.
+  function paneStands(rem: number): void {
+    Object.defineProperty(Element.prototype, "clientWidth", {
+      configurable: true,
+      get(this: Element) {
+        return this.classList.contains("details-pane") ? rem * 16 : 0;
+      },
+    });
+  }
+
+  /// What the pane's nav is watching, since jsdom has no observer of its own:
+  /// the ids handed to the one the scroll-spy makes.
+  function spying(): string[] {
+    const watched: string[] = [];
+
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe(target: Element) {
+          watched.push(target.id);
+        }
+        disconnect() {}
+        unobserve() {}
+      },
+    );
+
+    return watched;
+  }
+
+  beforeEach(() => {
+    // Asked for no motion, the jump asks with `scrollIntoView` — which is the
+    // ask a test with no layout under it can see.
+    Element.prototype.scrollIntoView = vi.fn();
+    vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  });
+
+  afterEach(() => {
+    if (measured !== undefined) {
+      Object.defineProperty(Element.prototype, "clientWidth", measured);
+    }
+  });
+
+  it("names every file of a commit's diff, in diff order", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+
+    // The section the diff is, and then its folds — the same anchors the
+    // renderer stamped on them, in the order the paths beside it name.
+    expect(
+      [...nav.querySelectorAll("a.contents-link")].map((line) =>
+        line.getAttribute("href"),
+      ),
+    ).toEqual(["#commit-diff", "#diff-1", "#diff-2"]);
+
+    // The whole path rides behind the line, which is where a nav this narrow
+    // can be read out in full.
+    expect(
+      [...nav.querySelectorAll(".contents-entry a")].map((line) =>
+        line.getAttribute("title"),
+      ),
+    ).toEqual(COMMIT_DIFF.diff!.paths);
+  });
+
+  it("jumps into a fold of the commit, unfolding it first", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+    const fold = container.querySelector<HTMLDetailsElement>(
+      ".details-pane #diff-2",
+    )!;
+    fold.open = false;
+
+    nav.querySelector<HTMLAnchorElement>('a[href="#diff-2"]')!.click();
+
+    expect(fold.open, "landing on a closed fold is landing on nothing").toBe(
+      true,
+    );
+    expect(fold.scrollIntoView).toHaveBeenCalled();
+  });
+
+  it("tracks the reader's place among the commit's folds", async () => {
+    const watched = spying();
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    await drawn(container, ".details-pane nav.contents");
+
+    await waitFor(() =>
+      expect(watched).toEqual(
+        expect.arrayContaining(["commit-diff", "diff-1", "diff-2"]),
+      ),
+    );
+  });
+
+  it("folds into its bar where the pane has no margin to stand in", async () => {
+    paneStands(50);
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+    expect(nav.classList.contains("contents-paned")).toBe(true);
+    expect(nav.classList.contains("contents-roomy")).toBe(false);
+  });
+
+  it("stands in the margin once the pane is wide enough for one", async () => {
+    paneStands(90);
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+    expect(nav.classList.contains("contents-roomy")).toBe(true);
+  });
+
+  /// The same answer on the other pane that holds a nav, from the same
+  /// measurement: it is the pane's width, not what the pane is holding.
+  it("answers the same way for a question set's pane", async () => {
+    paneStands(90);
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".question-set"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+    expect(nav.classList.contains("contents-roomy")).toBe(true);
+  });
+
+  /// The window is wide enough for the page's own sidebar at every width these
+  /// tests run at; what decides the nav's shape here is the pane.
+  it("keeps the bar on a narrow set pane, whatever the window is doing", async () => {
+    paneStands(40);
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".question-set"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+    expect(nav.classList.contains("contents-roomy")).toBe(false);
+    expect(nav.querySelector(".contents-bar")).toBeTruthy();
   });
 });
 
