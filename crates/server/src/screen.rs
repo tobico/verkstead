@@ -38,6 +38,14 @@
 //! human hands the keyboard back — see [`crate::hold`]. The socket dropping
 //! does not end one, which is why nothing here releases anything on its way
 //! out.
+//!
+//! **The mouse commits them to nothing.** A session whose interface tracks the
+//! mouse is sent a report of every move over its Screen, and those reports come
+//! up this socket too — as [`Watching::Moused`] rather than as typing, because
+//! the browser knows which the human did and the bytes do not say. They are
+//! written through to the session exactly as keystrokes are, and they leave the
+//! Hold alone: the Hold is what stops Verkstead ending a session under a human
+//! who is intervening, and a cursor crossing a pane is not one.
 
 use std::sync::{Arc, Mutex};
 
@@ -212,7 +220,13 @@ impl Live {
         self.held().painted()
     }
 
-    /// The human typed `keys`: put them in at the session's own terminal.
+    /// A watcher put `input` in: put it in at the session's own terminal.
+    ///
+    /// Whichever of the two kinds it arrived as. Typing and a mouse report are
+    /// the same thing by the time they are here — bytes a terminal is being
+    /// sent — and the difference between them is what was done about the Hold
+    /// before this was called, which is [`watch`]'s business rather than this
+    /// one's.
     ///
     /// Straight through, and nothing of it is drawn here. What a terminal does
     /// with a keystroke is the terminal's business — it echoes it, or it does
@@ -224,9 +238,9 @@ impl Live {
     /// Nothing here touches the quiet clock either. Quiet-detection is keyed on
     /// what the terminal prints, and what protects a human mid-typing is the
     /// Hold suspending session-end rather than the clock — see [`crate::hold`].
-    pub(crate) async fn typed(&self, keys: &str) {
-        if let Err(error) = self.terminal.write(keys.as_bytes()).await {
-            tracing::error!(error = ?error, "what a watcher typed did not reach the session");
+    pub(crate) async fn put_in(&self, input: &str) {
+        if let Err(error) = self.terminal.write(input.as_bytes()).await {
+            tracing::error!(error = ?error, "what a watcher put in did not reach the session");
         }
     }
 
@@ -422,8 +436,14 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                                 crate::push::when_it_has_stood(&state, conversation_id, which);
                             }
 
-                            live.typed(&keys).await;
+                            live.put_in(&keys).await;
                         }
+                        // And the mouse, which is the same bytes going the same
+                        // way with the Hold left exactly as it was — taken or
+                        // not. Nothing is logged for one either: a session that
+                        // tracks the mouse sends a report per pixel crossed, and
+                        // a line each would be the log and nothing else.
+                        Watching::Moused(report) => live.put_in(&report).await,
                     }
                 }
                 // A ping is answered by the transport underneath, and a binary

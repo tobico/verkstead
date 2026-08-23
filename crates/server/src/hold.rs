@@ -5,6 +5,15 @@
 //! closing — resuming over a half-finished intervention is worse than a stalled
 //! run, so the only thing that ends one is somebody saying so.
 //!
+//! **The keyboard alone takes it — paste included, the mouse never.** A session
+//! whose interface tracks the mouse is sent a report of every move over its
+//! Screen, and those reports reach it down the same path a keystroke takes; they
+//! flow whether the Conversation is held or not, and none of them takes a Hold.
+//! What a Hold is for is stopping Verkstead ending a session out from under a
+//! human who is deliberately intervening, and glancing a cursor across a live
+//! Screen is not that — see [`crate::screen`], which is where the two are told
+//! apart.
+//!
 //! **While it lasts Verkstead records and nothing else.** The relay goes on
 //! reading the terminal, the Capture goes on being written, the Transcript goes
 //! on being followed and the Timeline goes on being nudged. What stops is ending

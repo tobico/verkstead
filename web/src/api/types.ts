@@ -1669,11 +1669,16 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * Two kinds of thing, each saying which it is: the socket is a conversation in
- * both directions, and what a watcher does to a Screen is either look at it a
- * different size or type into it.
+ * Three kinds of thing, each saying which it is: the socket is a conversation
+ * in both directions, and what a watcher does to a Screen is look at it a
+ * different size, type into it, or move a mouse over it.
+ *
+ * The last two carry the same thing — bytes on their way to the session's own
+ * terminal — and are told apart for one reason, which is the Hold. Typing
+ * takes it and mousing never does, so which of the two the human did has to
+ * survive the crossing rather than be guessed at from the bytes.
  */
-export type Watching = { "Resized": Size } | { "Typed": string };
+export type Watching = { "Resized": Size } | { "Typed": string } | { "Moused": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

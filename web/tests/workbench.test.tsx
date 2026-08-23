@@ -2516,11 +2516,37 @@ describe("taking a live session's keyboard", () => {
   }
 
   /// What a watcher said up the socket, of the kind named.
-  function said(socket: Attached, kind: "Typed" | "Resized"): unknown[] {
+  function said(
+    socket: Attached,
+    kind: "Typed" | "Moused" | "Resized",
+  ): unknown[] {
     return socket.sent
       .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
       .filter((wrote) => kind in wrote)
       .map((wrote) => wrote[kind]);
+  }
+
+  /// The pane watching a live session, with its socket open and the first
+  /// repaint painted — which is what makes the terminal there is to type into.
+  async function watching(): Promise<{
+    container: ParentNode;
+    socket: Attached;
+  }> {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    theGrillingOutput({ running: true });
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const socket = await attached();
+    socket.says(PAINTED);
+
+    await drawn(container, ".details-pane .screen .xterm-rows");
+
+    return { container, socket };
   }
 
   /// Typing goes up the socket as the bytes the terminal made of it. Nothing is
@@ -2546,6 +2572,48 @@ describe("taking a live session's keyboard", () => {
 
     await waitFor(() => expect(said(socket, "Typed")).toEqual(["\r"]));
     expect(grid.textContent).toBe(before);
+  });
+
+  /// A paste is the keyboard too. It arrives at the terminal as an event of its
+  /// own rather than as a keypress, and what it carries is exactly what somebody
+  /// meant to put into the session — so it goes up as typing, and takes the Hold
+  /// the way a keystroke does.
+  it("sends a paste as typing", async () => {
+    const { container, socket } = await watching();
+
+    const typing = await drawn<HTMLTextAreaElement>(
+      container,
+      ".details-pane .screen .xterm-helper-textarea",
+    );
+
+    fireEvent.paste(typing, {
+      clipboardData: { getData: () => "cargo test" },
+    });
+
+    await waitFor(() => expect(said(socket, "Typed")).toEqual(["cargo test"]));
+    expect(said(socket, "Moused")).toEqual([]);
+  });
+
+  /// And the mouse is not. A session whose interface tracks it has the terminal
+  /// report every move, click and scroll down the same callback a keystroke
+  /// comes out of — so a cursor crossing a live Screen would take the Hold, and
+  /// silently stop Verkstead ending anything, if the two were not told apart.
+  ///
+  /// Told apart by what the human touched rather than by the bytes: nothing
+  /// about a mouse report distinguishes it from an arrow key on the wire. What
+  /// the wheel is turned into here is one of them.
+  it("sends what the mouse did as the mouse, which takes nothing", async () => {
+    const { container, socket } = await watching();
+
+    const grid = await drawn(container, ".details-pane .screen .xterm-screen");
+
+    fireEvent.wheel(grid, { deltaY: 120 });
+
+    await waitFor(() => expect(said(socket, "Moused")).not.toEqual([]));
+
+    // And nothing of it went up as typing, which is the whole of the claim: the
+    // server takes the Hold on the one kind and never on the other.
+    expect(said(socket, "Typed")).toEqual([]);
   });
 
   /// A Hold is the server's answer rather than this page's memory of having

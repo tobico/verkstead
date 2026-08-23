@@ -6079,6 +6079,22 @@ impl Watcher {
             .expect("the socket to take a keystroke");
     }
 
+    /// Move the mouse over it, which is the input that takes nothing.
+    ///
+    /// The report a terminal makes of a move, a click or a scroll, because that
+    /// is what the browser sends: a session whose interface tracks the mouse is
+    /// sent one of these per movement over its Screen, and the browser says it
+    /// is the mouse rather than leaving the server to guess from bytes that look
+    /// exactly like an arrow key.
+    async fn mouses(&mut self, report: &str) {
+        let said = serde_json::to_string(&Watching::Moused(report.to_owned())).unwrap();
+
+        self.socket
+            .send(Message::Text(said.into()))
+            .await
+            .expect("the socket to take a mouse report");
+    }
+
     /// This watcher's window is now that big — which is the Screen's size from
     /// here on, for everybody watching it.
     async fn resize(&mut self, columns: u16, rows: u16) {
@@ -6384,6 +6400,83 @@ async fn typing_into_a_screen_reaches_the_session_and_takes_the_hold() {
         view.blocked_on,
         Some(event),
         "and the Conversation carries *blocked on you*, pointing at it",
+    );
+}
+
+/// And the mouse over one reaches the session and takes nothing.
+///
+/// A session whose interface tracks the mouse is sent a report of every move,
+/// click and scroll over its Screen, down the path a keystroke takes. They have
+/// to arrive — an interface that draws a cursor and never sees one is broken —
+/// and they must not take the Hold: a Hold stops Verkstead ending sessions, and
+/// glancing a cursor across a live Screen would otherwise stop the whole run by
+/// accident.
+///
+/// The stub reads its terminal a byte at a time and prints what it read with the
+/// escapes made visible, because that is the claim: the report arrived at the
+/// session rather than at the Screen alone.
+#[tokio::test]
+async fn mousing_over_a_screen_reaches_the_session_and_takes_nothing() {
+    let fixture = grilling(
+        r#"
+        stty -icanon -echo min 1 time 0
+        printf 'ready
+'
+        cat -v
+        "#,
+    )
+    .await;
+
+    let event = fixture.running().await;
+    let at = fixture.listening().await;
+
+    let mut watcher = Watcher::attach(at, fixture.id, event).await;
+    watcher.until(|grid| grid.contains("ready")).await;
+
+    // A cursor crossing the pane, as a terminal reports one.
+    watcher.mouses("\u{1b}[<35;12;24M").await;
+
+    let showing = watcher.until(|grid| grid.contains("^[[<35;12;24M")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("^[[<35;12;24M")),
+        "the session should have read the mouse report: {showing:?}",
+    );
+
+    // Long enough for a Hold to have been taken if one were going to be.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let view = fixture.view().await;
+    assert!(
+        view.held.is_none(),
+        "the mouse took the Hold, and nothing but the keyboard may",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "and the Conversation is not blocked on anybody for a cursor going past",
+    );
+
+    // The keyboard still takes it, exactly as before.
+    watcher.types("hello\r").await;
+
+    assert_eq!(
+        fixture.until(|view| view.held).await,
+        event,
+        "the first keystroke should have taken the Hold",
+    );
+
+    // And the mouse goes on flowing while it is held: a human mid-intervention
+    // is using the mouse as much as the keyboard.
+    watcher.mouses("\u{1b}[<35;40;12M").await;
+
+    let showing = watcher.until(|grid| grid.contains("^[[<35;40;12M")).await;
+    assert!(
+        showing.iter().any(|row| row.contains("hello")),
+        "what was typed should have reached it too: {showing:?}",
+    );
+    assert_eq!(
+        fixture.view().await.held,
+        Some(event),
+        "and the Hold is where the keystroke left it",
     );
 }
 

@@ -43,6 +43,20 @@
 //! makes of a keystroke, and what it makes of one comes back down the socket
 //! like everything else it prints.
 //!
+//! **The mouse goes up the same socket and takes nothing.** A session whose
+//! interface tracks the mouse has the terminal report every move, click and
+//! scroll over the grid, and the terminal hands those reports out of the one
+//! callback it hands keystrokes out of — so moving a cursor across a live Screen
+//! would take the Hold, and silently stop Verkstead ending anything, if the two
+//! were not told apart.
+//!
+//! **They are told apart here, by what the human did rather than by the bytes.**
+//! Bytes arriving on the heels of a key or a paste are typing; everything else —
+//! a mouse report, whatever the terminal makes of the wheel — is the mouse. This
+//! side is the only place that knows, a report being indistinguishable from
+//! typing by the time it is on the wire, so it says which it is and the server
+//! takes it at its word.
+//!
 //! **Handing back is a press, and it is the only way out.** Not closing the
 //! pane, not closing the tab: Verkstead resuming over a half-finished
 //! intervention is worse than a stalled run. So the control sits here for as
@@ -83,6 +97,29 @@ import type {
   Watching,
 } from "../api/types";
 import { useReading } from "../freshness";
+
+/// The events that say the human is at this pane's keyboard.
+///
+/// A key and a paste are the two the Hold was always about. `input` is the same
+/// thing arriving as inserted text rather than as a keypress, which is how a
+/// phone's keyboard and an input method reach a terminal — and it is only ever
+/// text entry, so nothing the mouse does can be mistaken for one.
+const TOUCHES = ["keydown", "paste", "input"] as const;
+
+/// How long after one of those what the terminal hands over still counts as
+/// having been typed.
+///
+/// A window rather than the same turn of the event loop, because the terminal
+/// does not always hand keyboard input over in the turn it arrived in: a key and
+/// a paste come straight back out, and text composed on an input method or a
+/// phone's keyboard comes a turn or two later. Long enough to cover the slowest
+/// of those and far too short to cover a human moving from the keyboard to the
+/// mouse.
+///
+/// It errs the one safe way. A mouse report landing inside the window is called
+/// typing, and the Hold it would take is one the keystroke that opened the
+/// window has already taken.
+const TYPING_LASTS = 500;
 
 export function Screen(props: {
   conversation: ConversationView;
@@ -136,12 +173,35 @@ export function Screen(props: {
   let terminal: Terminal | undefined;
   let fit: FitAddon | undefined;
 
-  /// Where a keystroke goes, or nothing where there is nowhere for one to go.
+  /// Where what the terminal makes of the human goes, or nothing where there is
+  /// nowhere for it to go.
   ///
   /// Set by whatever is watching and read by the terminal's own listener, which
   /// is attached once when the terminal is made: a listener added per repaint
   /// would be one more copy of itself every time somebody resized a window.
-  let typed: ((keys: string) => void) | undefined;
+  let putIn: ((said: Watching) => void) | undefined;
+
+  /// When the human last touched this pane's keyboard — see [`TOUCHES`] and
+  /// [`TYPING_LASTS`].
+  ///
+  /// Which of the two things the human did is the only thing that can be asked
+  /// here. A mouse report is escape sequences and so is an arrow key: no amount
+  /// of reading the bytes tells one from the other, and the event that caused
+  /// them is the only witness there is.
+  let touched = 0;
+
+  /// Whether what the terminal is handing over is the keyboard's.
+  const atTheKeyboard = () => Date.now() - touched < TYPING_LASTS;
+
+  /// The human touched the keyboard: a key, a paste, or text inserted whole,
+  /// which is how a phone's keyboard and an input method arrive. All three are
+  /// the keyboard as far as the Hold is concerned.
+  ///
+  /// Listened for on the pane in the capture phase, so each is heard before the
+  /// terminal's own handler turns it into bytes.
+  const fromTheKeyboard = () => {
+    touched = Date.now();
+  };
 
   /// What went wrong, where something did. The socket's own failures rather than
   /// the query's: a session that stops being watchable while somebody is
@@ -184,9 +244,25 @@ export function Screen(props: {
       // session expects — an arrow key, a control character, a pasted line — and
       // those bytes are what goes up.
       //
-      // Nothing is drawn here for it: what the session makes of it comes back as
-      // what the session printed, which is the one account of what happened.
-      terminal.onData((keys) => typed?.(keys));
+      // And what the mouse does, which comes out of the same callback: the
+      // terminal reports a move, a click or a scroll to the session the way it
+      // reports a keypress. Which of the two this is decides which kind goes up,
+      // and the only thing that knows is what the human just touched.
+      //
+      // Nothing is drawn here for either: what the session makes of it comes
+      // back as what the session printed, which is the one account of what
+      // happened.
+      terminal.onData((input) =>
+        putIn?.(atTheKeyboard() ? { Typed: input } : { Moused: input }),
+      );
+
+      // Heard on the pane rather than on the textarea the terminal keeps focus
+      // in, and in the capture phase: both put these ahead of the terminal's own
+      // handlers, so the keyboard is known to have been touched before the bytes
+      // it caused come back out.
+      for (const touch of TOUCHES) {
+        host.addEventListener(touch, fromTheKeyboard, { capture: true });
+      }
     } else {
       terminal.resize(painted.columns, painted.rows);
     }
@@ -218,15 +294,15 @@ export function Screen(props: {
       screenSocket(props.conversation.id, props.output.id),
     );
 
-    // Where this pane's keystrokes go for as long as this socket is the one
-    // watching. The first of them takes the Hold, which is the server's to
-    // decide and to say: nothing here assumes it was taken.
-    typed = (keys) => {
+    // Where this pane's keystrokes and mouse reports go for as long as this
+    // socket is the one watching. The first keystroke takes the Hold and no
+    // mouse report ever does, which is the server's to decide and to say:
+    // nothing here assumes anything was taken.
+    putIn = (said) => {
       if (socket.readyState !== WebSocket.OPEN) {
         return;
       }
 
-      const said: Watching = { Typed: keys };
       socket.send(JSON.stringify(said));
     };
 
@@ -307,13 +383,20 @@ export function Screen(props: {
     onCleanup(() => {
       watching.disconnect();
       socket.close();
-      typed = undefined;
+      putIn = undefined;
     });
   });
 
   // A terminal holds a parser, a buffer and its own listeners, none of which go
-  // away with the element it drew into.
-  onCleanup(() => terminal?.dispose());
+  // away with the element it drew into — and this pane's own, the ones that say
+  // the human is at the keyboard, go with them.
+  onCleanup(() => {
+    for (const touch of TOUCHES) {
+      host?.removeEventListener(touch, fromTheKeyboard, { capture: true });
+    }
+
+    terminal?.dispose();
+  });
 
   return (
     <Switch>
