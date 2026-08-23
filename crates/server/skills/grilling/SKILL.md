@@ -23,7 +23,7 @@ You end it, not them. There is no button anywhere that stops a grilling: once
 you and the human have reached that shared understanding, the closing move is
 **the handoff document, and then one final Question Set that proposes wrapping
 up**. Picking a direction on that Set is how the human settles the way the work
-gets built — and for one of the three, the building starts with you.
+gets built — and for two of the three, the next piece of it is yours.
 
 ### The handoff document
 
@@ -91,10 +91,10 @@ proposal:
 ### When they pick a task list
 
 The pick comes back as `direction` on the Response, beside the `answers`. A
-`task-list` pick is the one you carry on from yourself: the other two are handed
-over the moment they are picked, and this one is not, because the backlog *is*
-the plan and the plan is best written by the context that settled it. So this
-session does not end at the pick. The work is yours.
+`task-list` pick is one of the two you carry on from yourself: `inline` is
+handed over the moment it is picked, and this one is not, because the backlog
+*is* the plan and the plan is best written by the context that settled it. So
+this session does not end at the pick. The work is yours.
 
 **Read `~/.claude/skills/breaking-down/SKILL.md` and follow it from *Ground the
 plan in the code* onward.** The branch is made, the worktree is this one, and
@@ -106,6 +106,24 @@ The plan commit is what ends this session. Verkstead watches for `.tasks/`
 committed to the branch and then for you to go quiet, and runs the backlog from
 there — a fresh session per task, under the account that builds. Do not start
 task 01.
+
+### When they pick a roadmap
+
+The other one you carry on from yourself, and for the same reason: a roadmap is
+planning above all, and its stage briefs are worth what the context that settled
+them can put in them. So this session does not end at the pick either.
+
+**Read `~/.claude/skills/staging/SKILL.md` and follow it from *Ground the plan
+in the code* onward.** Same worktree, same branch, same agreement — this
+conversation, and whatever they wrote beside the pick.
+
+That skill goes further than the breaking-down one does: it ends with the
+roadmap committed *and* the branch carried to a pull request, the way this
+repository's own review process says. Both are yours to do here, and neither
+waits on approval. Verkstead watches for the roadmap on the branch and then for
+you to go quiet, and takes the Conversation on to wrapping that pull request
+up. **Do not start stage 01** — Verkstead runs each stage as a Conversation of
+its own, on a branch of its own.
 
 ### When they don't accept
 

@@ -86,21 +86,22 @@ pub(crate) async fn start_adopting(
 /// An accepted proposal settles the Direction, and what follows it depends on
 /// whose session produces the picked Direction's artifact.
 ///
-/// **A task-list pick produces it here, in the session that proposed.** That
-/// session is idling on the ask and the Response is on its way back to it, so
-/// nothing is ended and nothing is launched: what Verkstead does is arm the
-/// runner on the session already running, which sees the backlog out and starts
-/// the task run — see [`crate::runner::follow_breakdown`]. The Conversation stays
-/// grilling until then, because the grilling is what is still happening.
+/// **A task-list or roadmap pick produces it here, in the session that
+/// proposed.** That session is idling on the ask and the Response is on its way
+/// back to it, so nothing is ended and nothing is launched: what Verkstead does
+/// is arm the runner on the session already running, which sees the artifact out
+/// and carries the Conversation on from there — see [`write_the_artifact`]. The
+/// Conversation stays grilling until then, because the grilling is what is still
+/// happening.
 ///
-/// **The other two end the grilling here**, and three things follow. The session
-/// that proposed is ended: it has its Response, there is nothing left for it to
-/// do, and what comes next runs in the same worktree under a different account.
-/// Its handoff is taken onto the Timeline, because the directory it was written
-/// in is Verkstead's own scratch space and the Timeline is where a
-/// Conversation's documents live. And the direction the human picked is acted on
-/// there and then — the pick rides the Set, so accepting and choosing are one
-/// answer and there is nothing left to press.
+/// **An inline pick ends the grilling here**, and three things follow. The
+/// session that proposed is ended: it has its Response, there is nothing left for
+/// it to do, and what comes next runs in the same worktree under a different
+/// account. Its handoff is taken onto the Timeline, because the directory it was
+/// written in is Verkstead's own scratch space and the Timeline is where a
+/// Conversation's documents live. And the work the human picked is started there
+/// and then — the pick rides the Set, so accepting and choosing are one answer
+/// and there is nothing left to press.
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has done whatever the pick asked of it. What a session that would
@@ -175,14 +176,12 @@ pub(crate) async fn settle_a_proposal(
     };
 
     if carrying_on {
-        return write_the_artifact(state, conversation_id, picked);
+        return write_the_artifact(state, conversation_id, picked).await;
     }
 
     state.sessions.end(conversation_id).await;
 
-    if let Err(error) = take_handoff(state, conversation_id).await {
-        tracing::error!(error = ?error, conversation_id, "the handoff could not be put on the Timeline");
-    }
+    hand_over(state, conversation_id).await;
 
     // And the work the pick names. Logged rather than raised for the reason the
     // two above are: the Response is stored and the Conversation has moved, so
@@ -209,7 +208,15 @@ pub(crate) async fn settle_a_proposal(
 /// Conversation grilling with nothing grilling it, which is a thing to see in the
 /// log: the pick is recorded, so the human's answer stands, and there is nothing
 /// here to raise an Interruption about — no session ran and went wrong.
-fn write_the_artifact(state: &AppState, id: i64, direction: Direction) {
+///
+/// The two tails differ in what the artifact is and in where landing it leaves
+/// the Conversation. A backlog is the start of a run — the tasks it names are
+/// worked one fresh session each, under the Profile that builds — so the
+/// Conversation goes on to Implementing. A roadmap is the whole of this
+/// Conversation's own work, because the building belongs to the Stages it plans,
+/// so the same session carries the branch to a pull request and the Conversation
+/// goes straight on to wrapping that up.
+async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) {
     let Some(session) = state.sessions.following(id) else {
         tracing::error!(
             conversation_id = id,
@@ -223,11 +230,13 @@ fn write_the_artifact(state: &AppState, id: i64, direction: Direction) {
         Direction::TaskList => {
             tokio::spawn(crate::runner::follow_breakdown(state.clone(), id, session));
         }
-        // The store moves these rather than leaving them grilling, so a pick of
-        // either is never carried on with here.
-        Direction::Inline | Direction::Roadmap => tracing::error!(
+        Direction::Roadmap => {
+            tokio::spawn(crate::runner::follow_staging(state.clone(), id, session));
+        }
+        // The store moves this one rather than leaving it grilling, so an inline
+        // pick is never carried on with here.
+        Direction::Inline => tracing::error!(
             conversation_id = id,
-            ?direction,
             "a direction that ends its grilling was left carrying on, so nothing is watching it"
         ),
     }
@@ -236,20 +245,23 @@ fn write_the_artifact(state: &AppState, id: i64, direction: Direction) {
 /// Record that the grilling is over and the work is being built: the handoff it
 /// wrote goes on the Timeline, and the Conversation moves.
 ///
-/// Called once the grilling session's own tail has landed and the session has
+/// Called once a task-list grilling's own tail has landed and the session has
 /// been seen out — see [`crate::runner::follow_breakdown`] — which is the one
-/// moment the handoff is certainly finished and the one moment the artifact it
+/// moment the handoff is certainly finished and the one moment the backlog it
 /// was writing is certainly under version control.
+///
+/// A roadmap tail has no counterpart here. Its session goes on past the artifact
+/// to the pull request, and what records *that* is the move it makes — see
+/// [`crate::wrapping::opened`] — so the only thing this would have left to do is
+/// the handoff, which that path takes for itself.
 ///
 /// The handoff first, so that a Conversation that says it is being built has
 /// everything the grilling left beside it. Neither half is refused for: the
-/// artifact is committed by the time this runs, and what a document that could
+/// backlog is committed by the time this runs, and what a document that could
 /// not be read or a move that would not record leaves behind is something to see
 /// in the log.
 pub(crate) async fn grilling_over(state: &AppState, id: i64) {
-    if let Err(error) = take_handoff(state, id).await {
-        tracing::error!(error = ?error, conversation_id = id, "the handoff could not be put on the Timeline");
-    }
+    hand_over(state, id).await;
 
     match store::start_implementing(&state.pool, id).await {
         Ok(store::Implementing::Started) => {
@@ -269,6 +281,20 @@ pub(crate) async fn grilling_over(state: &AppState, id: i64) {
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "the work could not be recorded as being built")
         }
+    }
+}
+
+/// Put the handoff the grilling wrote on the Timeline, refusing for nothing —
+/// which is [`take_handoff`] with the one thing every caller does about a
+/// failure done in the one place.
+///
+/// Every caller is somewhere the Conversation has already moved or is about to,
+/// so a handoff that could not be read is a thing to see in the log rather than
+/// something to stop for: what it costs is the document beside the work, and the
+/// work itself is where it is either way.
+pub(crate) async fn hand_over(state: &AppState, id: i64) {
+    if let Err(error) = take_handoff(state, id).await {
+        tracing::error!(error = ?error, conversation_id = id, "the handoff could not be put on the Timeline");
     }
 }
 
@@ -302,20 +328,18 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 }
 
 /// Set the work being built: a fresh session under the Conversation's
-/// implementation Profile starts in its worktree, inside whichever skill the
-/// picked `direction` primes it for.
+/// implementation Profile starts in its worktree, inside the implementing skill.
 ///
 /// A fresh session rather than the grilling one carrying on, because the two run
 /// under Profiles the Conversation fixed separately and a session cannot change
 /// the account it is running as. What the grilling knew reaches it as the
 /// handoff — see [`crate::skills::implementing`].
 ///
-/// The two directions that reach here build something. Inline starts a session
-/// that builds the work; a staged roadmap starts one that writes
-/// `docs/roadmaps/` and carries the branch to a pull request, and the stages it
-/// plans become Conversations of their own. A task-list pick never arrives: its
-/// backlog is written by the grilling session itself, which is already running
-/// and needs nothing started — see [`write_the_artifact`].
+/// Inline is the one direction that reaches here, and that is the whole of why
+/// this launches anything. The other two are planning as much as building — a
+/// backlog, a roadmap — and planning is best done by the context that settled the
+/// work, so their artifact is written by the grilling session itself, which is
+/// already running and needs nothing started. See [`write_the_artifact`].
 ///
 /// The move to Implementing is already recorded by the time this runs — the pick
 /// and the move are one transaction in the store — exactly as starting a grilling
@@ -359,19 +383,16 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
 
     let (brief, handoff) = documents(pool, id).await?;
 
-    // Which skill the session runs under is the whole of the difference between
-    // the two: same Profile, same worktree, same two documents.
-    let prompt = match direction {
-        Direction::Inline => skills::implementing(&brief, handoff.as_deref()),
-        Direction::Roadmap => skills::staging(&brief, handoff.as_deref()),
-        Direction::TaskList => {
-            tracing::error!(
-                conversation_id = id,
-                "a task-list pick reached the launcher, which is the grilling session's own tail"
-            );
-            return Ok(());
-        }
+    let Direction::Inline = direction else {
+        tracing::error!(
+            conversation_id = id,
+            ?direction,
+            "a pick the grilling session carries on with reached the launcher"
+        );
+        return Ok(());
     };
+
+    let prompt = skills::implementing(&brief, handoff.as_deref());
 
     let started = match state
         .sessions
@@ -385,45 +406,17 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         }
     };
 
-    // Both are followed, and the drivers differ in what they are watching for
-    // rather than in whether anybody is watching. An inline run is one session,
-    // and what says it did anything is what it committed; a roadmap is one
-    // session too, watched for the roadmap it writes and then carried on to the
-    // pull request it opened. Either way round, a session that ends without
-    // landing its work stops the run at an Interruption rather than leaving a
-    // Conversation that says it is implementing with nothing implementing it.
-    match (direction, started) {
-        (Direction::Inline, Some(session)) => {
-            tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
-        }
-        (Direction::Roadmap, Some(session)) => {
-            // The commit the branch came off, which is what says a roadmap in the
-            // Worktree is one this branch wrote rather than one the repository
-            // already had. Recorded at grill start, so a Conversation with a
-            // Worktree has one; without it there is nothing to watch for, and the
-            // session is left running rather than followed.
-            match conversation.base_commit.clone() {
-                Some(base) => {
-                    tokio::spawn(crate::runner::follow_roadmap(
-                        state.clone(),
-                        id,
-                        base,
-                        session,
-                    ));
-                }
-                None => tracing::error!(
-                    conversation_id = id,
-                    "the Conversation has no base commit, so the roadmap session is not followed"
-                ),
-            }
-        }
-        // A session that would not start is logged above. There is nothing to
-        // follow, and what the human sees is a Conversation that says it is
-        // being built with nothing building it.
-        (_, None) => {}
-        // And a task list never started one: it is answered above, before there
-        // is a prompt to launch anything on.
-        (Direction::TaskList, Some(_)) => {}
+    // And it is followed, because an unattended run with nobody watching it is
+    // a Conversation that says it is implementing with nothing implementing it.
+    // One session holds the whole of an inline run, so what says it did anything
+    // is what it committed, and a session that ends having committed nothing
+    // stops the run at an Interruption.
+    //
+    // A session that would not start is logged above. There is nothing to follow,
+    // and what the human sees is the same Conversation to look at and start
+    // again.
+    if let Some(session) = started {
+        tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
     }
 
     Ok(())

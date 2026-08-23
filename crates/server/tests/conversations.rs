@@ -1259,7 +1259,12 @@ async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
         "what the human picked is what the Conversation is being built as, \
          whatever the agent argued for",
     );
-    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and a roadmap is one the grilling session writes for itself, so the pick \
+         records the direction and moves nothing",
+    );
 }
 
 /// The one row of the sidebar, for the tests about what a row says of itself.
@@ -1484,74 +1489,76 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
-/// The two directions that hand the work over run off the pick, and each sets
-/// its own pipeline going.
+/// Inline is the one direction that hands the work over, and its pick is what
+/// sets that pipeline going.
 ///
-/// One test over the two, because what differs between them is which session is
-/// launched and this router has no way to run one — what is the same, and what
-/// is being asked here, is that the pick alone records the direction and takes
-/// the Conversation to Implementing.
+/// What is being asked here is that the pick alone records the direction and
+/// takes the Conversation to Implementing — the session it launches is not this
+/// router's to run.
 #[tokio::test]
-async fn a_pick_that_hands_the_work_over_sets_the_conversation_implementing() {
-    for (picked, direction) in [
-        ("inline", verkstead_schema::Direction::Inline),
-        ("roadmap", verkstead_schema::Direction::Roadmap),
-    ] {
-        let (watched, _dir, app, _repo, repo_id) = workbench().await;
-        let id = grilling(&app, watched.path(), repo_id).await;
-
-        picking(&app, ask(&app, id, PROPOSING).await, picked).await;
-
-        let view = opened(&app, id).await;
-
-        assert_eq!(view.direction, Some(direction), "picking {picked}");
-        assert_eq!(view.state, Lifecycle::Implementing, "picking {picked}");
-        assert_eq!(
-            moves(&view),
-            [Lifecycle::Grilling, Lifecycle::Implementing],
-            "the work starting is one move, with nothing in between to rest on \
-             — picking {picked}",
-        );
-    }
-}
-
-/// A task-list pick is the one that stays where it is. The session that proposed
-/// breaks the work down itself, so the grilling is still what is happening —
-/// and the handoff it wrote is still its own, because it has not finished with
-/// it.
-///
-/// What ends that session and moves the Conversation is the plan commit, which
-/// wants an agent to write it: `sessions.rs` is where that is asked end to end.
-#[tokio::test]
-async fn a_task_list_pick_leaves_the_conversation_grilling() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
+async fn an_inline_pick_sets_the_conversation_implementing() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
-    let written = handoff_written(dir.path(), id, "# What we settled\n");
-
-    assert_eq!(
-        picking(&app, ask(&app, id, PROPOSING).await, "task-list").await,
-        verkstead_render::Submitted::Accepted,
-    );
+    picking(&app, ask(&app, id, PROPOSING).await, "inline").await;
 
     let view = opened(&app, id).await;
 
+    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
+    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
-        view.direction,
-        Some(verkstead_schema::Direction::TaskList),
-        "the pick is recorded: it is what the backlog is watched for",
+        moves(&view),
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "the work starting is one move, with nothing in between to rest on",
     );
-    assert_eq!(
-        view.state,
-        Lifecycle::Grilling,
-        "and nothing moved, because the grilling is what is still happening",
-    );
-    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+}
 
-    assert!(
-        written.exists() && handoff(&view).is_none(),
-        "the handoff is taken when the session ends, and it has not ended",
-    );
+/// The other two picks are the ones that stay where they are. The session that
+/// proposed writes the backlog or the roadmap itself, so the grilling is still
+/// what is happening — and the handoff it wrote is still its own, because it has
+/// not finished with it.
+///
+/// One test over the two, because what the pick does is the same for both: it is
+/// what the tail is watched for, and nothing else. What ends that session and
+/// moves the Conversation is the artifact landing, which wants an agent to write
+/// it: `sessions.rs` is where each is asked end to end.
+#[tokio::test]
+async fn a_pick_the_grilling_writes_leaves_the_conversation_grilling() {
+    for (picked, direction) in [
+        ("task-list", verkstead_schema::Direction::TaskList),
+        ("roadmap", verkstead_schema::Direction::Roadmap),
+    ] {
+        let (watched, dir, app, _repo, repo_id) = workbench().await;
+        let id = grilling(&app, watched.path(), repo_id).await;
+
+        let written = handoff_written(dir.path(), id, "# What we settled\n");
+
+        assert_eq!(
+            picking(&app, ask(&app, id, PROPOSING).await, picked).await,
+            verkstead_render::Submitted::Accepted,
+        );
+
+        let view = opened(&app, id).await;
+
+        assert_eq!(
+            view.direction,
+            Some(direction),
+            "the pick is recorded: it is what the artifact is watched for — picking {picked}",
+        );
+        assert_eq!(
+            view.state,
+            Lifecycle::Grilling,
+            "and nothing moved, because the grilling is what is still happening \
+             — picking {picked}",
+        );
+        assert_eq!(moves(&view), [Lifecycle::Grilling], "picking {picked}");
+
+        assert!(
+            written.exists() && handoff(&view).is_none(),
+            "the handoff is taken when the session ends, and it has not ended \
+             — picking {picked}",
+        );
+    }
 }
 
 /// There is nowhere left to press a direction: the standalone chooser and the

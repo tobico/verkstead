@@ -1,12 +1,21 @@
-//! What happens the moment a backlog is worked to empty: the pull request the
-//! finish step opened is found, and the Conversation moves into Wrapping.
+//! What happens the moment a Conversation's own work is finished: the pull
+//! request the session opened is found, and the Conversation moves into
+//! Wrapping.
 //!
-//! The finish itself is the session's. It follows the target repository's own
-//! review process — read out of that repository's `docs/agents/git-workflow.md`
-//! by the bundled fork of next-task — because pushing and opening a PR is the
-//! project's process rather than Verkstead's. What is Verkstead's is knowing
-//! that it happened, and the only way to know is to ask GitHub: an agent's word
-//! for it would be the one report it can most easily be wrong about.
+//! Two endings arrive here, because two kinds of work end on a pull request. A
+//! backlog worked to empty ends at its finish step, from Implementing. A roadmap
+//! ends at the roadmap commit, from Grilling — the session that settled the work
+//! wrote it and carried the branch on without ever leaving the grilling, and
+//! there was no Implementing to leave, because on a roadmap the building belongs
+//! to the Stages.
+//!
+//! The push and the pull request are the session's either way. It follows the
+//! target repository's own review process — read out of that repository's
+//! `docs/agents/git-workflow.md` by the bundled fork it is running inside —
+//! because pushing and opening a PR is the project's process rather than
+//! Verkstead's. What is Verkstead's is knowing that it happened, and the only way
+//! to know is to ask GitHub: an agent's word for it would be the one report it
+//! can most easily be wrong about.
 //!
 //! So this asks the host's `gh` for the PR on the Conversation's branch — see
 //! [`crate::github`] — and records what it finds. Recording it *is* the move,
@@ -29,10 +38,10 @@ use crate::AppState;
 use crate::github;
 use crate::store;
 
-/// Find the pull request `conversation_id`'s finish step opened, and move the
+/// Find the pull request `conversation_id`'s last session opened, and move the
 /// Conversation on to wrapping it up.
 ///
-/// `writing` is the Timeline Event the finish session printed into, so that an
+/// `writing` is the Timeline Event that session printed into, so that an
 /// Interruption raised here carries the tail of what it last said — which is
 /// usually where the reason it opened nothing is written down.
 ///
@@ -68,7 +77,7 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
                 conversation_id,
                 branch,
                 why = trouble.why(),
-                "the finish step left no pull request Verkstead could find",
+                "the last session left no pull request Verkstead could find",
             );
 
             stopped(state, conversation_id, &trouble.why(), writing).await;
@@ -94,14 +103,14 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
             // going to look — and nobody has read the branch at all.
             watching(state, conversation_id);
         }
-        // The run was stopped from outside while the finish step was landing, or
-        // this is a second attempt at a finish that already moved the
+        // The run was stopped from outside while the last step was landing, or
+        // this is a second attempt at an ending that already moved the
         // Conversation. Neither is a failure and neither is anything to record
         // twice.
-        Ok(store::Wrapping::NotImplementing) => tracing::info!(
+        Ok(store::Wrapping::NothingToWrap) => tracing::info!(
             conversation_id,
             number = opened.number,
-            "the Conversation is not implementing any more, so nothing was recorded",
+            "the Conversation has nothing left to wrap up, so nothing was recorded",
         ),
         Ok(store::Wrapping::NoSuchConversation) => tracing::error!(
             conversation_id,

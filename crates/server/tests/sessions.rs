@@ -1798,9 +1798,14 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
     );
 }
 
-/// The roadmap direction end to end: the same Profile and the same worktree
-/// again, inside Verkstead's fork of to-roadmap this time — which writes a real
-/// `docs/roadmaps/<name>/` and commits it to the branch.
+/// The roadmap direction end to end: the grilling session reads on into the
+/// bundled fork of to-roadmap and commits a real `docs/roadmaps/<name>/` to the
+/// branch, without anything else being launched.
+///
+/// The stub writes its roadmap as it starts rather than when the Response lands,
+/// for the reason the task-list one does: a stub cannot idle on a blocking ask,
+/// and a roadmap already committed is watched for exactly as one committed a
+/// minute later is.
 ///
 /// Repo files stay the source of truth here too, so what this asks of the far
 /// end is what git says, and what it asks of Verkstead is the reading it draws
@@ -1812,25 +1817,26 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
 /// does. So what ends it is Verkstead's own done-signal — a roadmap on the
 /// branch that was not there before, committed, and then quiet.
 #[tokio::test]
-async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
+async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
     let fixture = grilling(
         r#"
         case "$1" in
         claude-grilling-5)
-            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
             printf 'model=%s\n' "$1"
-            printf 'prompt=%s\n' "$2"
             grep '^name:' "$HOME/.claude/skills/staging/SKILL.md"
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             mkdir -p docs/roadmaps/rate-limiting
             printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
             printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
             printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
             git add docs
             git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+            printf 'the roadmap is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
             sleep 300
             ;;
         esac
@@ -1854,44 +1860,9 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
 
-    let staging = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id != grilling_output && output.lines > 0)
-                .map(|output| output.id)
-        })
-        .await;
-
-    let said = fixture.capture(staging).await.replace("\r\n", "\n");
-
-    assert!(
-        said.contains("model=claude-implementation-5"),
-        "the staging runs under the implementation Profile, as the work it plans does: {said:?}"
-    );
-    assert!(
-        said.contains("~/.claude/skills/staging/SKILL.md"),
-        "and inside the bundled fork of to-roadmap: {said:?}"
-    );
-    assert!(
-        said.contains("name: staging"),
-        "which is really there to be read: installed under the State Directory and \
-         bound into the sandbox exactly as grilling's is: {said:?}"
-    );
-    assert!(
-        !said.contains("~/.claude/skills/breaking-down/SKILL.md")
-            && !said.contains("~/.claude/skills/implementing/SKILL.md"),
-        "which are the other two directions, and not this one: {said:?}"
-    );
-    assert!(
-        said.contains("A counter per key.") && said.contains(BRIEF),
-        "primed with both documents, exactly as the other two are: {said:?}"
-    );
-
-    // Writing the roadmap is the work starting rather than a step in front of
-    // it, and a roadmap is work like any other work: the fork carries the branch
-    // to a pull request the same way a finished backlog does, and the
-    // Conversation moves on to wrapping that up.
+    // A roadmap is work like any other work: the same session carries the branch
+    // to a pull request the way a finished backlog does, and the Conversation
+    // moves on to wrapping that up.
     let opened = fixture
         .until(|view| {
             (view.state == Lifecycle::Wrapping)
@@ -1901,6 +1872,28 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
         .await;
 
     assert_eq!(opened.number, 41);
+
+    let said = fixture.capture(grilling_output).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-grilling-5"),
+        "the roadmap is written by the session that settled it, under the grilling \
+         Profile it has been running as all along: {said:?}"
+    );
+    assert!(
+        said.contains("name: staging"),
+        "reading on into the bundled fork of to-roadmap, which is really there to be \
+         read from a grilling sandbox: {said:?}"
+    );
+
+    assert_eq!(
+        outputs(&fixture.view().await)
+            .into_iter()
+            .filter(|output| output.id != grilling_output && output.lines > 0)
+            .count(),
+        0,
+        "and nothing else was launched: the staging is the grilling carrying on",
+    );
 
     assert_eq!(
         fixture
@@ -1913,12 +1906,9 @@ async fn choosing_a_roadmap_runs_the_staging_fork_and_commits_a_roadmap() {
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        [
-            Lifecycle::Grilling,
-            Lifecycle::Implementing,
-            Lifecycle::Wrapping,
-        ],
-        "through Implementing on the way, because writing the roadmap is the work",
+        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        "with no Implementing on the way: on a roadmap the building belongs to the \
+         Stages, and this Conversation's own work is the planning",
     );
 
     assert!(
@@ -4241,8 +4231,17 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
 }
 
 /// A roadmap Conversation that stages, wraps up and settles — with a stub that
-/// tells the four sessions apart by the skill their prompts name, which is the
-/// fact under them: all of them run under the one implementation Profile.
+/// tells the sessions apart by the skill their prompts name, which is the fact
+/// under them: every one after the grilling runs under the one implementation
+/// Profile.
+///
+/// The grilling session is the one that stages, because that is what a roadmap
+/// pick does now: it reads on into the staging skill and carries the branch to a
+/// pull request without leaving the context that settled the work. It writes the
+/// roadmap as it starts rather than when the Response lands, because a stub
+/// cannot idle on a blocking ask — nothing in these fixtures dials the router —
+/// and a roadmap already committed is watched for exactly as one committed a
+/// minute later is.
 ///
 /// `workflow` is what the branch records about how this repository's own work
 /// goes for review, written beside the roadmap by the session that stages it.
@@ -4255,9 +4254,6 @@ case "$2" in
 *grilling/SKILL.md*)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
     printf 'the handoff is written\n'
-    sleep 300
-    ;;
-*staging/SKILL.md*)
     mkdir -p docs/roadmaps/rate-limiting docs/agents
 {workflow}
     printf '# Rate limiting roadmap\n\n## Stages\n\n{stages}' > docs/roadmaps/rate-limiting/ROADMAP.md

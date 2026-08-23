@@ -1877,6 +1877,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     git(&worktree, &["add", "-A"]);
     git(&worktree, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
+    // A roadmap pick records the direction and moves nothing: the grilling
+    // session writes the roadmap itself, so the Conversation says it is grilling
+    // until the pull request that follows the roadmap is recorded.
     store::start_grilling(&pool, staged, &base, &worktree)
         .await
         .unwrap();

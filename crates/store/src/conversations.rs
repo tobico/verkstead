@@ -512,11 +512,14 @@ pub enum Directing {
     NoSuchConversation,
 }
 
-/// What became of the work starting once a grilling's own tail has landed.
+/// What became of the work starting once a task-list grilling's own tail has
+/// landed.
 ///
-/// The other half of [`Directing::Writing`]: the pick recorded the direction and
-/// left the Conversation grilling, and this is the move that follows the
-/// artifact.
+/// The other half of a [`Directing::Writing`] task list: the pick recorded the
+/// direction and left the Conversation grilling, and this is the move that
+/// follows the backlog. A roadmap tail is the same shape one rung further along
+/// — the roadmap goes for review as it lands, so what follows it is
+/// [`super::record_pull_request`] rather than this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Implementing {
     /// Recorded: the Conversation is being built, and the move is on its
@@ -1638,16 +1641,18 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the
-/// Conversation's latest pick, and — for the directions whose next move is a
+/// Conversation's latest pick, and — for the one direction whose next move is a
 /// session of its own — the work is being built.
 ///
-/// **A task-list pick moves nothing.** The grilling session that proposed writes
-/// the backlog itself, holding everything the grilling settled, so the
-/// Conversation stays Grilling until that session ends: the pick informs the
-/// agent and the artifact moves the machine. What follows the plan commit is
-/// [`start_implementing`].
+/// **A task-list or roadmap pick moves nothing.** The grilling session that
+/// proposed writes the backlog or the roadmap itself, holding everything the
+/// grilling settled, so the Conversation stays Grilling until that session ends:
+/// the pick informs the agent and the artifact moves the machine. What follows
+/// the plan commit is [`start_implementing`]; what follows the roadmap commit is
+/// the pull request the same session opens, which is
+/// [`super::record_pull_request`]'s to record.
 ///
-/// The other two are one move rather than two. There is no rung between the
+/// **An inline pick is one move rather than two.** There is no rung between the
 /// grilling ending and the work starting — the pick and the acceptance are the
 /// one answer, and a state to sit in between them would be a state nothing ever
 /// waits in.
@@ -1693,10 +1698,10 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
     .await
     .with_context(|| format!("recording the direction picked on Conversation {id}"))?;
 
-    // The grilling carries on writing the backlog, so there is nothing to move
+    // The grilling carries on writing the artifact, so there is nothing to move
     // yet. The pick is committed either way: it is what the follower watching for
     // the artifact is armed from, and what a restart reads back.
-    if direction == Direction::TaskList {
+    if matches!(direction, Direction::TaskList | Direction::Roadmap) {
         tx.commit().await.context("acting on a picked direction")?;
 
         return Ok(Directing::Writing);

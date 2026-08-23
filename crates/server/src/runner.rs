@@ -309,9 +309,12 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             return follow_inline(state, conversation_id, session).await;
         }
         // Nor is this one. A roadmap Conversation has one step of its own, so a
-        // retry is that step again — unless the roadmap already landed, which is
-        // the same case a retried finish has: what failed was finding the pull
-        // request it opened, and the retry is that question asked again.
+        // retry is that step again — in a session of its own, for the reason a
+        // retried breakdown gets one: the grilling that would have written the
+        // roadmap is the session that just ended without one. Unless the roadmap
+        // already landed, which is the same case a retried finish has: what
+        // failed was finding the pull request it opened, and the retry is that
+        // question asked again.
         store::Step::Roadmap => {
             let Some(base) = base(&state, conversation_id).await else {
                 return;
@@ -549,18 +552,49 @@ pub(crate) async fn follow_inline(state: AppState, conversation_id: i64, mut ses
     .await;
 }
 
+/// Follow the grilling session as it stages the work into a roadmap.
+///
+/// The roadmap's counterpart to [`follow_breakdown`], and the same move: the
+/// session that settled the work writes the artifact without leaving the context
+/// that settled it, so nothing is launched here and what is followed is the
+/// session already running.
+///
+/// The commit the branch came off is read here rather than handed in, because
+/// this entry has nobody to have decided it — the pick arrives on a Response and
+/// what it arms is a watcher, not a session. Without one there is nothing that
+/// could say a roadmap in the Worktree is this branch's own, so the session is
+/// left running rather than followed.
+pub(crate) async fn follow_staging(state: AppState, conversation_id: i64, writing: Session) {
+    let Some(base) = base(&state, conversation_id).await else {
+        return;
+    };
+
+    follow_roadmap(state, conversation_id, base, writing).await
+}
+
 /// See a roadmap session out, and carry the Conversation on to wrapping the
 /// pull request it opened.
 ///
 /// The whole of a roadmap Conversation's own work in one session — the stages it
 /// plans are Conversations of their own — so there is no next step to launch.
-/// What there is, is the same ending a backlog's last step has: the fork commits
-/// the roadmap and then follows the repository's own finish sequence, so the
-/// branch is pushed and on a pull request by the time the session goes quiet. A
+/// What there is, is the same ending a backlog's last step has: the session
+/// commits the roadmap and then follows the repository's own finish sequence, so
+/// the branch is pushed and on a pull request by the time it goes quiet. A
 /// roadmap is work like any other work and goes for review like any other work.
 ///
-/// `base` is the commit the branch came off, which is what says a roadmap on it
-/// is one this branch wrote — see [`Landing::Roadmap`].
+/// So the ladder for a roadmap Conversation is Grilling to Wrapping, with nothing
+/// in between. Implementing is where an agent is building the work, and on a
+/// roadmap the building belongs to the Stages: this Conversation's own work is
+/// the planning, which is the grilling carrying on. The move is
+/// [`crate::wrapping::opened`]'s, made as the pull request is recorded — and the
+/// handoff goes on the Timeline first, at the one moment it is certainly
+/// finished, so a Conversation that says it is wrapping up has everything the
+/// grilling left beside it.
+///
+/// `writing` is the session that will commit the roadmap: ordinarily the grilling
+/// session itself, and on a retry a fresh one launched for the tail. `base` is
+/// the commit the branch came off, which is what says a roadmap on it is one this
+/// branch wrote — see [`Landing::Roadmap`].
 ///
 /// A session that ends without writing one stops the run at an Interruption, the
 /// way every other step does, and the human's remedies mean what they always
@@ -574,6 +608,8 @@ pub(crate) async fn follow_roadmap(
     let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
         return;
     };
+
+    crate::conversations::hand_over(&state, conversation_id).await;
 
     crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
 }

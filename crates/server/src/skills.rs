@@ -447,6 +447,31 @@ mod tests {
         );
     }
 
+    /// Nor does a roadmap pick, and for the same reason one level up: the stage
+    /// briefs are worth what the context that settled them can put in them. Same
+    /// branch to carry, and one thing more to say — this tail goes past the
+    /// artifact to the pull request, where the breakdown's stops at the commit.
+    #[test]
+    fn the_grilling_skill_says_to_stage_the_work_where_a_roadmap_is_picked() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains(STAGING),
+            "the branch is a skill to read, named by the path the sandbox mounts it at: \
+             {grilling}"
+        );
+        assert!(
+            grilling.contains("pull request"),
+            "and this one carries the branch the rest of the way, which the session \
+             has to know before it stops at the commit: {grilling}"
+        );
+        assert!(
+            grilling.contains("Do not start stage 01"),
+            "the roadmap is where this session stops: each stage is a Conversation of \
+             its own, on a branch of its own: {grilling}"
+        );
+    }
+
     /// A session is pointed at the skill by the prompt, and nothing else in the
     /// sandbox says what it is for.
     #[test]
@@ -676,6 +701,31 @@ mod tests {
         assert!(
             staging.contains("gh pr create --draft"),
             "and an unstacked one opens a draft PR of its own: {staging}"
+        );
+    }
+
+    /// Two sessions can be reading this one too: the grilling session carrying on
+    /// from the pick, and a fresh one launched because that tail was retried.
+    /// They differ in where the agreement is written down — a conversation the
+    /// reader had, or a handoff document handed to it — so the skill has to say
+    /// both.
+    #[test]
+    fn the_staging_skill_works_from_both_ways_in() {
+        let staging = skill("staging/SKILL.md");
+
+        assert!(
+            staging.contains("the grilling session, reading on"),
+            "the ordinary way in is the session that settled the work carrying on: \
+             {staging}"
+        );
+        assert!(
+            staging.contains("a fresh session"),
+            "and the other is a retried tail, with the handoff as its agreement: \
+             {staging}"
+        );
+        assert!(
+            staging.contains("handoff"),
+            "which it has to name, being the document that way in is primed with"
         );
     }
 

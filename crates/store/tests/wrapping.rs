@@ -1,9 +1,12 @@
-//! The pull request the finish step opened, and the move into Wrapping that
-//! recording one is.
+//! The pull request a Conversation's work was carried to, and the move into
+//! Wrapping that recording one is.
 //!
 //! Recording the PR is not a thing that happens beside the move — it *is* the
 //! move, in one transaction. So what these ask is what a Conversation and its
 //! Timeline say afterwards: the state, the PR Event, and the move under it.
+//!
+//! Two states get here, because two kinds of work end on a pull request: a
+//! backlog worked to empty, from Implementing, and a roadmap, from Grilling.
 
 use std::path::Path;
 
@@ -23,14 +26,13 @@ async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     (dir, pool)
 }
 
-/// A Conversation with its work being built, which is where a finish step can
-/// reach one.
+/// A Conversation that is grilling, which is where every direction is picked and
+/// where a roadmap Conversation still is when its pull request opens.
 ///
 /// Walked there rather than moved by hand: every state on the way records
-/// something — the base commit, the worktree, the direction — and a Conversation
-/// dropped straight into Implementing would be one nothing else in the store
-/// agrees about.
-async fn implementing(pool: &SqlitePool) -> i64 {
+/// something — the base commit, the worktree — and a Conversation dropped
+/// straight into one would be one nothing else in the store agrees about.
+async fn grilling(pool: &SqlitePool) -> i64 {
     let repo = register_repo(pool, Path::new("/srv/verkstead"), "verkstead", "main")
         .await
         .unwrap()
@@ -50,6 +52,16 @@ async fn implementing(pool: &SqlitePool) -> i64 {
     )
     .await
     .unwrap();
+
+    id
+}
+
+/// And the same one carried on to having its work built, which is where a finish
+/// step reaches one. Inline, because that is the direction whose pick makes the
+/// move.
+async fn implementing(pool: &SqlitePool) -> i64 {
+    let id = grilling(pool).await;
+
     pick_direction(pool, id, verkstead_schema::Direction::Inline)
         .await
         .unwrap();
@@ -105,6 +117,47 @@ async fn recording_the_pull_request_moves_the_conversation_into_wrapping() {
     );
 }
 
+/// A roadmap Conversation gets here from Grilling, with no Implementing on the
+/// way: the session that settled the work wrote the roadmap and carried the
+/// branch to a pull request without ever leaving the grilling, because the
+/// building belongs to the Stages it planned.
+#[tokio::test]
+async fn a_roadmap_conversation_wraps_up_straight_out_of_its_grilling() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    pick_direction(&pool, id, verkstead_schema::Direction::Roadmap)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Grilling,
+        "the pick moved nothing: the grilling is what writes the roadmap",
+    );
+
+    assert_eq!(
+        record_pull_request(&pool, id, &opened()).await.unwrap(),
+        Wrapping::Started,
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Wrapping);
+
+    assert_eq!(
+        events(&pool, id)
+            .await
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Moved(state) => Some(state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [Lifecycle::Grilling, Lifecycle::Wrapping],
+        "and the ladder skips Implementing rather than idling in it",
+    );
+}
+
 /// A second attempt at the same finish finds the move already made. Nothing is
 /// recorded twice — the state check is what says so, and it is read inside the
 /// same transaction the insert is in.
@@ -117,7 +170,7 @@ async fn a_conversation_that_is_already_wrapping_records_no_second_pull_request(
 
     assert_eq!(
         record_pull_request(&pool, id, &opened()).await.unwrap(),
-        Wrapping::NotImplementing,
+        Wrapping::NothingToWrap,
     );
 
     let requests = events(&pool, id)
@@ -140,7 +193,7 @@ async fn an_aborted_conversation_is_not_moved_on_by_a_pull_request() {
 
     assert_eq!(
         record_pull_request(&pool, id, &opened()).await.unwrap(),
-        Wrapping::NotImplementing,
+        Wrapping::NothingToWrap,
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();

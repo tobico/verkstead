@@ -8,11 +8,12 @@
 //! Conversation's state and its Timeline say afterwards.
 //!
 //! What a pick moves depends on whose session writes the picked Direction's
-//! artifact. Inline and roadmap are handed over, and their pick takes a
-//! Conversation from Grilling straight to Implementing; a task list is written by
-//! the grilling session itself, so its pick records the direction and moves
-//! nothing, and the move that follows the plan commit is
-//! [`start_implementing`]'s.
+//! artifact. Inline is handed over, and its pick takes a Conversation from
+//! Grilling straight to Implementing; a task list and a roadmap are written by
+//! the grilling session itself, so their pick records the direction and moves
+//! nothing. What follows a plan commit is [`start_implementing`]; what follows a
+//! roadmap commit is the pull request the same session opens, which
+//! `wrapping.rs` is where to look for.
 
 use std::path::Path;
 
@@ -118,9 +119,9 @@ fn ordinary() -> QuestionSet {
 /// Answer a Set the way both halves of the server do, through the one path a
 /// Response takes.
 ///
-/// Inline, which is a direction whose pick hands the work over there and then:
-/// the tests about what accepting *moves* are asking about one of those, and a
-/// task list has its own below.
+/// Inline, which is the direction whose pick hands the work over there and then:
+/// the tests about what accepting *moves* are asking about that one, and the two
+/// the grilling session writes for itself have their own below.
 async fn answer(pool: &SqlitePool, set_id: i64) -> Submission {
     answered(pool, set_id, &accepting(Direction::Inline)).await
 }
@@ -226,39 +227,48 @@ async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
     );
 }
 
-/// A task-list pick is the exception, and the reason is whose session does the
-/// next piece of work: the grilling one writes the backlog itself, so the
-/// grilling is still what is happening and the Conversation still says so.
+/// The two picks the grilling session carries on with are the exception, and the
+/// reason is whose session does the next piece of work: the grilling one writes
+/// the backlog or the roadmap itself, so the grilling is still what is happening
+/// and the Conversation still says so.
+///
+/// One test over the two, because the store does exactly the same thing for both
+/// — records the pick and moves nothing. Where they differ is in what the
+/// artifact landing moves them on to, which is a question for whoever is watching
+/// rather than for the pick.
 #[tokio::test]
-async fn a_task_list_pick_records_the_direction_and_leaves_it_grilling() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
+async fn a_pick_the_grilling_writes_records_the_direction_and_leaves_it_grilling() {
+    for picked in [Direction::TaskList, Direction::Roadmap] {
+        let (_dir, pool) = fresh_pool().await;
+        let id = grilling(&pool).await;
 
-    let created = ask(&pool, id, &proposing(Direction::TaskList))
-        .await
-        .unwrap()
-        .unwrap();
+        let created = ask(&pool, id, &proposing(picked)).await.unwrap().unwrap();
 
-    assert_eq!(
-        proposed(&pool, created.id, &accepting(Direction::TaskList)).await,
-        Some(Proposed::Accepted {
-            direction: Direction::TaskList,
-            directing: Directing::Writing,
-        }),
-        "the proposal is accepted, and what accepting it started is the backlog \
-         being written rather than a Conversation moving",
-    );
-    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
-    assert_eq!(
-        moves(&pool, id).await,
-        [Lifecycle::Grilling],
-        "so nothing is on the Timeline saying it moved",
-    );
-    assert_eq!(
-        direction(&pool, id).await,
-        Some(Direction::TaskList),
-        "and the pick is recorded all the same: it is what the tail is watched for",
-    );
+        assert_eq!(
+            proposed(&pool, created.id, &accepting(picked)).await,
+            Some(Proposed::Accepted {
+                direction: picked,
+                directing: Directing::Writing,
+            }),
+            "the proposal is accepted, and what accepting {picked:?} started is the \
+             artifact being written rather than a Conversation moving",
+        );
+        assert_eq!(
+            state(&pool, id).await,
+            Lifecycle::Grilling,
+            "picking {picked:?}"
+        );
+        assert_eq!(
+            moves(&pool, id).await,
+            [Lifecycle::Grilling],
+            "so nothing is on the Timeline saying it moved — picking {picked:?}",
+        );
+        assert_eq!(
+            direction(&pool, id).await,
+            Some(picked),
+            "and the pick is recorded all the same: it is what the tail is watched for",
+        );
+    }
 }
 
 /// And the move that follows the plan commit, which is the other half of it: the
