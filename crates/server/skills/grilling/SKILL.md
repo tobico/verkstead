@@ -21,32 +21,13 @@ understanding.
 
 You end it, not them. There is no button anywhere that stops a grilling: once
 you and the human have reached that shared understanding, the closing move is
-**the handoff document, and then one final Question Set that proposes wrapping
-up**. Picking a direction on that Set is how the human settles the way the work
-gets built — and for two of the three, the next piece of it is yours.
+**one final Question Set that proposes wrapping up**. Picking a direction on
+that Set is how the human settles the way the work gets built — and whichever
+one they pick, the next piece of it is yours.
 
-### The handoff document
-
-Whoever builds this is not you. The work runs under a different account and
-model, in a fresh session that has none of this conversation — so everything you
-learned grilling has to be written down first, or it is gone.
-
-**Write it to `/tmp/verkstead/handoff.md`, before you put the closing Set.**
-That path is outside the checkout on purpose: it is Verkstead's document rather
-than the project's, so it never reaches a commit. Verkstead takes it from there,
-puts it on the Timeline for the human, and primes the implementation session
-with it.
-
-Markdown, and as long as it needs to be. Write it for a competent agent who has
-read the Brief and nothing else:
-
-- **What is being built**, and what it is for.
-- **Every decision the grilling settled**, with the reasoning that settled it —
-  including the options you rejected and why, so they are not reopened.
-- **What was deliberately left open**, and who decides it when it comes up.
-- **Where in the codebase it lands**: the files, the patterns to follow, the
-  tests that cover it.
-- **What would count as done.**
+Write nothing before you put it. A proposal they send back costs you the round
+that follows and nothing else, so the Set is cheap to send: what the pick asks
+for is written afterwards, once you know which of the three it is.
 
 ### The closing Set
 
@@ -88,13 +69,44 @@ proposal:
   and may well pick another. What they pick is what runs — your recommendation
   changes nothing about that.
 
+### When they pick inline
+
+The pick comes back as `direction` on the Response, beside the `answers`. On an
+`inline` pick this session has one thing left to do, and then it is over: **write
+the handoff document.**
+
+Whoever builds this is not you. The work runs under a different account and
+model, in a fresh session that has none of this conversation — so everything you
+learned grilling has to be written down first, or it is gone. This is the one
+direction where that is true: a task list and a roadmap are written by you, into
+the repository, and whoever picks them up reads what you committed.
+
+**Write it to `/tmp/verkstead/handoff.md`.** That path is outside the checkout
+on purpose: it is Verkstead's document rather than the project's, so it never
+reaches a commit. Verkstead takes it from there, puts it on the Timeline for the
+human, and primes the implementation session with it.
+
+Markdown, and as long as it needs to be. Write it for a competent agent who has
+read the Brief and nothing else:
+
+- **What is being built**, and what it is for.
+- **Every decision the grilling settled**, with the reasoning that settled it —
+  including the options you rejected and why, so they are not reopened.
+- **What was deliberately left open**, and who decides it when it comes up.
+- **Where in the codebase it lands**: the files, the patterns to follow, the
+  tests that cover it.
+- **What would count as done.**
+
+Whatever they wrote beside the pick is part of what the handoff has to say —
+read the whole Response before you write it. Then stop: the handoff plus your
+going quiet is what ends this session, and Verkstead starts the build. Do not
+start the work yourself.
+
 ### When they pick a task list
 
-The pick comes back as `direction` on the Response, beside the `answers`. A
-`task-list` pick is one of the two you carry on from yourself: `inline` is
-handed over the moment it is picked, and this one is not, because the backlog
-*is* the plan and the plan is best written by the context that settled it. So
-this session does not end at the pick. The work is yours.
+A `task-list` pick writes no handoff at all, because the backlog *is* the plan
+and the plan is best written by the context that settled it. So this session
+does not end at the pick either. The work is yours.
 
 **Read `~/.claude/skills/breaking-down/SKILL.md` and follow it from *Ground the
 plan in the code* onward.** The branch is made, the worktree is this one, and
@@ -109,9 +121,10 @@ task 01.
 
 ### When they pick a roadmap
 
-The other one you carry on from yourself, and for the same reason: a roadmap is
-planning above all, and its stage briefs are worth what the context that settled
-them can put in them. So this session does not end at the pick either.
+The same again, and for the same reason one level up: a roadmap is planning
+above all, and its stage briefs are worth what the context that settled them can
+put in them. No handoff here either — each stage is a Conversation with a
+grilling of its own, and what this one settled goes in the briefs.
 
 **Read `~/.claude/skills/staging/SKILL.md` and follow it from *Ground the plan
 in the code* onward.** Same worktree, same branch, same agreement — this
@@ -144,9 +157,9 @@ Read it and decide for yourself what it calls for:
 Do not treat a refusal as a reason to stop, and never put the same proposal
 again unchanged: they said no to that one.
 
-**Rewrite the handoff before you propose again.** Whatever came out of the round
-that followed the refusal is part of what was settled, and the handoff standing
-where it is would hand over the understanding you had before they disagreed.
+Nothing was written on the strength of the proposal, so nothing has to be
+unwritten: a refused round costs you the round, and the next proposal goes out
+as cheaply as the first did.
 
 ## How the questions reach them
 

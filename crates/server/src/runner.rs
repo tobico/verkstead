@@ -99,6 +99,20 @@ enum Step {
     /// the same backlog. What differs is which fork wrote it.
     PlanningStage,
 
+    /// Write the handoff, which is the whole of what an inline grilling has left
+    /// to do once the human has picked: the work itself runs under the other
+    /// Profile in a session of its own, so everything this one settled has to be
+    /// written down before it ends.
+    ///
+    /// Carries the path the document is watched for, which is outside the
+    /// Worktree — Verkstead's own directory rather than the project's, so that
+    /// no `git add -A` after it can sweep the document into the human's
+    /// repository. See [`crate::handoffs`].
+    ///
+    /// Never what [`next_step`] answers, for the reason [`Step::Planning`] never
+    /// is: it is the step the runner is handed rather than one it decides.
+    Handoff(PathBuf),
+
     /// Work this task file, the lowest-numbered one left.
     Task(PathBuf),
 
@@ -130,6 +144,12 @@ enum Landing {
     /// repository often has already — a path arriving would read as landed
     /// before the session had written a line.
     Roadmap(String),
+
+    /// The handoff document, written in the Conversation's own directory outside
+    /// the Worktree. An absolute path rather than one inside it, and nothing
+    /// asked of git: what version control would say about a file the repository
+    /// has never heard of is nothing at all.
+    Handoff(PathBuf),
 }
 
 impl Step {
@@ -140,6 +160,10 @@ impl Step {
             // The plan commit is what puts the backlog under version control,
             // so the backlog being there and committed is the breakdown done.
             Step::Planning | Step::PlanningStage => Some(Landing::Arrived(todo())),
+            // And the handoff is the document itself, in a directory no commit
+            // reaches: nothing puts it under version control, so its being there
+            // is the whole of the signal.
+            Step::Handoff(path) => Some(Landing::Handoff(path.clone())),
             // Finishing a task is what deletes its file.
             Step::Task(file) => Some(Landing::Gone(file.clone())),
             // And the finish commit removes `TODO.md` with the rest of `.tasks/`.
@@ -164,6 +188,11 @@ impl Step {
         match self {
             Step::Planning => Some(store::Step::Planning),
             Step::PlanningStage => Some(store::Step::Stage),
+            // Recorded as the inline run it was about to prime, because that is
+            // what a retry has to launch. There is nobody left holding the
+            // grilling to write a handoff a second time — a retried tail runs
+            // fresh, on the Brief and whatever the human wrote beside the retry.
+            Step::Handoff(_) => Some(store::Step::Inline),
             Step::Task(_) => Some(store::Step::Task),
             Step::Finish => Some(store::Step::Finish),
             Step::Staging(_) => Some(store::Step::Roadmap),
@@ -180,6 +209,7 @@ impl Step {
         match self {
             Step::Planning => "breaking the work down into a backlog".to_owned(),
             Step::PlanningStage => "planning the roadmap stage into a backlog".to_owned(),
+            Step::Handoff(_) => "writing the handoff for the session that builds".to_owned(),
             Step::Task(file) => format!("the task in {}", file.display()),
             Step::Finish => "finishing the feature".to_owned(),
             Step::Staging(_) => "staging the work into a roadmap".to_owned(),
@@ -206,8 +236,10 @@ fn todo() -> PathBuf {
 ///
 /// The plan commit is the end of the planning as well as the start of the run, so
 /// the Conversation moves as the session is seen out: grilling until then and
-/// implementing afterwards, with the handoff the grilling wrote going on the
-/// Timeline at the same moment — see [`crate::conversations::grilling_over`].
+/// implementing afterwards — see [`crate::conversations::grilling_over`]. No
+/// handoff is taken or written on this path: the backlog is what the grilling
+/// settled, committed to the branch, and every session that works it reads the
+/// repository rather than a summary of a conversation it never had.
 ///
 /// Returns when there is nothing left to run: the backlog worked through, a
 /// Conversation that has gone, or a step whose session ended without landing it.
@@ -300,7 +332,15 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             }
             step => (step, Prompt::NextTask),
         },
+        // Not a backlog step either, and the one whose retry may be picking the
+        // tail up a rung earlier than it failed: an inline grilling that went
+        // quiet without a handoff is recorded as this step too, because writing
+        // one again is what nobody is left to do. So the move is made here if it
+        // has not been made — a Conversation that is building the work says so —
+        // and the session runs on the Brief and the note.
         store::Step::Inline => {
+            crate::conversations::grilling_over(&state, conversation_id).await;
+
             let Some(session) = launch(&state, conversation_id, Prompt::Implementing, &note).await
             else {
                 return;
@@ -469,6 +509,51 @@ async fn carry_on(state: AppState, conversation_id: i64) {
     }
 }
 
+/// Follow the grilling session as it writes the handoff, and start the session
+/// that builds from it.
+///
+/// The inline counterpart to [`follow_breakdown`], and the same move with a
+/// different artifact: the session that settled the work is the one that writes
+/// down what it settled, after the pick rather than before it, so what the human
+/// said beside the pick is part of what the handoff has to say. Nothing is
+/// launched here either — the session is already running, idling on the ask the
+/// Response came back through.
+///
+/// Then the three things the far side of an inline pick needs, in the order they
+/// have to happen in. The handoff goes on the Timeline, which is where a
+/// Conversation's documents live and the one moment this one is certainly
+/// finished. The Conversation moves, so that what says it is being built has
+/// everything the grilling left beside it. And the work starts, in a fresh
+/// session under the implementation Profile — fresh because the two run as
+/// accounts the Conversation fixed separately and a session cannot change the
+/// one it is running as, which is the whole reason the handoff exists.
+///
+/// A session that goes quiet without writing one stops at an Interruption, the
+/// way every other step does. What a retry launches then is the implementation
+/// itself: the grilling that would have written the handoff is the session that
+/// just ended without one, so a retried tail runs on the Brief and the human's
+/// note — see [`Step::stored`].
+pub(crate) async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session) {
+    let handoffs = crate::handoffs::Handoffs::under(&state.state_dir);
+    let step = Step::Handoff(handoffs.document(conversation_id));
+
+    if see_out(&state, conversation_id, step, writing)
+        .await
+        .is_none()
+    {
+        return;
+    }
+
+    crate::conversations::hand_over(&state, conversation_id).await;
+    crate::conversations::grilling_over(&state, conversation_id).await;
+
+    let Some(session) = launch(&state, conversation_id, Prompt::Implementing, "").await else {
+        return;
+    };
+
+    follow_inline(state, conversation_id, session).await
+}
+
 /// See an inline implementation session out, and stop the run at an Interruption
 /// if it ends having landed nothing.
 ///
@@ -586,10 +671,12 @@ pub(crate) async fn follow_staging(state: AppState, conversation_id: i64, writin
 /// in between. Implementing is where an agent is building the work, and on a
 /// roadmap the building belongs to the Stages: this Conversation's own work is
 /// the planning, which is the grilling carrying on. The move is
-/// [`crate::wrapping::opened`]'s, made as the pull request is recorded — and the
-/// handoff goes on the Timeline first, at the one moment it is certainly
-/// finished, so a Conversation that says it is wrapping up has everything the
-/// grilling left beside it.
+/// [`crate::wrapping::opened`]'s, made as the pull request is recorded.
+///
+/// No handoff anywhere in it, and none in a task list either. A handoff is for
+/// a context boundary the work actually crosses, and a roadmap crosses none:
+/// what the grilling settled is in the stage briefs it committed, and each Stage
+/// is a Conversation with a grilling of its own.
 ///
 /// `writing` is the session that will commit the roadmap: ordinarily the grilling
 /// session itself, and on a retry a fresh one launched for the tail. `base` is
@@ -608,8 +695,6 @@ pub(crate) async fn follow_roadmap(
     let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
         return;
     };
-
-    crate::conversations::hand_over(&state, conversation_id).await;
 
     crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
 }
@@ -1040,6 +1125,10 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
             return !crate::stages::touched(worktree, base).is_empty()
                 && pending(worktree, Path::new(crate::stages::ROADMAPS)) == Some(false);
         }
+        // And this one is not in the Worktree at all, so there is no commit to
+        // wait for: the document being there with something in it is the whole
+        // of it, read by exactly the rule that will take it.
+        Landing::Handoff(path) => return crate::handoffs::written(path),
     };
 
     if worktree.join(path).exists() != wanted {
@@ -1200,11 +1289,11 @@ async fn launch(
             let handoff = handoff.as_deref();
 
             let prompt = match &inside {
-                Prompt::BreakingDown => skills::breaking_down(&brief, handoff),
+                Prompt::BreakingDown => skills::breaking_down(&brief),
                 Prompt::PlanningStage(stacked_on) => {
                     skills::next_stage(&brief, stacked_on.as_deref())
                 }
-                Prompt::Staging => skills::staging(&brief, handoff),
+                Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
@@ -1566,6 +1655,43 @@ mod tests {
             Step::Staging("d41f8a3b".to_owned()).landing(),
             Some(Landing::Roadmap("d41f8a3b".to_owned())),
         );
+        assert_eq!(
+            Step::Handoff(PathBuf::from("/srv/verkstead/handoffs/7/handoff.md")).landing(),
+            Some(Landing::Handoff(PathBuf::from(
+                "/srv/verkstead/handoffs/7/handoff.md"
+            ))),
+        );
         assert_eq!(Step::Nothing.landing(), None);
+    }
+
+    /// The handoff is the one landing with no repository in it. Nothing puts the
+    /// document under version control — it is written outside the checkout on
+    /// purpose — so what says the step is over is the document being there with
+    /// something in it, and a Worktree with everything committed says nothing
+    /// about it either way.
+    #[test]
+    fn the_handoff_lands_outside_the_worktree_entirely() {
+        let dir = worktree(&[]);
+        let elsewhere = tempfile::tempdir().unwrap();
+        let document = elsewhere.path().join("handoff.md");
+        let landing = Landing::Handoff(document.clone());
+
+        assert!(!landed(dir.path(), &landing), "nothing is written yet");
+
+        std::fs::write(&document, "  \n").unwrap();
+        assert!(
+            !landed(dir.path(), &landing),
+            "and a document of nothing hands nothing over",
+        );
+
+        std::fs::write(&document, "# What we settled\n").unwrap();
+        assert!(landed(dir.path(), &landing));
+
+        assert_eq!(
+            git(dir.path(), &["status", "--porcelain"]),
+            Some(String::new()),
+            "with the Worktree untouched throughout: the handoff is Verkstead's \
+             document rather than the project's",
+        );
     }
 }

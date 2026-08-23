@@ -83,32 +83,31 @@ impl Handoffs {
         }
     }
 
+    /// Where a Conversation's handoff document is written, seen from outside its
+    /// sandbox.
+    ///
+    /// The path rather than the document, because the inline tail is watched for
+    /// this file arriving the way a backlog is watched for on the branch — see
+    /// [`crate::runner`]. The directory is not made here: [`Self::directory`]
+    /// does that as the sandbox is built, and a watcher only ever reads.
+    pub(crate) fn document(&self, conversation_id: i64) -> PathBuf {
+        self.root.join(conversation_id.to_string()).join(HANDOFF)
+    }
+
     /// The handoff a session wrote, taken out of the directory.
     ///
     /// `None` where there is none, which is an ordinary thing rather than a
     /// failure: a grilling that ended without writing one is a grilling whose
-    /// agent skipped half its closing move, and what follows is primed with the
-    /// Brief alone.
+    /// agent skipped its closing move, and what follows is primed with the Brief
+    /// alone.
     ///
     /// Removed as it is read, so the Timeline holds the only copy. An empty file
     /// counts as none: a document of nothing says nothing, and an Event holding
     /// it would be a blank card on the Timeline for good.
     pub(crate) fn take(&self, conversation_id: i64) -> Option<String> {
-        let path = self.root.join(conversation_id.to_string()).join(HANDOFF);
+        let path = self.document(conversation_id);
 
-        let written = match std::fs::read_to_string(&path) {
-            Ok(written) => written,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(error) => {
-                tracing::error!(
-                    error = ?error,
-                    conversation_id,
-                    path = %path.display(),
-                    "a handoff document could not be read"
-                );
-                return None;
-            }
-        };
+        let written = read(&path)?;
 
         if let Err(error) = std::fs::remove_file(&path) {
             // Kept rather than refused: the document is in hand, and a copy left
@@ -121,7 +120,7 @@ impl Handoffs {
             );
         }
 
-        (!written.trim().is_empty()).then_some(written)
+        Some(written)
     }
 
     /// Give a Conversation's directory back, with whatever is in it.
@@ -143,6 +142,40 @@ impl Handoffs {
             ),
         }
     }
+}
+
+/// Whether a handoff has been written at `path` — which is what says an inline
+/// grilling's tail has landed.
+///
+/// The same reading [`Handoffs::take`] gives, asked without taking anything: a
+/// file that is not there and a file with nothing in it are both a handoff that
+/// has not been written yet. One rule in one place, because the watcher and the
+/// taker disagreeing would be a session ended over a document that then read as
+/// none.
+pub(crate) fn written(path: &Path) -> bool {
+    read(path).is_some()
+}
+
+/// The document at `path`, or `None` where there is nothing there to hand over.
+///
+/// A file that will not read reads as none, which is the right way round for
+/// what turns on it: a session is ended on the strength of this, and a
+/// filesystem that was briefly busy is no reason to end one.
+fn read(path: &Path) -> Option<String> {
+    let written = match std::fs::read_to_string(path) {
+        Ok(written) => written,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                path = %path.display(),
+                "a handoff document could not be read"
+            );
+            return None;
+        }
+    };
+
+    (!written.trim().is_empty()).then_some(written)
 }
 
 #[cfg(test)]
@@ -194,6 +227,34 @@ mod tests {
         std::fs::write(path.join(HANDOFF), "  \n\n").unwrap();
 
         assert_eq!(handoffs.take(7), None);
+    }
+
+    /// The watcher's reading and the taker's are one reading. An inline session
+    /// is ended on the first and its document is read by the second, and the two
+    /// disagreeing would be a grilling ended over a handoff that then read as
+    /// none.
+    #[test]
+    fn a_handoff_reads_as_written_exactly_where_it_would_be_taken() {
+        let state = tempfile::tempdir().unwrap();
+        let handoffs = Handoffs::under(state.path());
+        let document = handoffs.document(7);
+
+        assert!(
+            !written(&document),
+            "there is no directory yet, let alone one"
+        );
+
+        let path = handoffs.directory(7).unwrap();
+        assert!(!written(&document), "nor a document in it");
+
+        std::fs::write(path.join(HANDOFF), "  \n\n").unwrap();
+        assert!(!written(&document), "a document of nothing is not one");
+
+        std::fs::write(path.join(HANDOFF), "# What we settled\n").unwrap();
+        assert!(written(&document));
+
+        assert_eq!(handoffs.take(7).as_deref(), Some("# What we settled\n"));
+        assert!(!written(&document), "and taking it leaves none");
     }
 
     #[test]

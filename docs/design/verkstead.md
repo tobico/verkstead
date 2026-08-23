@@ -94,12 +94,15 @@ flowchart LR
 - **Grilling.** "Start grilling" creates the branch + worktree and launches a
   grilling session under the conversation's grilling profile. Question sets
   and captured output stream into the timeline. The agent proposes wrap-up as
-  a final question set; answering it moves the conversation to Direction.
+  a final question set, carrying the direction chooser.
 - **Direction.** The agent recommends inline / task list / staged roadmap with
-  rationale; the human chooses in the GUI. **Inline** means a fresh session
-  under the implementation profile, primed with a handoff document the
-  grilling session writes (the grilling session cannot simply continue — the
-  profiles differ).
+  rationale; the human picks on that set, and the pick goes back to the
+  still-living grilling session. That session then produces what was picked —
+  the `.tasks/` backlog, the `docs/roadmaps/` staging, or (for **inline**) a
+  handoff document — and the artifact landing plus quiet is what moves the
+  conversation on. Inline needs the handoff because its builder is a fresh
+  session under the implementation profile: the grilling session cannot simply
+  continue, the profiles differ (ADR-0008).
 - **Two kinds of ask.** *Blocking* asks work as in askance: the session idles
   until the answer arrives. *Deferred* asks don't block; they sit in the
   timeline awaiting answers, which are folded into a later session's prompt.

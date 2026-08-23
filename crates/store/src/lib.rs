@@ -214,11 +214,11 @@ pub enum Proposed {
     /// next — the direction is already settled, so nobody has to be asked a
     /// second time.
     ///
-    /// Accepted is not the same as moved. [`Directing::Writing`] is the grilling
-    /// session carrying on to write the picked Direction's artifact, and
-    /// [`Directing::NotGrilling`] is not a failure either: a grilling that put
-    /// two proposals has the first acceptance move the Conversation, and the
-    /// second finds the move already made.
+    /// Accepted is not the same as moved, and no pick moves anything:
+    /// [`Directing::Writing`] is the grilling session carrying on to write the
+    /// picked Direction's artifact, which is what moves the Conversation when it
+    /// lands. [`Directing::NotGrilling`] is not a failure either — it is a pick
+    /// answered after the grilling it was put from had already ended.
     Accepted {
         direction: verkstead_schema::Direction,
         directing: Directing,

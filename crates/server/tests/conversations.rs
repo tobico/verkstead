@@ -1211,9 +1211,13 @@ async fn grilling(app: &Router, watched: &Path, repo_id: i64) -> i64 {
 }
 
 /// Picking a direction on the closing Set is the whole of accepting it: the
-/// grilling ends and the picked direction's pipeline starts, off the one answer.
+/// direction is settled off the one answer, with no second trip to the Timeline.
+///
+/// What it does *not* do is move anything. The pick informs the session that
+/// proposed, which is still running and still holding the thread; what moves the
+/// Conversation is the artifact that session goes on to produce.
 #[tokio::test]
-async fn picking_a_direction_on_the_closing_set_sets_the_work_going() {
+async fn picking_a_direction_on_the_closing_set_settles_it() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
@@ -1226,19 +1230,19 @@ async fn picking_a_direction_on_the_closing_set_sets_the_work_going() {
     let view = opened(&app, id).await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::Implementing,
+        view.direction,
+        Some(verkstead_schema::Direction::Inline),
         "nothing on this page was pressed to get here: the agent proposed and the human picked",
     );
     assert_eq!(
-        view.direction,
-        Some(verkstead_schema::Direction::Inline),
-        "and the pick is the choice, with no second trip to the Timeline",
+        view.state,
+        Lifecycle::Grilling,
+        "and the grilling is what is still happening: the pick informs it",
     );
     assert_eq!(
         moves(&view),
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "with no rung in between: nothing was ever waiting to be chosen",
+        [Lifecycle::Grilling],
+        "with no rung in between and none reached: nothing was ever waiting to be chosen",
     );
 }
 
@@ -1262,7 +1266,7 @@ async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
     assert_eq!(
         view.state,
         Lifecycle::Grilling,
-        "and a roadmap is one the grilling session writes for itself, so the pick \
+        "and the grilling session writes what was picked for itself, so the pick \
          records the direction and moves nothing",
     );
 }
@@ -1334,7 +1338,7 @@ async fn a_closing_set_stops_drawing_the_human_the_moment_it_is_picked_on() {
     answer(&app, set).await;
 
     let row = only_row(&app).await;
-    assert_eq!(row.state, Lifecycle::Implementing);
+    assert_eq!(row.state, Lifecycle::Grilling);
     assert!(
         !row.waiting,
         "the pick settled the direction as it settled the Set",
@@ -1374,38 +1378,6 @@ async fn a_conversation_with_no_session_running_is_not_working() {
     assert!(!only_row(&app).await.working);
 }
 
-/// The other half of the closing move: the document the grilling wrote before it
-/// proposed. Verkstead takes it as the proposal is accepted, and from then on the
-/// Timeline holds it — which is what the human reads and what the implementation
-/// session is primed with.
-#[tokio::test]
-async fn the_handoff_the_grilling_wrote_reaches_the_timeline_when_the_proposal_is_accepted() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-
-    let written = handoff_written(
-        dir.path(),
-        id,
-        "# What we settled\n\nAn in-process counter.\n",
-    );
-
-    answer(&app, ask(&app, id, PROPOSING).await).await;
-
-    let view = opened(&app, id).await;
-    let handoff = handoff(&view).expect("the handoff is on the Timeline");
-
-    assert!(
-        handoff.html.contains("in-process counter"),
-        "the handoff arrives rendered, like every other piece of agent markdown: {}",
-        handoff.html
-    );
-
-    assert!(
-        !written.exists(),
-        "the document is taken rather than copied: the Timeline holds the only one now",
-    );
-}
-
 /// The handoff is written outside the checkout on purpose. What proves it is git
 /// having nothing to say about the worktree afterwards — an agent that later runs
 /// `git add -A` is the whole reason the file is not in there.
@@ -1430,45 +1402,52 @@ async fn a_handoff_never_lands_in_the_repository() {
     assert_eq!(
         git(&worktree, &["status", "--porcelain"]),
         "",
-        "and by it being taken",
+        "and by the pick that decides what becomes of it",
     );
 }
 
-/// A grilling that skipped half its closing move still hands the work over: the
-/// Conversation moves, and what follows is primed with the Brief alone.
+/// No answer takes the handoff, whichever way it was answered.
+///
+/// The handoff is written on the far side of the pick now — an inline session
+/// writes it once it knows that is what was picked — so a document sitting there
+/// when a Response lands is one from a round that has already been superseded,
+/// and nothing about answering is the moment to take it. What takes it is the
+/// session ending, which `sessions.rs` is where to look for.
 #[tokio::test]
-async fn a_grilling_that_wrote_no_handoff_still_hands_over() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
+async fn no_answer_takes_the_handoff_the_grilling_wrote() {
+    for (how, response) in [
+        (
+            "picked on",
+            serde_json::json!({
+                "answers": [{ "label": "Q9", "selected": 1 }],
+                "direction": "inline",
+            }),
+        ),
+        (
+            "sent back",
+            serde_json::json!({ "answers": [{ "label": "Q9", "selected": 2 }] }),
+        ),
+    ] {
+        let (watched, dir, app, _repo, repo_id) = workbench().await;
+        let id = grilling(&app, watched.path(), repo_id).await;
 
-    answer(&app, ask(&app, id, PROPOSING).await).await;
+        let written = handoff_written(dir.path(), id, "# What we settled\n");
+        let set = ask(&app, id, PROPOSING).await;
 
-    let view = opened(&app, id).await;
+        assert_eq!(
+            post::<verkstead_render::Submitted>(
+                &app,
+                &format!("/api/ui/sets/{set}/response"),
+                &response,
+            )
+            .await,
+            verkstead_render::Submitted::Accepted,
+            "a Response {how} is taken either way",
+        );
 
-    assert_eq!(view.state, Lifecycle::Implementing);
-    assert_eq!(handoff(&view), None);
-}
-
-/// A proposal the human sent back is not the grilling ending, so the handoff
-/// stays where it is: the session is still holding the thread and will rewrite it
-/// before it proposes again.
-#[tokio::test]
-async fn a_proposal_sent_back_leaves_the_handoff_where_it_was_written() {
-    let (watched, dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-
-    let written = handoff_written(dir.path(), id, "# What we settled\n");
-    let set = ask(&app, id, PROPOSING).await;
-
-    answered(
-        &app,
-        set,
-        serde_json::json!({ "label": "Q9", "selected": 2 }),
-    )
-    .await;
-
-    assert!(written.exists(), "nothing was taken");
-    assert_eq!(handoff(&opened(&app, id).await), None);
+        assert!(written.exists(), "nothing was taken, {how}");
+        assert_eq!(handoff(&opened(&app, id).await), None, "{how}");
+    }
 }
 
 #[tokio::test]
@@ -1489,42 +1468,19 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
-/// Inline is the one direction that hands the work over, and its pick is what
-/// sets that pipeline going.
-///
-/// What is being asked here is that the pick alone records the direction and
-/// takes the Conversation to Implementing — the session it launches is not this
-/// router's to run.
-#[tokio::test]
-async fn an_inline_pick_sets_the_conversation_implementing() {
-    let (watched, _dir, app, _repo, repo_id) = workbench().await;
-    let id = grilling(&app, watched.path(), repo_id).await;
-
-    picking(&app, ask(&app, id, PROPOSING).await, "inline").await;
-
-    let view = opened(&app, id).await;
-
-    assert_eq!(view.direction, Some(verkstead_schema::Direction::Inline));
-    assert_eq!(view.state, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&view),
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "the work starting is one move, with nothing in between to rest on",
-    );
-}
-
-/// The other two picks are the ones that stay where they are. The session that
-/// proposed writes the backlog or the roadmap itself, so the grilling is still
-/// what is happening — and the handoff it wrote is still its own, because it has
+/// Every pick stays where it is. The session that proposed writes the backlog,
+/// the roadmap or the handoff itself, so the grilling is still what is happening
+/// — and the handoff standing in its directory is still its own, because it has
 /// not finished with it.
 ///
-/// One test over the two, because what the pick does is the same for both: it is
-/// what the tail is watched for, and nothing else. What ends that session and
+/// One test over the three, because what the pick does is the same for each: it
+/// is what the tail is watched for, and nothing else. What ends that session and
 /// moves the Conversation is the artifact landing, which wants an agent to write
 /// it: `sessions.rs` is where each is asked end to end.
 #[tokio::test]
-async fn a_pick_the_grilling_writes_leaves_the_conversation_grilling() {
+async fn a_pick_leaves_the_conversation_grilling() {
     for (picked, direction) in [
+        ("inline", verkstead_schema::Direction::Inline),
         ("task-list", verkstead_schema::Direction::TaskList),
         ("roadmap", verkstead_schema::Direction::Roadmap),
     ] {
@@ -1647,11 +1603,11 @@ async fn a_proposal_put_again_after_a_refusal_can_be_picked_on() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "the refusal moved nothing, so the work got going once",
+        [Lifecycle::Grilling],
+        "neither the refusal nor the pick moved anything: what moves a \
+         Conversation is the artifact the pick asked for",
     );
     assert_eq!(
         view.direction,

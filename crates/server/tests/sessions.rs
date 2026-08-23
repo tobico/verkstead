@@ -808,6 +808,20 @@ fn pull_request(view: &ConversationView) -> Option<&PullRequestEvent> {
     })
 }
 
+/// A Conversation's own directory outside its worktree, as the host sees it —
+/// the far side of the `/tmp/verkstead` a session writes its handoff into.
+///
+/// What the tests put in there is a marker a stub is waiting on: a stub cannot
+/// idle on a blocking ask, so this is how one is held at a point the test needs
+/// it held at.
+fn handoff_directory(fixture: &Grilling) -> PathBuf {
+    fixture
+        .state
+        .path()
+        .join("handoffs")
+        .join(fixture.id.to_string())
+}
+
 /// The handoff on a Timeline, once the grilling has handed one over.
 fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
     view.timeline.iter().find_map(|event| match event {
@@ -1408,6 +1422,7 @@ async fn a_run_stopped_on_an_interruption_is_waiting_on_the_human() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'the grilling is running\n'
             sleep 300
             ;;
@@ -1501,15 +1516,21 @@ async fn a_capture_survives_the_server_restarting() {
     assert_eq!(read_back.text, said);
 }
 
-/// The inline direction end to end: the grilling writes a handoff where the
-/// skill says, the human accepts its proposal, and choosing *implement inline*
-/// runs a fresh session under the *other* Profile — primed with the handoff, and
+/// The inline direction end to end: the human picks it on the closing Set, the
+/// grilling session writes a handoff where the skill says and goes quiet, and
+/// that handoff plus quiet is what ends the grilling — after which a fresh
+/// session under the *other* Profile builds the work, primed with the handoff and
 /// committing without anything to wait on.
 ///
 /// One stub for both sessions, telling them apart by the model it was run on,
 /// because that is the fact under all of it: the two run as different accounts,
 /// which is why the grilling cannot simply carry on and why the handoff has to
 /// exist at all.
+///
+/// The stub writes its handoff as it starts rather than when the Response lands,
+/// for the reason the task-list and roadmap stubs commit their artifacts early: a
+/// stub cannot idle on a blocking ask, and a document already written is watched
+/// for exactly as one written a minute later is.
 #[tokio::test]
 async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     let fixture = grilling(
@@ -1550,14 +1571,19 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    let view = fixture.view().await;
+    // The handoff plus quiet is what ends the grilling, and the document goes on
+    // the Timeline at that moment — the one moment it is certainly finished.
+    let handed = fixture
+        .until(|view| handoff(view).map(|handoff| handoff.html.clone()))
+        .await;
+
     assert!(
-        handoff(&view).is_some_and(|handoff| handoff.html.contains("in-process counter")),
-        "the handoff is taken onto the Timeline as the proposal is accepted",
+        handed.contains("in-process counter"),
+        "the handoff arrives rendered, like every other piece of agent markdown: {handed}",
     );
 
     // The second session, which is a different Event: the first is the grilling,
-    // and it ended when its proposal was accepted.
+    // and it ended when its handoff landed.
     let implementing = fixture
         .until(|view| {
             outputs(view)
@@ -1603,6 +1629,116 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 }
 
+/// And an inline grilling that goes quiet without writing one: the run stops at
+/// an Interruption, the way every other step that never landed does.
+///
+/// The handoff is what the session that builds is primed with, so a session that
+/// ended without one has left the work half handed over — and nothing here
+/// guesses at whether that was a crash, an agent that stopped short, or one that
+/// decided it had nothing to say. The human is asked.
+///
+/// What a retry runs then is the implementation itself, on the Brief and
+/// whatever they wrote alongside. There is nobody left holding the grilling to
+/// write a handoff a second time: that context is exactly what has gone.
+#[tokio::test]
+async fn an_inline_grilling_that_writes_no_handoff_stops_at_an_interruption() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf 'I have nothing more to add\n'
+            exit 0
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            printf 'a limiter\n' > limiter.md
+            git add limiter.md
+            git commit --quiet -m 'feat: rate limiting'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The grilling stops where it is, with the pick answered and nothing written
+    // in its directory.
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "writing the handoff for the session that builds",
+        "which step failed: the inline tail is the handoff, and it did not land",
+    );
+    assert_eq!(
+        stopped.how, "the session ended without finishing the step",
+        "and an agent that stops short exits zero, so nothing but this could say it",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(handoff(&view), None, "there is none to have been taken");
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and nothing moved: the artifact is what moves a Conversation",
+    );
+    assert_eq!(
+        outputs(&view)
+            .into_iter()
+            .filter(|output| output.id != grilled)
+            .count(),
+        0,
+        "with nothing launched behind it",
+    );
+
+    assert_eq!(
+        fixture
+            .settle(stopped.id, "Retry", "build it without the handoff")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let retried = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let said = fixture.capture(retried).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains("model=claude-implementation-5")
+            && said.contains("~/.claude/skills/implementing/SKILL.md"),
+        "the retry is the work itself, under the Profile that builds: {said:?}"
+    );
+    assert!(
+        said.contains(BRIEF) && !said.contains("What the grilling settled"),
+        "primed with the Brief alone, there being no handoff to fold in: {said:?}"
+    );
+    assert!(
+        said.contains("build it without the handoff"),
+        "and with what the human wrote beside the retry: {said:?}"
+    );
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .await;
+}
+
 /// A sandbox that will not start says why where somebody is looking.
 ///
 /// bwrap and `script` talk on the pipe beside the pseudo-terminal, and nothing
@@ -1621,8 +1757,11 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
+            sleep 300
             ;;
         *)
             printf 'this session never gets to run\n'
@@ -1632,25 +1771,22 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     )
     .await;
 
-    // The grilling says its piece and stops there, rather than idling on the
-    // answer as one really does: the pick starts the next session the moment it
-    // lands, and the bind has to be gone before that.
+    // The grilling holds off writing its handoff until the test says so, because
+    // the handoff is what ends it: the bind has to be gone before the session
+    // that wants it is launched, and that session follows the grilling ending.
     let grilled = fixture
-        .until(|view| {
-            output(view)
-                .filter(|output| output.lines > 0 && !output.running)
-                .map(|o| o.id)
-        })
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
-
-    // The bind the server admitted at startup, gone by the time the next session
-    // wants it. Taken away only once the grilling has ended, because a directory
-    // bound into a sandbox that is still up is one the host cannot remove.
-    let missing = fixture.spill.path().to_owned();
-    std::fs::remove_dir_all(&missing).unwrap();
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The bind the server admitted at startup, gone by the time the next session
+    // wants it.
+    let missing = fixture.spill.path().to_owned();
+    std::fs::remove_dir_all(&missing).unwrap();
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
 
     let refused = fixture
         .until(|view| {
@@ -1701,6 +1837,7 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
         claude-grilling-5)
             printf 'model=%s\n' "$1"
             grep '^name:' "$HOME/.claude/skills/breaking-down/SKILL.md"
+            printf '# A document nobody asked for\n' > /tmp/verkstead/handoff.md
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-counter.md
@@ -1795,6 +1932,20 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
         next.contains("~/.claude/skills/next-task/SKILL.md")
             && !next.contains("~/.claude/skills/breaking-down/SKILL.md"),
         "and it is the first task rather than a second breakdown: {next:?}"
+    );
+
+    // And no handoff anywhere in it. The backlog is what the grilling settled,
+    // committed to the branch, so a document beside it would be a second record
+    // of the plan that nothing downstream reads — which is why the stub wrote one
+    // and nothing went looking for it.
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "nothing was taken onto the Timeline",
+    );
+    assert!(
+        !next.contains("What the grilling settled"),
+        "and nothing was folded into the task session's prompt: {next:?}"
     );
 }
 
@@ -1893,6 +2044,16 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
             .count(),
         0,
         "and nothing else was launched: the staging is the grilling carrying on",
+    );
+
+    // And no handoff anywhere in it either. A roadmap Conversation crosses into
+    // no fresh context that has to be told what was settled — the stage briefs
+    // say it, in the repository, and each Stage has a grilling of its own — so
+    // the document the stub wrote is one nothing goes looking for.
+    assert_eq!(
+        handoff(&fixture.view().await),
+        None,
+        "nothing was taken onto the Timeline",
     );
 
     assert_eq!(
@@ -3807,13 +3968,14 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
 async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
     let fixture = grilling(
         r#"
+        model=$1
         name=
         while [ $# -gt 0 ]; do
             if [ "$1" = --session-id ]; then name=$2; fi
             shift
         done
 
-        case "$1" in
+        case "$model" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'the handoff is written\n'
@@ -4046,6 +4208,7 @@ async fn a_remedy_pressed_twice_is_the_first_choice_arriving_again() {
         r#"
         case "$1" in
         claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             printf 'grilling\n'
             sleep 300
             ;;

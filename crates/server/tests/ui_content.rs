@@ -1486,12 +1486,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .unwrap();
 
     // And a fourth that the grilling has handed over: its closing proposal
-    // answered with a direction picked on it, so it is out of Grilling and being
-    // built. The answered Set on its Timeline is the record of that pick.
+    // answered with an inline direction picked on it, and the handoff that pick
+    // asked for written, so it is out of Grilling and being built. The answered
+    // Set on its Timeline is the record of the pick.
     //
     // Answered through `submit_response`, which is the one path a Response takes
-    // and the one thing that moves a Conversation here — pressing the state into
-    // the store by hand would write a fixture no Answer could ever produce.
+    // — pressing the pick into the store by hand would write a fixture no Answer
+    // could ever produce. What moves the Conversation is the tail landing, below.
     let directing = store::start_conversation(&pool, repos[0].id, "usage-limits")
         .await
         .unwrap()
@@ -1541,12 +1542,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await;
 
-    // And the other half of that closing move: the document the grilling wrote
-    // before it proposed, which Verkstead takes onto the Timeline as the
-    // proposal is accepted. Recorded here for the reason the worktree is
-    // recorded rather than made — where the file came from is
-    // `tests/conversations.rs`'s subject, and what the Timeline does with it is
-    // this one's.
+    // And what the pick asked for: an inline grilling's tail is the handoff, and
+    // Verkstead takes it onto the Timeline as that session ends. Recorded here
+    // for the reason the worktree is recorded rather than made — where the file
+    // came from is `tests/conversations.rs`'s subject, and what the Timeline does
+    // with it is this one's.
+    //
+    // The move follows it, in that order, because that is the order the far side
+    // of an inline pick happens in: a Conversation that says it is being built
+    // has the document the grilling left beside it.
     store::record_handoff(
         &pool,
         directing,
@@ -1559,6 +1563,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    store::start_implementing(&pool, directing).await.unwrap();
 
     // And the commits on its branch, which is what a session leaves behind
     // besides its output. Recorded here rather than made, exactly as the

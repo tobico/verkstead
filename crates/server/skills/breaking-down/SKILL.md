@@ -1,6 +1,6 @@
 ---
 name: breaking-down
-description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list — read on from the grilling that settled it, or in a fresh session primed with the Brief and the handoff the grilling wrote.
+description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list — read on from the grilling that settled it, or in a fresh session primed with the Brief.
 ---
 
 Break the settled work into sequential task files under `.tasks/`, and commit
@@ -26,11 +26,13 @@ wrote beside the pick as part of what the backlog has to answer to. Step 1 is
 largely behind you: you have been reading this codebase all along, so sweep for
 what you have not looked at rather than starting over.
 
-**You are a fresh session.** The prompt carries the Brief and the handoff
-document the grilling wrote, plus whatever the human said when they asked for
-this to be tried again. The handoff is the agreement: everything in it was
-settled with the human over a whole grilling, so it is the plan you are breaking
-up rather than a proposal to re-open.
+**You are a fresh session.** The grilling that settled this work is over and its
+context is gone: the earlier attempt at this breakdown ended without one, and
+the human asked for it to be run again. The prompt carries the Brief and
+whatever they wrote alongside the retry, and there is no handoff document — what
+you have besides those is the repository. Ground the plan in it thoroughly
+before you draft anything, and put what you cannot settle from it to the human
+in the Set below rather than guessing.
 
 Either way, the direction is settled and the breakdown is what is left.
 

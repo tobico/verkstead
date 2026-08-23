@@ -89,14 +89,17 @@ two halves bill to separate accounts.
    grilling session opens in the Sandbox. What it wants to know arrives as
    Question Sets on the Timeline and, if you have subscribed, on your phone.
    Answer from wherever you are; the session waits.
-3. **The Proposal.** The grilling ends by proposing a **Direction**, with a
-   **Handoff** written for whoever builds the work. Picking the named Option
-   accepts it. Every other way of answering — a different Option, your own
+3. **The Proposal.** The grilling ends by proposing a **Direction** — inline,
+   task list or roadmap — on a Set carrying the chooser. Picking one accepts
+   the Proposal, and the pick is delivered back to the grilling session rather
+   than acted on. Every other way of answering — a different Option, your own
    words, or leaving it open — sends it back, and the session decides for
    itself whether to keep grilling or propose again.
-4. **Choose the Direction:** inline, task list, or roadmap. One press, and the
-   pipeline it names starts. A task list breaks the work into `.tasks/` first;
-   a roadmap stages it into `docs/roadmaps/`; inline builds it in one go.
+4. **The session produces what you picked.** A task list breaks the work into
+   `.tasks/`; a roadmap stages it into `docs/roadmaps/`; inline writes the
+   **Handoff** for the fresh session that builds it. That artifact, plus the
+   session going quiet, is what ends the grilling and starts the pipeline —
+   there is nothing left to press.
 5. **It runs itself.** Each **Step** is one fresh session, ended when the file
    it turns on has gone from the Worktree *and* the commit removing it has
    landed *and* the session has gone quiet. Commits appear on the Timeline with

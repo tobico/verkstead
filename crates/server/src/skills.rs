@@ -183,38 +183,40 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
-/// What a task-list session is started on: the same two documents, under the
-/// line that sends the agent into the breakdown skill instead.
+/// What a retried task-list tail is started on: the Brief, under the line that
+/// sends the agent into the breakdown skill.
 ///
-/// The same documents because it is the same work, read for a different purpose:
-/// this session is not building it but deciding how it splits, and a breakdown
-/// drawn from anything less than what the grilling settled would be a backlog for
-/// some other piece of work.
-pub(crate) fn breaking_down(brief: &str, handoff: Option<&str>) -> String {
+/// One document rather than two, unlike the sessions that build. A task list
+/// writes no handoff — the backlog *is* what the grilling settled, committed to
+/// the branch — so there is never one for this to carry. The ordinary way into
+/// the breakdown is the grilling session reading on with the whole thread still
+/// in its context and no prompt sent at all; this is the retry, which grounds
+/// itself in the Brief, the repository, and whatever the human wrote when they
+/// asked for the tail to be run again.
+pub(crate) fn breaking_down(brief: &str) -> String {
     on_the_documents(
         &format!(
             "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
         ),
         brief,
-        handoff,
+        None,
     )
 }
 
-/// What a roadmap session is started on: the same two documents again, under
-/// the line that sends the agent into the staging fork.
+/// What a retried roadmap tail is started on: the Brief again, under the line
+/// that sends the agent into the staging fork.
 ///
-/// The same documents for the reason the breakdown gets them: it is the same
-/// work, read for a different purpose again. This session is not building it and
-/// not slicing it into one feature's tasks, but deciding where the *features*
-/// fall — and a staging drawn from anything less than what the grilling settled
-/// would be a roadmap for some other piece of work.
-pub(crate) fn staging(brief: &str, handoff: Option<&str>) -> String {
+/// One document for the reason the breakdown gets one, one level up: the stage
+/// briefs are what the grilling settled, and nothing crosses out of this
+/// Conversation that has to be told anything else. The ordinary way in is the
+/// grilling session reading on; this is the retry.
+pub(crate) fn staging(brief: &str) -> String {
     on_the_documents(
         &format!(
             "Read {STAGING} and stage the work described below into a roadmap, the way it says."
         ),
         brief,
-        handoff,
+        None,
     )
 }
 
@@ -491,6 +493,11 @@ mod tests {
     /// The handoff is the whole reason an inline implementation is a fresh
     /// session, so the skill that ends a grilling has to say where it goes —
     /// and it is the path the sandbox mounts, not one an agent may improvise.
+    ///
+    /// On the far side of the pick, which is the other half of it: an inline
+    /// pick is what the handoff is written *for*, and one written before the
+    /// closing Set would be handing over an understanding the human had not yet
+    /// answered.
     #[test]
     fn the_grilling_skill_says_where_the_handoff_is_written() {
         let grilling = skill("grilling/SKILL.md");
@@ -503,6 +510,47 @@ mod tests {
             grilling.contains("handoff"),
             "and call it what the Timeline and the workbench call it"
         );
+
+        let (before, after) = grilling
+            .split_once("### When they pick inline")
+            .expect("the inline pick is a branch the skill carries");
+
+        assert!(
+            !before.contains(crate::handoffs::HANDOFF_INSIDE),
+            "nothing is written before the pick: a refused proposal would cost a \
+             rewrite, and the Set is meant to be cheap to send — {before}"
+        );
+        assert!(
+            after.contains(crate::handoffs::HANDOFF_INSIDE),
+            "and the inline branch is where it is written: {after}"
+        );
+    }
+
+    /// And the other two pick no handoff up at all. What they settle is the
+    /// artifact they commit, so a handoff on either path would be a second
+    /// record of the plan that nothing downstream reads.
+    #[test]
+    fn the_grilling_skill_writes_no_handoff_on_the_picks_that_commit_one() {
+        let grilling = skill("grilling/SKILL.md");
+
+        let (_, tails) = grilling
+            .split_once("### When they pick a task list")
+            .expect("the task-list pick is a branch the skill carries");
+
+        let (task_list, rest) = tails
+            .split_once("### When they pick a roadmap")
+            .expect("and the roadmap pick is the one after it");
+        let (roadmap, _) = rest
+            .split_once("### When they don't accept")
+            .expect("with the refusal branch after that");
+
+        for (named, branch) in [("task list", task_list), ("roadmap", roadmap)] {
+            assert!(
+                !branch.contains(crate::handoffs::HANDOFF_INSIDE),
+                "a {named} pick writes the plan into the repository and no handoff \
+                 anywhere: {branch}"
+            );
+        }
     }
 
     /// No gate anywhere in the implementation: the agent commits on its own,
@@ -570,8 +618,8 @@ mod tests {
 
     /// Two sessions can be reading this: the grilling one carrying on from the
     /// pick, and a fresh one launched because that tail was retried. They differ
-    /// in where the agreement is written down — a conversation the reader had, or
-    /// a handoff document handed to it — so the skill has to say both.
+    /// in what the reader has to ground itself in — its own conversation, or the
+    /// Brief and the repository — so the skill has to say both.
     #[test]
     fn the_breakdown_skill_works_from_both_ways_in() {
         let breaking_down = skill("breaking-down/SKILL.md");
@@ -583,12 +631,12 @@ mod tests {
         );
         assert!(
             breaking_down.contains("a fresh session"),
-            "and the other is a retried tail, with the handoff as its agreement: \
-             {breaking_down}"
+            "and the other is a retried tail: {breaking_down}"
         );
         assert!(
-            breaking_down.contains("handoff"),
-            "which it has to name, being the document that way in is primed with"
+            breaking_down.contains("there is no handoff document"),
+            "which is grounded in the Brief, the repository and the retry note — a \
+             task list writes no handoff for it to have been handed: {breaking_down}"
         );
     }
 
@@ -706,9 +754,8 @@ mod tests {
 
     /// Two sessions can be reading this one too: the grilling session carrying on
     /// from the pick, and a fresh one launched because that tail was retried.
-    /// They differ in where the agreement is written down — a conversation the
-    /// reader had, or a handoff document handed to it — so the skill has to say
-    /// both.
+    /// They differ in what the reader has to ground itself in, so the skill has
+    /// to say both.
     #[test]
     fn the_staging_skill_works_from_both_ways_in() {
         let staging = skill("staging/SKILL.md");
@@ -720,12 +767,12 @@ mod tests {
         );
         assert!(
             staging.contains("a fresh session"),
-            "and the other is a retried tail, with the handoff as its agreement: \
-             {staging}"
+            "and the other is a retried tail: {staging}"
         );
         assert!(
-            staging.contains("handoff"),
-            "which it has to name, being the document that way in is primed with"
+            staging.contains("there is no handoff document"),
+            "which is grounded in the Brief, the repository and the retry note — a \
+             roadmap writes no handoff for it to have been handed: {staging}"
         );
     }
 
@@ -746,14 +793,11 @@ mod tests {
         );
     }
 
-    /// The same two documents, into the third skill. What differs is the line
-    /// above them, which is the whole of what sends a session one way or another.
+    /// The Brief, into the third skill. What differs is the line above it, which
+    /// is the whole of what sends a session one way or another.
     #[test]
-    fn a_roadmap_session_is_started_on_the_same_documents_inside_the_fork() {
-        let prompt = staging(
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-        );
+    fn a_roadmap_session_is_started_on_the_brief_inside_the_fork() {
+        let prompt = staging("# Rate limiting\n\nThe API has none.\n");
 
         assert!(
             prompt.contains(STAGING),
@@ -764,8 +808,12 @@ mod tests {
             "and nothing sends this session to build or slice the work instead: {prompt:?}"
         );
         assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
+            prompt.contains("The API has none."),
+            "the Brief goes in whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "and nothing is said about a document a roadmap never has: {prompt:?}"
         );
     }
 
@@ -1227,15 +1275,11 @@ mod tests {
         );
     }
 
-    /// The same two documents, into the other skill. What differs is the line
-    /// above them, which is the whole of what sends a session one way or the
-    /// other.
+    /// The Brief, into the other skill. What differs is the line above it, which
+    /// is the whole of what sends a session one way or the other.
     #[test]
-    fn a_breakdown_session_is_started_on_the_same_documents_inside_the_fork() {
-        let prompt = breaking_down(
-            "# Rate limiting\n\nThe API has none.\n",
-            Some("# What we settled\n\nIn-process counter.\n"),
-        );
+    fn a_breakdown_session_is_started_on_the_brief_inside_the_fork() {
+        let prompt = breaking_down("# Rate limiting\n\nThe API has none.\n");
 
         assert!(
             prompt.contains(BREAKING_DOWN),
@@ -1246,8 +1290,12 @@ mod tests {
             "and nothing sends this session to build the work instead: {prompt:?}"
         );
         assert!(
-            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
-            "both documents go in whole: {prompt:?}"
+            prompt.contains("The API has none."),
+            "the Brief goes in whole: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What the grilling settled"),
+            "and nothing is said about a document a task list never has: {prompt:?}"
         );
     }
 

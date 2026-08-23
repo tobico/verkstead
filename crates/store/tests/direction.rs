@@ -7,13 +7,12 @@
 //! it. There is no rung between the two, so what these ask is what a
 //! Conversation's state and its Timeline say afterwards.
 //!
-//! What a pick moves depends on whose session writes the picked Direction's
-//! artifact. Inline is handed over, and its pick takes a Conversation from
-//! Grilling straight to Implementing; a task list and a roadmap are written by
-//! the grilling session itself, so their pick records the direction and moves
-//! nothing. What follows a plan commit is [`start_implementing`]; what follows a
-//! roadmap commit is the pull request the same session opens, which
-//! `wrapping.rs` is where to look for.
+//! A pick moves nothing, whichever one it is. The session that proposed is the
+//! one that produces what the pick asked for — the backlog, the roadmap, or the
+//! handoff an inline build is primed from — so the pick records the direction
+//! and leaves the Conversation grilling. What follows a plan commit or a handoff
+//! is [`start_implementing`]; what follows a roadmap commit is the pull request
+//! the same session opens, which `wrapping.rs` is where to look for.
 
 use std::path::Path;
 
@@ -119,9 +118,10 @@ fn ordinary() -> QuestionSet {
 /// Answer a Set the way both halves of the server do, through the one path a
 /// Response takes.
 ///
-/// Inline, which is the direction whose pick hands the work over there and then:
-/// the tests about what accepting *moves* are asking about that one, and the two
-/// the grilling session writes for itself have their own below.
+/// Inline, which is no more special than the other two any more: whichever
+/// direction is picked, the session that proposed writes its artifact and the
+/// Conversation stays where it is. One of the three has to be named, and this is
+/// the one the fixture's own proposal recommends.
 async fn answer(pool: &SqlitePool, set_id: i64) -> Submission {
     answered(pool, set_id, &accepting(Direction::Inline)).await
 }
@@ -196,7 +196,7 @@ async fn direction(pool: &SqlitePool, id: i64) -> Option<Direction> {
 }
 
 #[tokio::test]
-async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
+async fn answering_a_set_that_carries_a_proposal_is_accepted() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
@@ -211,34 +211,23 @@ async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
     ));
 
     assert_eq!(
-        state(&pool, id).await,
-        Lifecycle::Implementing,
-        "picking a direction on the closing proposal is what ends a grilling",
-    );
-    assert_eq!(
-        moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "and the one move is on the Timeline, with no rung in between",
-    );
-    assert_eq!(
         direction(&pool, id).await,
         Some(Direction::Inline),
         "and what was picked is the Conversation's latest pick",
     );
 }
 
-/// The two picks the grilling session carries on with are the exception, and the
-/// reason is whose session does the next piece of work: the grilling one writes
-/// the backlog or the roadmap itself, so the grilling is still what is happening
-/// and the Conversation still says so.
+/// No pick ends a grilling, and the reason is whose session does the next piece
+/// of work: the grilling one writes what the pick asked for, so the grilling is
+/// still what is happening and the Conversation still says so.
 ///
-/// One test over the two, because the store does exactly the same thing for both
-/// — records the pick and moves nothing. Where they differ is in what the
-/// artifact landing moves them on to, which is a question for whoever is watching
-/// rather than for the pick.
+/// One test over the three, because the store does exactly the same thing for
+/// each — records the pick and moves nothing. Where they differ is in what the
+/// artifact is and where landing it moves them on to, which is a question for
+/// whoever is watching rather than for the pick.
 #[tokio::test]
-async fn a_pick_the_grilling_writes_records_the_direction_and_leaves_it_grilling() {
-    for picked in [Direction::TaskList, Direction::Roadmap] {
+async fn a_pick_records_the_direction_and_leaves_the_conversation_grilling() {
+    for picked in [Direction::Inline, Direction::TaskList, Direction::Roadmap] {
         let (_dir, pool) = fresh_pool().await;
         let id = grilling(&pool).await;
 
@@ -271,43 +260,49 @@ async fn a_pick_the_grilling_writes_records_the_direction_and_leaves_it_grilling
     }
 }
 
-/// And the move that follows the plan commit, which is the other half of it: the
+/// And the move that follows the artifact, which is the other half of it: the
 /// grilling session has been seen out, and the work is being built.
+///
+/// Both tails that reach it, because both reach it by the same door: the backlog
+/// a task list commits, and the handoff an inline pick asks for. A roadmap's tail
+/// has no counterpart here — it goes on to the pull request instead.
 #[tokio::test]
 async fn a_grillings_tail_landing_is_what_starts_the_work() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = grilling(&pool).await;
+    for picked in [Direction::Inline, Direction::TaskList] {
+        let (_dir, pool) = fresh_pool().await;
+        let id = grilling(&pool).await;
 
-    pick_direction(&pool, id, Direction::TaskList)
-        .await
-        .unwrap();
+        pick_direction(&pool, id, picked).await.unwrap();
 
-    assert_eq!(
-        start_implementing(&pool, id).await.unwrap(),
-        Implementing::Started,
-    );
-    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
-    assert_eq!(
-        moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "one move, recorded where the grilling actually ended",
-    );
-    assert_eq!(
-        direction(&pool, id).await,
-        Some(Direction::TaskList),
-        "and the pick still stands: it is what the work is being built as",
-    );
+        assert_eq!(
+            start_implementing(&pool, id).await.unwrap(),
+            Implementing::Started,
+            "picking {picked:?}",
+        );
+        assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+        assert_eq!(
+            moves(&pool, id).await,
+            [Lifecycle::Grilling, Lifecycle::Implementing],
+            "one move, recorded where the grilling actually ended — picking {picked:?}",
+        );
+        assert_eq!(
+            direction(&pool, id).await,
+            Some(picked),
+            "and the pick still stands: it is what the work is being built as",
+        );
+    }
 }
 
 /// Nothing but a grilling has a tail to land. A Conversation that has moved on —
-/// aborted out from under the run, or carried somewhere else by a later pick — is
-/// not one to drag back to Implementing.
+/// aborted out from under the run, or already building the work — is not one to
+/// drag back to Implementing.
 #[tokio::test]
 async fn only_a_grilling_has_a_tail_to_land() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
     pick_direction(&pool, id, Direction::Inline).await.unwrap();
+    start_implementing(&pool, id).await.unwrap();
 
     assert_eq!(
         start_implementing(&pool, id).await.unwrap(),
@@ -346,7 +341,7 @@ async fn answering_an_ordinary_grilling_set_leaves_it_grilling() {
 }
 
 #[tokio::test]
-async fn the_acceptance_says_what_the_proposal_moved() {
+async fn the_acceptance_says_what_the_proposal_settled() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
@@ -370,7 +365,7 @@ async fn the_acceptance_says_what_the_proposal_moved() {
         proposed(&pool, proposing.id, &accepting(Direction::Inline)).await,
         Some(Proposed::Accepted {
             direction: Direction::Inline,
-            directing: Directing::Moved,
+            directing: Directing::Writing,
         }),
         "the store hands back what happened, and which direction was picked — \
          the human's rather than the recommended one",
@@ -456,10 +451,11 @@ async fn accepting_with_something_to_add_is_still_accepting() {
         proposed(&pool, created.id, &qualified).await,
         Some(Proposed::Accepted {
             direction: Direction::Inline,
-            directing: Directing::Moved,
+            directing: Directing::Writing,
         }),
     );
-    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+    assert_eq!(direction(&pool, id).await, Some(Direction::Inline));
+    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
 }
 
 /// A grilling sent back can propose again, and that one can be accepted.
@@ -491,20 +487,26 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
         proposed(&pool, second.id, &accepting(Direction::Inline)).await,
         Some(Proposed::Accepted {
             direction: Direction::Inline,
-            directing: Directing::Moved,
+            directing: Directing::Writing,
         }),
     );
 
-    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+    assert_eq!(direction(&pool, id).await, Some(Direction::Inline));
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Implementing],
-        "the refusal moved nothing, so the Timeline says it got here once",
+        [Lifecycle::Grilling],
+        "neither the refusal nor the pick moved anything: what moves a \
+         Conversation is the artifact the pick asked for",
     );
 }
 
+/// A pick answered after the tail it would have informed has already landed.
+///
+/// Which is the shape of a second proposal Set answered late: the grilling it
+/// was put from is over, the artifact is written, and there is nothing left for
+/// a direction to inform.
 #[tokio::test]
-async fn a_second_proposal_answered_finds_the_move_already_made() {
+async fn a_pick_answered_after_the_tail_landed_finds_nothing_to_settle() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
@@ -518,6 +520,7 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
         .unwrap();
 
     answer(&pool, first.id).await;
+    start_implementing(&pool, id).await.unwrap();
 
     assert_eq!(
         proposed(&pool, second.id, &accepting(Direction::Roadmap)).await,
@@ -525,7 +528,7 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
             direction: Direction::Roadmap,
             directing: Directing::NotGrilling,
         }),
-        "the first acceptance moved it, and the second has nothing left to move",
+        "the tail landed and moved it, and this pick has nothing left to inform",
     );
     assert_eq!(
         moves(&pool, id).await,
@@ -535,7 +538,7 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
     assert_eq!(
         direction(&pool, id).await,
         Some(Direction::Inline),
-        "and the pick that moved it is the one that stands",
+        "and the pick the work was built as is the one that stands",
     );
 }
 
@@ -572,14 +575,15 @@ async fn there_is_no_conversation_to_move() {
 /// A second pick on a Conversation already being built changes nothing.
 ///
 /// Not a rule about picking twice so much as the one rule stated once: only a
-/// grilling can be ended, and this one is over. What the human picked stands,
-/// and the work carries on being built as it.
+/// grilling can be informed, and this one is over. What the work was built as
+/// stands, and it carries on being built as that.
 #[tokio::test]
 async fn a_conversation_that_is_already_being_built_takes_no_second_pick() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
     pick_direction(&pool, id, Direction::Inline).await.unwrap();
+    start_implementing(&pool, id).await.unwrap();
 
     assert_eq!(
         pick_direction(&pool, id, Direction::TaskList)

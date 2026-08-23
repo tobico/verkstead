@@ -495,13 +495,9 @@ pub enum Staged {
 /// proposal Set answered after the first has nothing left to move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Directing {
-    /// Recorded: the pick is the Conversation's latest, the work is being built,
-    /// and the move is on the Timeline.
-    Moved,
-
-    /// Recorded, and the Conversation is still grilling: the session that
-    /// proposed writes the picked Direction's artifact itself, so what moves the
-    /// Conversation is that artifact landing rather than the answer.
+    /// Recorded, and the Conversation is still grilling: whichever direction was
+    /// picked, the session that proposed writes its artifact itself, so what
+    /// moves the Conversation is that artifact landing rather than the answer.
     Writing,
 
     /// It was not grilling, so there was no grilling for this to end. Nothing
@@ -512,14 +508,14 @@ pub enum Directing {
     NoSuchConversation,
 }
 
-/// What became of the work starting once a task-list grilling's own tail has
-/// landed.
+/// What became of the work starting once a grilling's own tail has landed.
 ///
-/// The other half of a [`Directing::Writing`] task list: the pick recorded the
+/// The other half of a [`Directing::Writing`] pick: the pick recorded the
 /// direction and left the Conversation grilling, and this is the move that
-/// follows the backlog. A roadmap tail is the same shape one rung further along
-/// — the roadmap goes for review as it lands, so what follows it is
-/// [`super::record_pull_request`] rather than this.
+/// follows the backlog a task list writes, or the handoff an inline tail writes.
+/// A roadmap tail is the same shape one rung further along — the roadmap goes
+/// for review as it lands, so what follows it is [`super::record_pull_request`]
+/// rather than this.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Implementing {
     /// Recorded: the Conversation is being built, and the move is on its
@@ -1641,36 +1637,28 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the
-/// Conversation's latest pick, and — for the one direction whose next move is a
-/// session of its own — the work is being built.
+/// Conversation's latest pick, and nothing else.
 ///
-/// **A task-list or roadmap pick moves nothing.** The grilling session that
-/// proposed writes the backlog or the roadmap itself, holding everything the
-/// grilling settled, so the Conversation stays Grilling until that session ends:
-/// the pick informs the agent and the artifact moves the machine. What follows
-/// the plan commit is [`start_implementing`]; what follows the roadmap commit is
-/// the pull request the same session opens, which is
-/// [`super::record_pull_request`]'s to record.
-///
-/// **An inline pick is one move rather than two.** There is no rung between the
-/// grilling ending and the work starting — the pick and the acceptance are the
-/// one answer, and a state to sit in between them would be a state nothing ever
-/// waits in.
+/// **A pick moves nothing, whichever one it is.** The grilling session that
+/// proposed is the one that produces what the pick asked for — the backlog, the
+/// roadmap, or the handoff an inline build is primed from — so the Conversation
+/// stays Grilling until that session has: the pick informs the agent and the
+/// artifact moves the machine. What follows a backlog or a handoff is
+/// [`start_implementing`]; what follows the roadmap commit is the pull request
+/// the same session opens, which is [`super::record_pull_request`]'s to record.
 ///
 /// Called off the back of a Response landing rather than off anything the human
 /// pressed — see [`super::submit_response`] — which is why a Conversation that is
-/// not grilling is [`Directing::NotGrilling`] rather than an error. A grilling
-/// that put two proposals to the human has the first Answer move it, and the
-/// second finds the move already made.
+/// not grilling is [`Directing::NotGrilling`] rather than an error. A pick that
+/// arrives after the grilling has ended has nothing left to inform.
 ///
 /// The pick is recorded as the row alone. What says on the Timeline that the
 /// human chose is the answered proposal Set sitting on it, with the direction
 /// on its Response — a second Event beside it would be a second record of one
 /// decision.
 ///
-/// One transaction, as every move is: a Conversation that says Implementing
-/// always has the move on its Timeline to say when it got there, and never says
-/// it is being built without saying how.
+/// One transaction, though there is only the one row to write: what a later pick
+/// overwrites is the row a watcher is armed from, and a restart reads back.
 pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) -> Result<Directing> {
     let mut tx = pool.begin().await.context("acting on a picked direction")?;
 
@@ -1698,35 +1686,21 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
     .await
     .with_context(|| format!("recording the direction picked on Conversation {id}"))?;
 
-    // The grilling carries on writing the artifact, so there is nothing to move
-    // yet. The pick is committed either way: it is what the follower watching for
-    // the artifact is armed from, and what a restart reads back.
-    if matches!(direction, Direction::TaskList | Direction::Roadmap) {
-        tx.commit().await.context("acting on a picked direction")?;
-
-        return Ok(Directing::Writing);
-    }
-
-    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Implementing.stored())
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("moving Conversation {id} to implementing"))?;
-
-    moved(&mut tx, id, Lifecycle::Implementing).await?;
-
+    // The grilling carries on writing the artifact, so there is nothing to move.
+    // The pick is committed for itself: it is what the follower watching for that
+    // artifact is armed from, and what a restart reads back.
     tx.commit().await.context("acting on a picked direction")?;
 
-    Ok(Directing::Moved)
+    Ok(Directing::Writing)
 }
 
 /// Record that a grilling's own tail has landed and the work is being built: the
 /// Conversation is implementing, and the move is on its Timeline.
 ///
-/// What the grilling session wrote is already under version control by the time
-/// this runs — the plan commit is what says the tail is over — so this is the
-/// record catching up with the repository rather than a decision of its own.
+/// What the grilling session wrote is already in hand by the time this runs —
+/// the plan commit, or the handoff document taken onto the Timeline — so this is
+/// the record catching up with what the session left behind rather than a
+/// decision of its own.
 ///
 /// Refused for anything but Grilling, which is the only place a tail can be
 /// running. That refusal is what keeps a run that was aborted, or one whose pick
