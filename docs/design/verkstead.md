@@ -308,6 +308,17 @@ Timeline events:
   On the card the waiting dot still outranks both rings, so a grilling sitting
   on an open set is drawn as waiting rather than as idle (*settled 2026-08-23,
   building agent-output-polish*).
+- **A call and the answer to it are one card** (*settled 2026-08-24, building
+  workbench-refit*): on the Transcript a tool call and the result answering it
+  are a single fold — the tool and its one line while it is shut, what it was
+  called with above what it said back once it is open. Two rows were two things
+  to open for one thing that happened, and the second of them said *Result* and
+  nothing else. Which two go together is the name the log gave the call, carried
+  on both turns and joined by the pane rather than by the server, so a call whose
+  tool is still running opens on its own and grows its answer where it stands.
+  Success is quiet and a failure says *failed* in the summary line, in the
+  stopped-run red — a session's one bad call is then findable without opening
+  the ninety-nine good ones.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
 - **Push notifications** for needs-you (blocking question sets, interruptions,

@@ -2548,17 +2548,42 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.transcript .tool-use .tool {
+/* A call and the answer to it: one card rather than two rows, since one thing
+   happened. Shut it is the tool and the line about it, and open it is what the
+   tool was called with above what it said back. */
+.transcript .tool-call {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.transcript .tool-call > details > summary {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The one word a pair ever says about itself, at the far end of the line it is
+   on. Success says nothing — a session calls a hundred tools and ninety-nine of
+   them work — so the word is there to be found rather than to be read past. */
+.transcript .tool-call .failed {
+  flex: none;
+  margin-left: auto;
+  color: var(--stopped);
+}
+
+.transcript .tool-call .tool {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--ink);
 }
 
-.transcript .tool-use .about {
+.transcript .tool-call .about {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* And an answer with no call above it to draw it, which is the one shape left
+   that says how it went in a word of its own. */
 .transcript .tool-result.failed > details > summary {
   color: var(--stopped);
 }
@@ -2579,6 +2604,18 @@ main:has(.workbench) {
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
+}
+
+/* Except inside a pair's card, where the two of them are wells of the paper
+   rather than boxes on it: the card is already the box around both, so a box of
+   their own would be a border drawn twice, and one rule is what separates the
+   call from the answer to it. */
+.transcript .tool-call pre {
+  margin: 0;
+  background: var(--paper);
+  border: 0;
+  border-top: 1px solid var(--edge);
+  border-radius: 0;
 }
 
 /* The backend's own bookkeeping, in one group under the conversation: a third

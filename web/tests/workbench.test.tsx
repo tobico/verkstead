@@ -37,6 +37,7 @@ import type {
   Submitted,
   TimelineEvent,
   TranscriptView,
+  Turn,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
@@ -1717,6 +1718,34 @@ function attached(): Promise<Attached> {
   });
 }
 
+/// How many rows a record draws, which is no longer how many turns it holds: a
+/// call and the answer to it are one card, so an answer its call is drawing has
+/// no row of its own. Batches, because an accumulated record is the turns of
+/// every reading of it and a pair can straddle the join.
+function rows(...readings: Turn[][]): number {
+  const said = readings.flat();
+  const called = new Set(
+    said.flatMap((turn) =>
+      turn.kind === "ToolUse" && turn.call !== "" ? [turn.call] : [],
+    ),
+  );
+
+  return said.filter(
+    (turn) => !(turn.kind === "ToolResult" && called.has(turn.call)),
+  ).length;
+}
+
+/// A record written here rather than by the server, for the shapes one session
+/// of one fixture cannot hold at once: a pair that failed, a call still waiting
+/// on its tool, an answer whose call is not in the record.
+///
+/// The turns are the wire's own type, so a field the server adds is a field
+/// these have to carry — which is the whole of what keeps a hand-written
+/// payload honest.
+function recordOf(turns: Turn[], cursor = "9.9.9"): TranscriptView {
+  return { turns, bookkeeping: [], whole: true, cursor };
+}
+
 /// A session that kept no record of its own conversation, which is what the
 /// server says for every stub agent and every backend that writes no log — and
 /// what sends the pane to the Capture.
@@ -2237,7 +2266,7 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, ".agent-output"));
 
     const put = await drawn(container, ".details-pane .turn.put");
-    const answered = await drawn(container, ".details-pane .turn.tool-result");
+    const answered = await drawn(container, ".details-pane .turn.tool-call");
 
     expect(put.textContent).toContain("What should the queue do");
     expect(answered.textContent).toContain("crates/server/src/queue.rs");
@@ -2258,7 +2287,7 @@ describe("a session's output on the timeline", () => {
     );
     const call = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.tool-use details",
+      ".details-pane .turn.tool-call details",
     );
     const prose = await drawn(container, ".details-pane .turn.prose");
 
@@ -2270,6 +2299,204 @@ describe("a session's output on the timeline", () => {
       "Find where a delivery is retried",
     );
     expect(prose.querySelector("details")).toBeNull();
+  });
+
+  /// One thing happened, so it is one thing to open. Shut, the card is the tool
+  /// and the line about it; open, it is what the tool was called with above
+  /// what it said back — the order the two happened in.
+  it("draws a call and the answer to it as the one card", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const pair = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.tool-call details",
+    );
+
+    expect(pair.querySelector("summary")!.textContent).toContain("Bash");
+    expect(pair.querySelector("summary")!.textContent).toContain(
+      "Find where a delivery is retried",
+    );
+
+    const behind = [...pair.querySelectorAll("pre")];
+
+    expect(behind.map((block) => block.className)).toEqual(["input", "output"]);
+    expect(behind[0]!.textContent).toContain("rg -n 'retry'");
+    expect(behind[1]!.textContent).toContain("crates/server/src/queue.rs");
+
+    // And the answer is not also standing on its own under it, which is what
+    // there being one card is.
+    expect(
+      container.querySelectorAll(".details-pane .turn.tool-call"),
+    ).toHaveLength(1);
+    expect(
+      container.querySelector(".details-pane .turn.tool-result"),
+    ).toBeNull();
+  });
+
+  /// Success is quiet: a session calls a hundred tools and ninety-nine of them
+  /// work, so a word saying so on every one of them would be a word to read
+  /// past. A failure is the exception and says so while the card is still shut,
+  /// which is what makes one findable without opening anything.
+  it("says failed on a pair that failed, and nothing on one that worked", async () => {
+    theSpeaking(
+      whenever(
+        TRANSCRIPT_OF_IT,
+        json(
+          recordOf([
+            {
+              kind: "ToolUse",
+              id: 1,
+              name: "Bash",
+              call: "toolu_a",
+              about: "Count the tasks left",
+              input: "{}",
+            },
+            {
+              kind: "ToolResult",
+              id: 2,
+              call: "toolu_a",
+              failed: false,
+              text: "two",
+            },
+            {
+              kind: "ToolUse",
+              id: 3,
+              name: "Bash",
+              call: "toolu_b",
+              about: "Run the tests",
+              input: "{}",
+            },
+            {
+              kind: "ToolResult",
+              id: 4,
+              call: "toolu_b",
+              failed: true,
+              text: "two tests failed",
+            },
+          ]),
+        ),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .turn.tool-call");
+
+    const [worked, failed] = [
+      ...container.querySelectorAll(".details-pane .turn.tool-call summary"),
+    ];
+
+    expect(worked!.textContent).toContain("Count the tasks left");
+    expect(worked!.querySelector(".failed")).toBeNull();
+    expect(failed!.textContent).toContain("Run the tests");
+    expect(failed!.querySelector(".failed")!.textContent).toBe("failed");
+
+    // And the red it is said in is the one a stopped run is said in. The
+    // stylesheet's, since jsdom resolves no variable and paints nothing.
+    expect(stylesheet).toContain(
+      ".transcript .tool-call .failed {\n  flex: none;\n  margin-left: auto;\n  color: var(--stopped);\n}",
+    );
+  });
+
+  /// An answer whose call is not in the record — a log whose first lines are
+  /// gone, or a format that has stopped naming the two. Something answered, and
+  /// a pane that swallowed it would be a pane missing a turn.
+  it("still draws an answer no call is drawing", async () => {
+    theSpeaking(
+      whenever(
+        TRANSCRIPT_OF_IT,
+        json(
+          recordOf([
+            {
+              kind: "ToolResult",
+              id: 1,
+              call: "toolu_gone",
+              failed: false,
+              text: "04-render.md",
+            },
+          ]),
+        ),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const orphan = await drawn(container, ".details-pane .turn.tool-result");
+
+    expect(orphan.textContent).toContain("04-render.md");
+  });
+
+  /// A pair can straddle a reading: a batch of a Transcript ends wherever the
+  /// log had got to, so a call whose tool is still running arrives on its own
+  /// and its answer comes with the next one (ADR 0009). The card grows the
+  /// answer where it stands rather than a second row appearing beneath it — and
+  /// it is the same card, so a reader who had it open still has.
+  it("grows the answer into the card its call arrived without", async () => {
+    const CALLED = recordOf(
+      [
+        {
+          kind: "ToolUse",
+          id: 1,
+          name: "Bash",
+          call: "toolu_a",
+          about: "Run the tests",
+          input: '{\n  "command": "cargo test"\n}',
+        },
+      ],
+      "1.1.0",
+    );
+    const ANSWERED: TranscriptView = {
+      ...recordOf(
+        [
+          {
+            kind: "ToolResult",
+            id: 2,
+            call: "toolu_a",
+            failed: false,
+            text: "78 passed",
+          },
+        ],
+        "2.2.0",
+      ),
+      whole: false,
+    };
+
+    theGrillingOutput(
+      { running: true },
+      whenever(TRANSCRIPT_OF_IT, json(CALLED)),
+      whenever(
+        `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(CALLED.cursor)}`,
+        json(ANSWERED),
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const waiting = await drawn<HTMLDetailsElement>(
+      container,
+      ".details-pane .turn.tool-call details",
+    );
+    waiting.open = true;
+
+    // Nothing has come back yet, so there is nothing under what it was called
+    // with — and nothing said about how it went either.
+    expect(waiting.querySelector("pre.output")).toBeNull();
+    expect(waiting.querySelector("summary .failed")).toBeNull();
+
+    await client.invalidateQueries();
+
+    await waitFor(() =>
+      expect(waiting.querySelector("pre.output")!.textContent).toContain(
+        "78 passed",
+      ),
+    );
+    expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(1);
+    expect(waiting.open).toBe(true);
   });
 
   /// Roughly a third of a log is the backend's own bookkeeping. Folded rather
@@ -2293,7 +2520,7 @@ describe("a session's output on the timeline", () => {
 
     // And not among the turns, which is what folding it away is for.
     expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
-      TRANSCRIPT.turns.length,
+      rows(TRANSCRIPT.turns),
     );
   });
 
@@ -2344,7 +2571,7 @@ describe("a session's output on the timeline", () => {
     // what was already there rather than replacing it…
     await waitFor(() =>
       expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
-        TRANSCRIPT.turns.length + MORE.turns.length,
+        rows(TRANSCRIPT.turns, MORE.turns),
       ),
     );
     // …and the fold is the same element it was, still open.
@@ -2417,7 +2644,7 @@ describe("a session's output on the timeline", () => {
     // session's beginning is drawn once.
     await waitFor(() =>
       expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
-        WHOLE_AGAIN.turns.length,
+        rows(WHOLE_AGAIN.turns),
       ),
     );
   });

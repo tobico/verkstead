@@ -1593,6 +1593,11 @@ export type ToolResult = {
  */
 id: number, 
 /**
+ * The call this answers, by the name the backend gave it. Empty where the
+ * log gave none, which leaves the answer standing on its own.
+ */
+call: string, 
+/**
  * Whether the tool failed.
  */
 failed: boolean, 
@@ -1613,6 +1618,12 @@ id: number,
  * What the tool is called.
  */
 name: string, 
+/**
+ * The name the backend gave this call, which its answer names back. Empty
+ * where the log gave none, which leaves the call with nothing to pair it
+ * to — still a call, still shown.
+ */
+call: string, 
 /**
  * The one line about it. Empty where the call said nothing this could
  * summarise, which leaves the name standing on its own.
