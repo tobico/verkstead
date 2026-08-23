@@ -2039,25 +2039,49 @@ main:has(.workbench) {
   border-radius: 0.6rem;
 }
 
-/* The two ways of reading one session, switched between at the top of the pane.
+/* The two ways of reading one session, switched between in the pane's header.
    A pair rather than a row of tabs, because there are two of them and there is
    no third coming: what says which is showing is the pressed one, not a rule
-   about position. */
+   about position.
+
+   As wide as its two labels rather than as wide as the pane: it shares the
+   header row with the title, and a switch that stretched would leave the title
+   nothing. It does not shrink either — when the two will not fit beside each
+   other the header wraps and the switch takes the next line whole, which is
+   what `flex-wrap` on `.pane-head` is there for. */
 .record-switch {
+  position: relative;
   display: flex;
+  flex: 0 0 auto;
   gap: 0.25rem;
-  margin: 0 0 0.75rem;
+  max-width: 100%;
+  margin: 0;
   padding: 0.2rem;
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* What is under the pressed label: one element moved to it, rather than a
+   background drawn on it. A background belongs to the element it is on and
+   cannot travel between two; this can, which is what makes switching read as
+   one thing moving. Taken out of the flex row so its travel costs the labels
+   nothing, and first in the markup so they paint over it. Where it stands is
+   measured — see `Output.tsx`. */
+.record-switch .indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  background: var(--accent);
+  border-radius: 0.4rem;
+}
+
 .record-switch button {
-  flex: 1;
-  padding: 0.4rem 0.75rem;
+  position: relative;
+  padding: 0.35rem 0.7rem;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
   background: none;
   border: 0;
@@ -2067,7 +2091,21 @@ main:has(.workbench) {
 
 .record-switch button[aria-pressed="true"] {
   color: var(--paper);
-  background: var(--accent);
+}
+
+/* The slide itself: a tenth of a second, eased at both ends, and across both
+   what it travels — the labels are words of different lengths, so the mark
+   changes width on its way as well as place.
+
+   Given only where motion is welcome, as the toggle switch's is. Under
+   `prefers-reduced-motion` there is no transition to run and the mark is simply
+   wherever the pressed label is, which is the instant switch this replaced. */
+@media (prefers-reduced-motion: no-preference) {
+  .record-switch .indicator {
+    transition:
+      transform 0.1s ease-in-out,
+      width 0.1s ease-in-out;
+  }
 }
 
 /* The Screen: the grid the session left, drawn as a terminal. The terminal

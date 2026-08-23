@@ -19,6 +19,6 @@ auto-shutdown.
 - [x] 01: Turns for lines — [details](01-turns-for-lines.md)
 - [x] 02: The idle mark — [details](02-idle-mark.md)
 - [x] 03: The idle mark on the sidebar card — [details](03-idle-mark-on-card.md)
-- [ ] 04: The switcher into the header — [details](04-switcher-into-header.md)
+- [x] 04: The switcher into the header — [details](04-switcher-into-header.md)
 - [ ] 05: The Screen fills the pane — [details](05-screen-fills-pane.md)
 - [ ] 06: Keyboard-only Hold, mouse flows free — [details](06-keyboard-only-hold.md)

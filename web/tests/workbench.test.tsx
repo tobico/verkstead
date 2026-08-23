@@ -1514,6 +1514,15 @@ function theGrillingOutput(
   );
 }
 
+/// Where a browser would have found an element, for the one assertion that
+/// reads a measurement back: jsdom has no layout, so every element on the page
+/// is at nothing and nothing wide, and a mark measured off two of them would
+/// never be seen to move.
+function lay(element: Element, box: { at: number; wide: number }): void {
+  Object.defineProperty(element, "offsetLeft", { value: box.at });
+  Object.defineProperty(element, "offsetWidth", { value: box.wide });
+}
+
 /// Where the workbench hands this conversation's keyboard back.
 const HANDING_BACK = `/api/ui/conversations/${GRILLING.id}/hand-back`;
 
@@ -2138,19 +2147,90 @@ describe("a session's output on the timeline", () => {
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(before);
   });
 
-  /// The Capture belongs to the pane, and what the conversation is comes
-  /// back when it is closed.
-  it("goes back to the conversation's details when it is closed", async () => {
-    theGrilling();
+  /// The switch is the pane's own control, so it stands in the pane's header
+  /// beside the title — where every other pane's Close is, and where this one's
+  /// was. Two of them there would be one row with two ways off it, so the Close
+  /// goes: "← Timeline" is the way out of every pane on a narrow window, and a
+  /// wide one has the conversation's Timeline standing beside this anyway.
+  it("puts the switch in the header, and keeps no Close beside it", async () => {
+    theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, ".agent-output"));
-    await drawn(container, ".details-pane .capture");
 
-    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+    await drawn(container, ".details-pane .pane-head .record-switch");
+    await drawn(container, ".details-pane .pane-head .pane-back");
 
-    await drawn(container, ".details-pane .conversation-facts");
-    expect(container.querySelector(".details-pane .capture")).toBeNull();
+    expect(container.querySelector(".details-pane .close-event")).toBeNull();
+  });
+
+  /// Sharing that row is what the switch's width is now about: as wide as its
+  /// two labels, and off onto a line of its own when the title leaves it no
+  /// room. Both are the stylesheet's, and jsdom lays nothing out.
+  it("sizes the switch to its labels and wraps rather than overflowing", () => {
+    expect(stylesheet).toContain(".pane-head {\n  display: flex;\n  flex-wrap: wrap;");
+    expect(stylesheet).toContain(
+      ".record-switch {\n" +
+        "  position: relative;\n" +
+        "  display: flex;\n" +
+        "  flex: 0 0 auto;\n" +
+        "  gap: 0.25rem;\n" +
+        "  max-width: 100%;\n",
+    );
+  });
+
+  /// What is under the pressed label is one element that travels, rather than a
+  /// background on whichever button is pressed — so switching reads as one thing
+  /// moving. Where it travels to is measured, which is why a test has to lay the
+  /// two labels out: jsdom has no layout and everything on the page is at
+  /// nothing and nothing wide.
+  it("moves the mark to whichever label is pressed", async () => {
+    theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+
+    const transcript = await drawn(container, ".details-pane .transcript-tab");
+    const screen = await drawn(container, ".details-pane .screen-tab");
+    const mark = await drawn<HTMLElement>(
+      container,
+      ".details-pane .record-switch .indicator",
+    );
+
+    // Presentation and nothing else: the two buttons already say which is
+    // showing, and saying it twice is saying it wrong.
+    expect(mark.getAttribute("aria-hidden")).toBe("true");
+
+    lay(transcript, { at: 4, wide: 78 });
+    lay(screen, { at: 86, wide: 56 });
+
+    fireEvent.click(screen);
+    await waitFor(() => {
+      expect(mark.style.transform).toBe("translateX(86px)");
+      expect(mark.style.width).toBe("56px");
+    });
+
+    fireEvent.click(transcript);
+    await waitFor(() => {
+      expect(mark.style.transform).toBe("translateX(4px)");
+      expect(mark.style.width).toBe("78px");
+    });
+  });
+
+  /// And the travel itself is the stylesheet's: jsdom runs no transitions, so
+  /// the rule is what is read. A tenth of a second, eased at both ends, across
+  /// both what the mark travels — the labels are words of different lengths, so
+  /// it changes width on the way as well as place.
+  it("slides the mark over a tenth of a second, unless motion is unwelcome", () => {
+    expect(stylesheet).toContain(
+      "@media (prefers-reduced-motion: no-preference) {\n" +
+        "  .record-switch .indicator {\n" +
+        "    transition:\n" +
+        "      transform 0.1s ease-in-out,\n" +
+        "      width 0.1s ease-in-out;\n" +
+        "  }\n" +
+        "}",
+    );
   });
 
   /// A phone shows one level at a time, and opening an event is walking into
@@ -2908,6 +2988,21 @@ describe("a commit on the timeline", () => {
 
     expect(row.querySelectorAll("button")).toHaveLength(0);
     expect(row.textContent).not.toContain("Approve");
+  });
+
+  /// The diff belongs to the pane, and what the conversation is comes back
+  /// when it is closed.
+  it("goes back to the conversation's details when it is closed", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    await drawn(container, ".details-pane .diff-files");
+
+    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+
+    await drawn(container, ".details-pane .conversation-facts");
+    expect(container.querySelector(".details-pane .diff-files")).toBeNull();
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
