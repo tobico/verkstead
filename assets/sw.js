@@ -16,8 +16,9 @@ self.addEventListener("fetch", () => {});
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-// A Question Set has arrived. Every push the server sends is one, and it does
-// two things with it: it shows a notification, and it tells every Verkstead
+// Something is waiting for the human: a Question Set has arrived, or a Hold has
+// stood a while with nobody coming back to it. The worker does the same two
+// things with either — it shows a notification, and it tells every Verkstead
 // that is already open to look again.
 //
 // The notification is not the negotiable half. The subscription was made with
@@ -27,30 +28,34 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 self.addEventListener("push", (event) => {
   const notice = read(event.data);
 
-  // The title is the Set's own, so the notification says which decision is
-  // waiting rather than that some decision is. The project goes in the body,
-  // because it is what tells two Sets apart at a glance.
+  // Where the notice says to go: the Set's own page for a Set, the held
+  // Conversation for a Hold. The server names it, because what the push is
+  // about is the server's to know — see `Notice` in `crates/server/src/push.rs`.
+  // The workbench where a push could not say: every Conversation is there, and
+  // so is every Set through the one it was asked from.
+  const url = notice.path || "/";
+
+  // The title is the notice's own, so it says which decision is waiting rather
+  // than that some decision is. The project goes in the body, because it is what
+  // tells two of them apart at a glance.
   event.waitUntil(
     Promise.all([
-      self.registration.showNotification(notice.title || "A Question Set is waiting", {
+      self.registration.showNotification(notice.title || "Verkstead is waiting for you", {
         body: notice.project ? `Verkstead · ${notice.project}` : "Verkstead",
         icon: "/icons/icon-192.png",
-        // One notification per Set, tagged by its id: a push service that
-        // delivers the same push twice then replaces the notification instead of
-        // stacking a second one over it.
-        tag: notice.id ? `verkstead-set-${notice.id}` : "verkstead",
-        // The workbench where a push could not say which Set it was about: a
-        // Set is reached through the Conversation it was asked from, and the
-        // workbench is where every Conversation is.
-        data: { url: notice.id ? `/sets/${notice.id}` : "/" },
+        // One notification per page it would open: a push service that delivers
+        // the same push twice then replaces the notification instead of stacking
+        // a second one over it.
+        tag: `verkstead-${url}`,
+        data: { url },
       }),
       nudge(),
     ]),
   );
 });
 
-// Tapped. The Set it was about is what opens, in the Verkstead that is already
-// there if there is one.
+// Tapped. What it was about is what opens — the Set, or the Conversation whose
+// session is held — in the Verkstead that is already there if there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(open((event.notification.data || {}).url || "/"));

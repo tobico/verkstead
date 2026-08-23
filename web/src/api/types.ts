@@ -340,12 +340,12 @@ export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
  * session said, and a Capture that had been tidied up would be a record of
  * something else.
  *
- * One thing in it is not the session's word, and says so where it appears: what
- * `script` and bwrap wrote on the pipe beside the terminal, appended once the
- * session is over. It is empty on every session that ran, and on one that never
- * started it is the only account of why — which makes the Capture the place
- * for it, being where somebody looking at a session that said nothing is
- * already looking.
+ * Not quite all of it is the agent's own word. What bwrap says when it will
+ * not start is said on the terminal Verkstead began it on, so it arrives here
+ * too, where it happened and in among whatever else was printed. On a session
+ * that never started it is the only account of why — which makes the Capture
+ * the place for it, being where somebody looking at a session that said
+ * nothing is already looking.
  */
 export type Capture = { text: string, };
 
@@ -521,6 +521,24 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
+ * Which of this Conversation's sessions the human has the keyboard of, or
+ * `null` where it is Verkstead's.
+ *
+ * The Hold, said as the Event of the session it was taken on: the workbench
+ * draws the hand-back control on that session's Screen, and a Hold with no
+ * session to name would be one nobody could give back.
+ *
+ * Beside `blocked_on` rather than folded into it, though a Hold sets that
+ * too. What the badge says is *the work has stopped and it is your move*,
+ * and what this says is *which move* — where an Interruption is answered
+ * with a Remedy, a Hold is answered by handing the keyboard back.
+ *
+ * Never on the Timeline, however long it lasts: the Timeline records the
+ * work rather than the watching. This is a fact about now, read off the
+ * running server every time the Conversation is.
+ */
+held: number | null, 
+/**
  * Whether a session is registered for this Conversation as of this read.
  *
  * The same fact the sidebar draws its working indicator from, said here
@@ -579,6 +597,15 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * single "cannot start" would leave them guessing which.
  */
 export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+
+/**
+ * What handing a Conversation's keyboard back came to.
+ *
+ * The one way a Hold ends, and it ends by being pressed: no timeout, no release
+ * on the socket dropping, because Verkstead resuming over a half-finished
+ * intervention is worse than a stalled run.
+ */
+export type HandedBack = "HandedBack" | "NotHeld";
 
 /**
  * The handoff document as the page receives it.
@@ -1164,6 +1191,21 @@ comment?: string | null,
 direction?: Direction | null, };
 
 /**
+ * One session's Screen: the grid its Capture leaves on a terminal.
+ *
+ * Not the bytes and not a picture of them — the escape sequences that would
+ * paint the grid as it stands, which is what the terminal in the details pane
+ * is fed. The server holds the terminal that decided them and hands over the
+ * repaint; the browser's copy is a window onto that one rather than a second
+ * opinion about it (ADR 0007).
+ *
+ * The size comes with it because a repaint means nothing without one: the same
+ * sequences put a session's display in different places on a grid of a
+ * different width.
+ */
+export type Screen = { repaint: string, columns: number, rows: number, };
+
+/**
  * One row of a Question Set's Timeline table: the number it answers to, what
  * was asked, and what was decided.
  *
@@ -1289,6 +1331,26 @@ export type SettingsView = { git_author: Author,
  * none — which is what a Verkstead nobody has told anything looks like.
  */
 github_token: TokenSaved | null, };
+
+/**
+ * What the server says down a live Screen's socket.
+ *
+ * Watching a running session is the one place the viewer is sent something
+ * rather than fetching it, so the two things it can be sent say which they are
+ * rather than being told apart by shape. A repaint arrives first and whenever
+ * the grid has been resized under everybody; what the session printed arrives
+ * as it prints it.
+ */
+export type Shown = { "Painted": Screen } | { "Printed": string };
+
+/**
+ * How big a Screen is, in characters.
+ *
+ * Named for the Screen rather than for the window it was measured in, because
+ * that is what it becomes: a watcher reports the size of the pane it drew, and
+ * the latest one is the size the Screen and the session's own terminal are.
+ */
+export type Size = { columns: number, rows: number, };
 
 /**
  * One stage of a roadmap: the number it answers to, what it is called, and
@@ -1541,6 +1603,15 @@ export type Violation = {
  * the Set as a whole.
  */
 label?: string | null, message: string, };
+
+/**
+ * And what a watcher says back up it.
+ *
+ * Two kinds of thing, each saying which it is: the socket is a conversation in
+ * both directions, and what a watcher does to a Screen is either look at it a
+ * different size or type into it.
+ */
+export type Watching = { "Resized": Size } | { "Typed": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

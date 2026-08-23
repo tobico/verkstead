@@ -13,6 +13,7 @@
     "model": "claude-fable-5",
     "name": "fable"
   },
+  "held": null,
   "id": 7,
   "implementation_profile": {
     "agent_type": "Claude",

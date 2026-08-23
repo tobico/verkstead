@@ -29,7 +29,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, Lifecycle, ManualTaskStarted,
+    ConversationEntry, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted,
     ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileEdit, ProfileEntry,
     PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry, SetView, SettingsEdit,
     SettingsSaved, SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit,
@@ -74,6 +74,18 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/transcript/{event}",
             get(transcript),
         )
+        // And how it looked while it was saying it: the grid those bytes leave
+        // on a terminal — see [`screen`].
+        .route("/api/ui/conversations/{id}/screen/{event}", get(screen))
+        // And the same Screen watched as it is drawn, where the session is still
+        // running: the one socket in the codebase — see
+        // [`crate::screen::attach`]. Beside the fetch rather than instead of it,
+        // because a session that has ended has no socket and its last screen is
+        // still worth showing.
+        .route(
+            "/api/ui/conversations/{id}/screen/{event}/attach",
+            get(crate::screen::attach),
+        )
         // And one commit's diff, fetched the same way and for the same reason —
         // see [`commit_diff`].
         .route(
@@ -100,6 +112,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
+        // And the one press that ends a Hold. Per Conversation rather than per
+        // Event, because a Conversation has one keyboard: which of its sessions
+        // the human took is the Conversation's own answer, and a route that made
+        // them name it would be one they could get wrong.
+        //
+        // A press rather than anything the socket does. A Hold ends only by
+        // being handed back — not by the socket dropping, not by the tab closing
+        // — so what ends one is a request of its own, which any device on the
+        // tailnet can make and which outlives whatever was watching.
+        .route("/api/ui/conversations/{id}/hand-back", post(hand_back))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -603,12 +625,25 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // most one open, so the last one that is unsettled is the one — and it is
     // the *only* one, which is what makes *the run stops here* a fact rather
     // than a promise.
-    let blocked_on = timeline.iter().rev().find_map(|event| match &event.event {
+    let stopped_at = timeline.iter().rev().find_map(|event| match &event.event {
         store::Event::Interruption(interruption) if interruption.settled.is_none() => {
             Some(event.id)
         }
         _ => None,
     });
+
+    // And what the human has taken the keyboard of, which is the other thing the
+    // work can be stopped on and the one that is nowhere on the Timeline: a Hold
+    // leaves no Event, because the Timeline records the work rather than the
+    // watching. Read off the running server, which is the only thing that knows.
+    let held = state.sessions.holding(id);
+
+    // The badge points at whichever of the two is in force, and at the Hold
+    // first. The two cannot really be open together — an Interruption is raised
+    // about a session that is over, and nothing raises one behind a Hold — and
+    // where they somehow are, the keyboard is the thing the human is holding
+    // right now.
+    let blocked_on = held.or(stopped_at);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -636,6 +671,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        held,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers the Manual Task composer
         // exactly where nothing is running, and one Event of a session's is not
@@ -803,6 +839,53 @@ async fn transcript(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Transcript failed");
             unavailable("the Transcript could not be read")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/screen/{event}` — how one session looked:
+/// the grid its Capture leaves on a terminal.
+///
+/// The same Event read a third way. The Transcript is what the session said and
+/// the Capture is the bytes it sent a terminal; this is the terminal at the
+/// other end of them — the grid, with the cursor where the session left it,
+/// handed over as the escape sequences that would paint it.
+///
+/// Replayed here rather than kept, because the Capture is the record and a
+/// second copy of the same thing in a different shape is a second thing to keep
+/// in step. A session that has ended replays to the screen it last stood on; a
+/// live one replays to wherever its Capture has got to.
+///
+/// The parsing is the server's, which is what makes this the exception to the
+/// rule that the browser never parses rather than a hole in it (ADR 0007): what
+/// crosses the wire is a repaint to feed a terminal, and the terminal that
+/// decided it stays here.
+async fn screen(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Read as permissively as every other pair of ids here: neither of them
+    // naming a number cannot name a Screen.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return no_such_screen();
+    };
+
+    match store::capture(&state.pool, id, event).await {
+        Ok(Some(text)) => {
+            let replayed = crate::screen::replay(&text);
+            let (columns, rows) = replayed.size();
+
+            Json(verkstead_render::Screen {
+                repaint: replayed.repaint(),
+                columns,
+                rows,
+            })
+            .into_response()
+        }
+        Ok(None) => no_such_screen(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a Screen failed");
+            unavailable("the Screen could not be read")
         }
     }
 }
@@ -1125,6 +1208,37 @@ async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
             unavailable("the conversation could not be aborted")
         }
     }
+}
+
+/// `POST /api/ui/conversations/{id}/hand-back` — the human gives the keyboard
+/// back, and the Hold is over.
+///
+/// The only way one ends. Nothing here judges anything: what the human left is
+/// judged by whichever driver was waiting at the gate, by the ordinary
+/// end-of-session rules — the Step's commit landed so the run goes on, or it did
+/// not and there is an Interruption. Handing back is what lets that question be
+/// asked, not what answers it.
+///
+/// Refused for nothing. A Conversation that is not held is one already handed
+/// back, which is the same answer arriving twice rather than a mistake.
+async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(HandedBack::NotHeld).into_response();
+    };
+
+    if !state.sessions.hand_back(id) {
+        return Json(HandedBack::NotHeld).into_response();
+    }
+
+    tracing::info!(
+        conversation_id = id,
+        "the keyboard has been handed back, so Verkstead has this Conversation again",
+    );
+
+    // The badge goes with it, and it is drawn off the Conversation.
+    state.nudges.announce();
+
+    Json(HandedBack::HandedBack).into_response()
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-profile` — which account and model
@@ -1511,6 +1625,21 @@ fn no_such_transcript() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Transcript on that Conversation"),
+    )
+}
+
+/// And no such Screen, which is the same question as no such Capture and
+/// worded apart from it all the same: what was asked for is the terminal the
+/// bytes were addressed to, and a reader who asked for that should be told
+/// there is no such thing rather than about a record they did not ask about.
+///
+/// Shared with the socket a live one is watched over — see
+/// [`crate::screen::attach`] — which refuses the same way for the same reason:
+/// a session that is not running has no Screen to attach to.
+pub(crate) fn no_such_screen() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such Screen on that Conversation"),
     )
 }
 

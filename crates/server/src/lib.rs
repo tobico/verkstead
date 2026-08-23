@@ -36,6 +36,7 @@ mod grillings;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
+mod hold;
 mod interruptions;
 mod manual;
 mod nudge;
@@ -53,6 +54,7 @@ mod runner;
 /// detail of the endpoints — and because what proves a boundary is a probe run
 /// inside it, which is a test standing where the orchestrator does.
 pub mod sandbox;
+mod screen;
 mod sessions;
 mod sets;
 /// What Verkstead was told about the human's credentials and identity: the
@@ -75,6 +77,13 @@ mod stages;
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
 mod tasks;
+/// The pseudo-terminal a session runs on — Verkstead's own, rather than one
+/// `script` made inside the sandbox.
+///
+/// Public for the reason the sandbox is: what a session runs on is part of the
+/// surface it runs on rather than an implementation detail of an endpoint, and
+/// what proves a terminal is a terminal is a process running on one saying so.
+pub mod terminal;
 mod transcript;
 mod ui;
 mod updates;
