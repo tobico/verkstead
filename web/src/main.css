@@ -792,6 +792,58 @@ main:has(.workbench) {
   margin: 0;
 }
 
+/* What stays at the top of a pane while the pane goes up under it: the header,
+   and in the timeline the header and the pinned block together, wrapped as one
+   `.pane-chrome`. One sticky block rather than two of them, because sticky wants
+   a known offset from the top edge and the header has no height to give it — it
+   wraps onto a second line in a narrow pane and grows again when the *Blocked on
+   you* badge appears, so a pinned block pinned under it would have to be told
+   that height and kept in step with it forever.
+
+   Sticky rather than fixed, because what it is the top of is the pane: a narrow
+   window scrolls the whole page and a wide one scrolls this pane, and sticky is
+   right in both.
+
+   The two selectors cannot both catch the same header, and the child combinator
+   is what makes that true: where the timeline wraps its header the header is the
+   wrapper's child rather than the pane's, so the wrapper is the one thing that
+   sticks and the header inside it travels with it. */
+.pane > .pane-head,
+.pane > .pane-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* The paper behind it, out past the pane's own padding on both sides, so the
+     record passes under it rather than beside it. Above it there is nothing to
+     cover: pinned to `top: 0` the block sits against the pane's top edge, and
+     the padding that was over its head has gone up with everything else. */
+  margin: 0 -1rem 1rem;
+  padding: 1.25rem 1rem 0;
+  background: var(--paper);
+}
+
+/* Which is why the padding over its head is the block's own rather than the
+   pane's: that rem and a quarter is what the record would otherwise slide up
+   against the underside of the title through, and padding the pane keeps has
+   scrolled away by the time it is wanted. Nothing moves at rest — the block
+   pays for exactly what the pane stopped paying for. A pane with no header to
+   its name keeps its own, because there is nothing there to hand it to. */
+.pane:has(> .pane-head),
+.pane:has(> .pane-chrome) {
+  padding-top: 0;
+}
+
+/* Inside the wrapper the header takes the layer over the pinned block below it,
+   which is what lets the ⋯ menu come down over the pinned items rather than
+   behind them, where it could not be pressed. The layer belongs to the header
+   rather than to the menu that wanted it: everything the header ever hangs
+   underneath itself is over the pinned block by being part of the header, and
+   the next thing hung there needs no rule of its own. */
+.pane-chrome > .pane-head {
+  position: relative;
+  z-index: 1;
+}
+
 /* The ways between the panes: back out of this level, and on to the next.
    Buttons rather than links, because moving between panes is not going
    anywhere — the workbench is one page, and the URL follows the conversation
@@ -1076,24 +1128,18 @@ main:has(.workbench) {
   }
 }
 
-/* The pinned events, above the timeline and stuck to the top of what scrolls:
-   the fixed set — a task list, a stage list and a PR — each of which is
-   the current state of something the work is against rather than a moment in
-   the record. Sticky rather than fixed, because it belongs to the pane it is
-   the top of: a narrow window scrolls the whole page and a wide one scrolls
-   this pane, and sticky is right in both. */
+/* The pinned events, above the timeline and inside the chrome that holds the top
+   of the pane: the fixed set — a task list, a stage list and a PR — each of
+   which is the current state of something the work is against rather than a
+   moment in the record. What keeps them in view is `.pane-chrome`, which sticks
+   them and the header to the top edge as one block and carries the paper the
+   record passes behind; all this rule is now is how they stack, and the air they
+   keep above and below themselves. */
 .pinned {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  /* The paper behind it, so the record scrolls under it rather than through
-     it — and past the pane's own padding, so nothing shows down either side. */
-  margin: 0 -1rem 1rem;
-  padding: 0.75rem 1rem;
-  background: var(--paper);
+  padding: 0.75rem 0;
 }
 
 /* The backlog and the roadmap: the whole list either way, because the whole
