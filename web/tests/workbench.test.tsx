@@ -182,6 +182,29 @@ describe("the workbench", () => {
     expect(screen.getByLabelText("Details")).toBeTruthy();
   });
 
+  /// The sidebar is where Verkstead is entered, so what stands over the list is
+  /// the mark: the icon and the name, in the line the word *Conversations* used
+  /// to hold. Still a heading, so the pane has one for a screen reader to find,
+  /// and the pane's own label is untouched — the test above reads it.
+  it("leads with the mark rather than a title of its own", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    const heading = await drawn(container, ".conversations-pane h1");
+
+    expect(heading.textContent).toContain("Verkstead");
+    expect(heading.textContent).not.toContain("Conversations");
+
+    // The one icon source, served from `assets/` at the site root — the file the
+    // favicon is, rather than a copy of it under `web/`.
+    const icon = heading.querySelector("img")!;
+    expect(icon.getAttribute("src")).toBe("/icons/verkstead.svg");
+
+    // Nothing for a screen reader to read: the word beside it is the name, and
+    // an alt that repeated it would have the heading say it twice.
+    expect(icon.getAttribute("alt")).toBe("");
+  });
+
   it("lists the conversations the server gave it, in that order", async () => {
     const fetching = theWorkbench();
     const { container } = mount();
@@ -1246,6 +1269,35 @@ describe("the panes on a narrow window", () => {
     // third pane.
     expect(stylesheet).toContain("@media (min-width: 60rem) {");
     expect(stylesheet).toContain("@media (min-width: 80rem) {");
+  });
+
+  /// Every pane's header stays where it is put, whichever of the two ways the
+  /// window is scrolling — the page below 60rem, the pane itself above it.
+  /// Layout again, so the rules are what is read.
+  it("keeps a pane's header at the top while the pane scrolls", () => {
+    expect(stylesheet).toContain(
+      ".pane > .pane-head,\n.pane > .pane-chrome {\n" +
+        "  position: sticky;\n" +
+        "  top: 0;\n" +
+        "  z-index: 1;\n",
+    );
+  });
+
+  /// And the record goes under it rather than being cut off against it: a rem of
+  /// paper fading to nothing, hung in the gap the header already kept below
+  /// itself so that at rest it covers no part of the first thing in the pane.
+  it("fades the record out under whatever is stuck", () => {
+    expect(stylesheet).toContain(
+      ".pane > .pane-head::after,\n.pane > .pane-chrome::after {\n" +
+        '  content: "";\n' +
+        "  position: absolute;\n" +
+        "  top: 100%;\n" +
+        "  right: 0;\n" +
+        "  left: 0;\n" +
+        "  height: 1rem;\n" +
+        "  background: linear-gradient(var(--paper), transparent);\n" +
+        "  pointer-events: none;\n}",
+    );
   });
 });
 
@@ -2961,10 +3013,41 @@ describe("the pinned task list", () => {
     expect(list.textContent).not.toContain("Pin");
   });
 
-  /// What `position: sticky` means is the stylesheet's, and jsdom lays nothing
-  /// out — so the rule itself is what is read, as the panes' own is.
-  it("stays in view while the record scrolls past it", () => {
-    expect(stylesheet).toContain(".pinned {\n  position: sticky;\n  top: 0;");
+  /// What holds it in view is the block it shares with the header, so that is
+  /// where the rule is read. jsdom lays nothing out, so the rule itself is what
+  /// is read, as the panes' own is.
+  it("stays in view while the record scrolls past it", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const pinned = await drawn(container, ".pinned");
+    const chrome = pinned.closest(".pane-chrome");
+
+    // One block, with the header in it: that is what makes them stay together
+    // with no strip of scrolling record between them.
+    expect(chrome).not.toBeNull();
+    expect(chrome!.querySelector(".pane-head")).not.toBeNull();
+
+    expect(stylesheet).toContain(
+      ".pane > .pane-head,\n.pane > .pane-chrome {\n  position: sticky;\n  top: 0;",
+    );
+  });
+
+  /// The bug this fixed: the pinned block and the menu hanging off the header
+  /// were on one layer, so the pinned items were drawn over the menu and there
+  /// was no way to press what was under them.
+  it("draws what hangs off the header over the pinned items", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const menu = await drawn(container, ".conversation-actions .menu");
+
+    // Both are inside the one stuck block, so which is over which is settled
+    // between them rather than against the record.
+    expect(menu.closest(".pane-chrome")).not.toBeNull();
+    expect(stylesheet).toContain(
+      ".pane-chrome > .pane-head {\n  position: relative;\n  z-index: 1;\n}",
+    );
   });
 
   it("draws nothing at all where the worktree holds no backlog", async () => {

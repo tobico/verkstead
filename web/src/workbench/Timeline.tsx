@@ -152,45 +152,53 @@ export function Timeline(props: {
 }): JSX.Element {
   return (
     <>
-      <div class="pane-head">
-        {/* The way back out of this level, which is the whole of what a narrow
-            window offers instead of the pane beside it. Drawn always and hidden
-            by the stylesheet where all three panes are on screen at once. */}
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Conversations
-        </button>
-        <h1>{props.conversation.branch}</h1>
-        {/* What the work has stopped on, said where the conversation is named
-            rather than only down in the list: a timeline is long by the time a
-            run gets far enough to stop, and a badge the human had to go hunting
-            behind would not be one. It points at the event that stopped it,
-            which is what makes it worth pressing. */}
-        <Show when={props.conversation.blocked_on}>
-          {(event) => (
-            <button
-              type="button"
-              class="blocked"
-              onClick={() => {
-                props.select(event());
-                props.details();
-              }}
-            >
-              Blocked on you
-            </button>
-          )}
-        </Show>
-        <Actions conversation={props.conversation} />
-        <button type="button" class="pane-forward" onClick={props.details}>
-          Details →
-        </button>
-      </div>
+      {/* The header and the pinned block as one block, because that is how they
+          stay: the stylesheet sticks this to the top edge of the pane and both
+          of them travel with it, so there is no strip of scrolling record
+          between the title and the pinned items and nothing to keep a pinned
+          block's own offset in step with. */}
+      <div class="pane-chrome">
+        <div class="pane-head">
+          {/* The way back out of this level, which is the whole of what a narrow
+              window offers instead of the pane beside it. Drawn always and
+              hidden by the stylesheet where all three panes are on screen at
+              once. */}
+          <button type="button" class="pane-back" onClick={props.back}>
+            ← Conversations
+          </button>
+          <h1>{props.conversation.branch}</h1>
+          {/* What the work has stopped on, said where the conversation is named
+              rather than only down in the list: a timeline is long by the time a
+              run gets far enough to stop, and a badge the human had to go
+              hunting behind would not be one. It points at the event that
+              stopped it, which is what makes it worth pressing. */}
+          <Show when={props.conversation.blocked_on}>
+            {(event) => (
+              <button
+                type="button"
+                class="blocked"
+                onClick={() => {
+                  props.select(event());
+                  props.details();
+                }}
+              >
+                Blocked on you
+              </button>
+            )}
+          </Show>
+          <Actions conversation={props.conversation} />
+          <button type="button" class="pane-forward" onClick={props.details}>
+            Details →
+          </button>
+        </div>
 
-      <Pinned
-        conversation={props.conversation}
-        selected={props.selected}
-        select={props.select}
-        details={props.details}
-      />
+        <Pinned
+          conversation={props.conversation}
+          selected={props.selected}
+          select={props.select}
+          details={props.details}
+        />
+      </div>
 
       <ol class="timeline">
         <For each={props.conversation.timeline}>
