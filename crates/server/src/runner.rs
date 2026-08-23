@@ -196,11 +196,18 @@ fn todo() -> PathBuf {
 /// Work `conversation_id`'s backlog to empty, starting from the session that is
 /// writing it.
 ///
-/// `planning` is the breakdown session the task-list direction has just
-/// launched. It is the run's first step rather than something that happened
-/// before the run: it is an ordinary interactive session and will idle once its
-/// plan is committed, so something has to see it out — and what sees a session
-/// out is exactly this.
+/// `writing` is the session that will commit the backlog: ordinarily the
+/// grilling session itself, which got the human's pick back through its blocking
+/// ask and breaks the work down without leaving the context that settled it, and
+/// on a retry a fresh session launched for the tail. Either way it is the run's
+/// first step rather than something that happened before the run — an ordinary
+/// interactive session, which will idle once its plan is committed, so something
+/// has to see it out, and what sees a session out is exactly this.
+///
+/// The plan commit is the end of the planning as well as the start of the run, so
+/// the Conversation moves as the session is seen out: grilling until then and
+/// implementing afterwards, with the handoff the grilling wrote going on the
+/// Timeline at the same moment — see [`crate::conversations::grilling_over`].
 ///
 /// Returns when there is nothing left to run: the backlog worked through, a
 /// Conversation that has gone, or a step whose session ended without landing it.
@@ -208,9 +215,17 @@ fn todo() -> PathBuf {
 /// nothing had moved would be a machine spending an account on the same failure
 /// over and over, with nobody watching. What it leaves behind for the human is an
 /// Interruption, which is where the run picks up again if they retry.
-///
-pub(crate) async fn follow(state: AppState, conversation_id: i64, planning: Session) {
-    work(state, conversation_id, Step::Planning, planning).await
+pub(crate) async fn follow_breakdown(state: AppState, conversation_id: i64, writing: Session) {
+    if see_out(&state, conversation_id, Step::Planning, writing)
+        .await
+        .is_none()
+    {
+        return;
+    }
+
+    crate::conversations::grilling_over(&state, conversation_id).await;
+
+    carry_on(state, conversation_id).await
 }
 
 /// Run a step again because the human asked for it, and go on working the
@@ -235,7 +250,23 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
     // now has left, which is the same answer the fork the session runs will come
     // to. Inline is not a backlog step at all and is followed on its own.
     let (step, prompt) = match step {
-        store::Step::Planning => (Step::Planning, Prompt::BreakingDown),
+        // The breakdown over again, and in a session of its own: the grilling
+        // that would have written the backlog is the session that just ended
+        // without one. So it is followed the way the grilling session was —
+        // seen out, and then the Conversation moved on to being built.
+        store::Step::Planning => {
+            tracing::info!(
+                conversation_id,
+                "a retried breakdown is starting in a fresh session"
+            );
+
+            let Some(session) = launch(&state, conversation_id, Prompt::BreakingDown, &note).await
+            else {
+                return;
+            };
+
+            return follow_breakdown(state, conversation_id, session).await;
+        }
         // The same first step by the other route, and the same care about where
         // the branch stands: what it was made on top of was decided once, when
         // it was made, and is read back rather than decided again — a retry that
@@ -368,24 +399,33 @@ pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on
 /// `first` is the step the session it is handed is running, decided before that
 /// session was started — see [`retry`] for why that ordering is the whole of it.
 async fn work(state: AppState, conversation_id: i64, first: Step, session: Session) {
-    let mut ran = first;
-    let mut session = session;
+    let Some(writing) = see_out(&state, conversation_id, first.clone(), session).await else {
+        return;
+    };
 
+    // The finish step is the last one a backlog has, and landing it is not the
+    // end of the run: what the finish did was push and open a pull request, and
+    // the Conversation moves on to wrapping that up. Asked here rather than
+    // afterwards, because this is the one place that knows *which* step just
+    // landed.
+    if first == Step::Finish {
+        crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        return;
+    }
+
+    carry_on(state, conversation_id).await
+}
+
+/// Work whatever the backlog has left, one fresh session per step, until it is
+/// empty.
+///
+/// Where [`work`] is handed a session that is already running its step, this
+/// starts from the repository: what is next is read off `.tasks/` and a session
+/// is launched for it. Split out because the two entries into a run differ only
+/// in that first session — the breakdown's own, or the grilling session that
+/// wrote the backlog in its place.
+async fn carry_on(state: AppState, conversation_id: i64) {
     loop {
-        let Some(writing) = see_out(&state, conversation_id, ran.clone(), session).await else {
-            return;
-        };
-
-        // The finish step is the last one a backlog has, and landing it is not
-        // the end of the run: what the finish did was push and open a pull
-        // request, and the Conversation moves on to wrapping that up. Asked here
-        // rather than after the loop, because this is the one place that knows
-        // *which* step just landed.
-        if ran == Step::Finish {
-            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
-            return;
-        }
-
         let Some(worktree) = worktree(&state, conversation_id).await else {
             return;
         };
@@ -415,8 +455,14 @@ async fn work(state: AppState, conversation_id: i64, first: Step, session: Sessi
             return;
         };
 
-        ran = step;
-        session = started;
+        let Some(writing) = see_out(&state, conversation_id, step.clone(), started).await else {
+            return;
+        };
+
+        if step == Step::Finish {
+            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+            return;
+        }
     }
 }
 

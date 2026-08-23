@@ -80,25 +80,34 @@ pub(crate) async fn start_adopting(
 ///
 /// The store hands back what happened and says nothing about it — see
 /// [`store::Taken`] — so this is where a proposal settled becomes a line in the
-/// log. Three of the four outcomes are unremarkable and one cannot happen, which
-/// is exactly why it is worth saying when it does.
+/// log. All of the outcomes are unremarkable but one, which cannot happen — and
+/// that is exactly why it is worth saying when it does.
 ///
-/// An accepted proposal is also the moment the grilling is over, and three
-/// things follow from that. The session that proposed is ended: it has its
-/// Response, there is nothing left for it to do, and what comes next runs in the
-/// same worktree under a different account. Its handoff is taken onto the
-/// Timeline, because the directory it was written in is Verkstead's own scratch
-/// space and the Timeline is where a Conversation's documents live. And the
-/// direction the human picked is acted on there and then — the pick rides the
-/// Set, so accepting and choosing are one answer and there is nothing left to
-/// press.
+/// An accepted proposal settles the Direction, and what follows it depends on
+/// whose session produces the picked Direction's artifact.
 ///
-/// None of the three is refused for: by the time this runs the Response is
-/// stored and the Conversation has moved. What a session that would not end or a
-/// handoff that could not be read leaves behind is something to see in the log,
-/// and no more than that. An Interruption is raised about a session that ran and
-/// went wrong — see [`crate::interruptions`] — and neither of these is one: the
-/// grilling is over either way, and what follows it starts from the Brief.
+/// **A task-list pick produces it here, in the session that proposed.** That
+/// session is idling on the ask and the Response is on its way back to it, so
+/// nothing is ended and nothing is launched: what Verkstead does is arm the
+/// runner on the session already running, which sees the backlog out and starts
+/// the task run — see [`crate::runner::follow_breakdown`]. The Conversation stays
+/// grilling until then, because the grilling is what is still happening.
+///
+/// **The other two end the grilling here**, and three things follow. The session
+/// that proposed is ended: it has its Response, there is nothing left for it to
+/// do, and what comes next runs in the same worktree under a different account.
+/// Its handoff is taken onto the Timeline, because the directory it was written
+/// in is Verkstead's own scratch space and the Timeline is where a
+/// Conversation's documents live. And the direction the human picked is acted on
+/// there and then — the pick rides the Set, so accepting and choosing are one
+/// answer and there is nothing left to press.
+///
+/// Nothing here is refused for: by the time this runs the Response is stored and
+/// the store has done whatever the pick asked of it. What a session that would
+/// not end, a handoff that could not be read, or a session that could not be
+/// picked up leaves behind is something to see in the log, and no more than that.
+/// An Interruption is raised about a session that ran and went wrong — see
+/// [`crate::interruptions`] — and none of these is one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -106,7 +115,7 @@ pub(crate) async fn settle_a_proposal(
 ) {
     use store::{Directing, Proposed};
 
-    let picked = match proposed {
+    let (picked, carrying_on) = match proposed {
         // The ordinary Set, carrying no proposal at all — which is nearly every
         // Set a grilling asks.
         None => return,
@@ -119,14 +128,14 @@ pub(crate) async fn settle_a_proposal(
         }
         Some(Proposed::Accepted {
             direction,
-            directing: Directing::Moved,
+            directing: directing @ (Directing::Moved | Directing::Writing),
         }) => {
             tracing::info!(
                 set_id,
                 ?direction,
                 "a wrap-up proposal was accepted with a direction picked on it"
             );
-            direction
+            (direction, directing == Directing::Writing)
         }
         Some(Proposed::Accepted {
             directing: Directing::NotGrilling,
@@ -165,6 +174,10 @@ pub(crate) async fn settle_a_proposal(
         }
     };
 
+    if carrying_on {
+        return write_the_artifact(state, conversation_id, picked);
+    }
+
     state.sessions.end(conversation_id).await;
 
     if let Err(error) = take_handoff(state, conversation_id).await {
@@ -181,6 +194,81 @@ pub(crate) async fn settle_a_proposal(
             conversation_id,
             "the direction picked on the closing Set was not built"
         );
+    }
+}
+
+/// Follow the grilling session as it writes the picked Direction's artifact.
+///
+/// Nothing is started: the session is the one that proposed, it is idling on the
+/// blocking ask the Response is being delivered through, and it goes on from
+/// there with the whole thread still in its context. What is armed here is the
+/// watcher — the artifact landing, plus quiet, is what ends the session and moves
+/// the Conversation on.
+///
+/// A Conversation with no session running has nothing to arm. That is a
+/// Conversation grilling with nothing grilling it, which is a thing to see in the
+/// log: the pick is recorded, so the human's answer stands, and there is nothing
+/// here to raise an Interruption about — no session ran and went wrong.
+fn write_the_artifact(state: &AppState, id: i64, direction: Direction) {
+    let Some(session) = state.sessions.following(id) else {
+        tracing::error!(
+            conversation_id = id,
+            ?direction,
+            "the grilling session is not running, so nothing is watching for what the pick asked for"
+        );
+        return;
+    };
+
+    match direction {
+        Direction::TaskList => {
+            tokio::spawn(crate::runner::follow_breakdown(state.clone(), id, session));
+        }
+        // The store moves these rather than leaving them grilling, so a pick of
+        // either is never carried on with here.
+        Direction::Inline | Direction::Roadmap => tracing::error!(
+            conversation_id = id,
+            ?direction,
+            "a direction that ends its grilling was left carrying on, so nothing is watching it"
+        ),
+    }
+}
+
+/// Record that the grilling is over and the work is being built: the handoff it
+/// wrote goes on the Timeline, and the Conversation moves.
+///
+/// Called once the grilling session's own tail has landed and the session has
+/// been seen out — see [`crate::runner::follow_breakdown`] — which is the one
+/// moment the handoff is certainly finished and the one moment the artifact it
+/// was writing is certainly under version control.
+///
+/// The handoff first, so that a Conversation that says it is being built has
+/// everything the grilling left beside it. Neither half is refused for: the
+/// artifact is committed by the time this runs, and what a document that could
+/// not be read or a move that would not record leaves behind is something to see
+/// in the log.
+pub(crate) async fn grilling_over(state: &AppState, id: i64) {
+    if let Err(error) = take_handoff(state, id).await {
+        tracing::error!(error = ?error, conversation_id = id, "the handoff could not be put on the Timeline");
+    }
+
+    match store::start_implementing(&state.pool, id).await {
+        Ok(store::Implementing::Started) => {
+            tracing::info!(
+                conversation_id = id,
+                "a grilling's tail has landed, so the work is being built"
+            )
+        }
+        Ok(store::Implementing::NotGrilling) => tracing::debug!(
+            conversation_id = id,
+            "a grilling's tail landed for a Conversation that had already left grilling"
+        ),
+        Ok(store::Implementing::NoSuchConversation) => tracing::error!(
+            conversation_id = id,
+            "a grilling's tail landed for a Conversation that is not there"
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "the work could not be recorded as being built")
+        }
     }
 }
 
@@ -222,14 +310,12 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 /// the account it is running as. What the grilling knew reaches it as the
 /// handoff — see [`crate::skills::implementing`].
 ///
-/// All three build something. Inline starts a session that builds the work; a
-/// task list starts one that breaks it into `.tasks/` first, and the sessions
-/// that work through that backlog follow from what it commits; a staged roadmap
-/// starts one that writes `docs/roadmaps/` and carries the branch to a pull
-/// request, and the stages it plans become Conversations of their own. Writing
-/// the backlog is the work starting rather than a step before it: an agent is
-/// loose in the worktree and about to commit to the branch, which is the thing
-/// the state is there to say.
+/// The two directions that reach here build something. Inline starts a session
+/// that builds the work; a staged roadmap starts one that writes
+/// `docs/roadmaps/` and carries the branch to a pull request, and the stages it
+/// plans become Conversations of their own. A task-list pick never arrives: its
+/// backlog is written by the grilling session itself, which is already running
+/// and needs nothing started — see [`write_the_artifact`].
 ///
 /// The move to Implementing is already recorded by the time this runs — the pick
 /// and the move are one transaction in the store — exactly as starting a grilling
@@ -240,12 +326,6 @@ async fn take_handoff(state: &AppState, conversation_id: i64) -> Result<()> {
 /// not start is logged rather than raised. Not an Interruption: those are raised
 /// about a session that ran and went wrong, and this is one that never ran, with
 /// nothing to gather as evidence and nothing the human has to decide between.
-///
-/// A task list is where this stops being one session's business. The session
-/// just started writes the backlog and then idles, as an interactive session
-/// does, and everything after it — a fresh session per task, ended as each one
-/// lands — is [`crate::runner`]'s. It is handed the session rather than told to
-/// go and find one: seeing that session out is the first step of the run.
 async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     let pool = &state.pool;
 
@@ -283,8 +363,14 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
     // the two: same Profile, same worktree, same two documents.
     let prompt = match direction {
         Direction::Inline => skills::implementing(&brief, handoff.as_deref()),
-        Direction::TaskList => skills::breaking_down(&brief, handoff.as_deref()),
         Direction::Roadmap => skills::staging(&brief, handoff.as_deref()),
+        Direction::TaskList => {
+            tracing::error!(
+                conversation_id = id,
+                "a task-list pick reached the launcher, which is the grilling session's own tail"
+            );
+            return Ok(());
+        }
     };
 
     let started = match state
@@ -299,18 +385,14 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         }
     };
 
-    // All three are followed, and the drivers differ in what they are watching
-    // for rather than in whether anybody is watching. A backlog's run is a
-    // session per step, each one seen out and the next launched; an inline run is
-    // one session, and what says it did anything is what it committed; a roadmap
-    // is one session too, watched for the roadmap it writes and then carried on
-    // to the pull request it opened. Every way round, a session that ends without
+    // Both are followed, and the drivers differ in what they are watching for
+    // rather than in whether anybody is watching. An inline run is one session,
+    // and what says it did anything is what it committed; a roadmap is one
+    // session too, watched for the roadmap it writes and then carried on to the
+    // pull request it opened. Either way round, a session that ends without
     // landing its work stops the run at an Interruption rather than leaving a
     // Conversation that says it is implementing with nothing implementing it.
     match (direction, started) {
-        (Direction::TaskList, Some(session)) => {
-            tokio::spawn(crate::runner::follow(state.clone(), id, session));
-        }
         (Direction::Inline, Some(session)) => {
             tokio::spawn(crate::runner::follow_inline(state.clone(), id, session));
         }
@@ -339,6 +421,9 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         // follow, and what the human sees is a Conversation that says it is
         // being built with nothing building it.
         (_, None) => {}
+        // And a task list never started one: it is answered above, before there
+        // is a prompt to launch anything on.
+        (Direction::TaskList, Some(_)) => {}
     }
 
     Ok(())

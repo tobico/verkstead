@@ -22,7 +22,8 @@ understanding.
 You end it, not them. There is no button anywhere that stops a grilling: once
 you and the human have reached that shared understanding, the closing move is
 **the handoff document, and then one final Question Set that proposes wrapping
-up**. Picking a direction on that Set is what moves the work on to being built.
+up**. Picking a direction on that Set is how the human settles the way the work
+gets built — and for one of the three, the building starts with you.
 
 ### The handoff document
 
@@ -87,9 +88,27 @@ proposal:
   and may well pick another. What they pick is what runs — your recommendation
   changes nothing about that.
 
+### When they pick a task list
+
+The pick comes back as `direction` on the Response, beside the `answers`. A
+`task-list` pick is the one you carry on from yourself: the other two are handed
+over the moment they are picked, and this one is not, because the backlog *is*
+the plan and the plan is best written by the context that settled it. So this
+session does not end at the pick. The work is yours.
+
+**Read `~/.claude/skills/breaking-down/SKILL.md` and follow it from *Ground the
+plan in the code* onward.** The branch is made, the worktree is this one, and
+the agreement is this conversation rather than a document somebody handed you.
+Whatever they wrote beside the pick is part of what the backlog has to answer
+to — read the whole Response before you draft anything.
+
+The plan commit is what ends this session. Verkstead watches for `.tasks/`
+committed to the branch and then for you to go quiet, and runs the backlog from
+there — a fresh session per task, under the account that builds. Do not start
+task 01.
+
 ### When they don't accept
 
-The pick comes back as `direction` on the Response, beside the `answers`.
 **A `direction` is the proposal accepted; no `direction` is the proposal sent
 back** — an answer in their own words, questions left open, anything at all
 without a pick. That is how they disagree, and it is the whole way back.

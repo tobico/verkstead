@@ -1,15 +1,10 @@
 ---
 name: breaking-down
-description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list, and the session is primed with a Brief and the handoff document the grilling wrote.
+description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list — read on from the grilling that settled it, or in a fresh session primed with the Brief and the handoff the grilling wrote.
 ---
 
-Break the work described in the prompt — the Brief it started from, and the
-handoff document the grilling session wrote — into sequential task files under
-`.tasks/`, and commit them.
-
-The handoff is the agreement. Everything in it was settled with the human over a
-whole grilling, so it is the plan you are breaking up rather than a proposal to
-re-open. What you are deciding here is the *shape of the backlog*: how the work
+Break the settled work into sequential task files under `.tasks/`, and commit
+them. What you are deciding here is the *shape of the backlog*: how the work
 splits, in what order, and where each slice stops.
 
 Tasks are **always sequential** — no parallel work, no "blocked by". The order
@@ -20,13 +15,32 @@ You start in a worktree of the repository, on a branch of its own. The branch is
 already made and this is already the feature: there is nothing to create, nothing
 to switch to, and no other plan in flight to check for.
 
+## Where the agreement is
+
+Two ways in, differing only in where what was settled is written down.
+
+**You are the grilling session, reading on.** The human picked `task-list` on
+your closing Set, and the agreement is this conversation — you are the one who
+settled it. Trust your own context over any summary of it, and read what they
+wrote beside the pick as part of what the backlog has to answer to. Step 1 is
+largely behind you: you have been reading this codebase all along, so sweep for
+what you have not looked at rather than starting over.
+
+**You are a fresh session.** The prompt carries the Brief and the handoff
+document the grilling wrote, plus whatever the human said when they asked for
+this to be tried again. The handoff is the agreement: everything in it was
+settled with the human over a whole grilling, so it is the plan you are breaking
+up rather than a proposal to re-open.
+
+Either way, the direction is settled and the breakdown is what is left.
+
 ## 1. Ground the plan in the code
 
 Read the codebase before drafting anything. Task titles and descriptions should
 use the project's own vocabulary — its `CLAUDE.md`, its `CONTEXT.md` glossary if
 it has one, the ADRs under `docs/adr/` covering what you are touching — and the
 breakdown should match how the code is actually laid out rather than how the
-handoff imagined it.
+plan imagined it.
 
 Where the code has drifted from what the grilling assumed, that is worth asking
 about. Don't ask as you find it: finish grounding, then put the drift alongside
@@ -46,7 +60,7 @@ of one layer.
 ## 3. Put the breakdown to the human
 
 The breakdown is a decision they own, so it goes to them as an ordinary Question
-Set — the same blocking ask the grilling used, and the way described under *How
+Set — the same blocking ask a grilling uses, and the way described under *How
 the questions reach them* below.
 
 Give the whole breakdown in the Preface, numbered, and for each task a title, a
@@ -55,9 +69,10 @@ the questions are read against. Then ask about it: whether the granularity is
 right, whether anything should be merged, split or reordered, whether anything is
 missing — plus whatever drift step 1 turned up.
 
-Iterate until they approve the breakdown. Every round is an ordinary Set: the
-direction is already settled, so there is no closing move to make here and
-nothing in this session ends anything.
+Iterate until they approve the breakdown. Every round is an ordinary Set and
+carries no `proposal` block: the direction is settled, so there is no closing
+move left to make and nothing you send ends anything. What ends this session is
+the plan commit below.
 
 ## 4. Write the task files
 
@@ -114,7 +129,8 @@ branch beside the plan that motivated them.
 
 Then stop. **Do not start on task 01**, and do not say anything about clearing a
 context — Verkstead reads `.tasks/` back off the branch and runs a session of its
-own per task.
+own per task. That commit is also what ends this session: Verkstead sees the
+backlog land, waits for you to go quiet, and takes it from there.
 
 ## How the questions reach them
 

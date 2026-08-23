@@ -77,21 +77,21 @@
       }
     },
     {
-      "Moved": {
-        "at": "2026-08-03T09:07:11.000Z",
-        "id": 17,
-        "state": "Implementing"
-      }
-    },
-    {
       "Commit": {
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 0,
         "files": 5,
-        "id": 18,
+        "id": 17,
         "insertions": 132,
         "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
         "subject": "chore: plan the task-runner tasks"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 18,
+        "state": "Implementing"
       }
     }
   ],

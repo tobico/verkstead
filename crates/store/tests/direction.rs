@@ -4,18 +4,24 @@
 //! The move is driven by a Response arriving rather than by anything anyone
 //! pressed, which is the whole shape of the thing: a grilling ends by the
 //! agent's own closing move, and picking a direction on that Set is what accepts
-//! it. There is no rung between the two — a pick takes a Conversation from
-//! Grilling straight to Implementing — so what these ask is what a
+//! it. There is no rung between the two, so what these ask is what a
 //! Conversation's state and its Timeline say afterwards.
+//!
+//! What a pick moves depends on whose session writes the picked Direction's
+//! artifact. Inline and roadmap are handed over, and their pick takes a
+//! Conversation from Grilling straight to Implementing; a task list is written by
+//! the grilling session itself, so its pick records the direction and moves
+//! nothing, and the move that follows the plan commit is
+//! [`start_implementing`]'s.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Directing, Event, Lifecycle, Proposed, Settlements, Submission, ask, load_conversation,
-    open_database, pick_direction, record_handoff, register_repo, save_brief, start_conversation,
-    start_grilling, submit_response, timeline,
+    Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
+    load_conversation, open_database, pick_direction, record_handoff, register_repo, save_brief,
+    start_conversation, start_grilling, start_implementing, submit_response, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -111,8 +117,12 @@ fn ordinary() -> QuestionSet {
 
 /// Answer a Set the way both halves of the server do, through the one path a
 /// Response takes.
+///
+/// Inline, which is a direction whose pick hands the work over there and then:
+/// the tests about what accepting *moves* are asking about one of those, and a
+/// task list has its own below.
 async fn answer(pool: &SqlitePool, set_id: i64) -> Submission {
-    answered(pool, set_id, &accepting(Direction::TaskList)).await
+    answered(pool, set_id, &accepting(Direction::Inline)).await
 }
 
 /// The same, with a Response of the test's own choosing.
@@ -189,7 +199,7 @@ async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let created = ask(&pool, id, &proposing(Direction::TaskList))
+    let created = ask(&pool, id, &proposing(Direction::Inline))
         .await
         .unwrap()
         .unwrap();
@@ -211,8 +221,97 @@ async fn answering_a_set_that_carries_a_proposal_ends_the_grilling() {
     );
     assert_eq!(
         direction(&pool, id).await,
-        Some(Direction::TaskList),
+        Some(Direction::Inline),
         "and what was picked is the Conversation's latest pick",
+    );
+}
+
+/// A task-list pick is the exception, and the reason is whose session does the
+/// next piece of work: the grilling one writes the backlog itself, so the
+/// grilling is still what is happening and the Conversation still says so.
+#[tokio::test]
+async fn a_task_list_pick_records_the_direction_and_leaves_it_grilling() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let created = ask(&pool, id, &proposing(Direction::TaskList))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        proposed(&pool, created.id, &accepting(Direction::TaskList)).await,
+        Some(Proposed::Accepted {
+            direction: Direction::TaskList,
+            directing: Directing::Writing,
+        }),
+        "the proposal is accepted, and what accepting it started is the backlog \
+         being written rather than a Conversation moving",
+    );
+    assert_eq!(state(&pool, id).await, Lifecycle::Grilling);
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling],
+        "so nothing is on the Timeline saying it moved",
+    );
+    assert_eq!(
+        direction(&pool, id).await,
+        Some(Direction::TaskList),
+        "and the pick is recorded all the same: it is what the tail is watched for",
+    );
+}
+
+/// And the move that follows the plan commit, which is the other half of it: the
+/// grilling session has been seen out, and the work is being built.
+#[tokio::test]
+async fn a_grillings_tail_landing_is_what_starts_the_work() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    pick_direction(&pool, id, Direction::TaskList)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        start_implementing(&pool, id).await.unwrap(),
+        Implementing::Started,
+    );
+    assert_eq!(state(&pool, id).await, Lifecycle::Implementing);
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "one move, recorded where the grilling actually ended",
+    );
+    assert_eq!(
+        direction(&pool, id).await,
+        Some(Direction::TaskList),
+        "and the pick still stands: it is what the work is being built as",
+    );
+}
+
+/// Nothing but a grilling has a tail to land. A Conversation that has moved on —
+/// aborted out from under the run, or carried somewhere else by a later pick — is
+/// not one to drag back to Implementing.
+#[tokio::test]
+async fn only_a_grilling_has_a_tail_to_land() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    pick_direction(&pool, id, Direction::Inline).await.unwrap();
+
+    assert_eq!(
+        start_implementing(&pool, id).await.unwrap(),
+        Implementing::NotGrilling,
+    );
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling, Lifecycle::Implementing],
+        "so the Timeline does not say it got there twice",
+    );
+
+    assert_eq!(
+        start_implementing(&pool, 404).await.unwrap(),
+        Implementing::NoSuchConversation,
     );
 }
 
@@ -253,14 +352,14 @@ async fn the_acceptance_says_what_the_proposal_moved() {
         "a Set carrying no proposal settled none, and says so by having nothing to say",
     );
 
-    let proposing = ask(&pool, id, &proposing(Direction::Inline))
+    let proposing = ask(&pool, id, &proposing(Direction::TaskList))
         .await
         .unwrap()
         .unwrap();
     assert_eq!(
-        proposed(&pool, proposing.id, &accepting(Direction::TaskList)).await,
+        proposed(&pool, proposing.id, &accepting(Direction::Inline)).await,
         Some(Proposed::Accepted {
-            direction: Direction::TaskList,
+            direction: Direction::Inline,
             directing: Directing::Moved,
         }),
         "the store hands back what happened, and which direction was picked — \
@@ -336,7 +435,7 @@ async fn accepting_with_something_to_add_is_still_accepting() {
         .unwrap();
 
     let qualified = Response {
-        direction: Some(Direction::TaskList),
+        direction: Some(Direction::Inline),
         ..Response::from_yaml(
             "answers:\n  - label: Q14\n    free_text: Keep the config key as it is.\n",
         )
@@ -346,7 +445,7 @@ async fn accepting_with_something_to_add_is_still_accepting() {
     assert_eq!(
         proposed(&pool, created.id, &qualified).await,
         Some(Proposed::Accepted {
-            direction: Direction::TaskList,
+            direction: Direction::Inline,
             directing: Directing::Moved,
         }),
     );
@@ -379,9 +478,9 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
         .unwrap()
         .unwrap();
     assert_eq!(
-        proposed(&pool, second.id, &accepting(Direction::TaskList)).await,
+        proposed(&pool, second.id, &accepting(Direction::Inline)).await,
         Some(Proposed::Accepted {
-            direction: Direction::TaskList,
+            direction: Direction::Inline,
             directing: Directing::Moved,
         }),
     );
@@ -425,7 +524,7 @@ async fn a_second_proposal_answered_finds_the_move_already_made() {
     );
     assert_eq!(
         direction(&pool, id).await,
-        Some(Direction::TaskList),
+        Some(Direction::Inline),
         "and the pick that moved it is the one that stands",
     );
 }
@@ -470,17 +569,17 @@ async fn a_conversation_that_is_already_being_built_takes_no_second_pick() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    pick_direction(&pool, id, Direction::TaskList)
-        .await
-        .unwrap();
+    pick_direction(&pool, id, Direction::Inline).await.unwrap();
 
     assert_eq!(
-        pick_direction(&pool, id, Direction::Inline).await.unwrap(),
+        pick_direction(&pool, id, Direction::TaskList)
+            .await
+            .unwrap(),
         Directing::NotGrilling,
     );
     assert_eq!(
         direction(&pool, id).await,
-        Some(Direction::TaskList),
+        Some(Direction::Inline),
         "the pick that ended the grilling is the one in force",
     );
     assert_eq!(
@@ -526,6 +625,9 @@ async fn there_is_no_conversation_to_hand_over_from() {
     );
 }
 
+/// A pick that moved nothing is still a pick, and the row is what says so after
+/// a restart: it is what the tail is watched for, and the only thing left saying
+/// which artifact this Conversation is waiting on.
 #[tokio::test]
 async fn a_direction_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
@@ -544,7 +646,7 @@ async fn a_direction_survives_a_restart() {
     let pool = open_database(&database).await.unwrap();
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
 
-    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert_eq!(conversation.state, Lifecycle::Grilling);
     assert_eq!(conversation.direction, Some(Direction::TaskList));
 }
 

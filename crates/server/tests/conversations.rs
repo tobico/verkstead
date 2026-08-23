@@ -1070,6 +1070,25 @@ proposal:
     Six changes, each independently testable.
 "#;
 
+/// The same, recommending a different direction — for the test that picks
+/// against the recommendation.
+const RECOMMENDING_INLINE: &str = r#"
+title: Ready to build the rate limiter
+questions:
+  - label: Q9
+    text: Anything still open before we build it?
+    options:
+      - n: 1
+        text: Nothing from me
+        recommended: true
+      - n: 2
+        text: Yes, see below
+proposal:
+  direction: inline
+  rationale: |
+    One change, in one file, with one test.
+"#;
+
 /// And an ordinary round of grilling, which carries no proposal at all.
 const ORDINARY: &str = r#"
 title: Where the request counter lives
@@ -1109,8 +1128,13 @@ async fn ask(app: &Router, conversation: i64, yaml: &str) -> i64 {
 /// Answer it from the browser, which is the path the human's own reply takes —
 /// picking a direction on the chooser, which is the whole of accepting a
 /// proposal.
+///
+/// Inline, which is a direction whose pick hands the work over there and then:
+/// the tests about what accepting *moves* are asking about one of those, and a
+/// task list is its own case below — the session that proposed writes its
+/// backlog, so nothing about the Conversation moves until it has.
 async fn answer(app: &Router, set_id: i64) -> verkstead_render::Submitted {
-    picking(app, set_id, "task-list").await
+    picking(app, set_id, "inline").await
 }
 
 /// The same, with the direction of the test's own choosing.
@@ -1208,7 +1232,7 @@ async fn picking_a_direction_on_the_closing_set_sets_the_work_going() {
     );
     assert_eq!(
         view.direction,
-        Some(verkstead_schema::Direction::TaskList),
+        Some(verkstead_schema::Direction::Inline),
         "and the pick is the choice, with no second trip to the Timeline",
     );
     assert_eq!(
@@ -1225,13 +1249,13 @@ async fn a_pick_the_agent_did_not_recommend_is_the_one_that_runs() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
-    picking(&app, ask(&app, id, PROPOSING).await, "inline").await;
+    picking(&app, ask(&app, id, RECOMMENDING_INLINE).await, "roadmap").await;
 
     let view = opened(&app, id).await;
 
     assert_eq!(
         view.direction,
-        Some(verkstead_schema::Direction::Inline),
+        Some(verkstead_schema::Direction::Roadmap),
         "what the human picked is what the Conversation is being built as, \
          whatever the agent argued for",
     );
@@ -1460,19 +1484,17 @@ async fn answering_an_ordinary_grilling_set_leaves_the_grilling_running() {
     assert_eq!(moves(&view), [Lifecycle::Grilling]);
 }
 
-/// All three run off the pick, and each sets its own pipeline going.
+/// The two directions that hand the work over run off the pick, and each sets
+/// its own pipeline going.
 ///
-/// One test over the three, because what differs between them is which session
-/// is launched and this router has no way to run one — what is the same, and
-/// what is being asked here, is that the pick alone records the direction and
-/// takes the Conversation to Implementing. A task list is no exception: what
-/// starts is the session that writes the backlog, and writing it is the work
-/// beginning rather than a step in front of it.
+/// One test over the two, because what differs between them is which session is
+/// launched and this router has no way to run one — what is the same, and what
+/// is being asked here, is that the pick alone records the direction and takes
+/// the Conversation to Implementing.
 #[tokio::test]
-async fn a_pick_records_the_direction_and_sets_the_conversation_implementing() {
+async fn a_pick_that_hands_the_work_over_sets_the_conversation_implementing() {
     for (picked, direction) in [
         ("inline", verkstead_schema::Direction::Inline),
-        ("task-list", verkstead_schema::Direction::TaskList),
         ("roadmap", verkstead_schema::Direction::Roadmap),
     ] {
         let (watched, _dir, app, _repo, repo_id) = workbench().await;
@@ -1491,6 +1513,45 @@ async fn a_pick_records_the_direction_and_sets_the_conversation_implementing() {
              — picking {picked}",
         );
     }
+}
+
+/// A task-list pick is the one that stays where it is. The session that proposed
+/// breaks the work down itself, so the grilling is still what is happening —
+/// and the handoff it wrote is still its own, because it has not finished with
+/// it.
+///
+/// What ends that session and moves the Conversation is the plan commit, which
+/// wants an agent to write it: `sessions.rs` is where that is asked end to end.
+#[tokio::test]
+async fn a_task_list_pick_leaves_the_conversation_grilling() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let written = handoff_written(dir.path(), id, "# What we settled\n");
+
+    assert_eq!(
+        picking(&app, ask(&app, id, PROPOSING).await, "task-list").await,
+        verkstead_render::Submitted::Accepted,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.direction,
+        Some(verkstead_schema::Direction::TaskList),
+        "the pick is recorded: it is what the backlog is watched for",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and nothing moved, because the grilling is what is still happening",
+    );
+    assert_eq!(moves(&view), [Lifecycle::Grilling]);
+
+    assert!(
+        written.exists() && handoff(&view).is_none(),
+        "the handoff is taken when the session ends, and it has not ended",
+    );
 }
 
 /// There is nowhere left to press a direction: the standalone chooser and the

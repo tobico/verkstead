@@ -426,6 +426,27 @@ mod tests {
         );
     }
 
+    /// A task-list pick does not end the grilling: the same session writes the
+    /// backlog, holding everything the grilling settled. Nothing else tells it so
+    /// — no second prompt is sent, because no second session is started — so the
+    /// skill it is already inside has to carry the branch and name the skill it
+    /// reads on into.
+    #[test]
+    fn the_grilling_skill_says_to_break_the_work_down_where_a_task_list_is_picked() {
+        let grilling = skill("grilling/SKILL.md");
+
+        assert!(
+            grilling.contains(BREAKING_DOWN),
+            "the branch is a skill to read, named by the path the sandbox mounts it at: \
+             {grilling}"
+        );
+        assert!(
+            grilling.contains("Do not start\ntask 01"),
+            "the backlog is where this session stops: the tasks are the runner's, \
+             a fresh session each: {grilling}"
+        );
+    }
+
     /// A session is pointed at the skill by the prompt, and nothing else in the
     /// sandbox says what it is for.
     #[test]
@@ -519,6 +540,30 @@ mod tests {
             !breaking_down.contains("/next-task") && !breaking_down.contains("/clear"),
             "nobody is at a terminal to run a slash command, and Verkstead runs the \
              backlog itself: {breaking_down}"
+        );
+    }
+
+    /// Two sessions can be reading this: the grilling one carrying on from the
+    /// pick, and a fresh one launched because that tail was retried. They differ
+    /// in where the agreement is written down — a conversation the reader had, or
+    /// a handoff document handed to it — so the skill has to say both.
+    #[test]
+    fn the_breakdown_skill_works_from_both_ways_in() {
+        let breaking_down = skill("breaking-down/SKILL.md");
+
+        assert!(
+            breaking_down.contains("the grilling session, reading on"),
+            "the ordinary way in is the session that settled the work carrying on: \
+             {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("a fresh session"),
+            "and the other is a retried tail, with the handoff as its agreement: \
+             {breaking_down}"
+        );
+        assert!(
+            breaking_down.contains("handoff"),
+            "which it has to name, being the document that way in is primed with"
         );
     }
 

@@ -499,6 +499,30 @@ pub enum Directing {
     /// and the move is on the Timeline.
     Moved,
 
+    /// Recorded, and the Conversation is still grilling: the session that
+    /// proposed writes the picked Direction's artifact itself, so what moves the
+    /// Conversation is that artifact landing rather than the answer.
+    Writing,
+
+    /// It was not grilling, so there was no grilling for this to end. Nothing
+    /// recorded and nothing wrong.
+    NotGrilling,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of the work starting once a grilling's own tail has landed.
+///
+/// The other half of [`Directing::Writing`]: the pick recorded the direction and
+/// left the Conversation grilling, and this is the move that follows the
+/// artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Implementing {
+    /// Recorded: the Conversation is being built, and the move is on its
+    /// Timeline.
+    Started,
+
     /// It was not grilling, so there was no grilling for this to end. Nothing
     /// recorded and nothing wrong.
     NotGrilling,
@@ -1614,12 +1638,19 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the
-/// Conversation's latest pick, the grilling is over, and the work is being
-/// built.
+/// Conversation's latest pick, and — for the directions whose next move is a
+/// session of its own — the work is being built.
 ///
-/// One move rather than two. There is no rung between the grilling ending and
-/// the work starting — the pick and the acceptance are the one answer, and a
-/// state to sit in between them would be a state nothing ever waits in.
+/// **A task-list pick moves nothing.** The grilling session that proposed writes
+/// the backlog itself, holding everything the grilling settled, so the
+/// Conversation stays Grilling until that session ends: the pick informs the
+/// agent and the artifact moves the machine. What follows the plan commit is
+/// [`start_implementing`].
+///
+/// The other two are one move rather than two. There is no rung between the
+/// grilling ending and the work starting — the pick and the acceptance are the
+/// one answer, and a state to sit in between them would be a state nothing ever
+/// waits in.
 ///
 /// Called off the back of a Response landing rather than off anything the human
 /// pressed — see [`super::submit_response`] — which is why a Conversation that is
@@ -1662,6 +1693,15 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
     .await
     .with_context(|| format!("recording the direction picked on Conversation {id}"))?;
 
+    // The grilling carries on writing the backlog, so there is nothing to move
+    // yet. The pick is committed either way: it is what the follower watching for
+    // the artifact is armed from, and what a restart reads back.
+    if direction == Direction::TaskList {
+        tx.commit().await.context("acting on a picked direction")?;
+
+        return Ok(Directing::Writing);
+    }
+
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(Lifecycle::Implementing.stored())
         .bind(id)
@@ -1674,6 +1714,50 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
     tx.commit().await.context("acting on a picked direction")?;
 
     Ok(Directing::Moved)
+}
+
+/// Record that a grilling's own tail has landed and the work is being built: the
+/// Conversation is implementing, and the move is on its Timeline.
+///
+/// What the grilling session wrote is already under version control by the time
+/// this runs — the plan commit is what says the tail is over — so this is the
+/// record catching up with the repository rather than a decision of its own.
+///
+/// Refused for anything but Grilling, which is the only place a tail can be
+/// running. That refusal is what keeps a run that was aborted, or one whose pick
+/// was superseded, from moving a Conversation that has gone somewhere else since.
+///
+/// One transaction, as every move is: a Conversation that says Implementing
+/// always has the move on its Timeline to say when it got there.
+pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementing> {
+    let mut tx = pool.begin().await.context("starting the implementation")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Implementing::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Grilling {
+        return Ok(Implementing::NotGrilling);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Implementing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} to implementing"))?;
+
+    moved(&mut tx, id, Lifecycle::Implementing).await?;
+
+    tx.commit().await.context("starting the implementation")?;
+
+    Ok(Implementing::Started)
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.

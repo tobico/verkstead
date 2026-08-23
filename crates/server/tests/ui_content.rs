@@ -1648,8 +1648,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
 
     // Through the states it went through, because that is what a Conversation
-    // with a backlog *is*: a grilling that handed over on a direction the human
-    // picked, and the work being built off it.
+    // with a backlog *is*: a grilling the human picked a task list on, which
+    // broke the work down itself and committed the plan, and the work being
+    // built off it. In that order, because the plan commit is what ends the
+    // grilling.
     store::pick_direction(&pool, tasked, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
@@ -1668,6 +1670,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap()
     .unwrap();
+
+    store::start_implementing(&pool, tasked).await.unwrap();
 
     write(
         "conversations.json",
@@ -1773,6 +1777,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::pick_direction(&pool, wrapping, verkstead_schema::Direction::TaskList)
         .await
         .unwrap();
+    store::start_implementing(&pool, wrapping).await.unwrap();
 
     store::record_commit(
         &pool,

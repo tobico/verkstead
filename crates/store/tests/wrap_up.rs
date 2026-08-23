@@ -45,7 +45,7 @@ async fn wrapping(pool: &SqlitePool) -> i64 {
     )
     .await
     .unwrap();
-    pick_direction(pool, id, verkstead_schema::Direction::TaskList)
+    pick_direction(pool, id, verkstead_schema::Direction::Inline)
         .await
         .unwrap();
     record_pull_request(

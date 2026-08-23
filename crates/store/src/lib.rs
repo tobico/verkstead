@@ -40,12 +40,12 @@ mod wrap_up;
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling, Lifecycle,
-    SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting, ask, asked_from,
-    conversations, load_conversation, note, pick_direction, record_handoff, rename_branch,
-    review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
+    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
+    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting,
+    ask, asked_from, conversations, load_conversation, note, pick_direction, record_handoff,
+    rename_branch, review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_profile,
     set_implementation_profile, set_state, stacks_on, start_adoption, start_conversation,
-    start_grilling, start_stage, timeline,
+    start_grilling, start_implementing, start_stage, timeline,
 };
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
@@ -211,11 +211,13 @@ pub enum Proposed {
     /// moving the Conversation on.
     ///
     /// The pick travels with it because it is the whole of what the server does
-    /// next — the grilling is over and the direction is already settled, so
-    /// nobody has to be asked a second time.
+    /// next — the direction is already settled, so nobody has to be asked a
+    /// second time.
     ///
-    /// [`Directing::NotGrilling`] is not a failure here either: a grilling that
-    /// put two proposals has the first acceptance move the Conversation, and the
+    /// Accepted is not the same as moved. [`Directing::Writing`] is the grilling
+    /// session carrying on to write the picked Direction's artifact, and
+    /// [`Directing::NotGrilling`] is not a failure either: a grilling that put
+    /// two proposals has the first acceptance move the Conversation, and the
     /// second finds the move already made.
     Accepted {
         direction: verkstead_schema::Direction,
@@ -251,9 +253,9 @@ pub enum Submission {
 /// browser or from `curl`, so a wait ends the same way either way — and so an
 /// archived Set is refused the same way either way.
 ///
-/// It is also where a grilling ends. A Set carrying a `proposal` is the grilling
-/// agent's closing move, and a Response that picks a direction on one takes its
-/// Conversation from Grilling straight to Implementing — here, rather than in
+/// It is also where a direction is settled. A Set carrying a `proposal` is the
+/// grilling agent's closing move, and a Response that picks a direction on one
+/// records the pick and moves whatever the pick moves — here, rather than in
 /// either endpoint, for the reason everything else about answering is here: the
 /// browser and `curl` must not be able to leave a Conversation in different
 /// states for the same Answer.

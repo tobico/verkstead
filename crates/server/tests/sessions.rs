@@ -1680,32 +1680,39 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
     );
 }
 
-/// The task-list direction end to end: the same Profile and the same worktree as
-/// inline, inside Verkstead's fork of to-tasks instead — which writes a real
-/// `.tasks/` backlog and commits it to the branch.
+/// The task-list direction end to end: the grilling session reads on into the
+/// bundled fork of to-tasks and commits a real `.tasks/` backlog to the branch,
+/// without anything else being launched.
+///
+/// The stub writes its backlog as it starts rather than when the Response lands,
+/// because a stub cannot idle on a blocking ask — nothing in these fixtures dials
+/// the router. That costs the test nothing: what Verkstead does with a task-list
+/// pick is launch nothing and start watching, and a backlog already committed is
+/// watched for exactly as one committed a minute later is.
 ///
 /// Repo files stay the source of truth, so what this asks of the far end is what
 /// git says: the backlog is in the worktree and it is committed. Verkstead runs
 /// the workflow that writes it and owns none of it.
 #[tokio::test]
-async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
+async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
     let fixture = grilling(
         r#"
         case "$1" in
         claude-grilling-5)
-            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
             printf 'model=%s\n' "$1"
-            printf 'prompt=%s\n' "$2"
             grep '^name:' "$HOME/.claude/skills/breaking-down/SKILL.md"
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-counter.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            printf 'prompt=%s\n' "$2"
+            sleep 300
             ;;
         esac
         "#,
@@ -1728,43 +1735,23 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
-    let breaking_down = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id != grilling_output && !output.running)
-                .map(|output| output.id)
-        })
+    // The plan commit plus quiet is what ends the grilling, and the move that
+    // follows it is what says the work is being built.
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
         .await;
 
-    let said = fixture.capture(breaking_down).await.replace("\r\n", "\n");
+    let said = fixture.capture(grilling_output).await.replace("\r\n", "\n");
 
     assert!(
-        said.contains("model=claude-implementation-5"),
-        "the breakdown runs under the implementation Profile, as the work it plans does: {said:?}"
-    );
-    assert!(
-        said.contains("~/.claude/skills/breaking-down/SKILL.md"),
-        "and inside the bundled fork of to-tasks: {said:?}"
+        said.contains("model=claude-grilling-5"),
+        "the backlog is written by the session that settled it, under the grilling \
+         Profile it has been running as all along: {said:?}"
     );
     assert!(
         said.contains("name: breaking-down"),
-        "which is really there to be read: installed under the State Directory and \
-         bound into the sandbox exactly as grilling's is: {said:?}"
-    );
-    assert!(
-        !said.contains("~/.claude/skills/implementing/SKILL.md"),
-        "which is the other direction, and not this one: {said:?}"
-    );
-    assert!(
-        said.contains("A counter per key.") && said.contains(BRIEF),
-        "primed with both documents, exactly as an inline session is: {said:?}"
-    );
-
-    assert_eq!(
-        fixture.view().await.state,
-        Lifecycle::Implementing,
-        "writing the backlog is the work starting rather than a step in front of it",
+        "reading on into the bundled fork of to-tasks, which is really there to be \
+         read from a grilling sandbox: {said:?}"
     );
 
     assert!(
@@ -1785,6 +1772,29 @@ async fn choosing_a_task_list_runs_the_breakdown_fork_and_commits_a_backlog() {
         git(&worktree, &["branch", "--show-current"]).trim(),
         fixture.view().await.branch,
         "on the branch the Conversation already made — the fork creates none",
+    );
+
+    // What follows the backlog is the task run, under the Profile that builds:
+    // no second planning session anywhere on the Timeline.
+    let worked = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilling_output && output.lines > 0)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let next = fixture.capture(worked).await.replace("\r\n", "\n");
+
+    assert!(
+        next.contains("model=claude-implementation-5"),
+        "the task run is the implementation Profile's, as the work it does is: {next:?}"
+    );
+    assert!(
+        next.contains("~/.claude/skills/next-task/SKILL.md")
+            && !next.contains("~/.claude/skills/breaking-down/SKILL.md"),
+        "and it is the first task rather than a second breakdown: {next:?}"
     );
 }
 
@@ -1979,7 +1989,15 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
+            printf 'breaking down\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
             sleep 300
             ;;
         *)
@@ -1989,32 +2007,20 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
                 exit 0
                 ;;
             esac
-            if [ ! -d .tasks ]; then
-                printf 'breaking down\n'
-                mkdir -p .tasks
-                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
-                printf '# 01. Count the requests\n' > .tasks/01-count.md
-                printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
-                git add .tasks
-                git commit --quiet -m 'chore: plan rate-limiting tasks'
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                printf 'working %s\n' "$next"
+                printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
+                number=${next%%-*}
+                printf 'a limiter\n' >> limiter.md
+                rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+                git add -A
+                git commit --quiet -m "feat: $next"
             else
-                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-                if [ -n "$next" ]; then
-                    printf 'working %s\n' "$next"
-                    printf 'skill=%s\n' "$(grep '^name:' "$HOME/.claude/skills/next-task/SKILL.md")"
-                    number=${next%%-*}
-                    printf 'a limiter\n' >> limiter.md
-                    rm ".tasks/$next"
-                    sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
-                    git add -A
-                    git commit --quiet -m "feat: $next"
-                else
-                    printf 'finishing\n'
-                    git rm --quiet .tasks/TODO.md
-                    git commit --quiet -m 'chore: finish rate-limiting'
-                fi
+                printf 'finishing\n'
+                git rm --quiet .tasks/TODO.md
+                git commit --quiet -m 'chore: finish rate-limiting'
             fi
             sleep 300
             ;;
@@ -2069,7 +2075,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     fixture
         .until(|view| {
             let sessions = outputs(view);
-            (sessions.len() == 6 && sessions.iter().all(|output| !output.running)).then_some(())
+            (sessions.len() == 5 && sessions.iter().all(|output| !output.running)).then_some(())
         })
         .await;
 
@@ -2077,9 +2083,9 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
 
     assert_eq!(
         outputs(&view).len(),
-        6,
-        "one Event per session: the grilling, the breakdown, a task each, the finish, \
-         and the review of the pull request it opened",
+        5,
+        "one Event per session: the grilling, which broke the work down itself, a task \
+         each, the finish, and the review of the pull request it opened",
     );
     assert!(
         outputs(&view).iter().all(|output| !output.running),
@@ -2111,7 +2117,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
 
     assert_eq!(
         outputs(&fixture.view().await).len(),
-        6,
+        5,
         "an empty backlog leaves the runner idle rather than launching sessions at nothing",
     );
 }
@@ -2124,27 +2130,27 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
     let fixture = grilling(
         r#"
         case "$1" in
-        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+        claude-grilling-5)
+            printf 'grilling\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01\n' > .tasks/01-count.md
+            printf '# 02\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            sleep 300
+            ;;
         *)
-            if [ ! -d .tasks ]; then
-                mkdir -p .tasks
-                printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-                printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-                printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
-                printf '# 01\n' > .tasks/01-count.md
-                printf '# 02\n' > .tasks/02-refuse.md
-                git add .tasks
-                git commit --quiet -m 'chore: plan rate-limiting tasks'
-            else
-                next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-                if [ -n "$next" ]; then
-                    rm ".tasks/$next"
-                    git add -A
-                    git commit --quiet -m "feat: $next"
-                    # Only the first task, so the list is caught half worked
-                    # through rather than empty.
-                    sleep 300
-                fi
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                rm ".tasks/$next"
+                git add -A
+                git commit --quiet -m "feat: $next"
+                # Only the first task, so the list is caught half worked
+                # through rather than empty.
+                sleep 300
             fi
             printf 'stopping\n'
             sleep 300
@@ -2209,7 +2215,16 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// which is the half under test.
 const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
-claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
 *)
     case "$2" in
     *reviewing/SKILL.md*)
@@ -2217,34 +2232,25 @@ claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
         exit 0
         ;;
     esac
-    if [ ! -d .tasks ]; then
-        mkdir -p .tasks
-        printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
-        printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
-        printf '# 01\n' > .tasks/01-count.md
-        git add .tasks
-        git commit --quiet -m 'chore: plan rate-limiting tasks'
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: count the requests"
     else
-        next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
-        if [ -n "$next" ]; then
-            printf 'a limiter\n' >> limiter.md
-            rm ".tasks/$next"
-            git add -A
-            git commit --quiet -m "feat: count the requests"
-        else
-            git rm --quiet .tasks/TODO.md
-            git commit --quiet -m 'chore: finish rate-limiting'
-            printf 'pushed, and the pull request is open\n'
-        fi
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
     ;;
 esac
 "#;
 
-/// Take a Conversation from the direction chooser to a worked-through backlog,
-/// with nothing pressed on the way: the whole point of the run is that nobody is
-/// asked anything between the direction and the pull request.
+/// Take a Conversation from the pick on its closing Set to a worked-through
+/// backlog, with nothing pressed on the way: the whole point of the run is that
+/// nobody is asked anything between the direction and the pull request.
 async fn worked_to_empty(fixture: &Grilling) {
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
@@ -3469,15 +3475,19 @@ async fn a_commit_landing_on_the_pull_request_puts_the_checks_back_to_waiting() 
 
 /// A breakdown asks its quiz the way every session asks anything: an ordinary
 /// Set, with the session idling until the Answers come back. Nothing about it
-/// ends or redirects the Conversation — the direction was settled before this
-/// session started.
+/// ends or redirects the Conversation — the direction is settled, and what moves
+/// the Conversation is the plan commit rather than any Answer.
+///
+/// Which matters more now that the quiz comes from the grilling session itself:
+/// the approval round still gates the commit, and the Conversation stays grilling
+/// across it.
 #[tokio::test]
 async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
     let fixture = grilling(
         r#"
         case "$1" in
-        claude-grilling-5) printf 'grilling\n'; sleep 300 ;;
-        *) printf 'breaking down\n'; sleep 300 ;;
+        claude-grilling-5) printf 'breaking down\n'; sleep 300 ;;
+        *) printf 'this session never gets to run\n'; sleep 300 ;;
         esac
         "#,
     )
@@ -3509,8 +3519,15 @@ async fn a_breakdown_question_reaches_the_human_as_an_ordinary_set() {
 
     assert_eq!(
         fixture.view().await.state,
-        Lifecycle::Implementing,
-        "answering a breakdown question moves nothing: the direction is settled",
+        Lifecycle::Grilling,
+        "answering a breakdown question moves nothing: the direction is settled, and \
+         nothing has been committed yet",
+    );
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        1,
+        "and nothing was launched: the session writing the backlog is the one that \
+         proposed",
     );
 }
 
@@ -4095,15 +4112,6 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
-            printf 'the handoff is written\n'
-            sleep 300
-            ;;
-        *)
-            if [ -f .tasks/TODO.md ]; then
-                printf 'this task is beyond me\n'
-                exit 1
-            fi
-
             mkdir -p .tasks
             printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-count.md
@@ -4111,6 +4119,10 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
             git commit --quiet -m 'chore: plan the rate limiter'
             printf 'the backlog is written\n'
             sleep 300
+            ;;
+        *)
+            printf 'this task is beyond me\n'
+            exit 1
             ;;
         esac
         "#,
