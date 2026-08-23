@@ -238,11 +238,20 @@ flowchart LR
 Fully responsive 3-pane hierarchy: conversations list → timeline of the
 selected conversation → details pane of the selected event.
 
+The details pane is the selected Event and nothing else: with nothing selected
+it is blank, and a narrow layout offers no way to page into it (*settled
+2026-08-24, building workbench-refit*). What a Conversation needs settling
+before it runs — branch, base commit, both Pairings, the readiness verdict —
+rides under the Brief on its timeline card instead, disappearing entirely once
+grilling starts, since the server freezes all of it at that moment. The repo
+name, the worktree path and the conversation state are drawn nowhere: the
+record tells that story.
+
 Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always | — |
+| Brief | inline, always; setup under it while drafting | — |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts | server-rendered diff viewer |

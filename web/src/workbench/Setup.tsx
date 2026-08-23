@@ -1,26 +1,21 @@
-//! The details pane: what a Conversation is, beside the Timeline of what has
-//! happened to it.
+//! A Conversation's setup: what has to be settled before anything will run it,
+//! drawn under the Brief it belongs to.
 //!
-//! The Repo it is attached to, the branch the work will be done on, and the
-//! commit it will branch from. All three are facts about the Conversation rather
-//! than about any one Event, and two of them are the human's to change for as
-//! long as it is still drafting — which is why the pane that is neither the list
-//! nor the record is where they are settled.
+//! The branch the work will be done on, the commit it will branch from, and the
+//! two pairings its sessions run under. All four are facts about the
+//! Conversation rather than about any one Event, and all four are the human's to
+//! change for as long as it is still drafting.
 //!
-//! The two pairings are settled here too, for the same reason: which account and
-//! model the grilling runs under, and which the implementation runs under, are
-//! facts about the conversation rather than about any one event. They are
-//! separate choices because they are genuinely separate accounts — grill on
-//! fable, implement on opus — and because the implementation session cannot
-//! simply carry the grilling one on. Both are fixed when grilling starts, the
-//! way the branch and the base commit are: the server refuses either after that,
-//! and the refusal is what this pane says.
+//! Under the Brief rather than in a pane of its own, because setting a
+//! Conversation up and kicking it off are one act and both belong where the work
+//! is read: the Brief is the headline and the setup follows it. Once grilling
+//! starts none of this is drawn at all — the server freezes every one of them at
+//! that moment, so nothing taken away was still actionable, and the card goes
+//! back to being the Brief alone.
 //!
-//! The Brief has no place here on purpose: it is inline in the Timeline, because
-//! there is nothing of it the Timeline does not already show. What stands here
-//! instead is the full self of the Events that do have one — a Capture, a
-//! Question Set, a commit's diff — each drawn by a component of its own, with
-//! this pane being what the third one says when no Event is open.
+//! The two pairings are separate choices because they are genuinely separate
+//! accounts — grill on fable, implement on opus — and because the implementation
+//! session cannot simply carry the grilling one on.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -74,33 +69,11 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
     "The grilling has started, so who runs this conversation is settled.",
 };
 
-export function Details(props: {
+export function Setup(props: {
   conversation: ConversationView;
-  back: () => void;
 }): JSX.Element {
   return (
-    <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Details</h1>
-      </div>
-
-      {/* The repository, as the Repo list shows one: what it is called, where it
-          is, and what a Conversation branches from unless it says otherwise.
-          Nothing here is editable — a Conversation is attached to a Repo when it
-          is started, and moving it to another would be starting a different
-          piece of work. */}
-      <dl class="conversation-facts">
-        <dt>Repo</dt>
-        <dd class="repo">{props.conversation.repo.name}</dd>
-        <dt>Path</dt>
-        <dd class="path">{props.conversation.repo.path}</dd>
-        <dt>State</dt>
-        <dd class="state">{props.conversation.state}</dd>
-      </dl>
-
+    <section class="conversation-setup" aria-label="Setup">
       {/* No branch field where the conversation is adopting a roadmap: a stage
           is worked on its own slug, so the name invented when the row was made
           is discarded when the stage is adopted, and naming it here would be a
@@ -110,38 +83,8 @@ export function Details(props: {
       </Show>
       <BaseCommit conversation={props.conversation} />
 
-      <Worktree conversation={props.conversation} />
-
       <Profiles conversation={props.conversation} />
-    </>
-  );
-}
-
-/// Where the work is actually being done, once grilling has made somewhere.
-///
-/// Nothing to change here — the path is Verkstead's to choose — so this is a
-/// fact rather than a field. What it is for is the case where the directory has
-/// gone: a worktree deleted by hand should read as a conversation with a problem
-/// while the human is looking at it, rather than as an obscure failure from
-/// whatever next tries to work in it.
-function Worktree(props: { conversation: ConversationView }): JSX.Element {
-  return (
-    <Show when={props.conversation.worktree}>
-      {(worktree) => (
-        <section class="conversation-worktree" aria-label="Worktree">
-          <h2>Worktree</h2>
-          <p class="path" classList={{ missing: worktree().missing }}>
-            {worktree().path}
-          </p>
-          <Show when={worktree().missing}>
-            <p class="error">
-              This directory is gone. Abort the conversation to clear it up —
-              the branch will stay where it is.
-            </p>
-          </Show>
-        </section>
-      )}
-    </Show>
+    </section>
   );
 }
 
@@ -165,7 +108,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <section class="conversation-profiles" aria-label="Agent profiles">
-      <h2>Agent profiles</h2>
+      <h3>Agent profiles</h3>
 
       <Switch>
         <Match when={profiles.isError}>
@@ -209,7 +152,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
           not a count of the two fields above: a profile whose pair has gone is
           not one to launch a session under, and there is more to being ready
           than the pairings. Said here because this is where the pairings are
-          fixed; the button it gates is in the timeline.
+          fixed; the button it gates is at the end of the record below.
 
           An adopting conversation never grills, so that verdict is not the one
           to draw for it — it would read as needing a brief nobody here writes.
@@ -270,7 +213,7 @@ function PairingPicker(props: {
     onSuccess: (outcome: ProfileChosen) => {
       if (outcome !== "Chosen") {
         setRefused(outcome);
-        // Chosen from a list this pane read a moment ago: reading it again is
+        // Chosen from a list this card read a moment ago: reading it again is
         // both the correction and the explanation.
         void queries.invalidateQueries({ queryKey: ["profiles"] });
         return;
@@ -294,7 +237,7 @@ function PairingPicker(props: {
           comes back if the profile that was picked is deleted, or if it stopped
           listing the model it was paired with, which is the honest reading of
           it — and nothing is said upwards about that, the choice being the
-          server's record rather than this pane's to clear. */}
+          server's record rather than this card's to clear. */}
       <Picker
         id={`${props.role}-pairing`}
         options={pairing.pairings(props.saved)}

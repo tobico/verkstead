@@ -12,11 +12,13 @@
 //! should not throw away what the pane it came from had drawn.
 //!
 //! Which Event is open is held here rather than in the Timeline, because it is
-//! what the third pane is *about*: with none open the pane says what the
-//! Conversation is, and with one open it shows that Event's full self. The
-//! selection is not in the URL — an Event opened is a place in a page rather
-//! than a page, and a Conversation whose Timeline has moved on is not one to
-//! restore a scroll position into.
+//! what the third pane is *about*: the pane is that Event's full self and
+//! nothing else, so with none open it is bare paper. What a Conversation *is* is
+//! not drawn there — the setup it needs is on the Brief card, where it is used —
+//! and the way on to an empty pane is not offered, so a narrow window can only
+//! walk into the pane by opening something. The selection is not in the URL —
+//! an Event opened is a place in a page rather than a page, and a Conversation
+//! whose Timeline has moved on is not one to restore a scroll position into.
 
 import { useNavigate, useParams } from "@solidjs/router";
 import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
@@ -34,7 +36,6 @@ import { useReading } from "../freshness";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
-import { Details } from "./Details";
 import { Evidence } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
@@ -105,6 +106,14 @@ export function Workbench(): JSX.Element {
   /// Which Timeline Event the details pane is showing, where one is open.
   const [event, setEvent] = createSignal<number | null>(null);
 
+  /// Closing whatever is open, which empties the pane — so on a narrow window it
+  /// is also the way back out of it. Harmless on a wide one, where all three
+  /// panes are drawn and `data-pane` means nothing.
+  const close = () => {
+    setEvent(null);
+    setPane("timeline");
+  };
+
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
   /// nothing.
@@ -125,8 +134,8 @@ export function Workbench(): JSX.Element {
   );
 
   /// The Event the details pane is showing, where it is one that has a full
-  /// self to show. An id whose Event has gone shows the Conversation instead,
-  /// which is what the pane says when nothing is open.
+  /// self to show. An id whose Event has gone leaves the pane empty, which is
+  /// what it is when nothing is open at all.
   ///
   /// Five kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
@@ -236,20 +245,12 @@ export function Workbench(): JSX.Element {
       </section>
 
       <section class="pane details-pane" aria-label="Details">
-        <Show
-          when={conversation.data}
-          fallback={<p class="empty">Nothing to show yet.</p>}
-        >
+        {/* Nothing at all where nothing is open, which on a wide window is a
+            blank column beside the record and on a narrow one is a level there
+            is no way in to. */}
+        <Show when={conversation.data}>
           {(conversation) => (
-            <Show
-              when={opened(conversation())}
-              fallback={
-                <Details
-                  conversation={conversation()}
-                  back={() => setPane("timeline")}
-                />
-              }
-            >
+            <Show when={opened(conversation())}>
               {(open) => (
                 <Switch>
                   <Match when={outputIn(open())}>
@@ -266,7 +267,7 @@ export function Workbench(): JSX.Element {
                       <Asked
                         asked={asked()}
                         back={() => setPane("timeline")}
-                        close={() => setEvent(null)}
+                        close={close}
                       />
                     )}
                   </Match>
@@ -276,7 +277,7 @@ export function Workbench(): JSX.Element {
                         conversation={conversation()}
                         commit={commit()}
                         back={() => setPane("timeline")}
-                        close={() => setEvent(null)}
+                        close={close}
                       />
                     )}
                   </Match>
@@ -285,7 +286,7 @@ export function Workbench(): JSX.Element {
                       <Evidence
                         stopped={stopped()}
                         back={() => setPane("timeline")}
-                        close={() => setEvent(null)}
+                        close={close}
                       />
                     )}
                   </Match>
@@ -295,7 +296,7 @@ export function Workbench(): JSX.Element {
                         conversation={conversation()}
                         opened={opened()}
                         back={() => setPane("timeline")}
-                        close={() => setEvent(null)}
+                        close={close}
                       />
                     )}
                   </Match>

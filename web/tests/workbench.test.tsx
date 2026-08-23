@@ -701,7 +701,6 @@ describe("the adoption page", () => {
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
     await drawn(container, ".adoption");
-    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
@@ -764,8 +763,7 @@ describe("the adoption page", () => {
       ),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
-    fireEvent.input(screen.getByLabelText("Base commit"), {
+    fireEvent.input(await waitFor(() => screen.getByLabelText("Base commit")), {
       target: { value: elsewhere.base_commit },
     });
     fireEvent.click(screen.getByRole("button", { name: "Record" }));
@@ -1047,23 +1045,67 @@ describe("writing the brief", () => {
   });
 });
 
-describe("a conversation's details", () => {
-  it("shows the repo the work is in, without offering to change it", async () => {
+/// Setting a conversation up: what has to be settled before anything will run
+/// it, drawn under the brief it belongs to.
+describe("a conversation's setup", () => {
+  /// The brief is the card's headline and the setup follows it, because setting
+  /// the work up and kicking it off are one act and both happen in the record.
+  it("stands on the brief card, under the brief itself", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    const setup = await drawn(container, ".timeline-event > .brief .conversation-setup");
 
-    const facts = container.querySelector(".conversation-facts")!;
-    expect(facts.querySelector(".repo")!.textContent).toBe(OPEN.repo.name);
-    expect(facts.querySelector(".path")!.textContent).toBe(OPEN.repo.path);
-    expect(facts.querySelector(".state")!.textContent).toBe(OPEN.state);
+    expect(setup.querySelector(".branch-name")).toBeTruthy();
+    expect(setup.querySelector(".base-commit")).toBeTruthy();
+    expect(setup.querySelector(".conversation-profiles")).toBeTruthy();
+
+    // Under the words rather than over them: the brief is what the card is.
+    const body = container.querySelector(".brief .brief-body")!;
+    expect(
+      body.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// Branch, base and both pairings freeze server-side when grilling starts, so
+  /// past that moment there is nothing here that could be changed — and nothing
+  /// is drawn rather than drawn disabled.
+  it("is gone entirely once the grilling has started", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".timeline-event > .brief");
+
+    expect(container.querySelector(".conversation-setup")).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base commit")).toBeNull();
+    expect(screen.queryByLabelText("Grilling")).toBeNull();
+  });
+
+  /// What the conversation is attached to and where it has got to were three
+  /// read-only lines in a pane that no longer exists. The record tells that
+  /// story, so they are drawn nowhere at all.
+  it("shows the repo, the worktree path and the state nowhere", async () => {
+    theWorkbenchWith({
+      state: "Grilling",
+      worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, ".timeline-event > .brief");
+
+    expect(container.querySelector(".conversation-facts")).toBeNull();
+    expect(container.querySelector(".conversation-worktree")).toBeNull();
+    expect(container.textContent).not.toContain(OPEN.repo.path);
+    expect(container.textContent).not.toContain(
+      "/var/lib/verkstead/worktrees/verkstead-open",
+    );
   });
 
   it("offers the branch name the server prefilled, and sends a new one", async () => {
     const fetching = theWorkbench(json("Renamed"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await waitFor(() => screen.getByLabelText("Branch"));
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
@@ -1081,7 +1123,7 @@ describe("a conversation's details", () => {
   it("says why a branch name was refused, in words", async () => {
     theWorkbench(json("NotABranchName"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await waitFor(() => screen.getByLabelText("Branch"));
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "two..dots" },
@@ -1094,7 +1136,7 @@ describe("a conversation's details", () => {
   it("shows the base commit that was recorded, and sends a new one", async () => {
     const fetching = theWorkbench(json("Recorded"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await waitFor(() => screen.getByLabelText("Base commit"));
 
     const field = screen.getByLabelText("Base commit") as HTMLInputElement;
     expect(field.value).toBe(OPEN.base_commit);
@@ -1115,7 +1157,7 @@ describe("a conversation's details", () => {
   it("takes the override away when the field is emptied", async () => {
     const fetching = theWorkbench(json("Recorded"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await waitFor(() => screen.getByLabelText("Base commit"));
 
     fireEvent.input(screen.getByLabelText("Base commit"), {
       target: { value: "" },
@@ -1139,7 +1181,7 @@ describe("a conversation's details", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await waitFor(() => screen.getByLabelText("Base commit"));
 
     expect((screen.getByLabelText("Base commit") as HTMLInputElement).value).toBe(
       "",
@@ -1377,17 +1419,34 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("timeline"),
     );
 
-    // The Timeline itself is a fetch behind the URL, and the way on to the
-    // details is drawn with it.
+    // The third level is the open Event's own, and nothing is open: there is
+    // nothing to page into, so nothing offers to.
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
-    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
+    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    expect(frame(container).dataset.pane).toBe("conversations");
+  });
+
+  /// So walking in to the third level is opening something, and the way forward
+  /// is what stands afterwards: it is drawn for a selection rather than for a
+  /// conversation.
+  it("walks on to the details by opening an event, and back out again", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, ".timeline-event .agent-output");
+    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    fireEvent.click(output);
     expect(frame(container).dataset.pane).toBe("details");
 
     fireEvent.click(screen.getByRole("button", { name: "← Timeline" }));
     expect(frame(container).dataset.pane).toBe("timeline");
 
-    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
-    expect(frame(container).dataset.pane).toBe("conversations");
+    // Still open, so the way forward is there to be taken again.
+    fireEvent.click(screen.getByRole("button", { name: "Details →" }));
+    expect(frame(container).dataset.pane).toBe("details");
   });
 
   /// Opening a Conversation is a navigation, and Back is a way of changing which
@@ -2900,50 +2959,6 @@ describe("aborting a conversation", () => {
   });
 });
 
-describe("a conversation's worktree", () => {
-  it("says where the work is being done", async () => {
-    theGrilling();
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const path = await drawn(container, ".conversation-worktree .path");
-
-    expect(path.textContent).toBe(GRILLING.worktree!.path);
-    expect(path.classList).not.toContain("missing");
-  });
-
-  /// A worktree deleted by hand should read as a conversation with a problem
-  /// while the human is looking at it, rather than as an obscure failure from
-  /// whatever next tries to work in it.
-  it("says so when the directory has gone from under it", async () => {
-    theWorkbenchWith({
-      state: "Grilling",
-      ready_to_grill: false,
-      worktree: {
-        path: "/var/lib/verkstead/worktrees/verkstead-gone",
-        missing: true,
-      },
-    });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const path = await drawn(container, ".conversation-worktree .path");
-
-    expect(path.classList).toContain("missing");
-    expect(screen.getByText(/This directory is gone/)).toBeTruthy();
-  });
-
-  it("says nothing at all before there is one", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    // Waited on the details pane itself rather than on the branch, which by now
-    // names both the sidebar row and the timeline's heading.
-    await drawn(container, ".conversation-profiles");
-
-    expect(OPEN.worktree).toBeNull();
-    expect(container.querySelector(".conversation-worktree")).toBeNull();
-  });
-});
-
 /// The two Question Sets the grilling conversation's session put to the human:
 /// one answered, and one still waiting. Both are needed, because what a row
 /// draws turns on which — and it is the waiting one the human is offered a sheet
@@ -3289,9 +3304,10 @@ describe("a commit on the timeline", () => {
     expect(row.textContent).not.toContain("Approve");
   });
 
-  /// The diff belongs to the pane, and what the conversation is comes back
-  /// when it is closed.
-  it("goes back to the conversation's details when it is closed", async () => {
+  /// The pane is the open Event and nothing else, so closing the diff leaves it
+  /// bare — and a narrow window walks back out to the record with it, there
+  /// being no level left to be on.
+  it("empties the pane and walks back out when it is closed", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
@@ -3300,8 +3316,10 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, ".details-pane .close-event"));
 
-    await drawn(container, ".details-pane .conversation-facts");
-    expect(container.querySelector(".details-pane .diff-files")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Details").textContent).toBe(""),
+    );
+    expect(frame(container).dataset.pane).toBe("timeline");
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
@@ -4132,9 +4150,9 @@ describe("the pinned pull request", () => {
   /// Nudge about it.
   it("asks GitHub nothing until it is opened", async () => {
     const fetching = theWrapping();
-    mount(`/conversations/${WRAPPING.id}`);
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Details" }));
+    await drawn(container, ".pinned .pull-request");
 
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBe(0);
   });

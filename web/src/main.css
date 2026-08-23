@@ -1522,32 +1522,24 @@ main:has(.workbench) {
   max-width: var(--measure);
 }
 
-/* What a conversation is, beside what has happened to it: the repo it is
-   attached to, and where it has got to. Read rather than changed — a
-   conversation is attached to a repo when it is started. */
-.conversation-facts {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.35rem 1rem;
-  margin: 0 0 1.5rem;
-  font-size: 0.9rem;
+/* What is still the human's to change while the brief is a draft, under the
+   brief it belongs to: the branch, the base commit and the two pairings. Ruled
+   off from the prose above it, because the brief is the card's headline and this
+   is the setup that follows it — and gone entirely once grilling starts, which
+   is why nothing here is ever drawn disabled. */
+.conversation-setup {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--edge);
 }
 
-.conversation-facts dt {
-  color: var(--ink-soft);
+/* The gap under the last of them is the card's own padding, rather than that
+   plus the one every section keeps below itself. */
+.conversation-setup > :last-child {
+  margin-bottom: 0;
 }
 
-.conversation-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.conversation-facts .path {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
-/* And what is still the human's to change while it drafts: the branch name and
-   the base commit, each a field with the button that records it. */
+/* Each a field with the button that records it. */
 .branch-name,
 .base-commit {
   margin-bottom: 1.5rem;
@@ -1608,7 +1600,7 @@ main:has(.workbench) {
   margin-bottom: 1.5rem;
 }
 
-.conversation-profiles h2 {
+.conversation-profiles h3 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
@@ -1653,36 +1645,6 @@ main:has(.workbench) {
    the two fields above, so it is stated rather than inferred. */
 .readiness.ready {
   color: var(--added);
-}
-
-/* Where the work is actually being done, once there is somewhere. A fact rather
-   than a field: the path is Verkstead's to choose. */
-.conversation-worktree {
-  margin-bottom: 1.5rem;
-}
-
-.conversation-worktree h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.1rem;
-}
-
-.conversation-worktree .path {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-
-/* A worktree that has gone from under Verkstead. Struck through rather than
-   merely annotated, so the path reads as the thing that is wrong with it. */
-.conversation-worktree .path.missing {
-  color: var(--ink-soft);
-  text-decoration: line-through;
-}
-
-.conversation-worktree .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
 }
 
 /* A move: the conversation changing hands. A line rather than a card, because

@@ -90,6 +90,12 @@ _Avoid_: prompt, instructions, plugin, workflow file
 The editable markdown document a Conversation starts from, and its first
 Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
 rather than editing the frozen one.
+
+While it is still a draft its card carries the whole of the Conversation's
+setup under it — the branch, the base commit, both Pairings and the readiness
+verdict — because setting the work up and kicking it off are one act, and both
+belong where the work is read. Every one of those freezes at the same moment
+the Brief does, so once grilling starts the card is the Brief alone.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:

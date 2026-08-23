@@ -14,7 +14,8 @@
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. The Brief has
 //! no full self beyond what is already drawn, so it is the one Event nothing
-//! opens.
+//! opens — and it is the one that carries a Conversation's setup instead, while
+//! there is still a draft to set up.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
@@ -64,6 +65,7 @@ import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
+import { Setup } from "./Setup";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -93,10 +95,9 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  NoGrillingProfile:
-    "Choose a grilling profile and model first, in the details pane.",
+  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
-    "Choose an implementation profile and model first, in the details pane.",
+    "Choose an implementation profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the grilling starts from.",
@@ -191,9 +192,16 @@ export function Timeline(props: {
             )}
           </Show>
           <Actions conversation={props.conversation} />
-          <button type="button" class="pane-forward" onClick={props.details}>
-            Details →
-          </button>
+          {/* And the way on to the next level, drawn only where there is a next
+              level to reach: the details pane holds the selected Event and
+              nothing else, so with nothing selected it is bare paper and a
+              control that paged into it would page into nothing. Hidden by the
+              stylesheet anyway where all three panes are on screen at once. */}
+          <Show when={props.selected !== null}>
+            <button type="button" class="pane-forward" onClick={props.details}>
+              Details →
+            </button>
+          </Show>
         </div>
 
         <Pinned
@@ -211,11 +219,7 @@ export function Timeline(props: {
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
-                    <Brief
-                      id={props.conversation.id}
-                      brief={brief()}
-                      adopting={props.conversation.adopting !== null}
-                    />
+                    <Brief conversation={props.conversation} brief={brief()} />
                   )}
                 </Match>
                 <Match when={"Moved" in event && event.Moved}>
@@ -335,15 +339,15 @@ function ManualTaskComposer(props: {
   const [picked, setPicked] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
 
-  /// The profile list, read here rather than passed down, the way the details
-  /// pane's pickers read it: the control is whole wherever it is drawn.
+  /// The profile list, read here rather than passed down, the way the setup's
+  /// pickers read it: the control is whole wherever it is drawn.
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
 
-    // And the same merge, for the same picker — see the details pane. This one
-    // sits under a half-typed instruction while a session is talking above it,
-    // which is the loudest a Nudge ever gets.
+    // And the same merge, for the same picker — see the setup on the brief
+    // card. This one sits under a half-typed instruction while a session is
+    // talking above it, which is the loudest a Nudge ever gets.
     freshness: { reconcile: "id" },
   }));
 
@@ -412,9 +416,9 @@ function ManualTaskComposer(props: {
           />
         </div>
 
-        {/* Drawn only once the list is here, the way the details pane's pickers
-            are: a select whose value is set before its options exist is a
-            select showing nothing. */}
+        {/* Drawn only once the list is here, the way the setup's pickers are:
+            a select whose value is set before its options exist is a select
+            showing nothing. */}
         <div class="manual-task-profile">
           <label for="manual-task-pairing">Run it as</label>
           <Show
@@ -428,9 +432,9 @@ function ManualTaskComposer(props: {
             }
           >
             {(saved) => (
-              /* A [`Picker`] rather than a `<select>`, the way the details
-                 pane's pickers are: what this shows and what the press below
-                 runs the task as are the same pairing, list or no list — see
+              /* A [`Picker`] rather than a `<select>`, the way the setup's
+                 pickers are: what this shows and what the press below runs the
+                 task as are the same pairing, list or no list — see
                  `src/picking.tsx`. */
               <Picker
                 id="manual-task-pairing"
@@ -914,10 +918,9 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         <Show
           when={props.conversation.ready_to_grill}
           fallback={
-            // Deliberately not the details pane's wording. That one is a
-            // verdict on the conversation, drawn where the profiles are fixed;
-            // this one stands in for the button, and says what would make it
-            // appear.
+            // Deliberately not the setup's wording. That one is a verdict on
+            // the conversation, drawn where the profiles are fixed; this one
+            // stands in for the button, and says what would make it appear.
             <p class="note">
               Write the brief and choose both agent profiles, and the grilling
               can start.
@@ -1026,16 +1029,22 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 /// Read as the server rendered it and written as it was typed. The two are one
 /// field's worth of markdown either way, and the Brief is the one document on
 /// this wire that travels both ways for exactly that reason.
+///
+/// The setup rides under it while the Conversation is still drafting — the
+/// branch, the base commit and the two pairings — because setting the work up
+/// and kicking it off are one act, and this is where it is kicked off. Once
+/// grilling starts the card is the Brief alone: everything under it froze at
+/// that moment, so there is nothing there to draw.
 function Brief(props: {
-  id: number;
+  conversation: ConversationView;
   brief: BriefEvent;
+}): JSX.Element {
+  const queries = useQueryClient();
 
   /// Whether this conversation is adopting a roadmap, in which case the brief
   /// is nobody here to write: it is the stage brief, and it arrives when the
   /// stage is adopted. So there is no editor, and nothing to open one on.
-  adopting: boolean;
-}): JSX.Element {
-  const queries = useQueryClient();
+  const adopting = () => props.conversation.adopting !== null;
 
   // Whether the Brief is being written rather than read. Its own signal and not
   // "is there a draft": an empty Brief is a perfectly ordinary thing to open the
@@ -1060,7 +1069,7 @@ function Brief(props: {
   };
 
   const save = useMutation(() => ({
-    mutationFn: (markdown: string) => saveBrief(props.id, markdown),
+    mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
     onSuccess: (outcome: BriefSaved) => {
       if (outcome !== "Saved") {
         // The draft stands: it is the only copy of what was written, and the
@@ -1079,7 +1088,7 @@ function Brief(props: {
     <article class="brief">
       <div class="event-head">
         <h2>Brief</h2>
-        <Show when={!editing() && !props.adopting}>
+        <Show when={!editing() && !adopting()}>
           <button type="button" class="edit-brief" onClick={write}>
             Edit
           </button>
@@ -1094,7 +1103,7 @@ function Brief(props: {
             fallback={
               <p class="empty">
                 <Show
-                  when={props.adopting}
+                  when={adopting()}
                   fallback={
                     <>
                       Nothing written yet — this is what the grilling starts
@@ -1150,6 +1159,13 @@ function Brief(props: {
             </p>
           </Show>
         </form>
+      </Show>
+
+      {/* Under the brief, and only while the brief is still a draft: the branch,
+          the base commit and the two pairings all freeze when grilling starts,
+          so past that moment there is nothing here that could be changed. */}
+      <Show when={props.conversation.state === "Draft"}>
+        <Setup conversation={props.conversation} />
       </Show>
     </article>
   );
