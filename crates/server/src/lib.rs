@@ -502,10 +502,11 @@ pub async fn run(config: Config) -> Result<()> {
     // session starts.
     let handoffs = handoffs::Handoffs::under(&data_dir);
 
-    // And where the credentials a session runs with are read from, which is the
-    // same directory again. Nothing is read here: the files are read as each
-    // session is spawned, so what the human saves through the settings page
-    // applies without a restart — see [`settings`].
+    // And where the credentials are read from, which is the same directory
+    // again — both the ones a session runs with and the one the server's own
+    // `gh` authenticates as. Nothing is read here: the files are read as each
+    // session is spawned and as each `gh` is run, so what the human saves
+    // through the settings page applies without a restart — see [`settings`].
     let settings = settings::Settings::in_data_dir(&data_dir);
 
     let pool = open_database(&config.database()).await?;
@@ -538,11 +539,12 @@ pub async fn run(config: Config) -> Result<()> {
                 binds,
                 skills,
                 handoffs,
-                settings,
+                settings.clone(),
             ),
-            // Whatever `gh` this machine has, logged in as whoever it is logged
-            // in as: Verkstead keeps no token of its own.
-            Gh::on_path(),
+            // Whatever `gh` this machine has, authenticating as the configured
+            // token — the same one the sessions get, so one token is the whole
+            // of Verkstead's GitHub auth.
+            Gh::on_path().authenticated_by(settings),
         ),
     )
     .await

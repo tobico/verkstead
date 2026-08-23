@@ -16,7 +16,7 @@ database at a fixed name inside.
 - [x] 01: One Data Directory — [details](01-data-directory.md)
 - [x] 02: The token reaches the sandbox — [details](02-token-into-sandbox.md)
 - [x] 03: Git wired by environment — [details](03-git-by-environment.md)
-- [ ] 04: The server's own gh uses the token — [details](04-server-gh-token.md)
+- [x] 04: The server's own gh uses the token — [details](04-server-gh-token.md)
 - [ ] 05: The settings API — [details](05-settings-api.md)
 - [ ] 06: The /settings page — [details](06-settings-page.md)
 - [ ] 07: Fold repos and profiles into /settings — [details](07-fold-in-repos-profiles.md)

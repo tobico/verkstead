@@ -202,7 +202,11 @@ flowchart LR
   so the prompt names the skill by path above the Brief and the skill carries
   the ask instruction in its own text.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
-  lists and comments), reusing existing auth. Agents keep using `gh` inside
+  lists and comments), authenticating as the same configured token the sessions
+  get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
+  the moment of the call so a rotation applies without a restart, and unset
+  where nothing is configured so the host's own login still stands (*refined
+  2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
   the sandbox for push/PR as today.
 - **Full Captures** are stored per session; the timeline event summarizes
   (line count + latest statement), the details pane shows everything.

@@ -60,13 +60,16 @@ git_author:
 ```
 
 Every session started after that gets the token as `GH_TOKEN`, which `gh`
-honours without being told to, and gets git configured through the
+honours without being told to — as does the server's own `gh`, the one that
+reads a pull request's checks, commits and comments onto a Timeline — and gets
+git configured through the
 environment — the author, `gh auth git-credential` as the credential helper for
 GitHub, and SSH GitHub remotes rewritten to HTTPS so a `git push` inside
 authenticates with the token. There is no file to write and nothing to log in
 to inside a sandbox. With no token — no file, an empty one, one that will not
-parse — sessions start anyway and `gh` inside says it is not logged in; with no
-author, git inside asks to be told who you are.
+parse — sessions start anyway and `gh` inside says it is not logged in, and the
+server's own `gh` falls back to whatever login the host has; with no author, git
+inside asks to be told who you are.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
 on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory

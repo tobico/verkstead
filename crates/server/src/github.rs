@@ -6,9 +6,16 @@
 //! GitHub what happened afterwards: which PR the branch has, what is on it, and
 //! what has been said about it.
 //!
-//! It reuses whatever auth the host already has. There is no token store here
-//! and no GitHub App: `gh` on the machine Verkstead runs on is logged in as
-//! somebody, and that is the account Verkstead reads as.
+//! It authenticates as the configured token — the one in `secrets.yaml` that
+//! every session's sandbox gets too — handed to `gh` as `GH_TOKEN` in the
+//! environment of the call. The file is read at the moment of the call rather
+//! than held from startup, so a token saved or rotated through the settings
+//! page reaches the next `gh` without the server being restarted.
+//!
+//! With nothing configured the call is made as it always was, and falls back to
+//! whatever login the host's `gh` has. Which may be none, and that is
+//! [`Trouble::NotLoggedIn`]: an answer for the human, naming the settings page
+//! it is fixed on.
 //!
 //! Everything it asks can fail for ordinary reasons — no `gh` on the PATH, an
 //! account that is not logged in, a repository with no remote, a branch with no
@@ -27,6 +34,7 @@ use std::process::{Command, Stdio};
 
 use serde::Deserialize;
 
+use crate::settings::Settings;
 use crate::store;
 
 /// The host's `gh`, as Verkstead runs it.
@@ -36,6 +44,11 @@ pub struct Gh {
     /// argv rather than a path, so a test can stand a shell script where `gh`
     /// goes.
     program: Vec<String>,
+
+    /// Where the configured token is read from, or `None` where this `Gh` has
+    /// no settings behind it — a router watching nothing has no Data Directory
+    /// to read one out of, and nothing on it ever asks GitHub anything.
+    settings: Option<Settings>,
 }
 
 impl Gh {
@@ -46,7 +59,34 @@ impl Gh {
 
     /// The same, with something else where `gh` goes — see [`Gh::program`].
     pub fn running(program: Vec<String>) -> Gh {
-        Gh { program }
+        Gh {
+            program,
+            settings: None,
+        }
+    }
+
+    /// And the same again, authenticating as whatever token `settings` holds at
+    /// the moment of each call.
+    ///
+    /// The settings rather than the token, and deliberately: a token read here
+    /// would be the one the server started with, where the whole point of
+    /// configuring it through a page is that saving a new one takes effect
+    /// without a restart.
+    pub fn authenticated_by(self, settings: Settings) -> Gh {
+        Gh {
+            settings: Some(settings),
+            ..self
+        }
+    }
+
+    /// The token to authenticate as, read now — `None` where none is
+    /// configured, which leaves the call to whatever login the host's `gh` has.
+    fn token(&self) -> Option<String> {
+        self.settings
+            .as_ref()?
+            .secrets()
+            .github_token()
+            .map(str::to_owned)
     }
 
     /// Run it inside `repo` and take its stdout, or say why there is none.
@@ -59,16 +99,27 @@ impl Gh {
             .split_first()
             .expect("a Gh is built with at least the program to run");
 
-        let output = match Command::new(program)
+        let mut command = Command::new(program);
+
+        command
             .args(before)
             .args(args)
             .current_dir(repo)
             // Nothing here is interactive: a `gh` that stopped to ask for a
             // password would be a server thread waiting on a terminal nobody is
             // at.
-            .stdin(Stdio::null())
-            .output()
-        {
+            .stdin(Stdio::null());
+
+        // What `gh` authenticates as, which it reads from here without being
+        // told to. Set only where there is one to set, for the reason a
+        // sandbox's is — see [`crate::sandbox`]: `GH_TOKEN` present and empty is
+        // a login `gh` fails on obscurely, and leaving it unset is what lets a
+        // Verkstead with nothing configured go on using the host's own login.
+        if let Some(token) = self.token() {
+            command.env("GH_TOKEN", token);
+        }
+
+        let output = match command.output() {
             Ok(output) => output,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(Trouble::NoGh);
@@ -153,7 +204,8 @@ impl Trouble {
                     .to_owned()
             }
             Trouble::NotLoggedIn => {
-                "this machine's `gh` is not logged in, so Verkstead cannot ask GitHub anything"
+                "this machine's `gh` is not logged in and no GitHub token is configured, \
+                 so Verkstead cannot ask GitHub anything — put one in on the settings page"
                     .to_owned()
             }
             Trouble::NoRemote => {
@@ -753,6 +805,11 @@ mod tests {
             pull_request(&gh, dir.path(), "rate-limiting"),
             Err(Trouble::NotLoggedIn),
         );
+        assert!(
+            Trouble::NotLoggedIn.why().contains("settings page"),
+            "and says where the token goes: {}",
+            Trouble::NotLoggedIn.why(),
+        );
 
         let (dir, gh) = stub(
             "",
@@ -1109,5 +1166,140 @@ mod tests {
             comments(&gh, dir.path(), 41),
             Err(Trouble::Refused("HTTP 404: Not Found".to_owned())),
         );
+    }
+    /// A `gh` that answers every ask with the `GH_TOKEN` it was run with, put
+    /// where that answer has a word to spare: the pull request's title, the
+    /// check's name, the comment's author. `unset` where it was run with none.
+    ///
+    /// The whole of what this module does with a token is hand it to a child
+    /// process, so a child that says what it was handed is the only witness
+    /// worth having.
+    fn stub_saying_its_token() -> (tempfile::TempDir, Gh) {
+        let dir = tempfile::tempdir().unwrap();
+
+        (
+            dir,
+            Gh::running(vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                // `$0` is the script's own name, so Verkstead's arguments are
+                // `$1` onwards: `pr view <selector> --json <fields>`, or the
+                // `api` call the comments on the diff come from.
+                r#"token="${GH_TOKEN-unset}"
+                   if [ "$1" = api ]; then printf '[]'; exit 0; fi
+                   case "$5" in
+                     number,title,url)
+                       printf '{"number":41,"title":"%s","url":"u"}' "$token" ;;
+                     statusCheckRollup)
+                       printf '{"statusCheckRollup":[{"name":"%s","status":"COMPLETED","conclusion":"SUCCESS"}]}' "$token" ;;
+                     comments,reviews)
+                       printf '{"comments":[{"id":"IC_1","url":"u","author":{"login":"%s"},"body":"b","createdAt":"t"}],"reviews":[]}' "$token" ;;
+                   esac"#
+                    .to_owned(),
+                "gh".to_owned(),
+            ]),
+        )
+    }
+
+    /// The settings files in a directory of their own, with `secrets.yaml`
+    /// written as the settings page would write it.
+    fn configured(yaml: Option<&str>) -> (tempfile::TempDir, Settings) {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        if let Some(yaml) = yaml {
+            std::fs::write(settings.secrets_path(), yaml).unwrap();
+        }
+
+        (dir, settings)
+    }
+
+    /// One token in `secrets.yaml` is the whole of Verkstead's GitHub auth:
+    /// every host-side ask runs as it, so a machine with no `gh auth login`
+    /// anywhere on it still reads pull requests, checks and comments.
+    #[test]
+    fn the_configured_token_authenticates_the_views_the_checks_and_the_comments() {
+        let (repo, gh) = stub_saying_its_token();
+        let (_data_dir, settings) = configured(Some("github_token: ghp_theconfiguredone\n"));
+        let gh = gh.authenticated_by(settings);
+
+        assert_eq!(
+            pull_request(&gh, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            "ghp_theconfiguredone",
+        );
+        assert_eq!(
+            checks(&gh, repo.path(), 41).unwrap()[0].name,
+            "ghp_theconfiguredone",
+        );
+        assert_eq!(
+            comments(&gh, repo.path(), 41).unwrap()[0].author,
+            "ghp_theconfiguredone",
+        );
+    }
+
+    /// And it is read at the moment of the call rather than held from startup,
+    /// so a token saved or rotated through the settings page is what the next
+    /// `gh` runs as — with nothing restarted.
+    #[test]
+    fn a_token_saved_after_startup_is_what_the_next_gh_runs_as() {
+        let (repo, gh) = stub_saying_its_token();
+        let (_data_dir, settings) = configured(Some("github_token: the-first\n"));
+        let gh = gh.authenticated_by(settings.clone());
+
+        assert_eq!(
+            pull_request(&gh, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            "the-first",
+        );
+
+        std::fs::write(settings.secrets_path(), "github_token: the-second\n").unwrap();
+
+        assert_eq!(
+            pull_request(&gh, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            "the-second",
+        );
+    }
+
+    /// With nothing configured, nothing is set: the call is made as it always
+    /// was and falls back to whatever login the host's `gh` has.
+    ///
+    /// Against what this test process itself holds, because that is what a
+    /// child inherits — the claim is that Verkstead sets no `GH_TOKEN` of its
+    /// own here, not that the machine running the tests has none.
+    #[test]
+    fn with_no_token_configured_the_host_gh_keeps_its_own_login() {
+        let inherited = std::env::var("GH_TOKEN").unwrap_or_else(|_| "unset".to_owned());
+
+        // A `Gh` with no settings behind it at all, which is every router that
+        // has no Data Directory to read them out of.
+        let (repo, gh) = stub_saying_its_token();
+
+        assert_eq!(
+            pull_request(&gh, repo.path(), "rate-limiting")
+                .unwrap()
+                .title,
+            inherited,
+        );
+
+        // And the three ways settings say nothing: no file, an empty one, and
+        // one that will not parse.
+        for yaml in [None, Some(""), Some("github_token: [oh\n")] {
+            let (repo, gh) = stub_saying_its_token();
+            let (_data_dir, settings) = configured(yaml);
+            let gh = gh.authenticated_by(settings);
+
+            assert_eq!(
+                pull_request(&gh, repo.path(), "rate-limiting")
+                    .unwrap()
+                    .title,
+                inherited,
+                "with secrets.yaml {yaml:?}",
+            );
+        }
     }
 }
