@@ -79,6 +79,15 @@ pub struct Pace {
     /// Ending one early kills a working session silently, and a minute of
     /// nothing is the shortest silence an agent still at work reliably breaks.
     pub manual: Duration,
+
+    /// And how often every Conversation is looked over for one that has
+    /// Stalled — see [`crate::stalls`].
+    ///
+    /// Here beside the rest for [`Pace::checks`]s reason rather than because a
+    /// sweep is anything the runner does: a caller standing a server up chooses
+    /// how often Verkstead looks at things, and a stall is one of the things it
+    /// looks for.
+    pub stalls: Duration,
 }
 
 impl Default for Pace {
@@ -88,6 +97,7 @@ impl Default for Pace {
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
             manual: Duration::from_secs(60),
+            stalls: crate::stalls::SWEPT_EVERY,
         }
     }
 }
@@ -360,6 +370,19 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         // see [`crate::manual::retried`].
         store::Step::Manual => {
             return crate::manual::retried(state, conversation_id, note).await;
+        }
+        // Nor is this one, and it is the one that is not a session at all: a
+        // stall is raised about a Conversation nothing was driving, so what a
+        // retry means is *start driving it again*, which the state it is in
+        // decides and no step word can. Recorded and nothing launched until the
+        // relaunches land.
+        store::Step::Stalled => {
+            tracing::info!(
+                conversation_id,
+                "a stalled Conversation was retried, and relaunching what drives one is not \
+                 written yet"
+            );
+            return;
         }
     };
 

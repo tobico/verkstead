@@ -168,13 +168,22 @@ where
     });
 }
 
-/// Start watching every Conversation that was already wrapping up.
+/// Start watching every Conversation that was already wrapping up, and say when
+/// it is done.
 ///
 /// What a restarting server does. A pull request goes on being built while
 /// Verkstead is down, and a review is a session that does not survive the process
 /// that started it — so a server that came back up and watched nothing would
 /// leave a Conversation wrapping for ever with nobody having said so.
-pub(crate) fn resume(state: &AppState) {
+///
+/// The task is handed back rather than let go, because something waits on it:
+/// the stall sweep judges a Conversation by whether anything is registered as
+/// driving it, and every wrap-up taken up here registers as it is started — so a
+/// sweep that looked first would call every one of them stalled. See
+/// [`crate::stalls::sweeping`].
+#[must_use = "the sweep waits for the wrap-ups to be taken up before it judges \
+              whether anything is driving them"]
+pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
     let state = state.clone();
 
     tokio::spawn(async move {
@@ -197,7 +206,7 @@ pub(crate) fn resume(state: &AppState) {
 
             watching(&state, conversation.id);
         }
-    });
+    })
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.

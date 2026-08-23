@@ -398,6 +398,24 @@ const BRISKLY: Pace = Pace {
     grace: Duration::from_millis(300),
     checks: Duration::from_millis(100),
     manual: Duration::from_millis(600),
+    // Longer than any of these run for, so that the sweep for a stalled
+    // Conversation is the one thing that never fires by itself here. Every one
+    // of these fixtures is a Conversation whose grilling session has printed and
+    // exited, which is a stall by every rule there is — so the tests that are
+    // about something else say nothing about it, and the ones that are about it
+    // keep [`SWEEPING`].
+    stalls: Duration::from_secs(600),
+};
+
+/// And the same at a pace that does look, for the tests that are about the
+/// looking.
+///
+/// A server sweeps every minute. What is being asked here is whether a
+/// Conversation nothing is driving is noticed while the server runs, and the
+/// number of seconds it waits before noticing is not part of the answer.
+const SWEEPING: Pace = Pace {
+    stalls: Duration::from_millis(100),
+    ..BRISKLY
 };
 
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
@@ -617,11 +635,22 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, gh).await
 }
 
+/// The same, on a server that sweeps for a stalled Conversation briskly enough
+/// to watch it do so — see [`SWEEPING`].
+async fn grilling_swept(stub: &str) -> Grilling {
+    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
+}
+
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
 async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
-    let bench = bench(spill, stub, gh).await;
+    grilling_at_pace(spill, stub, gh, BRISKLY).await
+}
+
+/// And the same again at a pace of the caller’s choosing.
+async fn grilling_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Grilling {
+    let bench = bench_at_pace(spill, stub, gh, pace).await;
     let app = &bench.app;
 
     let started: Started = post(
@@ -706,6 +735,13 @@ impl Bench {
 }
 
 async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
+    bench_at_pace(spill, stub, gh, BRISKLY).await
+}
+
+/// The same, at a pace of the caller’s choosing — which is what the tests about
+/// the stall sweep need, that being the one thing [`BRISKLY`] deliberately keeps
+/// slow.
+async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pace) -> Bench {
     let watched = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
@@ -732,7 +768,7 @@ async fn bench(spill: tempfile::TempDir, stub: &str, gh: &str) -> Bench {
         Skills::installed(state.path()).expect("this binary carries skills"),
         Handoffs::under(state.path()),
     )
-    .at_pace(BRISKLY);
+    .at_pace(pace);
 
     let app = router_running_sessions(
         pool,
@@ -2779,6 +2815,16 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+
+    // And it was never called a Conversation nothing was driving, which is the
+    // other half of taking one up: the sweep waits for the wrap-ups to be
+    // resumed before it judges anything, so a wrap-up under live watchers is
+    // exactly as healthy as it looks.
+    assert_eq!(
+        interruptions(&fixture.view().await),
+        Vec::<&InterruptionEvent>::new(),
+        "a wrap-up a restarting server took up again is not one standing still",
+    );
 }
 
 /// And what happens when `gh` cannot answer — no `gh`, no login, or a branch
@@ -5586,6 +5632,11 @@ async fn retrying_a_manual_task_runs_the_instruction_again_under_the_implementat
 /// anything — "check whether the retries are still capped" is answered by
 /// reading — so a clean exit is a clean exit, and there is nothing to put to the
 /// human about it.
+///
+/// What the Conversation is asked about afterwards is the Conversation: the
+/// grilling session died long ago, so the sweep that follows every manual task
+/// finds one nothing is driving. That is a different question from this one, and
+/// this one has no question in it.
 #[tokio::test]
 async fn a_manual_task_that_committed_nothing_is_not_something_to_ask_about() {
     let fixture = grilling(
@@ -5625,18 +5676,207 @@ async fn a_manual_task_that_committed_nothing_is_not_something_to_ask_about() {
     tokio::time::sleep(BRISKLY.manual * 4).await;
 
     let view = fixture.view().await;
-    assert_eq!(
-        interruptions(&view),
-        Vec::<&InterruptionEvent>::new(),
-        "an instruction may legitimately change nothing, and that is not a failure",
-    );
-    assert_eq!(
-        view.blocked_on, None,
-        "so there is nothing the human is being kept waiting by",
+    let asked = interruptions(&view);
+
+    assert!(
+        asked
+            .iter()
+            .all(|stopped| stopped.what != "doing what the manual task said"),
+        "an instruction may legitimately change nothing, and that is not a failure: {asked:?}",
     );
     assert_eq!(
         view.state,
         Lifecycle::Grilling,
         "and the Conversation is where it was",
+    );
+}
+
+/// A Conversation in a driven state with nothing driving it is **Stalled**, and
+/// the sweep is what says so.
+///
+/// The grilling session here has printed and exited, which is exactly the shape
+/// of the bug this is for: the Conversation still says it is being grilled,
+/// nothing is grilling it, and nothing on the page offers the human anything.
+/// What the sweep raises is an ordinary Interruption, so the ordinary Remedies
+/// become the way back out.
+#[tokio::test]
+async fn a_conversation_nothing_is_driving_is_asked_about_while_the_server_runs() {
+    let fixture = grilling_swept(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+    fixture.quiet().await;
+
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(
+        stalled.what, "grilling the work",
+        "what ought to have been happening, which for a stall is what the state says",
+    );
+    assert_eq!(
+        stalled.how,
+        "nothing is driving it: no session is running, and nothing is left to start one",
+        "and nothing failed, because nothing was ever launched",
+    );
+    assert!(
+        stalled.tail.contains("the grilling has nothing to say"),
+        "with the last thing anything said, which is where the reason usually is: {:?}",
+        stalled.tail,
+    );
+    assert_eq!(
+        stalled.settled, None,
+        "nobody has answered it, which is what makes it a question",
+    );
+
+    let view = fixture.view().await;
+    assert_eq!(
+        view.blocked_on,
+        Some(stalled.id),
+        "so the Conversation is blocked on the human, which is the whole point: a \
+         stall is precisely the condition that had no badge on it",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and it is still where it was — a stall is a condition an active state is \
+         in rather than a state of its own",
+    );
+
+    // Long enough for many more sweeps. At most one Interruption is open per
+    // Conversation, and a stall that goes on standing still is the same stall.
+    tokio::time::sleep(SWEEPING.stalls * 8).await;
+
+    assert_eq!(
+        interruptions(&fixture.view().await).len(),
+        1,
+        "a Conversation standing still for a while is one thing to answer, not one \
+         a minute",
+    );
+}
+
+/// And a Conversation left mid-run by a server that stopped flags as it comes
+/// back.
+///
+/// The case the sweep matters most for. No driver survives the process, so a
+/// restarted server holds no registrations at all — which is the truth about it,
+/// and means every Conversation nothing takes up again is one nothing is
+/// driving.
+#[tokio::test]
+async fn a_conversation_a_stopped_server_left_mid_run_flags_as_it_comes_back() {
+    let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+    fixture.quiet().await;
+
+    assert_eq!(
+        interruptions(&fixture.view().await),
+        Vec::<&InterruptionEvent>::new(),
+        "the server it started on sweeps too slowly to have looked, which is what \
+         makes the restart the thing being tested",
+    );
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(stalled.what, "grilling the work");
+    assert_eq!(stalled.settled, None);
+}
+
+/// A state nothing is supposed to be driving is never one standing still.
+///
+/// Draft and Direction are waiting on the human, Done is finished and Aborted is
+/// stopped. A sweep that flagged those would be asking the human about every
+/// Conversation they have ever had.
+#[tokio::test]
+async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_asked_about() {
+    let fixture = grilling_swept(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+    fixture.quiet().await;
+    fixture.stopped().await;
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+
+    let settled = interruptions(&fixture.view().await).len();
+
+    // Long enough for many sweeps over a Conversation that has stopped.
+    tokio::time::sleep(SWEEPING.stalls * 8).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Aborted,
+        "the work stopped where it was, which is not the same as standing still in it",
+    );
+    assert_eq!(
+        interruptions(&view).len(),
+        settled,
+        "so nothing more was raised about it: {:?}",
+        interruptions(&view),
+    );
+}
+
+/// A manual session ending is the other moment worth looking at, and it is
+/// looked at straight away rather than at the next sweep.
+///
+/// The human set it going by hand because the work was standing still. What they
+/// want to know when it stops is whether it is standing still again — and they
+/// submitted from a phone and walked away, so being asked is the only thing that
+/// reaches them.
+#[tokio::test]
+async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_now() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            printf 'the retries are still capped at five\n'
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_profile
+        .as_ref()
+        .expect("both Profiles are fixed before grilling starts")
+        .id;
+
+    assert_eq!(
+        interruptions(&view),
+        Vec::<&InterruptionEvent>::new(),
+        "this server sweeps too slowly to have looked, so what raises anything here \
+         is the manual task ending",
+    );
+
+    assert_eq!(
+        fixture
+            .manual("Check whether the retries are still capped.", profile)
+            .await,
+        ManualTaskStarted::Started,
+    );
+
+    let stalled = fixture.stopped().await;
+
+    assert_eq!(
+        stalled.what, "grilling the work",
+        "about the Conversation standing still rather than about the manual task, \
+         which did what it was asked",
+    );
+
+    let view = fixture.view().await;
+    assert_eq!(
+        manual_tasks(&view).len(),
+        1,
+        "and the instruction is on the record having been carried out",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "with nothing about the Conversation moved by any of it",
     );
 }

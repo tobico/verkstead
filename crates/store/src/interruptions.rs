@@ -83,6 +83,17 @@ pub enum Step {
     /// the instruction back off the newest Manual Task Event, rather than
     /// asking `.tasks/` what to run next.
     Manual,
+
+    /// A Conversation that is **Stalled**: in a driven state with nothing
+    /// driving it, which is a run that stopped without anything noticing it
+    /// at the time.
+    ///
+    /// Not a step of anything either, and the one word here that names no
+    /// session at all — nothing failed, because nothing was ever launched.
+    /// What a retry means is decided by the state the Conversation is in
+    /// rather than by anything a backlog says: the state is the whole of what
+    /// says what ought to have been driving it.
+    Stalled,
 }
 
 impl Step {
@@ -99,6 +110,7 @@ impl Step {
             Self::Checks => "checks",
             Self::Review => "review",
             Self::Manual => "manual",
+            Self::Stalled => "stalled",
         }
     }
 
@@ -116,6 +128,7 @@ impl Step {
             "checks" => Self::Checks,
             "review" => Self::Review,
             "manual" => Self::Manual,
+            "stalled" => Self::Stalled,
             other => bail!("an Interruption names the unknown step {other:?}"),
         })
     }

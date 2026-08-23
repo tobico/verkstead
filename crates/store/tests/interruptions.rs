@@ -269,6 +269,7 @@ async fn every_step_a_run_can_stop_on_reads_back_as_itself() {
         Step::Checks,
         Step::Review,
         Step::Manual,
+        Step::Stalled,
     ] {
         let event = record_interruption(&pool, id, &Evidence { step, ..evidence() })
             .await

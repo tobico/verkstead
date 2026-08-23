@@ -61,6 +61,9 @@ mod settling;
 /// router up that runs sessions means saying where they are installed.
 pub mod skills;
 mod stages;
+/// The check that says when a Conversation has Stalled: in a driven state,
+/// with nothing driving it and nothing asking the human about it.
+mod stalls;
 mod tasks;
 mod transcript;
 mod ui;
@@ -376,7 +379,13 @@ fn routed(
     // rather than about anything a request will start: a Conversation left
     // wrapping up by a server that stopped has a pull request GitHub has gone on
     // building, and nobody but this is going to look at it.
-    wrapping::resume(&state);
+    let resumed = wrapping::resume(&state);
+
+    // And then, once that is done, the check for the Conversations nothing took
+    // up: a restart holds no driver registrations at all, so what is still
+    // undriven after everything that resumes has resumed is what genuinely has
+    // nobody — see [`stalls`].
+    stalls::sweeping(&state, resumed);
 
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up

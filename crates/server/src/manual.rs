@@ -151,6 +151,11 @@ pub(crate) async fn submit(
 /// so *blocked on you* and the push it fires are the only things that reach
 /// them, and Retry is the only way to have another go without typing the
 /// instruction out again.
+///
+/// What it does end with, either way, is the check for a Conversation nothing
+/// is driving — see [`crate::stalls::sweep`]. Nothing is relaunched by it: the
+/// human set this going by hand because the work was standing still, and if it
+/// is standing still again now that it has finished, that is the thing to say.
 async fn follow(state: AppState, conversation_id: i64, mut session: Session, turn: Turn) {
     let event_id = session.event_id;
     let quiet = session.quiet.clone();
@@ -171,6 +176,8 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
 
         state.sessions.end(conversation_id).await;
         drop(turn);
+
+        crate::stalls::sweep(&state).await;
         return;
     };
 
@@ -185,6 +192,8 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
     }
 
     drop(turn);
+
+    crate::stalls::sweep(&state).await;
 }
 
 /// Put a manual session that fell over on the Timeline for the human to answer.

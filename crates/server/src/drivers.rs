@@ -104,14 +104,6 @@ impl Drivers {
     /// stands. Draft and Direction are waiting on the human, Done is finished
     /// and Aborted is stopped: none of them is a Conversation standing still,
     /// so none of them is one this question is really about.
-    // Nothing in the server asks this yet — the sweep that does is the next
-    // task. An expectation rather than an allowance, so that the annotation
-    // goes of its own accord: the compiler complains about it the moment there
-    // is a caller. Outside the tests only, which do call it.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the sweep that asks this is the next task")
-    )]
     pub(crate) fn driven(
         &self,
         working: &HashSet<i64>,
