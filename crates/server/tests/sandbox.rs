@@ -1022,7 +1022,11 @@ YAML
 
     assert_eq!(asked.len(), 1, "the Timeline it landed on is its own");
     assert_eq!(
-        asked[0].set.title,
+        asked[0]
+            .set
+            .set()
+            .expect("the Set the session just sent reads back")
+            .title,
         "What a delivery that has failed forty times becomes"
     );
 

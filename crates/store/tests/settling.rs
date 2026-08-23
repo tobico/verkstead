@@ -82,7 +82,15 @@ async fn settlings(pool: &SqlitePool) -> Vec<(String, Option<Settlement>)> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
-            Event::QuestionSet(asked) => Some((asked.set.title.clone(), asked.settlement)),
+            Event::QuestionSet(asked) => Some((
+                asked
+                    .set
+                    .set()
+                    .expect("the stored Set reads back")
+                    .title
+                    .clone(),
+                asked.settlement,
+            )),
             _ => None,
         })
         .collect()

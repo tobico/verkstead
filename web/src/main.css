@@ -1747,6 +1747,51 @@ main:has(.workbench) {
   opacity: 0.6;
 }
 
+/* A Set whose stored body this build cannot read. Dashed rather than coloured:
+   nothing has gone wrong with the work and there is nothing here to answer — the
+   record is intact and this build cannot render it, which is a gap in the
+   drawing rather than a state of the Conversation. */
+.timeline-event > .question-set.unreadable {
+  border-style: dashed;
+}
+
+.unreadable-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+/* What deserializing it said, on the row and on the page. Wrapped rather than
+   clipped: serde names the field and where in the body it sits, and half of that
+   sentence is no use to anybody. */
+.unreadable-why {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The body as it was stored, which is the whole of what there is to show. Its
+   own scroll, because one long line of JSON is not a reason for the column
+   beside it to move. */
+.stored-body {
+  margin-bottom: 1.5rem;
+}
+
+.stored-json {
+  margin: 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: var(--code-wash);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* A commit a session landed on the branch. A button, as the two events above
    are, because the whole of it — the diff — is in the details pane and this is
    how it is opened. */

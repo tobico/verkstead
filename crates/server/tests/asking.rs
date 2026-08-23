@@ -317,8 +317,11 @@ async fn a_set_read_by_its_own_id_names_the_conversation_it_was_asked_from() {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
 
-        let view: verkstead_render::SetView =
+        let reading: verkstead_render::SetReading =
             serde_json::from_str(&body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"));
+        let verkstead_render::SetReading::Set(view) = reading else {
+            panic!("a Set this build just stored reads back: {body}");
+        };
         assert_eq!(
             view.conversation, expected,
             "Set {id} should lead back to the Conversation it was asked from",

@@ -38,21 +38,21 @@
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<h1>Pausing when an account runs out of window</h1>\n<p>A session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.</p>\n",
-        "id": 8,
+        "id": 9,
         "markdown": "# Pausing when an account runs out of window\n\nA session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 9,
+        "id": 10,
         "state": "Grilling"
       }
     },
     {
       "QuestionSet": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 10,
+        "id": 11,
         "rows": [
           {
             "answer": "",
@@ -61,7 +61,7 @@
             "question": "Anything above you want changed before we build it?"
           }
         ],
-        "set_id": 3,
+        "set_id": 4,
         "standing": {
           "Answered": {
             "response": {
@@ -83,13 +83,13 @@
       "Handoff": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<h1>Pausing on a usage limit</h1>\n<p>The detector reads the account's own error rather than guessing from a\nfailure, because every other failure looks the same from outside.</p>\n<h2>Left open</h2>\n<p>Whether a resumed session starts over or carries on — decide it when the\nresume path is written.</p>\n",
-        "id": 11
+        "id": 13
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 12,
+        "id": 14,
         "state": "Implementing"
       }
     },
@@ -98,7 +98,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 3,
         "files": 2,
-        "id": 13,
+        "id": 15,
         "insertions": 74,
         "sha": "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93",
         "subject": "chore: plan the usage-limit pause"
@@ -109,7 +109,7 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 41,
         "files": 5,
-        "id": 14,
+        "id": 16,
         "insertions": 213,
         "sha": "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d",
         "subject": "feat: read the account's own limit error"

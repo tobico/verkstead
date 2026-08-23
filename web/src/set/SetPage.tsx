@@ -10,9 +10,10 @@ import type { JSX } from "solid-js";
 import { Match, Switch } from "solid-js";
 
 import { RefusedError, loadSet } from "../api/client";
-import type { SetView } from "../api/types";
+import type { SetReading, SetView, UnreadableSet } from "../api/types";
 import { useReading } from "../freshness";
 import { Sheet } from "./Sheet";
+import { Unreadable } from "./Unreadable";
 
 /// One Question Set, as the URL names it.
 export function SetPage(): JSX.Element {
@@ -30,6 +31,13 @@ export function SetPage(): JSX.Element {
     // unguarded effect over the query's data, and reassigning it would close
     // every per-file fold. Merged, an unchanged string is left alone and the
     // folds stand.
+    //
+    // The `id` is a level down inside the reading — the payload says which of
+    // the two kinds it is first — so the merge matches by structure here, which
+    // is what it does for every element the key is absent from. That is sound
+    // for this payload: a Set does not change from readable to unreadable while
+    // somebody is looking at it, and everything under the one key it does carry
+    // merges the way it always did.
     freshness: { reconcile: "id" },
   }));
 
@@ -46,11 +54,31 @@ export function SetPage(): JSX.Element {
       <Match when={set.isError}>
         <p class="error">Could not read the Set: {set.error?.message}</p>
       </Match>
-      <Match when={set.data}>
-        {(set) => <Sheet set={set()} lead={<Back set={set()} />} />}
+      {/* A Set whose stored body this build cannot read is a page of its own
+          rather than a failure: the record is there, and this is what there is
+          of it. Drawn before the readable one because it is the narrower
+          match. */}
+      <Match when={set.data && unreadable(set.data)}>
+        {(unreadable) => (
+          <Unreadable set={unreadable()} lead={<Back to={unreadable().conversation} />} />
+        )}
+      </Match>
+      <Match when={set.data && readable(set.data)}>
+        {(set) => <Sheet set={set()} lead={<Back to={set().conversation} />} />}
       </Match>
     </Switch>
   );
+}
+
+/// The Set inside a reading this build could render, and nothing where it could
+/// not.
+function readable(reading: SetReading): SetView | undefined {
+  return "Set" in reading ? reading.Set : undefined;
+}
+
+/// And the record inside one it could not.
+function unreadable(reading: SetReading): UnreadableSet | undefined {
+  return "Unreadable" in reading ? reading.Unreadable : undefined;
 }
 
 /// Back to the Conversation this Set was asked from, which is where it lives:
@@ -60,9 +88,9 @@ export function SetPage(): JSX.Element {
 /// The page's own and not the sheet's. In the workbench this same sheet is the
 /// details pane of the Timeline Event it belongs to, and the way back out of
 /// that is the pane's header rather than a link to the page it is already on.
-function Back(props: { set: SetView }): JSX.Element {
+function Back(props: { to: number }): JSX.Element {
   return (
-    <A href={`/conversations/${props.set.conversation}`} class="back">
+    <A href={`/conversations/${props.to}`} class="back">
       ← Conversation
     </A>
   );

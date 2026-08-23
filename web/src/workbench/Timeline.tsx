@@ -57,6 +57,7 @@ import type {
   QuestionSetEvent,
   StageListEvent,
   TaskListEvent,
+  UnreadableSetEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Picker } from "../picking";
@@ -233,6 +234,18 @@ export function Timeline(props: {
                 <Match when={"QuestionSet" in event && event.QuestionSet}>
                   {(asked) => (
                     <QuestionSet
+                      asked={asked()}
+                      selected={props.selected === asked().id}
+                      open={() => {
+                        props.select(asked().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"UnreadableSet" in event && event.UnreadableSet}>
+                  {(asked) => (
+                    <UnreadableSet
                       asked={asked()}
                       selected={props.selected === asked().id}
                       open={() => {
@@ -804,6 +817,39 @@ function QuestionSet(props: {
           </For>
         </tbody>
       </table>
+    </button>
+  );
+}
+
+/// A Question Set whose stored body this build cannot read: a row saying so,
+/// and the reason.
+///
+/// A row rather than a gap. The ask happened and it is on the record; a Timeline
+/// that quietly left it out would be this build deciding a decision never
+/// occurred. There is no table because there is nothing to draw one from, and no
+/// standing because nobody is going to answer a Set nobody here can read.
+///
+/// A button all the same, as every Event with a full self is: what it opens is
+/// the stored body, which is what there is of the Set.
+function UnreadableSet(props: {
+  asked: UnreadableSetEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      class="question-set unreadable"
+      classList={{ selected: props.selected }}
+      aria-pressed={props.selected}
+      onClick={props.open}
+    >
+      <span class="event-head">
+        <span class="what">Question set</span>
+        <span class="unreadable-badge">cannot be read</span>
+      </span>
+
+      <span class="unreadable-why">{props.asked.why}</span>
     </button>
   );
 }

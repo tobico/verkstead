@@ -19,10 +19,10 @@ import type {
   ProfileEntry,
   QuestionSetEvent,
   RepoEntry,
-  SetView,
+
   TimelineEvent,
 } from "../src/api/types";
-import { askedFor, json, serving, whenever } from "./serving";
+import { askedFor, json, readable, reads, serving, whenever } from "./serving";
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -56,8 +56,8 @@ const BESIDE = [
 
 /// One Set twice over: waiting when the app went away, answered from another
 /// device by the time it came back.
-const WAITING = answering as SetView;
-const ANSWERED = answered as SetView;
+const WAITING = readable(answering);
+const ANSWERED = readable(answered);
 
 /// The Set on the fixture's Timeline that is still waiting, to build an arrival
 /// out of: an Event of the shape the server really writes, rather than one made
@@ -156,7 +156,7 @@ describe("coming back to the app", () => {
 
   it("catches up the Set whose page was open when it went away", async () => {
     window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    serving(...BESIDE, json(WAITING), json(ANSWERED));
+    serving(...BESIDE, json(reads(WAITING)), json(reads(ANSWERED)));
     const { container } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: this is
     // the page as it was left.

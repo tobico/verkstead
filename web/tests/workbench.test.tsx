@@ -30,7 +30,7 @@ import type {
   RemedySettled,
   Screen,
   Shown,
-  SetView,
+
   Submitted,
   TimelineEvent,
   TranscriptView,
@@ -47,7 +47,15 @@ import {
   mount,
   theWorkbench,
 } from "./bench";
-import { askedFor, json, serving, whenever } from "./serving";
+import {
+  askedFor,
+  json,
+  readable,
+  reads,
+  serving,
+  unreadable,
+  whenever,
+} from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
@@ -55,6 +63,7 @@ import grilling from "./fixtures/conversation-grilling.json" with { type: "json"
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
+import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import capture from "./fixtures/capture.json" with { type: "json" };
@@ -1605,8 +1614,11 @@ describe("a move on the timeline", () => {
       "brief",
       "moved",
       "agent-output",
-      // The two Sets that session put to the human, in the order it asked
-      // them: the answered one, and the one still waiting.
+      // The three Sets that session put to the human, in the order it asked
+      // them: the answered one, the one still waiting, and the one whose stored
+      // body this build cannot read — which is a row like any other and in its
+      // own place in the record.
+      "question-set",
       "question-set",
       "question-set",
     ]);
@@ -2412,19 +2424,36 @@ const ASKED = (() => {
 const ANSWERED_SET = ASKED.find((asked) => "Answered" in asked.standing)!;
 const WAITING_SET = ASKED.find((asked) => "Waiting" in asked.standing)!;
 
+/// And the third row a Set gets: the one whose stored body this build cannot
+/// read, which is neither answered nor waiting and is on the record all the
+/// same.
+const UNREADABLE_SET = (() => {
+  const found = GRILLING.timeline.flatMap((event) =>
+    "UnreadableSet" in event ? [event.UnreadableSet] : [],
+  );
+  if (found.length !== 1) {
+    throw new Error("the fixture should hold one Set this build cannot read");
+  }
+  return found[0]!;
+})();
+
 /// The whole document behind each, which is what the details pane fetches. The
 /// two Set fixtures are the same shapes read back from the same endpoint — the
 /// standing is what decides whether the pane draws a sheet or a record, and
 /// these are the two.
-const DOCUMENT = answeredSet as SetView;
-const SHEET = answeringSet as SetView;
+///
+/// Served as the whole reading rather than as the Set inside it, because that is
+/// what the endpoint answers with: the pane is told which of the two kinds it is
+/// holding before it draws anything.
+const DOCUMENT = readable(answeredSet);
+const SHEET = readable(answeringSet);
 
 /// The workbench with the grilling conversation open and both of its Sets
 /// answerable, which is what the details pane fetches when one is opened.
 function theGrillingSets(...answers: Parameters<typeof serving>) {
   return theGrilling(
-    whenever(`/api/ui/sets/${ANSWERED_SET.set_id}`, json(DOCUMENT)),
-    whenever(`/api/ui/sets/${WAITING_SET.set_id}`, json(SHEET)),
+    whenever(`/api/ui/sets/${ANSWERED_SET.set_id}`, json(reads(DOCUMENT))),
+    whenever(`/api/ui/sets/${WAITING_SET.set_id}`, json(reads(SHEET))),
     ...answers,
   );
 }
@@ -2476,9 +2505,13 @@ describe("a question set on the timeline", () => {
     await drawn(container, ".question-set");
     const cards = [...container.querySelectorAll(".question-set")];
 
+    // The answered one, the one still waiting, and the unreadable one — which
+    // is waiting on nobody, whatever the record says about it, because nothing
+    // here can put its questions in front of anybody.
     expect(cards.map((card) => card.classList.contains("waiting"))).toEqual([
       false,
       true,
+      false,
     ]);
     expect(screen.getByText("waiting on you")).toBeTruthy();
   });
@@ -2574,6 +2607,51 @@ describe("a question set on the timeline", () => {
     });
 
     expect(pane.querySelector(".contents")).toBeNull();
+  });
+});
+
+describe("a question set the build cannot read", () => {
+  it("is a row saying so rather than a gap in the record", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const row = container.querySelector(".question-set.unreadable")!;
+
+    expect(row.querySelector(".unreadable-badge")!.textContent).toBe(
+      "cannot be read",
+    );
+    // Serde's own sentence, which names the field that has left the schema.
+    expect(row.querySelector(".unreadable-why")!.textContent).toContain(
+      "accepted_by",
+    );
+    // No table, because there is nothing to draw one from — and nothing asking
+    // the human for anything either.
+    expect(row.querySelector(".asked")).toBeNull();
+    expect(row.classList.contains("waiting")).toBe(false);
+  });
+
+  it("opens the stored body in the details pane, the way any Set opens", async () => {
+    theGrillingSets(
+      whenever(`/api/ui/sets/${UNREADABLE_SET.set_id}`, json(unreadableSet)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    fireEvent.click(container.querySelector(".question-set.unreadable")!);
+
+    const pane = screen.getByLabelText("Details");
+    const stored = await waitFor(() => {
+      const found = pane.querySelector(".stored-json");
+      if (!found) {
+        throw new Error("the stored body has not been drawn");
+      }
+      return found;
+    });
+
+    expect(stored.textContent).toBe(unreadable(unreadableSet).body);
+    // The one thing the timeline's rows are not: a sheet to fill in.
+    expect(pane.querySelector(".questions")).toBeNull();
   });
 });
 
@@ -2680,7 +2758,7 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
 /// written by hand: it is the same `DiffView`, rendered by the same server-side
 /// renderer that a commit's diff goes through — which is the whole reason a
 /// commit needs no diff machinery of its own.
-const COMMIT_DIFF: CommitDiff = { diff: (answeringSet as SetView).diff };
+const COMMIT_DIFF: CommitDiff = { diff: readable(answeringSet).diff };
 
 /// Where the details pane fetches it from.
 const DIFF_OF_IT = `/api/ui/conversations/${BUILDING.id}/commit/${COMMITS[0]!.id}`;

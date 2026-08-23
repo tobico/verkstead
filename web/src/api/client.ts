@@ -34,7 +34,7 @@ import type {
   RepoEntry,
   Response as Decided,
   Screen,
-  SetView,
+  SetReading,
   SettingsEdit,
   SettingsSaved,
   SettingsView,
@@ -63,13 +63,14 @@ export class RefusedError extends Error {
   }
 }
 
-/// One Set, rendered, with where it stands.
+/// One Set, rendered, with where it stands — or the stored body where this
+/// build cannot read it, which is a page to draw rather than a failure.
 ///
 /// The id is whatever the URL held, unparsed: one that is not a number cannot
 /// name a Set, and the server answers for that the same way it answers for one
 /// that names no Set — a 404, which the page reads as "there isn't one".
-export function loadSet(id: string): Promise<SetView> {
-  return get<SetView>(`/api/ui/sets/${encodeURIComponent(id)}`);
+export function loadSet(id: string): Promise<SetReading> {
+  return get<SetReading>(`/api/ui/sets/${encodeURIComponent(id)}`);
 }
 
 /// Answer a Set, which ends the wait the agent is holding on it.

@@ -22,7 +22,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Answered, SetView, Standing};
+use verkstead_render::{Answered, SetReading, SetView, Standing};
 use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, Response, SetCreated, Subquestion,
 };
@@ -75,6 +75,43 @@ async fn put(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated>
     Ok(store::ask(pool, ASKING_FROM, set)
         .await?
         .expect("the Conversation is there to ask from"))
+}
+
+/// A `proposal` block as one was written before `accepted_by` left the schema:
+/// the two parts a Proposal still has, and the retired third.
+///
+/// The real thing rather than a made-up field. This is what four of the first
+/// instance's Conversations could not be opened for — the block shrank when the
+/// direction chooser moved onto the Set itself, and `deny_unknown_fields` means
+/// every Set stored before that is a body this build will not take.
+const RETIRED_PROPOSAL: &str = r#"{
+  "direction": "task-list",
+  "rationale": "Six changes, each independently testable.",
+  "accepted_by": "Q1.1"
+}"#;
+
+/// Put a Set on [`ASKING_FROM`]'s Timeline and then age its stored body past
+/// what this build's schema will take, which is what a retired field leaves
+/// behind.
+///
+/// Stored the ordinary way first and rewritten in place after, rather than
+/// inserted by hand: what is on the Timeline has to be a Set exactly as
+/// [`store::ask`] writes one, Event and joining row and all. The one thing
+/// different about it is the thing being tested.
+async fn unreadable_set(pool: &SqlitePool, set: &QuestionSet) -> i64 {
+    let stored = put(pool, set).await.unwrap();
+
+    let mut body: serde_json::Value = serde_json::to_value(set).unwrap();
+    body["proposal"] = serde_json::from_str(RETIRED_PROPOSAL).unwrap();
+
+    sqlx::query("UPDATE question_sets SET body = ? WHERE id = ?")
+        .bind(serde_json::to_string_pretty(&body).unwrap())
+        .bind(stored.id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    stored.id
 }
 
 fn option(n: u32, text: &str, recommended: bool) -> QuestionOption {
@@ -307,6 +344,18 @@ async fn set_json(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetVie
 }
 
 async fn fetch_set(app: &Router, id: i64) -> (SetView, String) {
+    match fetch_reading(app, id).await {
+        (SetReading::Set(view), body) => (*view, body),
+        (SetReading::Unreadable(unreadable), _) => panic!(
+            "Set {id} came back unreadable, which nothing here stores: {}",
+            unreadable.why
+        ),
+    }
+}
+
+/// The whole of what the endpoint answered: the Set where this build can read
+/// the stored body, and the record itself where it cannot.
+async fn fetch_reading(app: &Router, id: i64) -> (SetReading, String) {
     let response = app
         .clone()
         .oneshot(
@@ -324,8 +373,9 @@ async fn fetch_set(app: &Router, id: i64) -> (SetView, String) {
 
     assert_eq!(status, StatusCode::OK, "asking for Set {id}: {body}");
 
-    let view = serde_json::from_str(&body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"));
-    (view, body)
+    let reading =
+        serde_json::from_str(&body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"));
+    (reading, body)
 }
 
 /// A Set that has already been answered, and the time its Response landed.
@@ -1048,6 +1098,154 @@ async fn a_set_says_where_it_stands_in_each_of_the_three_ways_it_can() {
     assert!(!archived_at.is_empty(), "expected when it was closed");
 }
 
+#[tokio::test]
+async fn a_set_this_build_cannot_read_gives_an_account_of_itself_rather_than_failing() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = unreadable_set(&pool, &full_grammar_set()).await;
+
+    let (reading, json) = fetch_reading(&app, id).await;
+
+    let SetReading::Unreadable(unreadable) = reading else {
+        panic!("expected an unreadable Set, got {json}");
+    };
+
+    assert_eq!(unreadable.id, id);
+    assert_eq!(
+        unreadable.conversation, ASKING_FROM,
+        "the way back is the Conversation it was asked from, as it is for a Set \
+         that reads"
+    );
+    assert!(
+        unreadable.why.contains("accepted_by"),
+        "the reason should name the field the schema has retired, got {:?}",
+        unreadable.why
+    );
+    assert!(
+        unreadable.body.contains("accepted_by")
+            && unreadable
+                .body
+                .contains("Six changes, each independently testable."),
+        "the stored body should come back as it was written, got {:?}",
+        unreadable.body
+    );
+}
+
+#[tokio::test]
+async fn what_was_asked_is_never_rewritten_to_make_it_readable() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = unreadable_set(&pool, &full_grammar_set()).await;
+
+    // Read it the two ways there are to read one — its own page, and the
+    // Timeline it is on — because either quietly repairing the record would be
+    // the same loss.
+    fetch_reading(&app, id).await;
+    get(&app, &format!("/api/ui/conversations/{ASKING_FROM}")).await;
+
+    let stored: String = sqlx::query_scalar("SELECT body FROM question_sets WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert!(
+        stored.contains("accepted_by"),
+        "the stored body is the record of what was asked and stays as it was, \
+         got {stored:?}"
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_set_costs_its_own_row_and_nothing_else_on_the_timeline() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    // A Timeline with one of each around it, so that what is being asked is
+    // whether the rest of it survives rather than whether one row draws.
+    store::save_brief(&pool, ASKING_FROM, "# What the queue does with a failure\n")
+        .await
+        .unwrap();
+    let readable = put(&pool, &full_grammar_set()).await.unwrap();
+    let unreadable = unreadable_set(&pool, &full_grammar_set()).await;
+    store::note(&pool, ASKING_FROM, "Started stage 02.")
+        .await
+        .unwrap();
+
+    let json = get(&app, &format!("/api/ui/conversations/{ASKING_FROM}")).await;
+    let view: verkstead_render::ConversationView = serde_json::from_str(&json).unwrap();
+
+    let drawn: Vec<&str> = view
+        .timeline
+        .iter()
+        .map(|event| match event {
+            verkstead_render::TimelineEvent::Brief(_) => "brief",
+            verkstead_render::TimelineEvent::QuestionSet(_) => "question-set",
+            verkstead_render::TimelineEvent::UnreadableSet(_) => "unreadable-set",
+            verkstead_render::TimelineEvent::Notice(_) => "notice",
+            other => panic!("nothing here writes {other:?}"),
+        })
+        .collect();
+
+    assert_eq!(
+        drawn,
+        ["brief", "question-set", "unreadable-set", "notice"],
+        "everything readable is drawn as usual, and the unreadable Set is a row \
+         of its own rather than an omission:\n{json}"
+    );
+
+    let verkstead_render::TimelineEvent::UnreadableSet(row) = &view.timeline[2] else {
+        unreachable!("just asserted");
+    };
+
+    assert_eq!(row.set_id, unreadable);
+    assert!(
+        row.why.contains("accepted_by"),
+        "the row says why it cannot be read, got {:?}",
+        row.why
+    );
+
+    let verkstead_render::TimelineEvent::QuestionSet(read) = &view.timeline[1] else {
+        unreachable!("just asserted");
+    };
+
+    assert_eq!(
+        read.set_id, readable.id,
+        "and the Set beside it is drawn with its table as it always was"
+    );
+    assert!(!read.rows.is_empty());
+}
+
+#[tokio::test]
+async fn an_unreadable_set_cannot_be_answered_by_anything() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = unreadable_set(&pool, &full_grammar_set()).await;
+
+    // Not offered on the page — the reading carries no standing to draw the
+    // sheet from — and refused underneath it too, which is what makes that an
+    // account of the Set rather than a courtesy of the viewer. A Response is
+    // checked against the Questions it resolves, and there are none to be had.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/sets/{id}/response"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&decided_every_way()).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let answered: Option<store::StoredResponse> = store::load_response(&pool, id).await.unwrap();
+    assert!(
+        answered.is_none(),
+        "nothing was stored against a Set nobody could check a Response against"
+    );
+}
+
 /// Nothing that would run in a browser survived the rendering, wherever in the
 /// payload it was written.
 ///
@@ -1148,6 +1346,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let (_dir, pool, app) = fresh_app().await;
     let (_, json) = archived_set(&app, &pool, &marked_up_set()).await;
     write("set-archived.json", &pinned(&json));
+
+    // And the one that is no standing at all: a stored body this build cannot
+    // read, which is the record drawn as itself with nothing to press.
+    let (_dir, pool, app) = fresh_app().await;
+    let id = unreadable_set(&pool, &marked_up_set()).await;
+    let (_, json) = fetch_reading(&app, id).await;
+    write("set-unreadable.json", &json);
 
     // A Set with a Diagram in it, which is the only kind whose page loads the
     // renderer.
@@ -1483,6 +1688,25 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     store::ask(&pool, grilling, &waiting)
         .await
         .unwrap()
+        .unwrap();
+
+    // And a third, whose stored body this build cannot read: the third way a Set
+    // reads on a Timeline, and the one no amount of asking would produce — it is
+    // what a field leaving the schema leaves behind. Aged in place after being
+    // stored the ordinary way, so what is on the Timeline is a Set exactly as
+    // `ask` writes one.
+    let mut aged = full_grammar_set();
+    aged.title = "How long a dead endpoint holds the queue".to_owned();
+    aged.branch = Some("outbound-retries".to_owned());
+    let unreadable = store::ask(&pool, grilling, &aged).await.unwrap().unwrap();
+
+    let mut body: serde_json::Value = serde_json::to_value(&aged).unwrap();
+    body["proposal"] = serde_json::from_str(RETIRED_PROPOSAL).unwrap();
+    sqlx::query("UPDATE question_sets SET body = ? WHERE id = ?")
+        .bind(serde_json::to_string_pretty(&body).unwrap())
+        .bind(unreadable.id)
+        .execute(&pool)
+        .await
         .unwrap();
 
     // And a fourth that the grilling has handed over: its closing proposal
@@ -2242,7 +2466,10 @@ fn pinned(json: &str) -> String {
     let settled = "2025-08-03T09:07:11.000Z";
 
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
-    let standing = &mut payload["standing"];
+    // A level down, because the reading says which of the two kinds it is
+    // holding before it says anything about the Set — and only a Set this build
+    // could read has a standing to pin.
+    let standing = &mut payload["Set"]["standing"];
 
     if let Some(answered) = standing.get_mut("Answered") {
         answered["submitted_at"] = settled.into();

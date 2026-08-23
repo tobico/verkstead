@@ -7,6 +7,10 @@
 //! lifted into columns beside the body, so that what a Set is *about* can be
 //! read without deserializing it.
 //!
+//! A stored body this build's schema will not take is read back as
+//! [`Asked::Unreadable`] rather than as a failure — see there for why one
+//! unreadable record has to cost its own row and nothing beside it.
+//!
 //! Every Set is asked from a Conversation and lands on its Timeline — see
 //! [`ask`], which is the one way one is stored. What answering it does is here
 //! all the same: a Response reaches the waiting agent the same way whether it
@@ -18,7 +22,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use sqlx::SqlitePool;
 use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
@@ -71,13 +75,100 @@ pub use wrap_up::{
     unsettle_wrap_up, wrap_up_settled,
 };
 
-/// A Set as the store holds it: the agent's Set plus the identity the server
+/// A Set as the store holds it: what was asked plus the identity the server
 /// stamped on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredSet {
     pub id: i64,
     pub created_at: String,
-    pub set: QuestionSet,
+    pub set: Asked,
+}
+
+/// What a stored Question Set is, as far as this build can read it.
+///
+/// ADR-0006's rule for Transcript lines, applied to the Sets themselves: keep
+/// what was written, and defer rendering it rather than lose the record. There
+/// is no migration machinery here by design, so every field that leaves the
+/// schema leaves stored bodies this build's `deny_unknown_fields` will not
+/// take — and one of those must cost its own row and nothing beside it, where
+/// a failure propagated out of a read would cost the whole Timeline it is on.
+///
+/// Nothing here ever rewrites a stored body. It is the record of what was
+/// asked, and a Verkstead that can read it again later should still find it as
+/// it was written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Asked {
+    /// The Set, as the agent sent it.
+    Set(QuestionSet),
+
+    /// A stored body this build cannot read, kept as it stands.
+    Unreadable(Unreadable),
+}
+
+/// A stored Question Set nothing here can deserialize: the body, and what
+/// reading it came to.
+///
+/// Both, because between them they are the whole of what is left to say about
+/// one — the body is what was asked, and the reason is why this build cannot
+/// say what that was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreadable {
+    /// The stored JSON, byte for byte.
+    pub body: String,
+
+    /// What deserializing it said.
+    pub why: String,
+}
+
+impl Asked {
+    /// What a stored body holds, kept as it stands where this build cannot read
+    /// it.
+    ///
+    /// The one place a stored Set is deserialized, which is what makes the
+    /// fallback the same fallback everywhere rather than something each caller
+    /// has to remember.
+    fn read(body: String) -> Self {
+        match serde_json::from_str(&body) {
+            Ok(set) => Self::Set(set),
+            Err(error) => Self::Unreadable(Unreadable {
+                body,
+                // Serde's own sentence, kept as it is. It names the field that
+                // is no longer in the schema and where in the body it sits,
+                // which is exactly what somebody looking at the row wants to
+                // know, and nothing here could word it better.
+                why: error.to_string(),
+            }),
+        }
+    }
+
+    /// The Set where this build can read it, and nothing where it cannot.
+    ///
+    /// What everything walking a Timeline for the Sets on it asks: an
+    /// unreadable one carries no proposal to settle, no review to answer and no
+    /// exchange to put in a prompt, so passing over it is the whole of what
+    /// there is to do about one.
+    pub fn set(&self) -> Option<&QuestionSet> {
+        match self {
+            Self::Set(set) => Some(set),
+            Self::Unreadable(_) => None,
+        }
+    }
+
+    /// The Set, or an error naming why there is none to be had.
+    ///
+    /// For the callers that cannot go on without it — answering above all,
+    /// which is checked against the Questions it resolves. What they fail is
+    /// the unreadable Set's own action, which is as far as one is allowed to
+    /// reach.
+    pub fn readable(&self, set_id: i64) -> Result<&QuestionSet> {
+        match self {
+            Self::Set(set) => Ok(set),
+            Self::Unreadable(unreadable) => Err(anyhow!(
+                "Question Set {set_id} cannot be read: {}",
+                unreadable.why
+            )),
+        }
+    }
 }
 
 /// A Response as the store holds it: the human's reply plus when it landed.
@@ -285,7 +376,14 @@ pub async fn submit_response(
         return Ok(Submission::NoSuchSet);
     };
 
-    if let Err(invalid) = response.validate(&stored.set) {
+    // A Response is checked against the Questions it resolves, so a Set this
+    // build cannot read cannot be answered: there is nothing to check it
+    // against. The failure is this Set's own — nothing else on its Timeline is
+    // touched by it — and the workbench offers no way to get here, since it
+    // draws an unreadable Set as a record rather than as a sheet.
+    let set = stored.set.readable(set_id)?;
+
+    if let Err(invalid) = response.validate(set) {
         return Ok(Submission::Invalid(invalid));
     }
 
@@ -304,7 +402,7 @@ pub async fn submit_response(
     //
     // The pick is the whole of accepting — see [`Response::direction`] — so
     // there is nothing here to read off the Answers.
-    let proposed = match (&stored.set.proposal, response.direction) {
+    let proposed = match (&set.proposal, response.direction) {
         (Some(_), Some(direction)) => Some(Proposed::Accepted {
             direction,
             directing: accept_proposal(pool, set_id, direction).await?,
@@ -319,7 +417,7 @@ pub async fn submit_response(
     // found. Settled here rather than in either endpoint for the reason the
     // proposal's move is: the browser and `curl` must not be able to leave a
     // Conversation's wrap-up in different states for the same Answer.
-    let reviewed = match &stored.set.review {
+    let reviewed = match &set.review {
         Some(review) => Some(answer_review(pool, set_id, review, response).await?),
         None => None,
     };
@@ -576,6 +674,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 /// Read a Set back, or `None` if no Set has that id.
+///
+/// A body this build cannot deserialize comes back as [`Asked::Unreadable`]
+/// rather than as a failure: the row is still there and still says what was
+/// asked, and losing the read would be losing the record.
 pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
     let row: Option<(i64, String, String)> =
         sqlx::query_as("SELECT id, created_at, body FROM question_sets WHERE id = ?")
@@ -588,13 +690,10 @@ pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
         return Ok(None);
     };
 
-    let set = serde_json::from_str(&body)
-        .with_context(|| format!("deserialising stored Question Set {id}"))?;
-
     Ok(Some(StoredSet {
         id,
         created_at,
-        set,
+        set: Asked::read(body),
     }))
 }
 

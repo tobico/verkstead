@@ -1215,6 +1215,19 @@ direction?: Direction | null, };
 export type Screen = { repaint: string, columns: number, rows: number, };
 
 /**
+ * One stored Question Set as the browser receives it: the document where this
+ * build can still read what was asked, and the record itself where it cannot.
+ *
+ * A tagged kind rather than a `SetView` with everything nulled out, because the
+ * two are read for different things. One is a Set to answer or a decision to
+ * read back; the other is a body nobody here can render, kept so that what was
+ * asked is not lost — see [`UnreadableSet`]. A page that had to work out which
+ * it was holding from a field being null would be a page that could draw a
+ * sheet over a Set it cannot read.
+ */
+export type SetReading = { "Set": SetView } | { "Unreadable": UnreadableSet };
+
+/**
  * One row of a Question Set's Timeline table: the number it answers to, what
  * was asked, and what was decided.
  *
@@ -1482,7 +1495,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.
@@ -1593,6 +1606,59 @@ export type Unread = {
  * The turn's place in the conversation, counted from 1.
  */
 id: number, line: string, };
+
+/**
+ * A stored Set this build cannot deserialize, as the browser receives it: the
+ * stored body, and what reading it came to.
+ *
+ * The body verbatim rather than rendered — there is nothing here that knows
+ * what it means, which is the whole of what is wrong — so the page draws it as
+ * the JSON it is. Nothing rewrites it: a later Verkstead that can read it again
+ * should find it exactly as the agent sent it.
+ *
+ * No `standing` and no title. Answering is checked against Questions nobody
+ * here can read, so it is not offered, and neither is archiving; and what the
+ * Set was called is in the body along with everything else, said once rather
+ * than half-recovered into a heading.
+ */
+export type UnreadableSet = { id: number, 
+/**
+ * The Conversation it was asked from — the way back, which an unreadable
+ * Set needs exactly as a readable one does.
+ */
+conversation: number, 
+/**
+ * The stored JSON, byte for byte.
+ */
+body: string, 
+/**
+ * What deserializing it said.
+ */
+why: string, };
+
+/**
+ * A Question Set the Timeline cannot draw a table for, because this build
+ * cannot read the body it was stored as.
+ *
+ * What it carries is the reason and no more. There is no title — that is in the
+ * body with everything else — and no standing, because a Set nobody here can
+ * read is not one anybody is going to answer. The stored body itself is what
+ * the details pane fetches, through the same `/api/ui/sets/{id}` a readable Set
+ * is opened by: it is the same Set reached the same way, and what comes back
+ * says which of the two it is.
+ */
+export type UnreadableSetEvent = { id: number, 
+/**
+ * When the Set was put, RFC 3339.
+ */
+at: string, set_id: number, 
+/**
+ * What deserializing the stored body said. On the row rather than behind
+ * the fetch, because it is one line and it is the whole of what happened:
+ * a reader who has to open the Event to find out why a row says nothing has
+ * been told nothing by the row.
+ */
+why: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

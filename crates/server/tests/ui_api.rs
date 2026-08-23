@@ -20,8 +20,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Archived, ConversationView, PushKey, QuestionSetEvent, SetView, Standing, Submitted,
-    Subscribed, Subscription, TimelineEvent,
+    Archived, ConversationView, PushKey, QuestionSetEvent, SetReading, SetView, Standing,
+    Submitted, Subscribed, Subscription, TimelineEvent,
 };
 use verkstead_schema::{Answer, ApiError, Liveness, QuestionSet, Response, SetCreated};
 use verkstead_server::{open_database, router, store};
@@ -132,6 +132,24 @@ async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
 
 fn read<T: DeserializeOwned>(body: &str) -> T {
     serde_json::from_str(body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"))
+}
+
+/// One Set as the viewer reads it, insisting this build can still read the
+/// stored body.
+///
+/// Every Set here was written by this build a moment ago, so a reading that
+/// cannot be rendered is a broken test rather than the case
+/// `/api/ui/sets/{id}` says the other half of — see `ui_content.rs`, which is
+/// where the unreadable half is asked about.
+async fn get_set(app: &Router, id: i64) -> SetView {
+    let reading: SetReading = get(app, &format!("/api/ui/sets/{id}")).await;
+
+    match reading {
+        SetReading::Set(view) => *view,
+        SetReading::Unreadable(unreadable) => {
+            panic!("Set {id} came back unreadable: {}", unreadable.why)
+        }
+    }
 }
 
 /// Send a Set the way the CLI does, and return the id the agent then waits on.
@@ -352,9 +370,9 @@ async fn the_badge_is_the_wait_the_agents_half_is_genuinely_holding() {
 
     // The set view is fed from the same registry, because the two badges are one
     // fact: the human archives a Set from its own page, with the badge in view.
-    let set: SetView = get(&app, &format!("/api/ui/sets/{waited_on}")).await;
+    let set = get_set(&app, waited_on).await;
     assert_eq!(set.standing, Standing::Waiting(Liveness::Waiting));
-    let orphaned: SetView = get(&app, &format!("/api/ui/sets/{orphan}")).await;
+    let orphaned = get_set(&app, orphan).await;
     assert_eq!(
         orphaned.standing,
         Standing::Waiting(Liveness::Disconnected),
@@ -461,7 +479,7 @@ async fn a_set_carries_where_it_stands_along_with_its_own_material() {
     let (_dir, _pool, app) = fresh_app().await;
     let id = post_set(&app, SET).await;
 
-    let set: SetView = get(&app, &format!("/api/ui/sets/{id}")).await;
+    let set = get_set(&app, id).await;
 
     assert_eq!(set.id, id);
     assert_eq!(set.title, "Rate limiting for the public API");
@@ -553,7 +571,7 @@ async fn an_answered_set_reads_back_as_the_decision_that_was_made() {
     .await;
     assert_eq!(outcome, Submitted::Accepted);
 
-    let set: SetView = get(&app, &format!("/api/ui/sets/{id}")).await;
+    let set = get_set(&app, id).await;
     let Standing::Answered(answered) = set.standing else {
         panic!("expected an answered Set, got {:?}", set.standing);
     };
@@ -653,7 +671,7 @@ async fn archiving_a_set_ends_a_wait_held_on_it_and_files_it_unanswered() {
          answered rather than showing a decision: {asked:?}"
     );
 
-    let set: SetView = get(&app, &format!("/api/ui/sets/{id}")).await;
+    let set = get_set(&app, id).await;
     assert!(
         matches!(set.standing, Standing::ArchivedUnanswered(_)),
         "expected the Set closed unanswered, got {:?}",

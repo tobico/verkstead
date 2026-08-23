@@ -9,20 +9,20 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Archived, SetView } from "../src/api/types";
+import type { Archived } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
-import { json } from "./serving";
+import { json, readable } from "./serving";
 import archivedSet from "./fixtures/set-archived.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-const WAITING = waiting as SetView;
+const WAITING = readable(waiting);
 
 /// The same Set once it has been closed: what the server answers with when the
 /// page reads it back where it stands.
-const ARCHIVED = { ...(archivedSet as SetView), id: WAITING.id };
+const ARCHIVED = { ...readable(archivedSet), id: WAITING.id };
 const KEY = draftKey(WAITING.id);
 
 const archived = (outcome: Archived) => json(outcome);

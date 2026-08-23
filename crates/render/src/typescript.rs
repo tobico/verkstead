@@ -22,7 +22,7 @@ use crate::{
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
     ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetView,
+    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetReading,
     SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
@@ -39,8 +39,11 @@ fn the_viewers_types_are_written_from_these() {
     let config = ts_rs::Config::from_env();
 
     // One Set, whole — which is what both the standalone page and the details
-    // pane of the Timeline it landed on are drawn from.
-    SetView::export_all(&config).unwrap();
+    // pane of the Timeline it landed on are drawn from. The whole reading
+    // rather than the `SetView` inside it: what comes back says whether this
+    // build could read the stored body at all, and the page has to be able to
+    // draw either answer.
+    SetReading::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of
     // them is a Response, which the Set already brought along: it is what an

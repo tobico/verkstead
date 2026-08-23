@@ -235,7 +235,15 @@ fn settled(timeline: &[store::TimelineEvent]) -> String {
             continue;
         };
 
-        digest.push_str(&exchange(&asked.set, &answered.response));
+        // A Set this build cannot read has no exchange to write down: the
+        // Questions it was asked with are in a body nothing here can take
+        // apart. It is passed over rather than failing the digest — the rest of
+        // what the human has answered is still worth priming a session with.
+        let Some(set) = asked.set.set() else {
+            continue;
+        };
+
+        digest.push_str(&exchange(set, &answered.response));
     }
 
     digest
@@ -391,7 +399,9 @@ comment: none of this is settled about the burst allowance
             at: "2026-08-23T12:00:00Z".to_owned(),
             event: store::Event::QuestionSet(Box::new(store::SetOnTimeline {
                 set_id,
-                set: QuestionSet::from_yaml(ASKED).expect("the example Set parses"),
+                set: store::Asked::Set(
+                    QuestionSet::from_yaml(ASKED).expect("the example Set parses"),
+                ),
                 settlement,
             })),
         }

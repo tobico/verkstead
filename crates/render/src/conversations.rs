@@ -350,6 +350,15 @@ pub enum TimelineEvent {
     /// Set page reads.
     QuestionSet(QuestionSetEvent),
 
+    /// A Question Set whose stored body this build cannot read, drawn as itself.
+    ///
+    /// Its own kind rather than a flag on the one above, because there is no
+    /// table to draw and nothing to answer: the row says it cannot be read, and
+    /// what it opens is the stored body rather than a document. The Set is on
+    /// the record and stays on it — an omission would be this build quietly
+    /// deciding a decision never happened.
+    UnreadableSet(UnreadableSetEvent),
+
     /// The handoff the grilling wrote on its way out, rendered inline like the
     /// Brief — and for the same reason: it is a document to read, and there is
     /// nothing of it a details pane would show that the Timeline does not.
@@ -890,6 +899,32 @@ pub struct QuestionSetEvent {
     pub standing: Standing,
 }
 
+/// A Question Set the Timeline cannot draw a table for, because this build
+/// cannot read the body it was stored as.
+///
+/// What it carries is the reason and no more. There is no title — that is in the
+/// body with everything else — and no standing, because a Set nobody here can
+/// read is not one anybody is going to answer. The stored body itself is what
+/// the details pane fetches, through the same `/api/ui/sets/{id}` a readable Set
+/// is opened by: it is the same Set reached the same way, and what comes back
+/// says which of the two it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct UnreadableSetEvent {
+    pub id: i64,
+
+    /// When the Set was put, RFC 3339.
+    pub at: String,
+
+    pub set_id: i64,
+
+    /// What deserializing the stored body said. On the row rather than behind
+    /// the fetch, because it is one line and it is the whole of what happened:
+    /// a reader who has to open the Event to find out why a row says nothing has
+    /// been told nothing by the row.
+    pub why: String,
+}
+
 /// One row of a Question Set's Timeline table: the number it answers to, what
 /// was asked, and what was decided.
 ///
@@ -1091,6 +1126,20 @@ pub fn question_set_event(
         title: set.title.clone(),
         rows: asked(set, response),
         standing,
+    })
+}
+
+/// A Question Set whose stored body this build cannot read, as an Event.
+///
+/// Nothing is summarised because nothing could be: what the row has to say is
+/// that the record is there and this build cannot render it, which is the reason
+/// and the id it is stored under.
+pub fn unreadable_set_event(id: i64, at: String, set_id: i64, why: String) -> TimelineEvent {
+    TimelineEvent::UnreadableSet(UnreadableSetEvent {
+        id,
+        at,
+        set_id,
+        why,
     })
 }
 

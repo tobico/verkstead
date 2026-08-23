@@ -390,6 +390,18 @@ archived. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true.
 _Avoid_: request, batch, ticket
 
+**Unreadable**:
+What a stored Question Set is when the build looking at it cannot deserialize
+the body it was written as — ordinary schema movement, a field having left. It
+is drawn as a row saying so, on the Timeline it has always been on, with the
+stored body reachable and nothing offered to answer or archive it by. The rule
+is ADR-0006's, applied to the Sets themselves: keep what was written and defer
+rendering it, so that one record the schema has outrun costs its own row and
+never the Timeline around it. Nothing rewrites a body to make it readable —
+it is the record of what was asked, and a later Verkstead should find it as it
+was written. Distinct from Unanswered, which is a Question the human left open.
+_Avoid_: corrupt, invalid, broken, unparseable, legacy
+
 **Preface**:
 The markdown context that accompanies a Question Set, giving the human
 everything needed to understand the Questions without seeing the agent's

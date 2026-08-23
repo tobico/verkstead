@@ -20,12 +20,22 @@
 import { Match, Switch, type JSX } from "solid-js";
 
 import { loadSet } from "../api/client";
-import type { QuestionSetEvent } from "../api/types";
+import type {
+  QuestionSetEvent,
+  SetReading,
+  SetView,
+  UnreadableSet,
+  UnreadableSetEvent,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Sheet } from "../set/Sheet";
+import { Unreadable } from "../set/Unreadable";
 
+/// Either row a Set gets on the Timeline. What they have in common is the only
+/// thing this pane needs — which Set to fetch — and what comes back is what says
+/// which of the two it is drawing, exactly as it does on the standalone page.
 export function Asked(props: {
-  asked: QuestionSetEvent;
+  asked: QuestionSetEvent | UnreadableSetEvent;
   back: () => void;
   close: () => void;
 }): JSX.Element {
@@ -63,7 +73,13 @@ export function Asked(props: {
         {head}
         <p class="error">Could not read this set: {set.error?.message}</p>
       </Match>
-      <Match when={set.data}>
+      {/* A stored body this build cannot read is the record drawn as itself,
+          the same one the standalone page draws — the narrower match, so it
+          goes first. */}
+      <Match when={set.data && unreadable(set.data)}>
+        {(unreadable) => <Unreadable set={unreadable()} lead={head} />}
+      </Match>
+      <Match when={set.data && readable(set.data)}>
         {(set) => (
           // No table of contents: that is a description of a column the whole
           // window wide, and this is a column beside two others.
@@ -72,4 +88,15 @@ export function Asked(props: {
       </Match>
     </Switch>
   );
+}
+
+/// The Set inside a reading this build could render, and nothing where it could
+/// not.
+function readable(reading: SetReading): SetView | undefined {
+  return "Set" in reading ? reading.Set : undefined;
+}
+
+/// And the record inside one it could not.
+function unreadable(reading: SetReading): UnreadableSet | undefined {
+  return "Unreadable" in reading ? reading.Unreadable : undefined;
 }

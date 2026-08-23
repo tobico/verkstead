@@ -22,7 +22,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use support::repo_with_a_commit;
-use verkstead_schema::{Direction, Response};
+use verkstead_schema::{Direction, QuestionSet, Response};
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, Sandbox};
 use verkstead_server::settings::Settings;
@@ -127,9 +127,13 @@ impl Grilling {
         String::from_utf8_lossy(&output.stdout).trim().to_owned()
     }
 
-    /// Block until Question Set `id` has been submitted, and hand it back as the
-    /// store holds it.
-    fn await_stored_set(&self, id: i64) -> store::StoredSet {
+    /// Block until Question Set `id` has been submitted, and hand back what it
+    /// asked.
+    ///
+    /// The Set itself rather than the row holding it: a stored body this build
+    /// cannot read is a broken test rather than a case with anything to say
+    /// here.
+    fn await_asked_set(&self, id: i64) -> QuestionSet {
         let deadline = Instant::now() + Duration::from_secs(30);
 
         loop {
@@ -143,7 +147,11 @@ impl Grilling {
             });
 
             if let Some(stored) = stored {
-                return stored;
+                return stored
+                    .set
+                    .set()
+                    .expect("the Set the session just sent reads back")
+                    .clone();
             }
 
             assert!(
@@ -331,19 +339,15 @@ fn a_set_carrying_a_proposal_goes_through_from_inside_a_sandbox() {
     stdin.write_all(CLOSING_SET.as_bytes()).unwrap();
     drop(stdin);
 
-    let stored = fixture.await_stored_set(1);
+    let stored = fixture.await_asked_set(1);
 
     assert_eq!(
-        stored
-            .set
-            .proposal
-            .as_ref()
-            .map(|proposal| proposal.direction),
+        stored.proposal.as_ref().map(|proposal| proposal.direction),
         Some(Direction::TaskList),
         "the server took the proposal as written"
     );
     assert_eq!(
-        stored.set.title, "Ready to build the rate limiter",
+        stored.title, "Ready to build the rate limiter",
         "and the Set it belongs to landed on this Conversation's Timeline"
     );
 

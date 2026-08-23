@@ -1,102 +1,104 @@
 {
-  "branch": "solid-viewer",
-  "conversation": 1,
-  "diagrams": true,
-  "diff": null,
-  "id": 1,
-  "postscript_html": null,
-  "preface_html": "<p>Where the counter would live:</p>\n<div class=\"wide\"><pre class=\"mermaid\">graph LR;\n  client--&gt;api;\n  api--&gt;redis;\n</pre></div>",
-  "project": "verkstead",
-  "proposal": null,
-  "questions": [
-    {
-      "ask": {
-        "columns": [],
-        "name": "Q1",
-        "options": [
-          {
-            "cells": [],
-            "n": 1,
-            "recommended": false,
-            "text_html": "In-process, per instance."
-          },
-          {
-            "cells": [],
-            "n": 2,
-            "recommended": true,
-            "text_html": "In Redis, shared across instances."
-          }
-        ],
-        "text_html": "<p>Where should the request counter live?</p>\n"
-      },
-      "heading": false,
-      "nav_text": "Where should the request counter live?",
-      "subquestions": []
-    },
-    {
-      "ask": {
-        "columns": [],
-        "name": "Q2",
-        "options": [
-          {
-            "cells": [],
-            "n": 1,
-            "recommended": false,
-            "text_html": "A bare 429."
-          },
-          {
-            "cells": [],
-            "n": 2,
-            "recommended": false,
-            "text_html": "A 429 plus RateLimit headers."
-          }
-        ],
-        "text_html": "<p>How should a throttled client be told to back off?</p>\n"
-      },
-      "heading": false,
-      "nav_text": "How should a throttled client be told to back off?",
-      "subquestions": [
-        {
+  "Set": {
+    "branch": "solid-viewer",
+    "conversation": 1,
+    "diagrams": true,
+    "diff": null,
+    "id": 1,
+    "postscript_html": null,
+    "preface_html": "<p>Where the counter would live:</p>\n<div class=\"wide\"><pre class=\"mermaid\">graph LR;\n  client--&gt;api;\n  api--&gt;redis;\n</pre></div>",
+    "project": "verkstead",
+    "proposal": null,
+    "questions": [
+      {
+        "ask": {
           "columns": [],
-          "name": "Q2a",
+          "name": "Q1",
           "options": [
             {
               "cells": [],
               "n": 1,
               "recommended": false,
-              "text_html": "The exact number of seconds."
+              "text_html": "In-process, per instance."
+            },
+            {
+              "cells": [],
+              "n": 2,
+              "recommended": true,
+              "text_html": "In Redis, shared across instances."
+            }
+          ],
+          "text_html": "<p>Where should the request counter live?</p>\n"
+        },
+        "heading": false,
+        "nav_text": "Where should the request counter live?",
+        "subquestions": []
+      },
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q2",
+          "options": [
+            {
+              "cells": [],
+              "n": 1,
+              "recommended": false,
+              "text_html": "A bare 429."
             },
             {
               "cells": [],
               "n": 2,
               "recommended": false,
-              "text_html": "A rounded number."
+              "text_html": "A 429 plus RateLimit headers."
             }
           ],
-          "text_html": "<p>What should Retry-After say?</p>\n"
+          "text_html": "<p>How should a throttled client be told to back off?</p>\n"
         },
-        {
-          "columns": [],
-          "name": "Q2b",
-          "options": [],
-          "text_html": "<p>Anything else about the headers?</p>\n"
-        }
-      ]
-    },
-    {
-      "ask": {
-        "columns": [],
-        "name": "Q3",
-        "options": [],
-        "text_html": "<p>Anything I should know before starting?</p>\n"
+        "heading": false,
+        "nav_text": "How should a throttled client be told to back off?",
+        "subquestions": [
+          {
+            "columns": [],
+            "name": "Q2a",
+            "options": [
+              {
+                "cells": [],
+                "n": 1,
+                "recommended": false,
+                "text_html": "The exact number of seconds."
+              },
+              {
+                "cells": [],
+                "n": 2,
+                "recommended": false,
+                "text_html": "A rounded number."
+              }
+            ],
+            "text_html": "<p>What should Retry-After say?</p>\n"
+          },
+          {
+            "columns": [],
+            "name": "Q2b",
+            "options": [],
+            "text_html": "<p>Anything else about the headers?</p>\n"
+          }
+        ]
       },
-      "heading": false,
-      "nav_text": "Anything I should know before starting?",
-      "subquestions": []
-    }
-  ],
-  "standing": {
-    "Waiting": "waiting"
-  },
-  "title": "Rate limiting for the public API"
+      {
+        "ask": {
+          "columns": [],
+          "name": "Q3",
+          "options": [],
+          "text_html": "<p>Anything I should know before starting?</p>\n"
+        },
+        "heading": false,
+        "nav_text": "Anything I should know before starting?",
+        "subquestions": []
+      }
+    ],
+    "standing": {
+      "Waiting": "waiting"
+    },
+    "title": "Rate limiting for the public API"
+  }
 }

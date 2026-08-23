@@ -337,8 +337,10 @@ pub enum Event {
 pub struct SetOnTimeline {
     pub set_id: i64,
 
-    /// What the agent asked.
-    pub set: QuestionSet,
+    /// What the agent asked — or the stored body where this build can no longer
+    /// read it, which is a row on the Timeline like any other rather than the
+    /// end of reading it. See [`super::Asked`].
+    pub set: super::Asked,
 
     /// How it was settled, or `None` while it is still waiting on the human.
     pub settlement: Option<super::Settlement>,
@@ -1235,9 +1237,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 .map(|(set_id, body)| -> Result<SetOnTimeline> {
                     Ok(SetOnTimeline {
                         set_id,
-                        set: serde_json::from_str(&body).with_context(|| {
-                            format!("deserialising stored Question Set {set_id}")
-                        })?,
+                        // Never a failure, whatever the body turns out to hold:
+                        // an unreadable Set is a row of its own and the rest of
+                        // the Timeline is drawn around it — see
+                        // [`super::Asked`].
+                        set: super::Asked::read(body),
                         settlement: settled(set_id, answered_at, answer, archived_at)?,
                     })
                 })
@@ -1414,8 +1418,15 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
     .with_context(|| format!("looking for Conversation {conversation_id}'s review"))?;
 
     for (set_id, body) in rows {
-        let set: QuestionSet = serde_json::from_str(&body)
-            .with_context(|| format!("reading stored Question Set {set_id}"))?;
+        // A Set this build cannot read is passed over rather than failing the
+        // question: it carries no `review` block anybody here could act on, and
+        // one unreadable body must not be able to tell a Conversation it has no
+        // review when what happened is that a field left the schema.
+        let asked = super::Asked::read(body);
+
+        let Some(set) = asked.set() else {
+            continue;
+        };
 
         if set.review.is_some() {
             return Ok(Some(set_id));

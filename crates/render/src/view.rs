@@ -13,6 +13,55 @@ use crate::conversations::ProposalView;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
+/// One stored Question Set as the browser receives it: the document where this
+/// build can still read what was asked, and the record itself where it cannot.
+///
+/// A tagged kind rather than a `SetView` with everything nulled out, because the
+/// two are read for different things. One is a Set to answer or a decision to
+/// read back; the other is a body nobody here can render, kept so that what was
+/// asked is not lost — see [`UnreadableSet`]. A page that had to work out which
+/// it was holding from a field being null would be a page that could draw a
+/// sheet over a Set it cannot read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SetReading {
+    /// Boxed, as a Set on a Timeline is: a rendered Set is the Preface, every
+    /// Option of every Question and a highlighted Diff, and an enum as large as
+    /// that would cost the same on the record that says it could not be read.
+    /// Nothing of it reaches the wire — a `Box` serializes as what is in it.
+    Set(Box<SetView>),
+
+    Unreadable(UnreadableSet),
+}
+
+/// A stored Set this build cannot deserialize, as the browser receives it: the
+/// stored body, and what reading it came to.
+///
+/// The body verbatim rather than rendered — there is nothing here that knows
+/// what it means, which is the whole of what is wrong — so the page draws it as
+/// the JSON it is. Nothing rewrites it: a later Verkstead that can read it again
+/// should find it exactly as the agent sent it.
+///
+/// No `standing` and no title. Answering is checked against Questions nobody
+/// here can read, so it is not offered, and neither is archiving; and what the
+/// Set was called is in the body along with everything else, said once rather
+/// than half-recovered into a heading.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct UnreadableSet {
+    pub id: i64,
+
+    /// The Conversation it was asked from — the way back, which an unreadable
+    /// Set needs exactly as a readable one does.
+    pub conversation: i64,
+
+    /// The stored JSON, byte for byte.
+    pub body: String,
+
+    /// What deserializing it said.
+    pub why: String,
+}
+
 /// One Question Set as the browser receives it.
 ///
 /// Everything the agent wrote — the Preface, every Question's and Sub-question's

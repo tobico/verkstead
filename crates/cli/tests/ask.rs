@@ -14,7 +14,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
-use verkstead_schema::Response;
+use verkstead_schema::{QuestionSet, Response};
 use verkstead_server::store::{self, StoredSet};
 
 /// Two Questions, one with a Sub-question, so a Response has to cover `Q1`,
@@ -186,12 +186,20 @@ impl Server {
         })
     }
 
-    /// Block until the CLI has submitted Set `id`.
-    fn await_stored_set(&self, id: i64) -> StoredSet {
+    /// Block until the CLI has submitted Set `id`, and hand back what it asked.
+    ///
+    /// The Set itself rather than the row holding it: a stored body this build
+    /// cannot read is a broken test rather than a case with anything to say
+    /// here.
+    fn await_asked_set(&self, id: i64) -> QuestionSet {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(stored) = self.stored_set(id) {
-                return stored;
+                return stored
+                    .set
+                    .set()
+                    .expect("the Set the CLI just sent reads back")
+                    .clone();
             }
             assert!(
                 Instant::now() < deadline,
@@ -316,7 +324,7 @@ fn the_response_is_delivered_on_stdout_as_yaml() {
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
-    server.await_stored_set(1);
+    server.await_asked_set(1);
     server.answer(1, COMPLETE);
 
     let output = finished(waiting);
@@ -355,7 +363,7 @@ fn the_cli_reconnects_when_the_server_restarts_mid_wait() {
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
-    server.await_stored_set(1);
+    server.await_asked_set(1);
 
     let (addr, database) = server.kill();
     std::thread::sleep(Duration::from_millis(250));
@@ -396,7 +404,7 @@ fn a_set_archived_unanswered_ends_the_wait_for_good() {
     let server = Server::start(tmp.path().join("verkstead.db"));
 
     let waiting = ask(&server, tmp.path(), SET);
-    server.await_stored_set(1);
+    server.await_asked_set(1);
 
     // The human closes the Set instead of answering it — the CLI is holding a
     // wait at this moment, and that is the wait that has to end.
@@ -436,19 +444,19 @@ fn project_branch_and_diff_are_derived_from_the_working_directory() {
     // A clean linked worktree: the root repo's name, the worktree's branch,
     // and no Diff at all.
     let clean = ask(&server, &linked, SET);
-    let stored = server.await_stored_set(1);
+    let stored = server.await_asked_set(1);
     kill(clean);
 
     assert_eq!(
-        stored.set.project.as_deref(),
+        stored.project.as_deref(),
         Some(REPO_NAME),
         "from a linked worktree the project is the root repo's name"
     );
-    assert_eq!(stored.set.branch.as_deref(), Some("feature"));
+    assert_eq!(stored.branch.as_deref(), Some("feature"));
     assert_eq!(
-        stored.set.diff, None,
+        stored.diff, None,
         "a clean tree carries no Diff, got {:?}",
-        stored.set.diff
+        stored.diff
     );
 
     // The same worktree with an untracked file in it.
@@ -459,10 +467,10 @@ fn project_branch_and_diff_are_derived_from_the_working_directory() {
     .unwrap();
 
     let dirty = ask(&server, &linked, SET);
-    let stored = server.await_stored_set(2);
+    let stored = server.await_asked_set(2);
     kill(dirty);
 
-    let diff = stored.set.diff.expect("a dirty tree carries a Diff");
+    let diff = stored.diff.expect("a dirty tree carries a Diff");
     assert!(
         diff.contains("+++ b/open-questions.md")
             && diff.contains("+a line only in the working tree"),
@@ -485,8 +493,8 @@ fn the_quickstart_delivers_the_example_response() {
     // `verkstead ask examples/questions.yaml`, and the Set is the first one
     // this server has seen, so the id the quickstart curls is 1.
     let waiting = ask_file(&server, tmp.path(), &example("questions.yaml"));
-    let stored = server.await_stored_set(1);
-    assert_eq!(stored.set.title, "Rate limiting for the public API");
+    let stored = server.await_asked_set(1);
+    assert_eq!(stored.title, "Rate limiting for the public API");
 
     // The curl step. `answer` insists on a 201, so this is also where an
     // example Response that failed to resolve the example Set would be caught.

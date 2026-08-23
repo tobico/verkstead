@@ -43,6 +43,18 @@ questions:
         text: Should the id appear in URLs?
 "#;
 
+/// What a stored Set asked, insisting this build can still read it.
+///
+/// Every Set here was written by this build a moment ago, so a body it cannot
+/// read is a broken test rather than the case
+/// [`store::Asked::Unreadable`] is there for.
+fn asked(stored: &store::StoredSet) -> &QuestionSet {
+    stored
+        .set
+        .set()
+        .expect("a Set this build just stored reads back")
+}
+
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
@@ -131,11 +143,11 @@ async fn a_valid_set_is_stored_and_answered_with_its_id() {
         .expect("the Set should be in the store");
     assert_eq!(stored.id, created.id);
     assert_eq!(stored.created_at, created.created_at);
-    assert_eq!(stored.set.title, "Storage layout for the pending list");
-    assert_eq!(stored.set.questions.len(), 2);
-    assert_eq!(stored.set.questions[1].subquestions.len(), 2);
-    assert_eq!(stored.set.project.as_deref(), Some("verkstead"));
-    assert_eq!(stored.set.branch.as_deref(), Some("api-core-and-cli"));
+    assert_eq!(asked(&stored).title, "Storage layout for the pending list");
+    assert_eq!(asked(&stored).questions.len(), 2);
+    assert_eq!(asked(&stored).questions[1].subquestions.len(), 2);
+    assert_eq!(asked(&stored).project.as_deref(), Some("verkstead"));
+    assert_eq!(asked(&stored).branch.as_deref(), Some("api-core-and-cli"));
 }
 
 #[tokio::test]
@@ -166,7 +178,7 @@ questions:
     let created: SetCreated = serde_saphyr::from_str(&body_text(response).await).unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
-    assert_eq!(stored.set.preface.as_deref(), Some(submitted));
+    assert_eq!(asked(&stored).preface.as_deref(), Some(submitted));
 }
 
 #[tokio::test]
@@ -194,7 +206,7 @@ questions:
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
 
     assert_eq!(
-        stored.set.diff.as_deref(),
+        asked(&stored).diff.as_deref(),
         Some("diff --git a/notes.md b/notes.md\n@@ -1 +1,2 @@\n first\n+second\n")
     );
 }
@@ -377,5 +389,5 @@ async fn the_schema_is_applied_to_an_existing_database() {
 
     let pool = open_database(&path).await.unwrap();
     let stored = store::load_set(&pool, created.id).await.unwrap().unwrap();
-    assert_eq!(stored.set, set);
+    assert_eq!(asked(&stored), &set);
 }

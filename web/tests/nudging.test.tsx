@@ -32,7 +32,14 @@ import type {
   TranscriptView,
 } from "../src/api/types";
 import { drawn } from "./bench";
-import { askedFor, json, serving, whenever } from "./serving";
+import {
+  askedFor,
+  json,
+  readable,
+  reads as readingOf,
+  serving,
+  whenever,
+} from "./serving";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
@@ -84,8 +91,8 @@ const BESIDE = [
 
 /// One Set twice over: waiting when the page was drawn, answered from another
 /// device by the time a Nudge says to look again.
-const WAITING = answering as SetView;
-const ANSWERED = answered as SetView;
+const WAITING = readable(answering);
+const ANSWERED = readable(answered);
 
 /// The Set on the fixture's Timeline that is still waiting, to build an arrival
 /// out of: an Event of the shape the server really writes.
@@ -625,7 +632,7 @@ describe("what a Nudge is about", () => {
     };
 
     window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    const fetching = serving(...BESIDE, json(WAITING), json(DISCONNECTED));
+    const fetching = serving(...BESIDE, json(readingOf(WAITING)), json(readingOf(DISCONNECTED)));
     const { container } = render(() => <App />);
     await drawn(container, ".liveness.waiting");
     stream().opens();
@@ -718,7 +725,7 @@ describe("a Nudge relayed by the worker", () => {
 
   it("reads everything back, exactly as a Nudge on the stream does", async () => {
     window.history.pushState({}, "", `/sets/${WAITING.id}`);
-    serving(...BESIDE, json(WAITING), json(ANSWERED));
+    serving(...BESIDE, json(readingOf(WAITING)), json(readingOf(ANSWERED)));
     const container = attaches();
     const { container: page } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: the page

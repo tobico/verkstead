@@ -32,8 +32,9 @@ use verkstead_render::{
     ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
     ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
+    Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -215,6 +216,29 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         }
     };
 
+    // A stored body this build's schema will not take is a page all the same,
+    // and the same page whether it is reached by its own URL or opened from the
+    // Timeline: the record, said to be unreadable, with the body itself under
+    // it. Not a failure — the Set is there, and this is what there is of it.
+    let set = match stored.set {
+        store::Asked::Set(set) => set,
+        store::Asked::Unreadable(unreadable) => {
+            tracing::warn!(
+                set_id = id,
+                why = unreadable.why,
+                "a stored Question Set cannot be read"
+            );
+
+            return Json(SetReading::Unreadable(UnreadableSet {
+                id: stored.id,
+                conversation,
+                body: unreadable.body,
+                why: unreadable.why,
+            }))
+            .into_response();
+        }
+    };
+
     let standing = standing(
         &state,
         id,
@@ -225,9 +249,9 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
-    let view: SetView = verkstead_render::set_view(stored.id, conversation, stored.set, standing);
+    let view: SetView = verkstead_render::set_view(stored.id, conversation, set, standing);
 
-    Json(view).into_response()
+    Json(SetReading::Set(Box::new(view))).into_response()
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
@@ -711,18 +735,33 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // The Event's own stamp is what the Liveness verdict is aged
                     // against. It is the Set's creation time — both are written in
                     // the one transaction that puts a Set on a Timeline.
-                    store::Event::QuestionSet(asked) => {
-                        let standing =
-                            standing(&state, asked.set_id, asked.settlement, &event.at, now);
+                    store::Event::QuestionSet(asked) => match &asked.set {
+                        store::Asked::Set(set) => {
+                            let standing =
+                                standing(&state, asked.set_id, asked.settlement, &event.at, now);
 
-                        verkstead_render::question_set_event(
-                            event.id,
-                            event.at,
-                            asked.set_id,
-                            &asked.set,
-                            standing,
-                        )
-                    }
+                            verkstead_render::question_set_event(
+                                event.id,
+                                event.at,
+                                asked.set_id,
+                                set,
+                                standing,
+                            )
+                        }
+                        // A row of its own rather than an omission: the ask
+                        // happened, and a Timeline that quietly left it out
+                        // would be this build deciding a decision never
+                        // occurred. What it opens is the stored body — see the
+                        // Set endpoint above.
+                        store::Asked::Unreadable(unreadable) => {
+                            verkstead_render::unreadable_set_event(
+                                event.id,
+                                event.at,
+                                asked.set_id,
+                                unreadable.why.clone(),
+                            )
+                        }
+                    },
                     // Rendered like the Brief, and inline like it: a document to
                     // read, with nothing of it a details pane would add.
                     store::Event::Handoff(markdown) => {

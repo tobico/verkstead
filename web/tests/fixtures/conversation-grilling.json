@@ -1,7 +1,7 @@
 {
   "adopting": null,
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
-  "blocked_on": null,
+  "blocked_on": 12,
   "branch": "outbound-retries",
   "direction": null,
   "grilling_profile": {
@@ -170,6 +170,25 @@
           "Waiting": "waiting"
         },
         "title": "What a delivery that has failed forty times becomes"
+      }
+    },
+    {
+      "UnreadableSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 8,
+        "set_id": 3,
+        "why": "unknown field `accepted_by`, expected `direction` or `rationale` at line 6 column 17"
+      }
+    },
+    {
+      "Interruption": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "git_status": "",
+        "how": "nothing is driving it: no session is running, and nothing is left to start one",
+        "id": 12,
+        "settled": null,
+        "tail": "Looking at how the queue is **drained**.",
+        "what": "grilling the work"
       }
     }
   ],
