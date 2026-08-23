@@ -292,6 +292,14 @@ async fn build(state: &AppState, id: i64, direction: Direction) -> Result<()> {
         return Ok(());
     };
 
+    // Waited for before anything is launched, the way every driver waits for it:
+    // starting a session ends whatever is registered, and what may be registered
+    // here is a Manual Task the human set going in this very lull — see
+    // [`crate::manual`]. Waited for rather than tried for, because nothing else
+    // will start this implementation on its behalf; the choice is already on the
+    // record, so a browser that gave up on the wait has still had its answer.
+    let _turn = state.sessions.turn(id).await;
+
     // The grilling session ended when its proposal was accepted. Ended again
     // here because this is where it matters rather than where it happened: one
     // worktree holds one agent, and two would be two agents editing each other's

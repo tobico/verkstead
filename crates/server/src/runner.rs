@@ -67,6 +67,17 @@ pub struct Pace {
     /// choice one phase along, and a caller standing a server up sets all of
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
+
+    /// And how long a Manual Task's session must have printed nothing before it
+    /// is ended — see [`crate::manual`].
+    ///
+    /// Distinctly longer than [`Pace::grace`], because it is carrying more
+    /// weight. A backlog step is ended on quiet *and* a landing read off the
+    /// repository, so quiet is the second of two signals; a manual task has no
+    /// done file and no path to watch, and quiet is the only one there is.
+    /// Ending one early kills a working session silently, and a minute of
+    /// nothing is the shortest silence an agent still at work reliably breaks.
+    pub manual: Duration,
 }
 
 impl Default for Pace {
@@ -75,6 +86,7 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
+            manual: Duration::from_secs(60),
         }
     }
 }
@@ -270,7 +282,8 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
             step => (step, Prompt::NextTask),
         },
         store::Step::Inline => {
-            let Some(session) = launch(&state, conversation_id, Prompt::Implementing, &note).await
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::Implementing, &note).await
             else {
                 return;
             };
@@ -306,7 +319,8 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
                 return crate::wrapping::opened(&state, conversation_id, None).await;
             }
 
-            let Some(session) = launch(&state, conversation_id, Prompt::Staging, &note).await
+            let Some(session) =
+                launch_in_turn(&state, conversation_id, Prompt::Staging, &note).await
             else {
                 return;
             };
@@ -329,7 +343,7 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 
     tracing::info!(conversation_id, step = ?step, "a retried step is starting in a fresh session");
 
-    let Some(session) = launch(&state, conversation_id, prompt, &note).await else {
+    let Some(session) = launch_in_turn(&state, conversation_id, prompt, &note).await else {
         return;
     };
 
@@ -349,7 +363,7 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 /// fork is told because it is the one thing about a stage the repository does not
 /// say.
 pub(crate) async fn plan_stage(state: AppState, conversation_id: i64, stacked_on: Option<String>) {
-    let Some(session) = launch(
+    let Some(session) = launch_in_turn(
         &state,
         conversation_id,
         Prompt::PlanningStage(stacked_on),
@@ -411,7 +425,8 @@ async fn work(state: AppState, conversation_id: i64, first: Step, session: Sessi
 
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
-        let Some(started) = launch(&state, conversation_id, Prompt::NextTask, "").await else {
+        let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask, "").await
+        else {
             return;
         };
 
@@ -1073,6 +1088,34 @@ enum Prompt {
     Reviewing,
 }
 
+/// Wait for the Conversation's Worktree, and then [`launch`] into it.
+///
+/// What every driver here launches through except the two that are already
+/// holding the Turn when they get here — a fix session and the review, both
+/// dispatched by a wrap-up that took it before it decided anything.
+///
+/// The wait is what keeps a launch from displacing a session somebody else put
+/// there. [`crate::sessions::Sessions::start`] ends whatever is registered, which
+/// is exactly what a run relaunching its own step wants and exactly what must
+/// not happen to a Manual Task — the human sets one going in a quiet moment
+/// between steps, and a run that reached the next one a second later would kill
+/// it mid-sentence. A manual session holds the Turn for as long as it runs, so
+/// this waits for it rather than ending it.
+///
+/// Held across the launch alone rather than across the session, because that is
+/// the whole of what it is protecting: once a session is registered, everything
+/// else that might start one can see it there.
+async fn launch_in_turn(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    note: &str,
+) -> Option<Session> {
+    let _turn = state.sessions.turn(conversation_id).await;
+
+    launch(state, conversation_id, inside, note).await
+}
+
 /// Start a fresh session on the next step, under the Conversation's
 /// implementation Profile.
 ///
@@ -1087,6 +1130,11 @@ enum Prompt {
 /// The Conversation is read back every time rather than held across the run: a
 /// backlog takes hours, and where an agent is about to be let loose is the one
 /// thing that must not be guessed at.
+///
+/// The Turn is the caller's to have taken — see [`launch_in_turn`], which is
+/// what the callers that are not already holding one launch through. It cannot
+/// be taken here: a wrap-up takes the Turn before it decides what to dispatch,
+/// and a lock taken twice by the one task is a task waiting on itself.
 async fn launch(
     state: &AppState,
     conversation_id: i64,

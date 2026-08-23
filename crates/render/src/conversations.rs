@@ -256,6 +256,19 @@ pub struct ConversationView {
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
 
+    /// Whether a session is registered for this Conversation as of this read.
+    ///
+    /// The same fact the sidebar draws its working indicator from, said here
+    /// because the Timeline has its own use for it: the Manual Task composer is
+    /// offered exactly where nothing is running, and the states it is offered in
+    /// are the ones a session may or may not be running in.
+    ///
+    /// A question about a process rather than about the record, so it is true
+    /// only as of the moment it was read — and a restarted server has no
+    /// sessions at all, so every Conversation then reads as not working, which
+    /// is what each of them is.
+    pub working: bool,
+
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 
@@ -1439,6 +1452,60 @@ pub enum GrillingStarted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+}
+
+/// What the human typed into the Manual Task composer: the instruction, and the
+/// Agent Profile to run it under.
+///
+/// The Profile travels with the instruction rather than being read off the
+/// Conversation, because the pick is one-off. The composer starts on the
+/// Conversation's implementation Profile and a different choice belongs to this
+/// submission alone — it never becomes the Conversation's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ManualTaskSubmission {
+    /// What to do, in the human's own markdown. Nothing here interprets it — it
+    /// goes on the Timeline whole and into the prompt whole.
+    pub instruction: String,
+
+    /// Which saved Profile the one-off session runs as.
+    pub profile_id: i64,
+}
+
+/// What became of submitting one.
+///
+/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
+/// each of them is something different for the human to go and do, and a single
+/// "cannot start" would leave them guessing which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ManualTaskStarted {
+    /// The instruction is on the Timeline and a session is running on it.
+    Started,
+
+    NoSuchConversation,
+
+    /// It is drafting or aborted, so it has no Worktree for a session to run in.
+    /// The two states the composer is never offered in.
+    NowhereToWork,
+
+    /// A session was registered when this arrived, so the composer that was
+    /// pressed was stale. Nothing is queued: an instruction written against a
+    /// world that has since moved may no longer be the thing to do.
+    AlreadyRunning,
+
+    /// Nothing was typed, and an instruction is the whole of what a Manual Task
+    /// is.
+    EmptyInstruction,
+
+    /// The picked Profile has gone — deleted between the page being drawn and
+    /// the press.
+    NoSuchProfile,
+
+    /// The instruction is on the Timeline and no session could be started for
+    /// it. The reason is in the server's log, as a worktree git refused is: this
+    /// is the one refusal with nothing for the human to correct.
+    NotStarted,
 }
 
 /// What became of pressing Adopt.

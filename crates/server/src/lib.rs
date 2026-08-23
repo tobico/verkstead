@@ -33,6 +33,7 @@ pub mod github;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod interruptions;
+mod manual;
 mod nudge;
 mod profiles;
 mod push;

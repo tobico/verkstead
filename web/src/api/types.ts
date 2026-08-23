@@ -519,6 +519,20 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
+ * Whether a session is registered for this Conversation as of this read.
+ *
+ * The same fact the sidebar draws its working indicator from, said here
+ * because the Timeline has its own use for it: the Manual Task composer is
+ * offered exactly where nothing is running, and the states it is offered in
+ * are the ones a session may or may not be running in.
+ *
+ * A question about a process rather than about the record, so it is true
+ * only as of the moment it was read — and a restarted server has no
+ * sessions at all, so every Conversation then reads as not working, which
+ * is what each of them is.
+ */
+working: boolean, 
+/**
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, 
@@ -684,6 +698,35 @@ at: string,
  * markdown on this wire is.
  */
 html: string, };
+
+/**
+ * What became of submitting one.
+ *
+ * Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
+ * each of them is something different for the human to go and do, and a single
+ * "cannot start" would leave them guessing which.
+ */
+export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NotStarted";
+
+/**
+ * What the human typed into the Manual Task composer: the instruction, and the
+ * Agent Profile to run it under.
+ *
+ * The Profile travels with the instruction rather than being read off the
+ * Conversation, because the pick is one-off. The composer starts on the
+ * Conversation's implementation Profile and a different choice belongs to this
+ * submission alone — it never becomes the Conversation's.
+ */
+export type ManualTaskSubmission = { 
+/**
+ * What to do, in the human's own markdown. Nothing here interprets it — it
+ * goes on the Timeline whole and into the prompt whole.
+ */
+instruction: string, 
+/**
+ * Which saved Profile the one-off session runs as.
+ */
+profile_id: number, };
 
 /**
  * A move as the page receives it: when, and to what.
