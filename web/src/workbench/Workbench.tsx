@@ -11,6 +11,13 @@
 //! The attribute rather than a rendered-or-not pane, because walking back out
 //! should not throw away what the pane it came from had drawn.
 //!
+//! How wide the panes stand is held here too, for the same reason: the widths
+//! are a property of the frame rather than of anything drawn in it. They are
+//! percentages of the workbench kept per device (`panes.ts`), and the dividers
+//! that set them exist only in the layouts that stand panes side by side —
+//! below that breakpoint the page is walked through one pane at a time, so
+//! there is no border to drag and nothing remembered is read.
+//!
 //! Which Event is open is held here rather than in the Timeline, because it is
 //! what the third pane is *about*: the pane is that Event's full self and
 //! nothing else, so with none open it is bare paper. What a Conversation *is* is
@@ -21,7 +28,17 @@
 //! whose Timeline has moved on is not one to restore a scroll position into.
 
 import { useNavigate, useParams } from "@solidjs/router";
-import { Match, Show, Switch, createEffect, createSignal, on, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  type Accessor,
+  type JSX,
+} from "solid-js";
 
 import { loadConversation } from "../api/client";
 import type {
@@ -44,6 +61,20 @@ import { Interrupted } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
+import {
+  ALL_THREE,
+  BESIDE,
+  DEFAULTS,
+  clamped,
+  dragged,
+  nudged,
+  range,
+  remember,
+  restore,
+  widths as remembered,
+  type Divider,
+  type Widths,
+} from "./panes";
 
 /// Which level of the hierarchy a narrow window is showing.
 export type Pane = "conversations" | "timeline" | "details";
@@ -128,6 +159,69 @@ function manualIn(open: Opened): ManualTaskEvent | undefined {
   return "manual" in open ? open.manual : undefined;
 }
 
+/// Whether a media query holds, as something the page can be built out of.
+///
+/// The stylesheet answers the same question for itself; this is for the parts
+/// of the layout that are the page's rather than the rules' — which dividers
+/// exist, and whether this device's remembered widths are read at all. A
+/// browser with no `matchMedia` to ask answers no to everything, which is the
+/// narrow layout: one pane, no dividers, nothing read.
+function matching(query: string): Accessor<boolean> {
+  if (typeof window.matchMedia !== "function") {
+    return () => false;
+  }
+
+  const asked = window.matchMedia(query);
+  const [holds, setHolds] = createSignal(asked.matches);
+  const changed = () => setHolds(asked.matches);
+
+  asked.addEventListener?.("change", changed);
+  onCleanup(() => asked.removeEventListener?.("change", changed));
+
+  return holds;
+}
+
+/// The line between two panes, and the handle that moves it.
+///
+/// A separator rather than a button, because that is what it is: the thing it
+/// does to the page is not an action but a value, and the value is the share of
+/// the workbench the pane on its left is worth. Which is what the arrow keys
+/// move it by, for the pointer nobody dragging with a keyboard has.
+function Divider(props: {
+  divider: Divider;
+  label: string;
+  share: number;
+  travel: { least: number; most: number };
+  drag: (divider: Divider, event: PointerEvent) => void;
+  nudge: (divider: Divider, by: number) => void;
+  restore: () => void;
+}): JSX.Element {
+  return (
+    <div
+      class="pane-divider"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={props.label}
+      aria-valuenow={Math.round(props.share)}
+      aria-valuemin={Math.round(props.travel.least)}
+      aria-valuemax={Math.round(props.travel.most)}
+      tabindex="0"
+      onPointerDown={(event) => props.drag(props.divider, event)}
+      onDblClick={() => props.restore()}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          props.nudge(props.divider, -1);
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          props.nudge(props.divider, 1);
+        }
+      }}
+    />
+  );
+}
+
 export function Workbench(): JSX.Element {
   const params = useParams();
   const navigate = useNavigate();
@@ -136,6 +230,84 @@ export function Workbench(): JSX.Element {
 
   /// Which Timeline Event the details pane is showing, where one is open.
   const [event, setEvent] = createSignal<number | null>(null);
+
+  /// Which layout is standing, which decides how many dividers there are and
+  /// how much room each pane is allowed to leave the others.
+  const beside = matching(BESIDE);
+  const allThree = matching(ALL_THREE);
+
+  /// How wide the panes stand. Read off this device once, and written back when
+  /// a drag is let go of rather than on the way — a width settled on is worth
+  /// remembering, and the hundred it passed through on the way there are not.
+  const [settled, setSettled] = createSignal<Widths>(remembered());
+
+  /// And as they may actually be drawn: a sidebar dragged wide in the two-pane
+  /// layout is not allowed to squeeze the timeline out of the three-pane one,
+  /// so the minimums are met against the layout in front of the human rather
+  /// than against the one the width was settled in.
+  const shown = () => clamped(settled(), allThree());
+
+  /// The frame the shares are shares *of* — a divider dropped at a point on the
+  /// screen means nothing until it is measured against this.
+  let frame!: HTMLDivElement;
+
+  /// Dragging one. The listeners go on the window rather than on the handle,
+  /// because a pointer that has outrun the handle — which every drag's does —
+  /// is still dragging it.
+  const drag = (divider: Divider, event: PointerEvent) => {
+    // Which stops the drag selecting the text of both panes on the way past.
+    event.preventDefault();
+
+    const frameRect = frame.getBoundingClientRect();
+    if (frameRect.width === 0) {
+      return;
+    }
+
+    const moved = (at: PointerEvent) => {
+      const share = ((at.clientX - frameRect.left) / frameRect.width) * 100;
+      setSettled((was) => dragged(was, divider, share, allThree()));
+    };
+
+    const dropped = () => {
+      window.removeEventListener("pointermove", moved);
+      window.removeEventListener("pointerup", dropped);
+      window.removeEventListener("pointercancel", dropped);
+      remember(settled());
+    };
+
+    window.addEventListener("pointermove", moved);
+    window.addEventListener("pointerup", dropped);
+    window.addEventListener("pointercancel", dropped);
+  };
+
+  /// Moving one with the keyboard, which settles at once: there is no letting
+  /// go of an arrow key.
+  const nudge = (divider: Divider, by: number) => {
+    setSettled((was) => nudged(was, divider, by, allThree()));
+    remember(settled());
+  };
+
+  /// And putting them back, which is what a double-click on either divider
+  /// does: both widths, because what it restores is the defaults rather than
+  /// one of them.
+  const defaults = () => {
+    restore();
+    setSettled(DEFAULTS);
+  };
+
+  /// What the frame carries the widths as. Only where a layout stands panes
+  /// side by side: below that the page is walked through one pane at a time,
+  /// and what this device remembers about a desktop's columns is nothing a
+  /// phone should be reading. The stylesheet has a default of its own behind
+  /// each name, so an absent pair is the untouched workbench rather than a
+  /// broken one.
+  const columns = () =>
+    beside()
+      ? {
+          "--pane-sidebar": `${shown().sidebar}%`,
+          "--pane-timeline": `${shown().timeline}%`,
+        }
+      : undefined;
 
   /// Closing whatever is open, which empties the pane — so on a narrow window it
   /// is also the way back out of it. Harmless on a wide one, where all three
@@ -254,13 +426,34 @@ export function Workbench(): JSX.Element {
   }));
 
   return (
-    <div class="workbench" data-pane={pane()}>
+    <div
+      class="workbench"
+      data-pane={pane()}
+      ref={frame}
+      style={columns()}
+    >
       <section class="pane conversations-pane" aria-label="Conversations">
         <Conversations
           selected={selected()}
           open={(id) => navigate(`/conversations/${id}`)}
         />
       </section>
+
+      {/* One divider per border there is: the sidebar's wherever the sidebar
+          stands beside something, and the timeline's only where all three panes
+          are up. Each sits between the two panes it parts, so the grid places
+          it without being told where. */}
+      <Show when={beside()}>
+        <Divider
+          divider="sidebar"
+          label="Resize the conversations pane"
+          share={shown().sidebar}
+          travel={range("sidebar", shown(), allThree())}
+          drag={drag}
+          nudge={nudge}
+          restore={defaults}
+        />
+      </Show>
 
       <section class="pane timeline-pane" aria-label="Timeline">
         <Switch>
@@ -290,6 +483,18 @@ export function Workbench(): JSX.Element {
           </Match>
         </Switch>
       </section>
+
+      <Show when={allThree()}>
+        <Divider
+          divider="timeline"
+          label="Resize the timeline pane"
+          share={shown().timeline}
+          travel={range("timeline", shown(), allThree())}
+          drag={drag}
+          nudge={nudge}
+          restore={defaults}
+        />
+      </Show>
 
       <section class="pane details-pane" aria-label="Details">
         {/* Nothing at all where nothing is open, which on a wide window is a

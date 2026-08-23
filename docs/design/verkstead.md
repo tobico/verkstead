@@ -243,6 +243,18 @@ flowchart LR
 Fully responsive 3-pane hierarchy: conversations list → timeline of the
 selected conversation → details pane of the selected event.
 
+The panes are resizable where they stand side by side (*settled 2026-08-24,
+building workbench-refit*). Widths are shares of the window rather than fixed
+lengths — what is traded away is a part of what this screen has, and no two
+screens have the same — and the dividers between the panes drag: both of them
+with all three panes up, the sidebar's alone with two. Each pane keeps a floor
+so none can be dragged away, a double-click on a divider puts the defaults
+back, and what a drag settles on is remembered per device. Below the two-pane
+breakpoint the layout pages one pane at a time: no dividers, and nothing
+remembered is read. The details pane caps its content at the 60rem the Set and
+Settings pages are read at and centres it when the pane is wider, so a pane
+dragged to the width of a window is still a pane a line can be read across.
+
 The details pane is the selected Event and nothing else: with nothing selected
 it is blank, and a narrow layout offers no way to page into it (*settled
 2026-08-24, building workbench-refit*). What a Conversation needs settling

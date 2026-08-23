@@ -783,6 +783,51 @@ main:has(.workbench) {
   display: block;
 }
 
+/* The line between two panes, and the handle that moves it.
+
+   Only in the document where a layout stands panes side by side — the page puts
+   it there, and takes it away again below the breakpoint where the workbench is
+   walked through one pane at a time. So there is no `display: none` here to
+   keep in step with the rules that decide which panes are drawn: a divider that
+   is drawn is a divider there is something either side of.
+
+   It is the border as well as the handle. The panes themselves carry no edge
+   between them any more — two lines a pixel apart, one of them moving, is the
+   sort of thing nobody sees and everybody notices.
+
+   `touch-action` because a finger dragging this is dragging this: left to
+   itself the browser would take the gesture for a scroll of the pane under it
+   and the divider would never see the second event. */
+.pane-divider {
+  position: relative;
+  width: 0.5rem;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--edge);
+}
+
+/* Under the pointer, and under the keyboard's focus, the line says it is a
+   thing that moves. The whole half-rem is the target; what lights up is the
+   line, because the half-rem is only there to be easier to hit than a pixel. */
+.pane-divider:hover::before,
+.pane-divider:focus-visible::before {
+  width: 2px;
+  background: var(--accent);
+}
+
+.pane-divider:focus-visible {
+  outline: none;
+}
+
 /* A pane's title with the ways out of it either side. Wrapping, so a narrow
    pane puts the title under the way back rather than squeezing both onto one
    line. */
@@ -2783,7 +2828,13 @@ main:has(.workbench) {
    scroll would move the list the human is not reading. */
 @media (min-width: 60rem) {
   .workbench {
-    grid-template-columns: 15rem 1fr;
+    /* The sidebar, the divider that moves it, and whichever level is being
+       read. A share of the window rather than a length: what the human is
+       trading away is a part of what they have, and what they have is not the
+       same window twice. The default behind the name is the 15rem this column
+       used to be fixed at, as a share of the window the third pane arrives
+       at. */
+    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
     height: 100dvh;
   }
 
@@ -2793,7 +2844,6 @@ main:has(.workbench) {
 
   .workbench > .conversations-pane {
     display: block;
-    border-right: 1px solid var(--edge);
   }
 
   .workbench:not([data-pane="details"]) > .timeline-pane,
@@ -2813,21 +2863,42 @@ main:has(.workbench) {
    to, so the ways between the panes go away. */
 @media (min-width: 80rem) {
   .workbench {
-    grid-template-columns: 15rem 25rem 1fr;
+    grid-template-columns:
+      var(--pane-sidebar, 20%) auto var(--pane-timeline, 30%) auto 1fr;
   }
 
   .workbench > .pane {
     display: block;
   }
 
-  .workbench > .details-pane {
-    border-left: 1px solid var(--edge);
-  }
-
   .pane-back,
   .pane-forward {
     display: none;
   }
+}
+
+/* The details pane's content at the measure the rest of the app is read at, and
+   in the middle of the pane when the pane is wider than that.
+
+   A pane that can be dragged is a pane that can be dragged to the width of a
+   window, and a Set answered across two feet of screen is a Set nobody can read
+   a line of. 60rem is what every other page's column is capped at — the Set and
+   the Settings both — so what the pane holds is the same width there that it is
+   anywhere else, whatever the human has left the pane itself at.
+
+   Padding rather than a `max-width` on the content, because what is inside this
+   pane is a pane's worth of blocks rather than one wrapper to cap: the sticky
+   header, the sheets, the diffs, the terminal. Padding moves the whole column
+   in from both edges at once and every one of them is inside it — including
+   the header, which goes on bleeding its rem of paper out either side of what
+   it is the header of.
+
+   The percentage is of the pane, so below the first breakpoint — where the pane
+   is the window and the window is narrower than the measure — the `max` picks
+   the rem the pane always had, and this rule costs nothing. No media query
+   needed to say so. */
+.workbench > .details-pane {
+  padding-inline: max(1rem, (100% - 60rem) / 2);
 }
 
 /* The pane with a Screen in it, which is the one pane here that ends where the
