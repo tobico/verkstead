@@ -339,6 +339,13 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         // first — which is [`crate::review`]'s to launch, because it is the one
         // thing that knows what to do with what the review comes back with.
         store::Step::Review => return crate::review::retried(state, conversation_id).await,
+        // And nor is this one, which is not the pipeline's at all: what a
+        // retried Manual Task runs is the instruction the human typed, read
+        // back off the Timeline because a bare step word has no room for it —
+        // see [`crate::manual::retried`].
+        store::Step::Manual => {
+            return crate::manual::retried(state, conversation_id, note).await;
+        }
     };
 
     tracing::info!(conversation_id, step = ?step, "a retried step is starting in a fresh session");

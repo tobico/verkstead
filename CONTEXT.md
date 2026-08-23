@@ -330,6 +330,13 @@ that submission alone and never becomes the Conversation's.
 
 Ended on quiet with no Question Set of its own still open, there being no done
 file to end it by — so a session idling on a Blocking Ask is left where it is.
+
+One whose session exits badly stops at an Interruption, with the usual three
+Remedies: the human submits from a phone and walks away, so being asked is the
+only thing that reaches them. Retry runs the same instruction again, read back
+off the Timeline, under the Conversation's implementation Profile. One that
+exits cleanly having committed nothing raises nothing — an instruction may
+legitimately change nothing.
 _Avoid_: step (the unattended unit a done file ends), task (a backlog's), hold,
 take over (the Remedy), errand, manual step
 

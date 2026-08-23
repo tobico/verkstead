@@ -5377,3 +5377,266 @@ async fn a_driver_waits_for_a_manual_session_rather_than_ending_it() {
          free: {said:?}"
     );
 }
+
+/// A manual session that fell over stops at an Interruption, the way every
+/// session that falls over does.
+///
+/// Deliberately not a message on the Timeline: the human submits from a phone
+/// and walks away, so *blocked on you* and the push it fires are the only things
+/// that reach them. What they get back is the evidence — how it ended, what git
+/// makes of the Worktree, what the session last said — and the three Remedies.
+#[tokio::test]
+async fn a_manual_session_that_fell_over_asks_the_human_what_to_do_about_it() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            printf 'half a rebase\n' > rebase.md
+            printf 'error: could not apply c0ffee1\n'
+            exit 1
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_profile
+        .as_ref()
+        .expect("both Profiles are fixed before grilling starts")
+        .id;
+    let worktree = PathBuf::from(
+        view.worktree
+            .clone()
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+
+    assert_eq!(
+        fixture.manual("Rebase this onto `main`.", profile).await,
+        ManualTaskStarted::Started,
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert_eq!(
+        stopped.what, "doing what the manual task said",
+        "which step failed, and a manual task is a step of nothing else",
+    );
+    assert_eq!(
+        stopped.how, "the session exited with status 1",
+        "and how it ended",
+    );
+    assert!(
+        stopped.git_status.contains("rebase.md"),
+        "what git makes of the Worktree, which is where the half-done work is: {:?}",
+        stopped.git_status,
+    );
+    assert!(
+        stopped.tail.contains("error: could not apply c0ffee1"),
+        "and the tail of what the session last said: {:?}",
+        stopped.tail,
+    );
+    assert_eq!(
+        stopped.settled, None,
+        "nobody has answered it, which is what makes it a question",
+    );
+
+    let view = fixture.view().await;
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "the Conversation is blocked on the human, and says which Event it is blocked on",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and it is still exactly where it was: an Interruption about a Manual Task \
+         moves no more state than the Manual Task did",
+    );
+
+    assert!(
+        worktree.join("rebase.md").exists(),
+        "the Worktree is left as the session left it, which is what makes taking \
+         over a remedy at all",
+    );
+}
+
+/// Retry: the same instruction again, in a fresh session, with what the human
+/// wrote beside the button under it.
+///
+/// The instruction is read back off the newest Manual Task Event, because a
+/// retry is dispatched off the step the evidence names and a step is a bare
+/// word. What it runs under is the Conversation's implementation Profile — the
+/// one-off pick belonged to the submission, and the submission here deliberately
+/// picked the other one.
+#[tokio::test]
+async fn retrying_a_manual_task_runs_the_instruction_again_under_the_implementation_profile() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            if [ -f RETRIED ]; then
+                printf 'model=%s\n' "$1"
+                printf 'prompt=%s\n' "$2"
+                printf 'done\n'
+            else
+                printf 'first go\n' > RETRIED
+                printf 'error: could not apply c0ffee1\n'
+                exit 1
+            fi
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+    let picked = view
+        .grilling_profile
+        .as_ref()
+        .expect("both Profiles are fixed before grilling starts")
+        .id;
+
+    assert_eq!(
+        fixture.manual("Rebase this onto `main`.", picked).await,
+        ManualTaskStarted::Started,
+    );
+
+    let stopped = fixture.stopped().await;
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture
+            .settle(stopped.id, "Retry", "leave the tags alone this time")
+            .await,
+        RemedySettled::Settled,
+    );
+
+    let retried = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == retried && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/manual-task/SKILL.md"),
+        "a manual task again rather than a step of the pipeline: {printed:?}",
+    );
+    assert!(
+        printed.contains("Rebase this onto"),
+        "on the same instruction, read back off the Timeline: {printed:?}",
+    );
+    assert!(
+        printed.contains("What I said when I asked you to try this again")
+            && printed.contains("leave the tags alone this time"),
+        "with what the human wrote under it, where a retried step's note goes: {printed:?}",
+    );
+    assert!(
+        printed.contains("model=claude-implementation-5"),
+        "under the Conversation's implementation Profile: the pick belonged to the \
+         submission — {printed:?}",
+    );
+    assert!(
+        !printed.contains(BRIEF),
+        "and still with neither of the two documents: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+    assert_eq!(
+        manual_tasks(&view).len(),
+        1,
+        "one Manual Task, because one was asked for: a retry runs what is on the \
+         record rather than writing it down again",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and nothing about the Conversation moved on account of any of it",
+    );
+}
+
+/// A manual task that changed nothing is a manual task done.
+///
+/// The one place this parts company with every step of a run, which is asked
+/// about when it commits nothing. An instruction is free text and can ask for
+/// anything — "check whether the retries are still capped" is answered by
+/// reading — so a clean exit is a clean exit, and there is nothing to put to the
+/// human about it.
+#[tokio::test]
+async fn a_manual_task_that_committed_nothing_is_not_something_to_ask_about() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            printf 'the retries are still capped at five\n'
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_profile
+        .as_ref()
+        .expect("both Profiles are fixed before grilling starts")
+        .id;
+
+    assert_eq!(
+        fixture
+            .manual("Check whether the retries are still capped.", profile)
+            .await,
+        ManualTaskStarted::Started,
+    );
+
+    fixture.quiet().await;
+
+    // Long enough that an Interruption which was going to be raised would have
+    // been: the session is over, and being ended on quiet takes longer than this.
+    tokio::time::sleep(BRISKLY.manual * 4).await;
+
+    let view = fixture.view().await;
+    assert_eq!(
+        interruptions(&view),
+        Vec::<&InterruptionEvent>::new(),
+        "an instruction may legitimately change nothing, and that is not a failure",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "so there is nothing the human is being kept waiting by",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Grilling,
+        "and the Conversation is where it was",
+    );
+}

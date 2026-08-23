@@ -73,6 +73,16 @@ pub enum Step {
     /// as a review that found nothing. A retry is the review over again, in a
     /// session as fresh as the first one was.
     Review,
+
+    /// A Manual Task: the instruction the human typed at the end of the
+    /// Timeline, run outside the pipeline altogether.
+    ///
+    /// Not a step of anything, and the only one whose *what* is written down
+    /// nowhere but the Timeline — a bare word has no room for the paragraph the
+    /// human typed. Which is what the word is for: a retry that finds it reads
+    /// the instruction back off the newest Manual Task Event, rather than
+    /// asking `.tasks/` what to run next.
+    Manual,
 }
 
 impl Step {
@@ -88,6 +98,7 @@ impl Step {
             Self::Stage => "stage",
             Self::Checks => "checks",
             Self::Review => "review",
+            Self::Manual => "manual",
         }
     }
 
@@ -104,6 +115,7 @@ impl Step {
             "stage" => Self::Stage,
             "checks" => Self::Checks,
             "review" => Self::Review,
+            "manual" => Self::Manual,
             other => bail!("an Interruption names the unknown step {other:?}"),
         })
     }

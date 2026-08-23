@@ -259,7 +259,17 @@ async fn every_step_a_run_can_stop_on_reads_back_as_itself() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    for step in [Step::Planning, Step::Task, Step::Finish, Step::Inline] {
+    for step in [
+        Step::Planning,
+        Step::Task,
+        Step::Finish,
+        Step::Inline,
+        Step::Roadmap,
+        Step::Stage,
+        Step::Checks,
+        Step::Review,
+        Step::Manual,
+    ] {
         let event = record_interruption(&pool, id, &Evidence { step, ..evidence() })
             .await
             .unwrap()

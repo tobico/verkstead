@@ -16,7 +16,7 @@ driver the state calls for.
 
 - [x] 01: Manual Task on the Timeline — [details](01-manual-task-event.md)
 - [x] 02: The composer, and the session it starts — [details](02-composer-and-session.md)
-- [ ] 03: A manual task that fails — [details](03-manual-task-interruption.md)
+- [x] 03: A manual task that fails — [details](03-manual-task-interruption.md)
 - [ ] 04: The driver registry — [details](04-driver-registry.md)
 - [ ] 05: The stall sweep — [details](05-stall-sweep.md)
 - [ ] 06: Retrying a stall for the runner, an inline session or a wrap-up — [details](06-stall-retry-drivers.md)
