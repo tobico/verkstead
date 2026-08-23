@@ -379,7 +379,8 @@ textarea::placeholder {
 
 .back,
 .to-repos,
-.to-profiles {
+.to-profiles,
+.to-settings {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
@@ -596,6 +597,126 @@ textarea::placeholder {
 
 .profile-actions .remove {
   color: var(--removed);
+}
+
+/* The settings: what Verkstead itself has been told, in two sections under one
+   button, because the server writes both files in one request. Laid out like
+   the profile form — the same labels over the same fields — since it is the
+   same kind of page. */
+
+.settings section {
+  margin-bottom: 1.5rem;
+}
+
+.settings h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.settings label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.settings input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* A setting that is not there, and what it costs. Drawn as a notice rather than
+   as an error — nothing has failed yet, and what it is saying is what will fail
+   if this is left as it is. The stopped red rather than the accent: it is the
+   same "this is waiting on you" the workbench marks a halted run with. */
+.settings .warning {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-inline-start: 3px solid var(--stopped);
+  border-radius: 0.6rem;
+  font-size: 0.9rem;
+}
+
+/* What is known about the saved token, which is everything but the token. */
+.settings .token-standing {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.settings .last-four,
+.settings .login {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}
+
+.settings .verified {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--added);
+}
+
+/* A token GitHub would not vouch for is still saved, and the line saying so
+   sits in the flow above the field rather than under the button like the save's
+   own failure — hence a margin of its own. */
+.settings .error.unverified {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+}
+
+.settings .token-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+
+.settings-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.settings button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.settings button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The buttons that undo rather than do, drawn as outlines of the one they sit
+   beside — as the brief editor's cancel is. */
+.settings .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.settings .clear {
+  color: var(--removed);
+  background: none;
+  border-color: var(--edge);
+}
+
+.settings .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
 }
 
 /* The workbench: conversations, the selected one's timeline, and the details of

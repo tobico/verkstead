@@ -275,7 +275,7 @@ describe("the workbench", () => {
     const elsewhere = container.querySelector(".elsewhere")!;
     expect(
       [...elsewhere.querySelectorAll("a")].map((to) => to.getAttribute("href")),
-    ).toEqual(["/repos", "/profiles"]);
+    ).toEqual(["/repos", "/profiles", "/settings"]);
   });
 
   it("says where to go when there is no repo to start one against", async () => {

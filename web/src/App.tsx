@@ -8,6 +8,7 @@ import { listenForNudges } from "./nudge";
 import { ProfileList } from "./profiles/ProfileList";
 import { RepoList } from "./repos/RepoList";
 import { SetPage } from "./set/SetPage";
+import { SettingsPage } from "./settings/SettingsPage";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -46,6 +47,10 @@ export function App(): JSX.Element {
         {/* What a session runs under. Reached from the sidebar beside the
             repos, because both are things a conversation is settled against. */}
         <Route path="/profiles" component={ProfileList} />
+        {/* What Verkstead itself has been told, rather than what any one
+            Conversation is settled against: the GitHub token every session is
+            handed, and who its commits are by. */}
+        <Route path="/settings" component={SettingsPage} />
         {/* One Set as a page of its own, which is what a push notification
             opens: a phone woken by one is being asked about that Set and
             nothing else, so it lands on the Set rather than on the workbench
