@@ -11,7 +11,15 @@
 //! environment — so this form is where they come from, and a Verkstead nobody
 //! has told anything is one whose sessions cannot reach GitHub and cannot
 //! commit. That is what the warnings here say, in those words, rather than
-//! leaving it to be found out by a session that failed at midnight.
+//! leaving it to be found out by a session that failed at midnight. They are on
+//! the page rather than in the form, because whoever needs to read them is
+//! precisely whoever is not editing.
+//!
+//! What the page holds is a summary — the token's state and the author, with the
+//! warnings about whichever of them is missing — and the form that rewrites it is
+//! a modal, as the Profiles' and the Repos' are. What this section is read for is
+//! checking that a machine is set up; the form is wanted once and then not again
+//! for months, and it had the top of the page every time.
 //!
 //! The token field is write-only. What is shown of a saved token is its
 //! last four characters and when it was written — never the token — because a
@@ -27,6 +35,7 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
+import { Modal } from "../Modal";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -53,9 +62,12 @@ export function Credentials(): JSX.Element {
     // change: another device may write the same two files, and a frozen query
     // is one the catch-up read on reconnect could never reach. There is no list
     // in it for the key to match by — what the merge does here is leave the
-    // fields that did not change alone, and the form above them with them.
+    // fields that did not change alone, and the summary above them with them.
     freshness: { reconcile: "id" },
   }));
+
+  // Whether the form is up.
+  const [open, setOpen] = createSignal(false);
 
   // What has been typed, or `null` while nothing has — the fields follow the
   // server until somebody touches them, the way a branch name does.
@@ -73,7 +85,9 @@ export function Credentials(): JSX.Element {
 
   // What GitHub made of the token that was last saved, or `null` where nothing
   // has been saved from here. Not part of the settings: it is the answer to a question
-  // asked at the moment of the save, and nothing reads it back afterwards.
+  // asked at the moment of the save, and nothing reads it back afterwards. It is
+  // said on the page rather than in the form, because the form is gone by the
+  // time there is an answer to say.
   const [verified, setVerified] = createSignal<Verified | null>(null);
 
   const told = (): SettingsView | undefined => settings.data;
@@ -84,6 +98,16 @@ export function Credentials(): JSX.Element {
   const authorEmail = () => email() ?? author()?.email ?? "";
 
   const typing = () => replacing() || configured() === null;
+
+  /// Half an author is as broken as none: git complains by name about whichever
+  /// half it has not been given.
+  const authorless = () =>
+    (author()?.name ?? "") === "" || (author()?.email ?? "") === "";
+
+  /// And nothing at all is worth no line of its own, because the warning says
+  /// it: what the summary is for is showing what *is* configured.
+  const authored = () =>
+    (author()?.name ?? "") !== "" || (author()?.email ?? "") !== "";
 
   /// The account the last saved token authenticates as, and the words GitHub
   /// or `gh` refused it in — one of the two at a time, and neither until this
@@ -98,17 +122,25 @@ export function Credentials(): JSX.Element {
     return what && "Refused" in what ? what.Refused.why : null;
   };
 
+  /// Take the form away, saved or not. What was typed goes with it: a form
+  /// opened again follows what the files say now, and a half-typed one kept from
+  /// last time would be a draft nothing here promised to keep.
+  const shut = () => {
+    setOpen(false);
+    setName(null);
+    setEmail(null);
+    setToken("");
+    setReplacing(false);
+  };
+
   const save = useMutation(() => ({
     mutationFn: (edit: SettingsEdit) => saveSettings(edit),
     onSuccess: (saved: SettingsSaved) => {
       setVerified(saved.verified);
 
-      // The fields go back to following the files, and the write-only one is
-      // spent: the standing line underneath is the whole of the confirmation.
-      setName(null);
-      setEmail(null);
-      setToken("");
-      setReplacing(false);
+      // The form goes, and the summary underneath — which the answer has just
+      // rewritten — is the whole of the confirmation.
+      shut();
 
       // Taken from the answer rather than asked for again, which is the one
       // place this differs from the Repos and the Profiles: what a save
@@ -140,6 +172,20 @@ export function Credentials(): JSX.Element {
     );
   };
 
+  /// What is known about the saved token, which is everything but the token.
+  /// Drawn in both places: on the page it is the summary, and in the form it is
+  /// what Replace and Clear are about.
+  const standing = () => (
+    <Show when={configured()}>
+      {(saved) => (
+        <p class="token-standing">
+          A token ending <code class="last-four">{saved().last_four}</code>,
+          saved <span class="when">{utcStamp(saved().at)}</span>.
+        </p>
+      )}
+    </Show>
+  );
+
   return (
     <Switch>
       <Match when={settings.isPending}>
@@ -151,158 +197,183 @@ export function Credentials(): JSX.Element {
         </p>
       </Match>
       <Match when={told()}>
-        <form class="settings" onSubmit={submit}>
-          <section class="github-token">
-            <h2>GitHub token</h2>
-            {/* What a token that is not there costs, said here rather than
-                found out by a session that could not push at midnight. */}
-            <Show when={configured() === null}>
-              <p class="warning">
-                No GitHub token is configured, so sessions cannot reach GitHub.
-              </p>
-            </Show>
-
-            <Show when={configured()}>
-              {(saved) => (
-                <p class="token-standing">
-                  A token ending{" "}
-                  <code class="last-four">{saved().last_four}</code>, saved{" "}
-                  <span class="when">{utcStamp(saved().at)}</span>.
-                </p>
-              )}
-            </Show>
-
-            {/* What GitHub said about the last token saved from here: the
-                account it authenticates as, or why nobody could be asked. Both
-                are worth showing — a token saved against the wrong account is
-                the failure this form exists to catch. */}
-            <Show when={account()}>
-              {(login) => (
-                <p class="verified">
-                  GitHub says it is <span class="login">{login()}</span>.
-                </p>
-              )}
-            </Show>
-            <Show when={refused()}>
-              {(why) => (
-                <p class="error unverified">
-                  It is saved, but GitHub would not say whose it is: {why()}
-                </p>
-              )}
-            </Show>
-
-            <Show
-              when={typing()}
-              fallback={
-                <div class="token-actions">
-                  <button type="button" onClick={() => setReplacing(true)}>
-                    Replace
-                  </button>
-                  <button
-                    type="button"
-                    class="clear"
-                    disabled={save.isPending}
-                    onClick={() => {
-                      setVerified(null);
-                      write("Clear");
-                    }}
-                  >
-                    Clear
-                  </button>
-                </div>
-              }
-            >
-              <label for="github-token">
-                Token, pasted — it is stored and never shown again
-              </label>
-              <input
-                id="github-token"
-                type="password"
-                autocapitalize="off"
-                autocorrect="off"
-                autocomplete="off"
-                spellcheck={false}
-                placeholder="ghp_…"
-                value={token()}
-                onInput={(ev) => setToken(ev.currentTarget.value)}
-              />
-              {/* Only where there was one to go back to: with nothing
-                  configured, the field is the page rather than a detour from
-                  it. */}
-              <Show when={configured() !== null}>
-                <div class="token-actions">
-                  <button
-                    type="button"
-                    class="cancel"
-                    onClick={() => {
-                      setReplacing(false);
-                      setToken("");
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </Show>
-            </Show>
-          </section>
-
-          <section class="git-author">
-            <h2>Git author</h2>
-            {/* Half an author is as broken as none: git complains by name
-                about whichever half it has not been given. */}
-            <Show
-              when={
-                (author()?.name ?? "") === "" || (author()?.email ?? "") === ""
-              }
-            >
-              <p class="warning">
-                No git author is configured, so commits inside a session fail
-                asking who the author is.
-              </p>
-            </Show>
-
-            <label for="author-name">Name</label>
-            <input
-              id="author-name"
-              type="text"
-              autocapitalize="words"
-              autocorrect="off"
-              spellcheck={false}
-              placeholder="Ada Lovelace"
-              value={authorName()}
-              onInput={(ev) => setName(ev.currentTarget.value)}
-            />
-
-            <label for="author-email">Email</label>
-            <input
-              id="author-email"
-              type="email"
-              inputmode="email"
-              autocapitalize="off"
-              autocorrect="off"
-              spellcheck={false}
-              placeholder="ada@example.com"
-              value={authorEmail()}
-              onInput={(ev) => setEmail(ev.currentTarget.value)}
-            />
-          </section>
-
-          <div class="settings-buttons">
-            <button type="submit" disabled={save.isPending}>
-              Save
+        <section class="credentials">
+          {/* The heading, with the one thing there is to do to what is under it
+              on the other end of its line — as the two lists below have. */}
+          <div class="section-head">
+            <h2>GitHub and git author</h2>
+            <button type="button" onClick={() => setOpen(true)}>
+              Edit
             </button>
           </div>
 
-          {/* A server that could not write the files, which is the one thing
-              here that is an error rather than an answer. Said loudly: a
-              settings page that quietly saved nothing is how credentials go
-              missing. */}
-          <Show when={save.isError}>
-            <p class="error">
-              The settings could not be saved: {save.error?.message}
+          {/* What a token that is not there costs, said here rather than found
+              out by a session that could not push at midnight. */}
+          <Show when={configured() === null}>
+            <p class="warning">
+              No GitHub token is configured, so sessions cannot reach GitHub.
             </p>
           </Show>
-        </form>
+          {standing()}
+
+          {/* What GitHub said about the last token saved from here: the account
+              it authenticates as, or why nobody could be asked. Both are worth
+              showing — a token saved against the wrong account is the failure
+              this form exists to catch. */}
+          <Show when={account()}>
+            {(login) => (
+              <p class="verified">
+                GitHub says it is <span class="login">{login()}</span>.
+              </p>
+            )}
+          </Show>
+          <Show when={refused()}>
+            {(why) => (
+              <p class="error unverified">
+                It is saved, but GitHub would not say whose it is: {why()}
+              </p>
+            )}
+          </Show>
+
+          <Show when={authorless()}>
+            <p class="warning">
+              No git author is configured, so commits inside a session fail
+              asking who the author is.
+            </p>
+          </Show>
+          {/* Written the way git writes an author, which is the form it is
+              going to be used in. */}
+          <Show when={authored()}>
+            <p class="author-standing">
+              Commits are by{" "}
+              <span class="author-name">{author()?.name}</span>{" "}
+              <span class="author-email">
+                &lt;{author()?.email}&gt;
+              </span>
+              .
+            </p>
+          </Show>
+
+          {/* One form for both files, drawn over the page: the server writes
+              them in one request, so there is one Save. */}
+          <Modal
+            class="edit-credentials"
+            open={open()}
+            close={shut}
+            name="GitHub and git author"
+          >
+            <form class="settings" onSubmit={submit}>
+              <section class="github-token">
+                <h3>GitHub token</h3>
+                {standing()}
+
+                <Show
+                  when={typing()}
+                  fallback={
+                    <div class="token-actions">
+                      <button type="button" onClick={() => setReplacing(true)}>
+                        Replace
+                      </button>
+                      <button
+                        type="button"
+                        class="clear"
+                        disabled={save.isPending}
+                        onClick={() => {
+                          setVerified(null);
+                          write("Clear");
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  }
+                >
+                  <label for="github-token">
+                    Token, pasted — it is stored and never shown again
+                  </label>
+                  <input
+                    id="github-token"
+                    type="password"
+                    autocapitalize="off"
+                    autocorrect="off"
+                    autocomplete="off"
+                    spellcheck={false}
+                    placeholder="ghp_…"
+                    value={token()}
+                    onInput={(ev) => setToken(ev.currentTarget.value)}
+                  />
+                  {/* Only where there was one to go back to: with nothing
+                      configured, the field is the form rather than a detour
+                      from it. Named for what it does rather than "cancel",
+                      which is the way out of the whole form on the line
+                      below. */}
+                  <Show when={configured() !== null}>
+                    <div class="token-actions">
+                      <button
+                        type="button"
+                        class="cancel"
+                        onClick={() => {
+                          setReplacing(false);
+                          setToken("");
+                        }}
+                      >
+                        Keep the saved token
+                      </button>
+                    </div>
+                  </Show>
+                </Show>
+              </section>
+
+              <section class="git-author">
+                <h3>Git author</h3>
+
+                <label for="author-name">Name</label>
+                <input
+                  id="author-name"
+                  type="text"
+                  autocapitalize="words"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder="Ada Lovelace"
+                  value={authorName()}
+                  onInput={(ev) => setName(ev.currentTarget.value)}
+                />
+
+                <label for="author-email">Email</label>
+                <input
+                  id="author-email"
+                  type="email"
+                  inputmode="email"
+                  autocapitalize="off"
+                  autocorrect="off"
+                  spellcheck={false}
+                  placeholder="ada@example.com"
+                  value={authorEmail()}
+                  onInput={(ev) => setEmail(ev.currentTarget.value)}
+                />
+              </section>
+
+              <div class="settings-buttons">
+                <button type="submit" disabled={save.isPending}>
+                  Save
+                </button>
+                <button type="button" class="cancel" onClick={shut}>
+                  Cancel
+                </button>
+              </div>
+
+              {/* A server that could not write the files, which is the one
+                  thing here that is an error rather than an answer, and the one
+                  that keeps the form up. Said loudly: a settings page that
+                  quietly saved nothing is how credentials go missing. */}
+              <Show when={save.isError}>
+                <p class="error">
+                  The settings could not be saved: {save.error?.message}
+                </p>
+              </Show>
+            </form>
+          </Modal>
+        </section>
       </Match>
     </Switch>
   );

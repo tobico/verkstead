@@ -7,6 +7,12 @@
 //! than the credentials. What the page holds, and what became of the two routes
 //! it holds it instead of, is the last describe here.
 //!
+//! What the page shows is a summary and what rewrites it is a modal, so this
+//! suite is in two halves: what is readable without editing — the token's state,
+//! the author, and the warnings about whichever is missing — and what the form
+//! does once it is opened. What a modal *is* — the dialog, Escape, a press away
+//! from the card — belongs to `Modal` and is read in `modals.test.tsx`.
+//!
 //! `tests/fixtures/settings*.json` are golden fixtures like the profiles page's:
 //! `cargo test` calls the real endpoint and writes the files, so what these
 //! assertions read is what the server actually said — the unset state a fresh
@@ -73,6 +79,16 @@ function theSettings(
   return serving(whenever("/api/ui/settings", json(standing)), ...answers);
 }
 
+/// Open the form, which is what the button on the heading does.
+function edit() {
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+}
+
+/// The form, or nothing at all where it has not been opened.
+function theForm(container: ParentNode): HTMLDialogElement | null {
+  return container.querySelector<HTMLDialogElement>("dialog.edit-credentials");
+}
+
 /// The body the page put on the wire when it saved.
 function sent(fetching: ReturnType<typeof serving>): unknown {
   const written = fetching.mock.calls.find(
@@ -100,6 +116,22 @@ describe("the settings as they stand", () => {
     );
   });
 
+  /// The author is a line rather than two fields, because reading it is what the
+  /// page is for and rewriting it is the form's.
+  it("says who commits are by", async () => {
+    theSettings(TOLD);
+    const { container } = mount();
+
+    await waitFor(() => screen.getByText(/Commits are by/));
+
+    expect(container.querySelector(".author-name")!.textContent).toBe(
+      TOLD.git_author.name,
+    );
+    expect(container.querySelector(".author-email")!.textContent).toContain(
+      TOLD.git_author.email,
+    );
+  });
+
   /// The one promise this page makes: the whole token is not in the payload it
   /// is drawn from, so it cannot be in the page — and the field to type one into
   /// starts empty rather than prefilled with anything.
@@ -109,6 +141,7 @@ describe("the settings as they stand", () => {
 
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
 
+    edit();
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
 
     expect(
@@ -120,10 +153,11 @@ describe("the settings as they stand", () => {
     theSettings(TOLD);
     mount();
 
-    await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-        TOLD.git_author.name,
-      ),
+    await waitFor(() => screen.getByText(/Commits are by/));
+    edit();
+
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      TOLD.git_author.name,
     );
     expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
       TOLD.git_author.email,
@@ -140,7 +174,9 @@ describe("the settings as they stand", () => {
 
 describe("what is not configured", () => {
   /// Said here rather than found out by a session that could not push at
-  /// midnight: neither of these is read out of a home directory any more.
+  /// midnight: neither of these is read out of a home directory any more. On the
+  /// page rather than in the form, because whoever needs to read them is
+  /// precisely whoever is not editing.
   it("warns that sessions cannot reach GitHub with no token", async () => {
     theSettings(UNSET);
     mount();
@@ -157,6 +193,16 @@ describe("what is not configured", () => {
     );
   });
 
+  /// And says nothing else about an author nobody has given: the warning is the
+  /// whole of it, where a line naming the halves would be naming two blanks.
+  it("says nothing of an author with neither half", async () => {
+    theSettings(UNSET);
+    mount();
+
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    expect(screen.queryByText(/Commits are by/)).toBeNull();
+  });
+
   /// Half an author is as broken as none: git complains by name about whichever
   /// half it has not been given.
   it("warns about an author with only half of one", async () => {
@@ -166,6 +212,8 @@ describe("what is not configured", () => {
     await waitFor(() =>
       screen.getByText(/commits inside a session fail asking who the author is/),
     );
+    // And still says the half there is, which is the half being checked.
+    expect(screen.getByText("Ada Lovelace")).toBeTruthy();
   });
 
   it("says neither where both are configured", async () => {
@@ -178,13 +226,16 @@ describe("what is not configured", () => {
     expect(screen.queryByText(/commits inside a session fail/)).toBeNull();
   });
 
-  /// With nothing configured the field is the page rather than a detour from it:
+  /// With nothing configured the field is the form rather than a detour from it:
   /// there is no token to replace, so there is nothing to press first.
   it("opens the token field straight away", async () => {
     theSettings(UNSET);
     mount();
 
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
+
+    expect(screen.getByLabelText(/Token, pasted/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Replace" })).toBeNull();
   });
 
@@ -192,7 +243,8 @@ describe("what is not configured", () => {
     theSettings(UNSET, json(SAVED));
     mount();
 
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
 
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
       target: { value: TOKEN },
@@ -214,11 +266,68 @@ describe("what is not configured", () => {
   });
 });
 
+describe("the form", () => {
+  /// Nothing of it is on the page until it is asked for: what the page is for is
+  /// reading what is configured, and this is settled once and then left alone.
+  it("is a modal, and nothing at all until the edit button is pressed", async () => {
+    theSettings(TOLD);
+    const { container } = mount();
+    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+
+    expect(theForm(container)).toBeNull();
+
+    edit();
+
+    expect(theForm(container)!.open, "opened as a modal").toBe(true);
+    // Both sections, under the one Save the server's one request deserves.
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+  });
+
+  it("goes away once the settings are saved", async () => {
+    theSettings(TOLD, json(SAVED));
+    const { container } = mount();
+    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+  });
+
+  /// Cancel saves nothing, and what was typed goes with it: a form opened again
+  /// follows what the files say now rather than a draft nothing promised to
+  /// keep.
+  it("saves nothing when it is cancelled, and opens afresh after", async () => {
+    const fetching = theSettings(TOLD);
+    const { container } = mount();
+    await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+
+    edit();
+    fireEvent.input(screen.getByLabelText("Email"), {
+      target: { value: "typed@nowhere" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
+    ).toHaveLength(0);
+
+    edit();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
+      TOLD.git_author.email,
+    );
+  });
+});
+
 describe("saving", () => {
   it("sends the author fields as they were typed", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
     mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     fireEvent.input(screen.getByLabelText("Email"), {
       target: { value: "ada@analytical.engine" },
@@ -236,10 +345,10 @@ describe("saving", () => {
     );
   });
 
-  /// The author round-trips: what the save answered with is what the fields go
-  /// back to following, because that is a fresh read of the files rather than an
-  /// echo of what was sent.
-  it("shows the author the save came back with", async () => {
+  /// The author round-trips onto the summary: what the save answered with is
+  /// what the page goes back to showing, because that is a fresh read of the
+  /// files rather than an echo of what was sent.
+  it("shows on the summary the author the save came back with", async () => {
     const rewritten: SettingsSaved = {
       settings: {
         ...SAVED.settings,
@@ -248,8 +357,9 @@ describe("saving", () => {
       verified: null,
     };
     theSettings(TOLD, json(rewritten));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     fireEvent.input(screen.getByLabelText("Email"), {
       target: { value: "ada@analytical.engine" },
@@ -257,9 +367,9 @@ describe("saving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
-        "ada@analytical.engine",
-      ),
+      expect(
+        container.querySelector(".author-email")!.textContent,
+      ).toContain("ada@analytical.engine"),
     );
   });
 
@@ -269,7 +379,8 @@ describe("saving", () => {
   it("keeps the configured token when the field was not filled in", async () => {
     const fetching = theSettings(UNSET, json(SAVED));
     mount();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
 
     fireEvent.input(screen.getByLabelText("Name"), {
       target: { value: "Ada Lovelace" },
@@ -286,7 +397,8 @@ describe("saving", () => {
   it("sends a token that was typed, whole", async () => {
     const fetching = theSettings(UNSET, json(SAVED));
     mount();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
 
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
       target: { value: TOKEN },
@@ -300,10 +412,13 @@ describe("saving", () => {
     );
   });
 
+  /// Said on the summary rather than in the form, because the form is gone by
+  /// the time there is an answer to say.
   it("says which account GitHub verified the token as", async () => {
     theSettings(UNSET, json(SAVED));
     const { container } = mount();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
 
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
       target: { value: TOKEN },
@@ -324,7 +439,8 @@ describe("saving", () => {
     };
     theSettings(UNSET, json(unverified));
     mount();
-    await waitFor(() => screen.getByLabelText(/Token, pasted/));
+    await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
+    edit();
 
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
       target: { value: TOKEN },
@@ -336,32 +452,40 @@ describe("saving", () => {
   });
 
   /// A server that could not write the files, which is the one thing here that
-  /// is an error rather than an answer.
-  it("says so when the settings could not be saved", async () => {
+  /// is an error rather than an answer — and the one that keeps the form up,
+  /// because nothing has been saved to go back to reading.
+  it("says so when the settings could not be saved, and keeps the form up", async () => {
     theSettings(TOLD, json({ error: "the disk is full" }, 503));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => screen.getByText(/could not be saved/));
+    expect(theForm(container)!.open).toBe(true);
   });
 });
 
 describe("replacing and clearing the token", () => {
   /// The field to paste a credential into is one somebody asked for: with a
-  /// token already configured, replacing is a press.
-  it("opens the field on the press, and closes it again on cancel", async () => {
+  /// token already configured, replacing is a press. And the way back from it is
+  /// named for what it does, because "cancel" in this form is the way out of the
+  /// whole of it.
+  it("opens the field on the press, and closes it again on the way back", async () => {
     theSettings(TOLD);
     mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     expect(screen.queryByLabelText(/Token, pasted/)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     await waitFor(() => screen.getByLabelText(/Token, pasted/));
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Keep the saved token" }),
+    );
     await waitFor(() =>
       expect(screen.queryByLabelText(/Token, pasted/)).toBeNull(),
     );
@@ -369,8 +493,9 @@ describe("replacing and clearing the token", () => {
 
   it("sends the replacement, and spends the field", async () => {
     const fetching = theSettings(TOLD, json(SAVED));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     fireEvent.click(screen.getByRole("button", { name: "Replace" }));
     fireEvent.input(screen.getByLabelText(/Token, pasted/), {
@@ -383,10 +508,12 @@ describe("replacing and clearing the token", () => {
         { Set: { token: TOKEN } },
       ),
     );
-    // And the field is spent: the standing line underneath is the confirmation.
-    await waitFor(() =>
-      expect(screen.queryByLabelText(/Token, pasted/)).toBeNull(),
-    );
+    // And the field is spent with the form it was in: the standing line on the
+    // summary is the confirmation.
+    await waitFor(() => expect(theForm(container)).toBeNull());
+
+    edit();
+    expect(screen.queryByLabelText(/Token, pasted/)).toBeNull();
   });
 
   /// Clearing is its own press for the reason a blank field is a `Keep`: the two
@@ -398,8 +525,9 @@ describe("replacing and clearing the token", () => {
       verified: null,
     };
     const fetching = theSettings(TOLD, json(cleared));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
+    edit();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
 
@@ -410,9 +538,11 @@ describe("replacing and clearing the token", () => {
       }),
     );
 
-    // And the page is the unset one again, warning and all.
+    // And the page is the unset one again, warning and all, with the form gone:
+    // clearing is a save, and a save is what takes the form away.
     await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    expect(theForm(container)).toBeNull();
+    expect(container.querySelector(".author-name")!.textContent).toBe(
       TOLD.git_author.name,
     );
   });
@@ -458,27 +588,34 @@ describe("the settings page", () => {
     expect(page.querySelectorAll(".back")).toHaveLength(1);
   });
 
-  /// Both lists came along whole: the form that registers a Repo and the form
-  /// that saves a Profile are on the page, with the rows underneath them. What
-  /// each does with what is typed is `repos.test.tsx`'s and
-  /// `profiles.test.tsx`'s.
-  it("keeps both lists' rows, and the way into each list's form", async () => {
+  /// Summaries, lists and buttons: every form on this page is a modal now, so
+  /// what the page itself carries is the way into each of them and none of their
+  /// fields. What each does with what is typed is `repos.test.tsx`'s,
+  /// `profiles.test.tsx`'s and this file's own.
+  it("keeps every list's rows, and the way into every form", async () => {
     const { container } = thePage();
 
     await waitFor(() => screen.getByText(REPOS[0]!.name));
 
-    expect(container.querySelector(".repos .add-repo")).not.toBeNull();
+    for (const section of [".credentials", ".profiles", ".repos"]) {
+      expect(
+        container.querySelector(`${section} > .section-head > button`),
+        `expected ${section} to head its own form`,
+      ).not.toBeNull();
+    }
+
     expect(container.querySelectorAll(".repos .repo-row")).toHaveLength(
       REPOS.length,
     );
-    // The Profiles' form is a modal now, so what the page carries is the button
-    // that opens it — and nothing of the form until it is pressed.
-    expect(
-      container.querySelector(".profiles .section-head button"),
-    ).not.toBeNull();
-    expect(container.querySelector(".profiles .edit-profile")).toBeNull();
     expect(container.querySelectorAll(".profiles .profile-row")).toHaveLength(
       PROFILES.length,
+    );
+
+    // And nothing of any of the three forms until one is asked for.
+    expect(container.querySelector("dialog")).toBeNull();
+    expect(container.querySelectorAll("input")).toHaveLength(
+      // The notifications switch on the heading's line, which is not a form.
+      container.querySelectorAll(".page-head input").length,
     );
   });
 

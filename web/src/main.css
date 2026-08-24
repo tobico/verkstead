@@ -400,11 +400,12 @@ textarea::placeholder {
 }
 
 /* Registering a repo: a path typed, and the button that sends it. The label
-   stands over both, because what has to be understood before typing is that the
-   path is an absolute one. */
-
-.add-repo {
-  margin-bottom: 1.5rem;
+   stands over the field, because what has to be understood before typing is
+   that the path is an absolute one — and the whole of it is drawn over the page
+   as a modal, so the box around it is the card the modal already draws. */
+.add-repo h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }
 
 .add-repo label {
@@ -414,17 +415,10 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
-/* Wrapping, so a phone puts the button under the field rather than squeezing a
-   path into what is left of the line. */
-.add-repo-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .add-repo input {
-  flex: 1 1 14rem;
-  min-width: 0;
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: inherit;
@@ -434,7 +428,12 @@ textarea::placeholder {
   padding: 0.5rem 0.6rem;
 }
 
-.add-repo button {
+.add-repo-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.add-repo-buttons button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -445,9 +444,16 @@ textarea::placeholder {
   cursor: pointer;
 }
 
-.add-repo button:disabled {
+.add-repo-buttons button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the profile form's cancel is. */
+.add-repo-buttons .cancel {
+  color: var(--accent);
+  background: none;
 }
 
 .add-repo .error {
@@ -594,11 +600,14 @@ textarea::placeholder {
   gap: 0.5rem;
 }
 
-/* The button on the heading that opens the modal empty is painted with them: it
-   is the same size of act as theirs — this one adds a profile where those two
-   change one or take it away. */
+/* The buttons on the section headings that open a modal are painted with them:
+   they are the same size of act as theirs — those add a repo or a profile, or
+   open the credentials, where these two change a profile or take it away. One
+   rule, because every section of this page now heads its list the same way. */
 .profile-actions button,
-.profiles > .section-head > button {
+.credentials > .section-head > button,
+.profiles > .section-head > button,
+.repos > .section-head > button {
   padding: 0.35rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;
@@ -613,18 +622,29 @@ textarea::placeholder {
   color: var(--removed);
 }
 
-/* The settings: what Verkstead itself has been told, in two sections under one
-   button, because the server writes both files in one request. Laid out like
-   the profile form — the same labels over the same fields — since it is the
-   same kind of page. */
+/* The credentials: what Verkstead itself has been told. What the page holds is
+   a summary of it — the token's state, the author, and the warnings about
+   whichever is missing — and the form that rewrites it is a modal, in two
+   sections under one Save because the server writes both files in one request.
+   Laid out like the profile form, the same labels over the same fields, since it
+   is the same kind of form. */
 
-.settings section {
+.credentials {
   margin-bottom: 1.5rem;
 }
 
-.settings h2 {
+.credentials h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
+}
+
+.settings section {
+  margin-bottom: 1.25rem;
+}
+
+.settings h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }
 
 .settings label {
@@ -651,7 +671,7 @@ textarea::placeholder {
    as an error — nothing has failed yet, and what it is saying is what will fail
    if this is left as it is. The stopped red rather than the accent: it is the
    same "this is waiting on you" the workbench marks a halted run with. */
-.settings .warning {
+.credentials .warning {
   margin: 0 0 0.85rem;
   padding: 0.7rem 0.9rem;
   background: var(--card);
@@ -661,20 +681,24 @@ textarea::placeholder {
   font-size: 0.9rem;
 }
 
-/* What is known about the saved token, which is everything but the token. */
-.settings .token-standing {
+/* What is known about the saved token, which is everything but the token. Said
+   in both places, because the summary's line and the form's are the same line:
+   on the page it is what is configured, and in the form it is what Replace and
+   Clear are about. The form is inside the summary's section, so one rule reaches
+   both. */
+.credentials .token-standing {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-.settings .last-four,
-.settings .login {
+.credentials .last-four,
+.credentials .login {
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: var(--ink);
 }
 
-.settings .verified {
+.credentials .verified {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--added);
@@ -683,9 +707,26 @@ textarea::placeholder {
 /* A token GitHub would not vouch for is still saved, and the line saying so
    sits in the flow above the field rather than under the button like the save's
    own failure — hence a margin of its own. */
-.settings .error.unverified {
+.credentials .error.unverified {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
+}
+
+/* The author as a line rather than as two fields, written the way git writes
+   one — which is the form it is going to be used in. */
+.credentials .author-standing {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.credentials .author-name,
+.credentials .author-email {
+  color: var(--ink);
+}
+
+.credentials .author-email {
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .settings .token-actions {
@@ -716,7 +757,8 @@ textarea::placeholder {
 }
 
 /* The buttons that undo rather than do, drawn as outlines of the one they sit
-   beside — as the brief editor's cancel is. */
+   beside — as the brief editor's cancel is. Two of them: the way out of the
+   form, and the way back from the field a token is pasted into. */
 .settings .cancel {
   color: var(--accent);
   background: none;
@@ -734,8 +776,9 @@ textarea::placeholder {
 }
 
 /* The two lists folded onto the settings page under the credentials, headed the
-   way the credentials' own sections are: everything on this page is one kind of
-   thing, so it is all one page's worth of headings. */
+   way the credentials' summary is: everything on this page is one kind of thing,
+   so it is all one page's worth of headings, each with the button that opens its
+   form on the other end of the line. */
 
 .profiles,
 .repos {
