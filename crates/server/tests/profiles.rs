@@ -825,3 +825,159 @@ async fn nothing_saved_means_an_empty_list() {
 
     assert!(listed(&app).await.is_empty());
 }
+
+/// What a Repo was last grilled with, filled into the pickers of the next
+/// Conversation started on it.
+///
+/// The grilling itself is recorded through the store rather than pressed: what
+/// these are about is the memory, and nothing in this file launches a session.
+async fn grill(dir: &Path, id: i64) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    store::start_grilling(&pool, id, "deadbeef", &dir.join("worktree"))
+        .await
+        .unwrap();
+}
+
+/// A second Conversation on the same Repo as the first, started the way the
+/// human starts one.
+async fn another(app: &Router) -> i64 {
+    let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
+
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": repos[0].id }),
+    )
+    .await;
+
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    id
+}
+
+/// The whole of it: grill once, and the next Conversation on that Repo arrives
+/// with both pickers already filled.
+#[tokio::test]
+async fn a_new_conversation_arrives_with_what_its_repo_was_last_grilled_with() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+    let opus = saved(&app, watched.path(), "opus").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let next = another(&app).await;
+    let view = opened(&app, next).await;
+
+    let grilling = view
+        .grilling_pairing
+        .expect("the grilling picker is filled");
+    assert_eq!(grilling.profile.id, fable.id);
+    assert_eq!(grilling.model.as_deref(), Some(MODEL));
+
+    let implementation = view
+        .implementation_pairing
+        .expect("and so is the implementation one");
+    assert_eq!(implementation.profile.id, opus.id);
+    assert_eq!(implementation.model.as_deref(), Some(MODEL));
+
+    // Real choices rather than a picture of two: with a Brief written, nothing
+    // else stands between this Conversation and the grilling button.
+    let saved: BriefSaved = post(
+        &app,
+        &format!("/api/ui/conversations/{next}/brief"),
+        &serde_json::json!({ "markdown": "# Rate limiting\n" }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+    assert!(opened(&app, next).await.ready_to_grill);
+}
+
+/// A default rather than a lock. The prefill is the human's to change, and what
+/// they changed it to is what the Repo remembers next.
+#[tokio::test]
+async fn changing_the_prefill_before_grilling_is_what_gets_remembered() {
+    let (watched, dir, app) = workbench().await;
+    let first = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+    let opus = saved(&app, watched.path(), "opus").await;
+
+    choose_grilling(&app, first, fable.id, MODEL).await;
+    choose_implementation(&app, first, fable.id, MODEL).await;
+    grill(dir.path(), first).await;
+
+    // Prefilled with fable, changed to opus, and grilled on the change.
+    let second = another(&app).await;
+    assert_eq!(
+        choose_implementation(&app, second, opus.id, MODELS[0]).await,
+        ProfileChosen::Chosen
+    );
+    grill(dir.path(), second).await;
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(
+        view.grilling_pairing.map(|p| p.profile.id),
+        Some(fable.id),
+        "the half nobody touched is still what it was"
+    );
+
+    let implementation = view.implementation_pairing.expect("and the changed half");
+    assert_eq!(implementation.profile.id, opus.id);
+    assert_eq!(implementation.model.as_deref(), Some(MODELS[0]));
+}
+
+/// A remembered Profile whose pair has gone is a session that would fail to
+/// start, so the picker arrives unchosen rather than holding one.
+#[tokio::test]
+async fn a_remembered_profile_whose_pair_has_gone_is_not_prefilled() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+    let opus = saved(&app, watched.path(), "opus").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(
+        view.grilling_pairing.map(|p| p.profile.id),
+        Some(fable.id),
+        "the half that is still there is still prefilled"
+    );
+    assert_eq!(view.implementation_pairing, None);
+}
+
+/// And a remembered model the Profile has since stopped listing, the same way:
+/// the Profile is fine, and that pairing of it is not one any more.
+#[tokio::test]
+async fn a_remembered_model_a_profile_no_longer_lists_is_not_prefilled() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let work = saved(&app, watched.path(), "work").await;
+
+    choose_grilling(&app, id, work.id, MODEL).await;
+    choose_implementation(&app, id, work.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    // Retyped without the model both halves were remembered with.
+    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let rewritten: ProfileSaved = post(
+        &app,
+        &format!("/api/ui/profiles/{}", work.id),
+        &edit("work", &claude_dir, &config_file, &[MODELS[0]]),
+    )
+    .await;
+    assert_eq!(rewritten, ProfileSaved::Saved);
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(view.grilling_pairing, None);
+    assert_eq!(view.implementation_pairing, None);
+}

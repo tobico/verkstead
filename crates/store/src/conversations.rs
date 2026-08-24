@@ -1122,14 +1122,14 @@ pub enum Role {
 }
 
 impl Role {
-    fn stored(self) -> &'static str {
+    pub(crate) fn stored(self) -> &'static str {
         match self {
             Self::Grilling => "grilling",
             Self::Implementation => "implementation",
         }
     }
 
-    fn column(self) -> &'static str {
+    pub(crate) fn column(self) -> &'static str {
         match self {
             Self::Grilling => "grilling_profile_id",
             Self::Implementation => "implementation_profile_id",
@@ -1709,6 +1709,10 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// did not, the rule was the default branch's tip *at grill start* — so this is
 /// the moment that rule resolves to a commit, and after it there is a fact about
 /// what the work branched from rather than a rule about what it would have.
+///
+/// It is also where the Repo remembers what it was grilled with — see
+/// [`super::pairings::remember`] — because this is the moment the two Pairings
+/// stop being changeable and become what the work is actually running under.
 pub async fn start_grilling(
     pool: &SqlitePool,
     id: i64,
@@ -1753,6 +1757,12 @@ pub async fn start_grilling(
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
+
+    // And what it is being grilled with, against its Repo, so the next
+    // Conversation started on that Repo arrives with both pickers filled. In
+    // this transaction because this is the moment the Pairings are fixed: a
+    // memory written a moment later could be of a choice that never ran.
+    super::pairings::remember(&mut tx, id).await?;
 
     tx.commit().await.context("starting a grilling")?;
 

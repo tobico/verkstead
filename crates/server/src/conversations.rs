@@ -39,10 +39,16 @@ use crate::worktrees;
 /// The name is the server's because the record is: a prefill the browser
 /// invented would be a name the server never saw, and the human may well leave
 /// it as it is.
-pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
+///
+/// The two Pairings are prefilled the same way, off what the Repo was last
+/// grilled with — see [`prefill`].
+pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_conversation(pool, repo_id, &branch_name()).await? {
-            Some(id) => Started::Started { id },
+        match store::start_conversation(&state.pool, repo_id, &branch_name()).await? {
+            Some(id) => {
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
             None => Started::NoSuchRepo,
         },
     )
@@ -62,18 +68,93 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
 /// somebody finished between the notice and the click is a thing to say on the
 /// page rather than a start to refuse.
 pub(crate) async fn start_adopting(
-    pool: &SqlitePool,
+    state: &AppState,
     repo_id: i64,
     roadmap: &str,
 ) -> Result<Started> {
     Ok(
-        match store::start_adoption(pool, repo_id, &branch_name(), roadmap).await? {
-            Some(id) => Started::Started { id },
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+            Some(id) => {
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
             None => Started::NoSuchRepo,
         },
     )
 }
 
+/// Fill a new Conversation's two pickers with what its Repo was last grilled
+/// with.
+///
+/// A default and not a lock: both are still the human's to change, and changing
+/// one before pressing Start Grilling is what the Repo remembers next — the
+/// memory is written from the Conversation at grill start, whatever it says by
+/// then.
+///
+/// **Each half is judged before it is applied**, against the same reading the
+/// pane gives a chosen Pairing: a Profile whose pair has gone, or which no
+/// longer lists the model it was remembered with, is a Pairing that would fail
+/// to start a session, and a picker prefilled with one would be worse than a
+/// picker left empty. What does not survive the judging is simply not applied,
+/// which leaves that picker exactly as a Repo with no memory leaves it.
+///
+/// Nothing here refuses the start. The Conversation exists by the time this
+/// runs, and answering the button with a failure would say that it does not —
+/// so a memory that could not be read is logged and the human gets the empty
+/// pickers they would have got anyway.
+async fn prefill(state: &AppState, id: i64, repo_id: i64) {
+    if let Err(error) = remembered(state, id, repo_id).await {
+        tracing::warn!(
+            error = ?error,
+            conversation_id = id,
+            "the Repo's remembered Pairings could not be applied to a new Conversation"
+        );
+    }
+}
+
+/// What [`prefill`] does, with somewhere for a store error to go.
+async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
+    let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
+
+    if let Some((profile_id, model)) = usable(&state.watched, remembered.grilling).await? {
+        store::set_grilling_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    }
+
+    if let Some((profile_id, model)) = usable(&state.watched, remembered.implementation).await? {
+        store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    }
+
+    Ok(())
+}
+
+/// A remembered Pairing as something to prefill a picker with, or `None` where
+/// it is not one any more.
+///
+/// Read as a row rather than trusted as a pair of ids, which is the reading
+/// [`start_grilling`] gives the Pairings it is about to launch under: whether
+/// the Profile's pair is still where it was left is a question for the Watched
+/// Paths, and whether it still lists the model is a question for the Profile's
+/// own list.
+async fn usable(
+    watched: &crate::watched::WatchedPaths,
+    remembered: Option<store::Pairing>,
+) -> Result<Option<(i64, String)>> {
+    let Some(model) = remembered
+        .as_ref()
+        .and_then(|pairing| pairing.model.clone())
+    else {
+        return Ok(None);
+    };
+
+    let Some(pairing) = crate::profiles::pairing(watched, remembered).await? else {
+        return Ok(None);
+    };
+
+    Ok(
+        (pairing.profile.broken.is_none() && pairing.profile.models.contains(&model))
+            .then_some((pairing.profile.id, model)),
+    )
+}
 /// Finish what answering a Question Set started, and say what it did to the
 /// Conversation it was asked from.
 ///

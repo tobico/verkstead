@@ -28,6 +28,7 @@ mod captures;
 mod commits;
 mod conversations;
 mod interruptions;
+mod pairings;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -52,6 +53,7 @@ pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
     record_interruption, settle_interruption,
 };
+pub use pairings::{RepoPairings, remembered_pairings};
 pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
@@ -538,6 +540,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // The Conversations attached to them, and their Timelines. After the Repos
     // and the Profiles, because a Conversation's row references all three.
     conversations::apply_schema(pool).await?;
+
+    // And what each Repo was last grilled with, so a Conversation started on
+    // it arrives with both pickers filled. After the Conversations only for
+    // reading order — what it references is the Repos and the Profiles.
+    pairings::apply_schema(pool).await?;
 
     // What the sessions run against them printed. After the Timelines, because a
     // Capture hangs off the Event it is the full self of.

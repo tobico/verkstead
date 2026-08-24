@@ -89,7 +89,9 @@ flowchart LR
   costs a tap every time and the counts stay small. Both are fixed when
   grilling starts, alongside the branch, the base commit and the brief: what
   runs the work is settled before the work begins rather than swapped
-  underneath it.
+  underneath it. Each repo remembers the pair it was last grilled with, so the
+  next conversation on it arrives with both pickers filled — a prefill the
+  human may change, kept server-side so a phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —

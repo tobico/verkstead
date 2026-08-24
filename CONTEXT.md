@@ -204,6 +204,16 @@ Both are **fixed when grilling starts**, alongside the branch, the base commit
 and the Brief: what runs the work is settled before the work begins rather than
 swapped underneath it — and the implementation one is used long after that,
 which is exactly why it is not left changeable until then.
+
+Each Repo **remembers the last pair it was grilled with**, so a new
+Conversation on it arrives with both pickers already filled. Written at grill
+start, from what the Conversation is actually running under; remembered
+server-side rather than in a browser, because the workbench is answered from a
+phone as readily as from a desk. A prefill and not a lock: it is the human's to
+change before pressing, and what they changed it to is what gets remembered
+next. A remembered Pairing whose Profile has broken, or which no longer lists
+the model, is silently not applied — an unchosen picker, exactly as a Repo with
+no memory gives.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
 profile (the Profile is half of it)
 
