@@ -3823,6 +3823,56 @@ describe("a commit on the timeline", () => {
     );
   });
 
+  /// The card's own account of the commit, under the counts. Clamped by the
+  /// stylesheet, so what is asked here is that the prose is on the card at all
+  /// and that it is prose — the fixture's summary opens with a Diagram, and a
+  /// card filled with the words of the fence would be the whole of what is left
+  /// to read.
+  it("carries a snippet of what the commit said about itself", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, ".timeline-event > .commit");
+
+    const said = COMMITS.find((commit) => commit.snippet !== null)!;
+    const row = [
+      ...container.querySelectorAll(".timeline-event > .commit"),
+    ].find((card) => card.querySelector(".subject")!.textContent === said.subject)!;
+
+    expect(row.querySelector(".snippet")!.textContent).toBe(said.snippet);
+    expect(row.querySelector(".snippet")!.textContent).not.toContain(
+      "flowchart",
+    );
+  });
+
+  /// Every bookkeeping commit and every commit recorded before summaries were
+  /// kept. Nothing marks the absence: the card is the one it has always been.
+  it("draws the card it always drew for a commit that said nothing", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, ".timeline-event > .commit");
+
+    const silent = COMMITS.find((commit) => commit.snippet === null)!;
+    const row = [
+      ...container.querySelectorAll(".timeline-event > .commit"),
+    ].find((card) => card.querySelector(".subject")!.textContent === silent.subject)!;
+
+    expect(row.querySelector(".snippet")).toBeNull();
+    expect(row.innerHTML).toBe(
+      '<span class="event-head">' +
+        '<span class="what">Commit</span>' +
+        `<span class="sha">${silent.sha.slice(0, 7)}</span>` +
+        "</span>" +
+        `<span class="subject">${silent.subject}</span>` +
+        '<span class="changed">' +
+        `<span class="files">${silent.files} files</span>` +
+        `<span class="added">+${silent.insertions}</span>` +
+        `<span class="removed">−${silent.deletions}</span>` +
+        "</span>",
+    );
+  });
+
   it("draws one row per commit, in timeline order", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);

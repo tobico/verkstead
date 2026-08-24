@@ -725,6 +725,21 @@ pub struct CommitEvent {
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// What the commit said about itself, as prose alone: its Commit Summary
+    /// flattened to a line with the Diagram left out, for the card to clamp —
+    /// see [`crate::markdown::to_prose`].
+    ///
+    /// The prose and not the rendering, unlike every other document on a card.
+    /// A commit's card is a button, rendered markdown cannot live inside one,
+    /// and the summary is on the card to be read rather than to be read *at*:
+    /// what it looks like whole is the pane's, and the card says what it says.
+    ///
+    /// `None` where the commit carried no summary — which is every bookkeeping
+    /// commit and every commit recorded before summaries were kept — and where
+    /// what it carried was a Diagram and nothing else. Both draw the card that
+    /// has always been drawn.
+    pub snippet: Option<String>,
 }
 
 /// One commit, as the details pane receives it: what it said about itself, and
@@ -1263,9 +1278,13 @@ pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
     })
 }
 
-/// A commit as an Event. Nothing to render — the summary is five facts git
-/// counted — and here beside the move for the reason that one is: one place
-/// knows how a Timeline is made.
+/// A commit as an Event: five facts git counted, and the snippet of what the
+/// commit said about itself that its card clamps.
+///
+/// Here beside the move for the reason that one is: one place knows how a
+/// Timeline is made. The snippet is rendered on the way through, which is the
+/// one thing here there is anything to render — a summary of nothing but a
+/// Diagram comes out empty, and a card with nothing to say says nothing.
 pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent {
     TimelineEvent::Commit(CommitEvent {
         id,
@@ -1275,6 +1294,11 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
         files: commit.files,
         insertions: commit.insertions,
         deletions: commit.deletions,
+        snippet: commit
+            .summary
+            .as_deref()
+            .map(crate::markdown::to_prose)
+            .filter(|prose| !prose.is_empty()),
     })
 }
 
@@ -1282,8 +1306,9 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
 /// holds it.
 ///
 /// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than six parameters, because five of them are numbers
-/// and a subject, and a call with those in the wrong order would compile.
+/// the store — and rather than seven parameters, because five of them are
+/// numbers and a subject, and a call with those in the wrong order would
+/// compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitSummary {
     pub sha: String,
@@ -1291,6 +1316,10 @@ pub struct CommitSummary {
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// The Commit Summary as the agent wrote it, or `None` where the commit
+    /// carried none. Markdown, as everything an agent writes is.
+    pub summary: Option<String>,
 }
 
 /// One commit as the details pane receives it, rendered on the way.

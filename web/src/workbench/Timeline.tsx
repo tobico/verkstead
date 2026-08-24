@@ -1214,12 +1214,20 @@ function QuestionSet(props: {
   );
 }
 
-/// A commit a session landed on the branch: what it was called, and how much of
-/// the repository it moved.
+/// A commit a session landed on the branch: what it was called, how much of the
+/// repository it moved, and the opening of what it said about itself.
 ///
 /// A button, as a session's output and a question set are, and for the same
-/// reason: the whole of it — the diff — is in the details pane, and this is how
-/// it is opened.
+/// reason: the whole of it — the summary drawn out and the diff — is in the
+/// details pane, and this is how it is opened.
+///
+/// Which is also why the snippet is text rather than a rendering, where the
+/// three document cards are rendered markdown: markdown cannot live inside a
+/// button, and this card is a button first. The server sends the prose with the
+/// Diagram already taken out — see `to_prose` — so what is clamped here is what
+/// the summary says rather than the fence it opens with. A commit that said
+/// nothing draws the card that has always been drawn, with nothing marking the
+/// absence.
 ///
 /// Nothing here asks the human for anything. Commits are viewable and have no
 /// state of their own: the design gives them no per-commit review, because
@@ -1255,6 +1263,15 @@ function Commit(props: {
         <span class="added">+{props.commit.insertions}</span>
         <span class="removed">−{props.commit.deletions}</span>
       </span>
+
+      {/* Under the counts, because the counts are how much moved and this is
+          what the moving was for: the eye reads the line, then the size of it,
+          then the account. Clamped to CLAMPED_LINES, as a document's card is,
+          and by the stylesheet alone — plain prose is lines of one height, so
+          there is nothing here for an observer to measure. */}
+      <Show when={props.commit.snippet}>
+        {(snippet) => <span class="snippet">{snippet()}</span>}
+      </Show>
     </button>
   );
 }
