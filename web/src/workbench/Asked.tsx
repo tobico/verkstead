@@ -81,9 +81,13 @@ export function Asked(props: {
       </Match>
       <Match when={set.data && readable(set.data)}>
         {(set) => (
-          // No table of contents: that is a description of a column the whole
-          // window wide, and this is a column beside two others.
-          <Sheet set={set()} lead={head} contents={false} />
+          // With its table of contents, drawn from the pane's width rather than
+          // the window's: the pane caps what it holds at the same 60rem every
+          // other column is read at and centres it, so there is a margin here
+          // for the sidebar to stand in again — and where the human has left
+          // the pane narrower than that, the nav folds into its bar exactly as
+          // it does on a narrow window.
+          <Sheet set={set()} lead={head} contents="pane" />
         )}
       </Match>
     </Switch>

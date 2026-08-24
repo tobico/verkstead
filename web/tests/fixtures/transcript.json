@@ -25,12 +25,14 @@
     },
     {
       "about": "Find where a delivery is retried",
+      "call": "toolu_01",
       "id": 4,
       "input": "{\n  \"command\": \"rg -n 'retry' crates/server/src\",\n  \"description\": \"Find where a delivery is retried\"\n}",
       "kind": "ToolUse",
       "name": "Bash"
     },
     {
+      "call": "toolu_01",
       "failed": false,
       "id": 5,
       "kind": "ToolResult",

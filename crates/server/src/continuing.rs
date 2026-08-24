@@ -169,7 +169,7 @@ async fn start(
     // Both Profiles are the predecessor's: a stage is the same work by the same
     // hands, one branch further on. The implementation one is what the session
     // runs under, and without it there is nothing to run.
-    if conversation.implementation_profile.is_none() {
+    if conversation.implementation_pairing.is_none() {
         return say(
             state,
             settled,
@@ -369,24 +369,40 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
 }
 
 /// Give the new Conversation everything a human would have settled before
-/// pressing anything: the two Profiles, and the stage brief as its Brief.
+/// pressing anything: the two Pairings, and the stage brief as its Brief.
 ///
-/// The Profiles are the predecessor's, both of them. The implementation one is
+/// The Pairings are the predecessor's, both of them. The implementation one is
 /// what the work runs under; the grilling one is carried across because a stage
 /// that is reopened later is grilled by whatever the roadmap's work has been
 /// grilled by all along.
+///
+/// Carried whole, model and all — and a predecessor whose Profile was chosen
+/// before pairings existed carries no model, which leaves this stage running on
+/// the same Profile's own model, exactly as its predecessor did.
 async fn settle(
     state: &AppState,
     id: i64,
     conversation: &store::Conversation,
     stage: &Stage,
 ) -> anyhow::Result<()> {
-    if let Some(grilling) = &conversation.grilling_profile {
-        store::set_grilling_profile(&state.pool, id, grilling.id).await?;
+    if let Some(grilling) = &conversation.grilling_pairing {
+        store::set_grilling_pairing(
+            &state.pool,
+            id,
+            grilling.profile.id,
+            grilling.model.as_deref(),
+        )
+        .await?;
     }
 
-    if let Some(implementation) = &conversation.implementation_profile {
-        store::set_implementation_profile(&state.pool, id, implementation.id).await?;
+    if let Some(implementation) = &conversation.implementation_pairing {
+        store::set_implementation_pairing(
+            &state.pool,
+            id,
+            implementation.profile.id,
+            implementation.model.as_deref(),
+        )
+        .await?;
     }
 
     store::save_brief(&state.pool, id, &stage.brief).await?;

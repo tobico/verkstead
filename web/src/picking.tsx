@@ -44,8 +44,10 @@ export function Picker<T>(props: {
   /// What is chosen now, as `value` would have written it — the empty string
   /// for nothing chosen.
   chosen: string;
-  /// What the human just picked. Never the empty string: the placeholder is a
-  /// state to be in and not a choice to make.
+  /// What the human just picked. Never the empty string, unless the caller
+  /// offered one: the placeholder is a state to be in and not a choice to make,
+  /// but an option of the caller's own that sends nothing is a choice like any
+  /// other — the base dropdown's first entry, which is the rule to go back to.
   pick: (value: string) => void;
   /// Said when what was chosen is no longer among the options, for the caller
   /// that holds the choice in a signal of its own to clear it.
@@ -60,6 +62,14 @@ export function Picker<T>(props: {
 }): JSX.Element {
   /// What each option would send, in the order they are drawn.
   const offered = (): string[] => props.options.map(props.value);
+
+  /// Whether the caller's own list holds an option that sends nothing.
+  ///
+  /// Where it does, the empty string is one of the choices rather than the
+  /// absence of one: no placeholder is drawn over it, and picking it is a pick
+  /// like any other. Read off the options rather than taken as a flag, because
+  /// it is the same fact either way and two ways of saying it could disagree.
+  const offersNothing = (): boolean => offered().includes("");
 
   /// Whether what is chosen is still something that can be picked.
   const standing = (): boolean => offered().includes(props.chosen);
@@ -78,7 +88,7 @@ export function Picker<T>(props: {
       disabled={props.disabled}
       onChange={(ev) => {
         const picked = ev.currentTarget.value;
-        if (picked) {
+        if (picked || offersNothing()) {
           props.pick(picked);
         }
       }}
@@ -90,8 +100,12 @@ export function Picker<T>(props: {
           The same words on all of them, because it is the same state on all of
           them: a choice has not been made, or the one that was made is gone.
           A picker whose reader would need to be told something else can take
-          the words as a prop then. */}
-      <Show when={shown() === ""}>
+          the words as a prop then.
+
+          Nothing at all where the caller offers an option of its own that sends
+          nothing: that option is what the empty string means there, and a
+          placeholder over it would be two rows for one state. */}
+      <Show when={shown() === "" && !offersNothing()}>
         <option value="">Not chosen</option>
       </Show>
       <For each={props.options}>

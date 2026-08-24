@@ -1301,6 +1301,20 @@ fn wrap_up_proposal() -> QuestionSet {
 /// The human accepting it, which is picking a direction on the chooser — and
 /// picking one the agent did not recommend, because that is as much an
 /// acceptance as agreeing with it.
+/// Settle a Conversation's two Pairings: the first Profile for the grilling and
+/// the second for the implementation, each with the first model it lists.
+///
+/// Both while the Conversation is still drafting, which is the only state
+/// either can be recorded in — every fixture below chooses before it advances.
+async fn pairings(pool: &SqlitePool, conversation: i64, profiles: &[store::Profile]) {
+    store::set_grilling_pairing(pool, conversation, profiles[0].id, profiles[0].model())
+        .await
+        .unwrap();
+    store::set_implementation_pairing(pool, conversation, profiles[1].id, profiles[1].model())
+        .await
+        .unwrap();
+}
+
 fn accepting_the_proposal() -> Response {
     Response {
         answers: vec![Answer {
@@ -1519,10 +1533,17 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // which is exactly what the broken reading is for: this app watches nothing,
     // so every Profile it reads back is broken, and these fixtures are what the
     // viewer's tests draw that state from.
+    //
+    // One of them lists more than one model, because a Profile carries the whole
+    // list of what its account can launch and the viewer draws every entry.
     let mut profiles = Vec::new();
-    for (name, home, model) in [
-        ("fable", "/srv/accounts/fable", "claude-fable-5"),
-        ("opus", "/srv/accounts/opus", "claude-opus-5"),
+    for (name, home, models) in [
+        ("fable", "/srv/accounts/fable", &["claude-fable-5"][..]),
+        (
+            "opus",
+            "/srv/accounts/opus",
+            &["claude-opus-5", "claude-haiku-4-5-20251001"][..],
+        ),
     ] {
         profiles.push(
             store::create_profile(
@@ -1531,7 +1552,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                     name: name.to_owned(),
                     claude_dir: std::path::PathBuf::from(format!("{home}/.claude")),
                     config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
-                    model: model.to_owned(),
+                    models: models.iter().map(|model| (*model).to_owned()).collect(),
                     agent_type: store::AgentType::Claude,
                 },
             )
@@ -1549,12 +1570,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, drafting, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, drafting, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, drafting, &profiles).await;
     store::save_brief(
         &pool,
         drafting,
@@ -1566,13 +1582,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::set_base_commit(
-        &pool,
-        drafting,
-        Some("6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7"),
-    )
-    .await
-    .unwrap();
+
+    // Pinned to a branch rather than left on the rule, so the fixture carries
+    // the shape a picked base has: a name, resolved when grilling starts. What
+    // it resolves to is only ever a commit once the work is on it, which the
+    // grilling one below shows.
+    store::set_base_commit(&pool, drafting, Some("release-1.4"))
+        .await
+        .unwrap();
 
     // A second one, so the sidebar is a list rather than a row — and against the
     // other Repo, because what a row names beside the branch is which repository
@@ -1592,12 +1609,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, grilling, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, grilling, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, grilling, &profiles).await;
     store::save_brief(
         &pool,
         grilling,
@@ -1634,6 +1646,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
          What should happen to a delivery that has failed forty times?\r\n",
         &store::Summary {
             lines: 3,
+            // The turns of the Transcript written just below, which is what the
+            // relay would have counted as it followed the log: everything there
+            // but the one line of the backend's own bookkeeping.
+            turns: Some(6),
             latest: "What should happen to a delivery that has failed forty times?".to_owned(),
         },
     )
@@ -1739,12 +1755,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, directing, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, directing, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, directing, &profiles).await;
     store::save_brief(
         &pool,
         directing,
@@ -1815,7 +1826,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     //
     // Two of them, because a Timeline row has to read as one of several rather
     // than as a lone event — and on the Conversation that has been through a
-    // grilling, because that is where a branch first has anything on it.
+    // grilling, because that is where a branch first has anything on it. One of
+    // each kind, too: the bookkeeping commit that says only what it was, and the
+    // one that delivered work and wrote a Commit Summary about it.
     for commit in [
         store::Commit {
             sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
@@ -1823,6 +1836,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 2,
             insertions: 74,
             deletions: 3,
+            summary: None,
         },
         store::Commit {
             sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
@@ -1830,6 +1844,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 5,
             insertions: 213,
             deletions: 41,
+            summary: Some(
+                "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
+                 The relay reads the account's own limit error off stderr and \
+                 hands the session's runner a time to wake at, instead of the \
+                 fixed backoff it used to guess."
+                    .to_owned(),
+            ),
         },
     ] {
         store::record_commit(&pool, directing, &commit)
@@ -1851,12 +1872,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, tasked, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, tasked, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, tasked, &profiles).await;
     store::save_brief(
         &pool,
         tasked,
@@ -1912,6 +1928,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 5,
             insertions: 132,
             deletions: 0,
+            summary: None,
         },
     )
     .await
@@ -1953,31 +1970,32 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And the same Conversation with its run stopped, which is the one shape a
-    // viewer test cannot reach any other way: an Interruption is raised by a
-    // session dying, and there are no sessions here. Recorded after the fixture
-    // above is written, so the two are the same backlog before and after it went
-    // wrong.
-    store::record_interruption(
+    // And the same Conversation with its driving halted, which is the one shape a
+    // viewer test cannot reach any other way: a halt is written by a session
+    // dying, and there are no sessions here. Recorded after the fixture above is
+    // written, so the two are the same backlog before and after it went wrong.
+    //
+    // The Notice is written here rather than by the server's own `halts`, which
+    // is what composes one from the evidence it gathers — this is an integration
+    // test, and what it needs is a Timeline of the right shape.
+    store::halt(
         &pool,
         tasked,
-        &store::Evidence {
-            step: store::Step::Task,
-            what: "the task in .tasks/03-commit-events.md".to_owned(),
-            how: "the session exited with status 1".to_owned(),
-            git_status: "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n"
-                .to_owned(),
-            tail: "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\n\
-                   error: could not compile `verkstead-store` (lib) due to 1 previous error"
-                .to_owned(),
-        },
+        store::Halt::Deliberate,
+        "**The task in .tasks/03-commit-events.md** stopped.\n\n\
+         the session exited with status 1\n\n\
+         ### The worktree\n\n\
+         \x20   ## task-runner\n    \x20M crates/store/src/commits.rs\n    ?? crates/store/src/sweep.rs\n\n\
+         ### What the last session said\n\n\
+         \x20   error[E0432]: unresolved import `crate::sweep`\n    \x20 --> crates/store/src/commits.rs:9:5\n\
+         \x20   error: could not compile `verkstead-store` (lib) due to 1 previous error\n",
     )
     .await
     .unwrap()
     .unwrap();
 
     write(
-        "conversation-interrupted.json",
+        "conversation-halted.json",
         &pin_worktree(
             &pin_health(&pin_timeline(
                 &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
@@ -1996,10 +2014,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, waiting, profiles[0].id)
+    store::set_grilling_pairing(&pool, waiting, profiles[0].id, None)
         .await
         .unwrap();
-    store::set_implementation_profile(&pool, waiting, profiles[1].id)
+    store::set_implementation_pairing(&pool, waiting, profiles[1].id, None)
         .await
         .unwrap();
     store::save_brief(
@@ -2061,12 +2079,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, wrapping, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, wrapping, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, wrapping, &profiles).await;
     store::save_brief(
         &pool,
         wrapping,
@@ -2097,6 +2110,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 1,
             insertions: 0,
             deletions: 24,
+            summary: None,
         },
     )
     .await
@@ -2182,12 +2196,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap()
         .unwrap();
-    store::set_grilling_profile(&pool, staged, profiles[0].id)
-        .await
-        .unwrap();
-    store::set_implementation_profile(&pool, staged, profiles[1].id)
-        .await
-        .unwrap();
+    pairings(&pool, staged, &profiles).await;
     store::save_brief(
         &pool,
         staged,
@@ -2426,15 +2435,16 @@ fn pin_written_at(json: &str, under: &str) -> String {
 fn pin_health(json: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
-    // A list of Profiles, or one Conversation carrying the two it has chosen.
+    // A list of Profiles, or one Conversation carrying the two Pairings it has
+    // chosen — whose Profile half is the one the filesystem has an opinion of.
     match payload.as_array_mut() {
         Some(rows) => rows.iter_mut().for_each(mend),
         None => {
             let mut ready = payload["state"] == "Draft";
 
-            for role in ["grilling_profile", "implementation_profile"] {
+            for role in ["grilling_pairing", "implementation_pairing"] {
                 match payload.get_mut(role).filter(|it| !it.is_null()) {
-                    Some(profile) => mend(profile),
+                    Some(pairing) => mend(&mut pairing["profile"]),
                     None => ready = false,
                 }
             }

@@ -190,8 +190,10 @@ class Streaming {
   }
 }
 
-/// The stream the app opened, which there is always exactly one of: the app
-/// opens it on mount and holds it for as long as it is running.
+/// The stream the app opened, newest first — which is the one it is listening
+/// on. There is one at a time and not one per app: the connection is given back
+/// whenever the page is hidden and taken again when it is looked at, so a page
+/// that has been away has opened more than one over its life.
 function stream(): Streaming {
   const opened = Streaming.opened.at(-1);
   if (!opened) {
@@ -564,7 +566,8 @@ describe("what a Nudge is about", () => {
     // pane reads to decide whether the record can still move: a Transcript
     // opened over a session that had already stopped is read once and never
     // again, whatever any Nudge says.
-    await drawn(container, ".agent-output .live");
+    await drawn(container, ".agent-output .mark");
+
     fireEvent.click(await drawn(container, ".agent-output"));
     await drawn(container, ".details-pane .turn");
     stream().opens();
@@ -646,6 +649,87 @@ describe("what a Nudge is about", () => {
     // the agent letting go of its wait is a Nudge of its own (ADR-0009).
     await drawn(container, ".liveness.disconnected");
     expect(askedFor(fetching, `/api/ui/sets/${WAITING.id}`)).toBe(2);
+  });
+});
+
+describe("the connection the stream holds", () => {
+  /// A browser gives one origin six connections over HTTP/1.1, and a stream held
+  /// for as long as a page lives pins one of them for as long as the page is
+  /// open. Six Verksteads left open in tabs is every connection pinned, and from
+  /// there the page in front of the human waits for one that nothing is going to
+  /// give back — which is a workbench that loads nothing at all.
+  it("lets the connection go while the page is not being looked at", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+
+    away("hidden");
+
+    expect(stream().closed).toBe(true);
+  });
+
+  /// And takes one again when it is. A page that was not listening is a page
+  /// that has to be told everything, which is exactly what coming back already
+  /// does — so what it hears from here on is the news, and what it missed is the
+  /// read it is making anyway.
+  it("listens again when the page is looked at", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    away("hidden");
+
+    away("visible");
+
+    expect(stream().closed).toBe(false);
+
+    // And it is a stream that hears Nudges, rather than one nothing is listening
+    // on: what arrives down this one is drawn like anything else.
+    stream().opens();
+    stream().nudges();
+    await waitFor(() => screen.getByText(ARRIVAL.title));
+  });
+
+  /// The stream opening for a page that has come back is not a reconnect, and
+  /// must not be read as one: coming back is already a read of everything, and a
+  /// second one over the top of it would be the whole world fetched twice every
+  /// time somebody changed tabs.
+  it("reads the world back once when the page comes back", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    const fetching = serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+    stream().opens();
+    const before = askedFor(fetching, OPENED);
+
+    away("hidden");
+    away("visible");
+    // The connection is made again before the page reads, so the browser's own
+    // open lands after the catch-up rather than instead of it.
+    stream().opens();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(askedFor(fetching, OPENED)).toBe(before + 1);
+  });
+
+  /// A page nobody has looked at yet holds nothing either — every browser starts
+  /// a background tab hidden, and a tab opened behind the one being read is
+  /// exactly the case this is all about.
+  it("opens no stream at all for a page that starts hidden", async () => {
+    window.history.pushState({}, "", `/conversations/${CONVERSATION.id}`);
+    serving(...BESIDE, whenever(OPENED, json(CONVERSATION)));
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+
+    render(() => <App />);
+    await waitFor(() => screen.getByText(ALREADY_THERE));
+
+    expect(Streaming.opened).toEqual([]);
   });
 });
 

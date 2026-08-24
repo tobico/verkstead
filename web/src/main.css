@@ -45,6 +45,14 @@
   --tok-name: #2f6f8f;
   --tok-support: #6b5aa0;
 
+  /* What a dropdown menu stands off the page by. One shadow rather than three,
+     and a strong one: a menu is drawn over whatever the human was reading, and
+     against a card of the same paper the border alone was not enough to say
+     which of the two was in front. Two layers, because a single soft one reads
+     as a smudge — the tight one is the edge, the wide one is the lift. */
+  --lift:
+    0 0.75rem 2rem rgb(0 0 0 / 22%), 0 0.15rem 0.4rem rgb(0 0 0 / 14%);
+
   color-scheme: light dark;
 }
 
@@ -79,6 +87,11 @@
     --tok-keyword: #e08aa6;
     --tok-name: #86bcd8;
     --tok-support: #b6a8e0;
+
+    /* Deeper, because a shadow this faint is invisible on paper this dark: the
+       same two layers, carrying the weight the light-mode pair carries. */
+    --lift:
+      0 0.75rem 2rem rgb(0 0 0 / 55%), 0 0.15rem 0.4rem rgb(0 0 0 / 40%);
   }
 }
 
@@ -375,32 +388,25 @@ textarea::placeholder {
   color: #b3382c;
 }
 
-/* Where else there is to go, in the same slot on every page: back out of a Set,
-   and out to the one page everything is configured on. */
+/* The way back out of a page, in the same slot on every one of them. The way
+   *on* to the settings was here too until it went into the ⋯ at the head of the
+   conversations — see `.workbench-actions` — and nothing is left that puts two
+   of these on a line. */
 
-.back,
-.to-settings {
+.back {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
 }
 
-/* The slot laid out for more than one of them, which is the conversations
-   sidebar alone — and it held three until the Repos and the Profiles were
-   folded onto the settings page. */
-.elsewhere {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 1.25rem;
-}
-
 /* Registering a repo: a path typed, and the button that sends it. The label
-   stands over both, because what has to be understood before typing is that the
-   path is an absolute one. */
-
-.add-repo {
-  margin-bottom: 1.5rem;
+   stands over the field, because what has to be understood before typing is
+   that the path is an absolute one — and the whole of it is drawn over the page
+   as a modal, so the box around it is the card the modal already draws. */
+.add-repo h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }
 
 .add-repo label {
@@ -410,17 +416,10 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
-/* Wrapping, so a phone puts the button under the field rather than squeezing a
-   path into what is left of the line. */
-.add-repo-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
 .add-repo input {
-  flex: 1 1 14rem;
-  min-width: 0;
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: inherit;
@@ -430,7 +429,12 @@ textarea::placeholder {
   padding: 0.5rem 0.6rem;
 }
 
-.add-repo button {
+.add-repo-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.add-repo-buttons button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -441,9 +445,16 @@ textarea::placeholder {
   cursor: pointer;
 }
 
-.add-repo button:disabled {
+.add-repo-buttons button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the profile form's cancel is. */
+.add-repo-buttons .cancel {
+  color: var(--accent);
+  background: none;
 }
 
 .add-repo .error {
@@ -469,11 +480,9 @@ textarea::placeholder {
 
 /* Agent profiles: the account a session runs under. One form does both saving
    and rewriting — a profile is four fields with nothing built from them yet, so
-   editing one is filling the same form in with what it already says. */
-.edit-profile {
-  margin-bottom: 1.5rem;
-}
-
+   editing one is filling the same form in with what it already says — and it is
+   drawn over the page as a modal, so the box around it is the card the modal
+   already draws. */
 .edit-profile h3 {
   margin: 0 0 0.75rem;
   font-size: 1rem;
@@ -490,7 +499,11 @@ textarea::placeholder {
   font-size: 0.9em;
 }
 
-.edit-profile input {
+/* The models are the one field that is a list, so they are the one taken in a
+   textarea — drawn as the inputs around it, because it is the same kind of
+   typing with room for more than one line of it. */
+.edit-profile input,
+.edit-profile textarea {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -501,6 +514,10 @@ textarea::placeholder {
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
+}
+
+.edit-profile textarea {
+  resize: vertical;
 }
 
 .edit-profile-buttons {
@@ -562,11 +579,10 @@ textarea::placeholder {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Which one the form above is about, said with the accent down the near edge —
-   the same mark the open conversation carries. */
+/* Which one the modal over the page is about, said in the accent border — the
+   same mark the open conversation carries. */
 .profile-row.editing {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 /* A profile whose pair has gone. Said in the row rather than only in the words
@@ -585,7 +601,14 @@ textarea::placeholder {
   gap: 0.5rem;
 }
 
-.profile-actions button {
+/* The buttons on the section headings that open a modal are painted with them:
+   they are the same size of act as theirs — those add a repo or a profile, or
+   open the credentials, where these two change a profile or take it away. One
+   rule, because every section of this page now heads its list the same way. */
+.profile-actions button,
+.credentials > .section-head > button,
+.profiles > .section-head > button,
+.repos > .section-head > button {
   padding: 0.35rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;
@@ -600,18 +623,29 @@ textarea::placeholder {
   color: var(--removed);
 }
 
-/* The settings: what Verkstead itself has been told, in two sections under one
-   button, because the server writes both files in one request. Laid out like
-   the profile form — the same labels over the same fields — since it is the
-   same kind of page. */
+/* The credentials: what Verkstead itself has been told. What the page holds is
+   a summary of it — the token's state, the author, and the warnings about
+   whichever is missing — and the form that rewrites it is a modal, in two
+   sections under one Save because the server writes both files in one request.
+   Laid out like the profile form, the same labels over the same fields, since it
+   is the same kind of form. */
 
-.settings section {
+.credentials {
   margin-bottom: 1.5rem;
 }
 
-.settings h2 {
+.credentials h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
+}
+
+.settings section {
+  margin-bottom: 1.25rem;
+}
+
+.settings h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
 }
 
 .settings label {
@@ -638,7 +672,7 @@ textarea::placeholder {
    as an error — nothing has failed yet, and what it is saying is what will fail
    if this is left as it is. The stopped red rather than the accent: it is the
    same "this is waiting on you" the workbench marks a halted run with. */
-.settings .warning {
+.credentials .warning {
   margin: 0 0 0.85rem;
   padding: 0.7rem 0.9rem;
   background: var(--card);
@@ -648,20 +682,24 @@ textarea::placeholder {
   font-size: 0.9rem;
 }
 
-/* What is known about the saved token, which is everything but the token. */
-.settings .token-standing {
+/* What is known about the saved token, which is everything but the token. Said
+   in both places, because the summary's line and the form's are the same line:
+   on the page it is what is configured, and in the form it is what Replace and
+   Clear are about. The form is inside the summary's section, so one rule reaches
+   both. */
+.credentials .token-standing {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-.settings .last-four,
-.settings .login {
+.credentials .last-four,
+.credentials .login {
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: var(--ink);
 }
 
-.settings .verified {
+.credentials .verified {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
   color: var(--added);
@@ -670,9 +708,26 @@ textarea::placeholder {
 /* A token GitHub would not vouch for is still saved, and the line saying so
    sits in the flow above the field rather than under the button like the save's
    own failure — hence a margin of its own. */
-.settings .error.unverified {
+.credentials .error.unverified {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
+}
+
+/* The author as a line rather than as two fields, written the way git writes
+   one — which is the form it is going to be used in. */
+.credentials .author-standing {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.credentials .author-name,
+.credentials .author-email {
+  color: var(--ink);
+}
+
+.credentials .author-email {
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 .settings .token-actions {
@@ -703,7 +758,8 @@ textarea::placeholder {
 }
 
 /* The buttons that undo rather than do, drawn as outlines of the one they sit
-   beside — as the brief editor's cancel is. */
+   beside — as the brief editor's cancel is. Two of them: the way out of the
+   form, and the way back from the field a token is pasted into. */
 .settings .cancel {
   color: var(--accent);
   background: none;
@@ -721,16 +777,17 @@ textarea::placeholder {
 }
 
 /* The two lists folded onto the settings page under the credentials, headed the
-   way the credentials' own sections are: everything on this page is one kind of
-   thing, so it is all one page's worth of headings. */
+   way the credentials' summary is: everything on this page is one kind of thing,
+   so it is all one page's worth of headings, each with the button that opens its
+   form on the other end of the line. */
 
 .profiles,
 .repos {
   margin-bottom: 1.5rem;
 }
 
-.profiles > h2,
-.repos > h2 {
+.profiles h2,
+.repos h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
@@ -777,6 +834,51 @@ main:has(.workbench) {
   display: block;
 }
 
+/* The line between two panes, and the handle that moves it.
+
+   Only in the document where a layout stands panes side by side — the page puts
+   it there, and takes it away again below the breakpoint where the workbench is
+   walked through one pane at a time. So there is no `display: none` here to
+   keep in step with the rules that decide which panes are drawn: a divider that
+   is drawn is a divider there is something either side of.
+
+   It is the border as well as the handle. The panes themselves carry no edge
+   between them any more — two lines a pixel apart, one of them moving, is the
+   sort of thing nobody sees and everybody notices.
+
+   `touch-action` because a finger dragging this is dragging this: left to
+   itself the browser would take the gesture for a scroll of the pane under it
+   and the divider would never see the second event. */
+.pane-divider {
+  position: relative;
+  width: 0.5rem;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--edge);
+}
+
+/* Under the pointer, and under the keyboard's focus, the line says it is a
+   thing that moves. The whole half-rem is the target; what lights up is the
+   line, because the half-rem is only there to be easier to hit than a pixel. */
+.pane-divider:hover::before,
+.pane-divider:focus-visible::before {
+  width: 2px;
+  background: var(--accent);
+}
+
+.pane-divider:focus-visible {
+  outline: none;
+}
+
 /* A pane's title with the ways out of it either side. Wrapping, so a narrow
    pane puts the title under the way back rather than squeezing both onto one
    line. */
@@ -791,6 +893,105 @@ main:has(.workbench) {
 
 .pane-head h1 {
   margin: 0;
+}
+
+/* What stays at the top of a pane while the pane goes up under it: the header,
+   and in the timeline the header and the pinned block together, wrapped as one
+   `.pane-chrome`. One sticky block rather than two of them, because sticky wants
+   a known offset from the top edge and the header has no height to give it — it
+   wraps onto a second line in a narrow pane and grows again when the *Blocked on
+   you* badge appears, so a pinned block pinned under it would have to be told
+   that height and kept in step with it forever.
+
+   Sticky rather than fixed, because what it is the top of is the pane: a narrow
+   window scrolls the whole page and a wide one scrolls this pane, and sticky is
+   right in both.
+
+   The two selectors cannot both catch the same header, and the child combinator
+   is what makes that true: where the timeline wraps its header the header is the
+   wrapper's child rather than the pane's, so the wrapper is the one thing that
+   sticks and the header inside it travels with it. */
+.pane > .pane-head,
+.pane > .pane-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* The paper behind it, out past the pane's own padding on both sides, so the
+     record passes under it rather than beside it. Above it there is nothing to
+     cover: pinned to `top: 0` the block sits against the pane's top edge, and
+     the padding that was over its head has gone up with everything else. */
+  margin: 0 -1rem 1rem;
+  padding: 1.25rem 1rem 0;
+  background: var(--paper);
+}
+
+/* Which is why the padding over its head is the block's own rather than the
+   pane's: that rem and a quarter is what the record would otherwise slide up
+   against the underside of the title through, and padding the pane keeps has
+   scrolled away by the time it is wanted. Nothing moves at rest — the block
+   pays for exactly what the pane stopped paying for. A pane with no header to
+   its name keeps its own, because there is nothing there to hand it to. */
+.pane:has(> .pane-head),
+.pane:has(> .pane-chrome) {
+  padding-top: 0;
+}
+
+/* The record thins out into what is stuck rather than being cut off against it.
+   The gradient hangs in the gap that was already below the chrome — the rem the
+   header keeps under itself — which is why it costs nothing at rest: paper drawn
+   over paper, with nothing of the first event covered until the record is
+   actually passing beneath. So there is no scroll listener and no `scrolled`
+   flag, and nothing that would have to be answered twice over for the two ways a
+   pane scrolls.
+
+   Deaf to the pointer, because for most of a pane's life this is a rem of the
+   record it is lying over, and a fade that swallowed the presses meant for what
+   shows through it would be worse than the abrupt edge it replaced. */
+.pane > .pane-head::after,
+.pane > .pane-chrome::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 0;
+  left: 0;
+  height: 1rem;
+  background: linear-gradient(var(--paper), transparent);
+  pointer-events: none;
+}
+
+/* Inside the wrapper the header takes the layer over the pinned block below it,
+   which is what lets the ⋯ menu come down over the pinned items rather than
+   behind them, where it could not be pressed. The layer belongs to the header
+   rather than to the menu that wanted it: everything the header ever hangs
+   underneath itself is over the pinned block by being part of the header, and
+   the next thing hung there needs no rule of its own. */
+.pane-chrome > .pane-head {
+  position: relative;
+  z-index: 1;
+}
+
+/* The sidebar leads with the mark rather than with a title of its own: this pane
+   is the whole of what Verkstead is entered by, so what belongs over the list is
+   the thing the list is part of, and *Conversations* only named what was under
+   it a second time. The icon and the word together rather than either alone —
+   the icon by itself is a shape nobody has been taught yet, and the word by
+   itself is what every other pane's title already looks like.
+
+   Heading-sized, and still an `<h1>`, so the pane keeps a heading at the top of
+   it for a screen reader to find. */
+.pane-head .wordmark {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pane-head .wordmark img {
+  width: 1.4rem;
+  height: 1.4rem;
+  /* The artwork is full-bleed — a square of cold iron with the anvil on it —
+     so at this size it is an app icon rather than a glyph, and it is cornered
+     like one. */
+  border-radius: 0.3rem;
 }
 
 /* The ways between the panes: back out of this level, and on to the next.
@@ -814,139 +1015,222 @@ main:has(.workbench) {
   flex-basis: 100%;
 }
 
-/* Starting a conversation: which repo the work is in, and nothing else — the
-   branch name is prefilled by the server and the brief is written in the
-   timeline. */
-.start-conversation {
-  margin-bottom: 1.5rem;
+/* The one modal in the UI, which is one component — see `Modal.tsx`. A native
+   `dialog` opened with `showModal`, so the top layer, the backdrop, Escape and
+   the focus are the platform's; what is here is where the card sits and what it
+   is painted with.
+
+   The dialog is the frame and carries no padding of its own. A press on the
+   backdrop is reported as a press on the dialog, so padding there would make a
+   press on the card's own margin read as a press away from the card — which is
+   why the card underneath is what has the padding. */
+.modal {
+  width: min(28rem, calc(100% - 2rem));
+  padding: 0;
+  /* Rising from the bottom edge, which is where a thumb is. */
+  margin: auto auto 1rem;
+  color: inherit;
+  background: none;
+  border: 0;
 }
 
-.start-conversation label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
+.modal::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+/* Drawn as a card of the page is, because that is what it is: the same paper,
+   the same edge, a rounder corner for being the one thing in front. It scrolls
+   rather than the page behind it, and it stops short of the window so that what
+   is under it is still visibly there. */
+.modal-card {
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+}
+
+/* Wider than a phone: the card sits in the middle rather than rising from the
+   bottom edge, where a thumb would have put it. */
+@media (min-width: 30rem) {
+  .modal {
+    margin: auto;
+  }
+}
+
+/* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
+   chrome is here and only the paint is each menu's own: they hang the same way,
+   they are dismissed the same way, and they stand off the page by the same
+   shadow, which is what says a menu is in front of what it covers.
+
+   The anchor everything below hangs from. */
+.menu {
+  position: relative;
+}
+
+/* The trigger keeps almost nothing of its own: what one of these looks like is
+   the caller's, and they look nothing like each other — a full-width button, a
+   pill, an ellipsis. Only the two things every one of them is. */
+.menu-trigger {
+  font: inherit;
+  cursor: pointer;
+}
+
+.menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* What a press away from the open menu lands on, so that it lands on nothing
+   else: a stray press that opened a conversation, or answered a question, is
+   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
+   is not in front of the page the way a dialog is, it is only on top of it. */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+}
+
+/* The menu itself, hung under the trigger's far end. Over the page rather than
+   in the flow of it, so opening one does not move what it was opened from. */
+.menu-drop {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 3;
+  padding: 0.3rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+/* Every row of every menu: drawn as the text it is rather than as a control,
+   because a menu of buttons that looked like buttons would read as a form to
+   fill in. */
+.menu-drop button,
+.menu-drop a[role="menuitem"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.menu-drop button:hover,
+.menu-drop button:focus-visible,
+.menu-drop a[role="menuitem"]:hover,
+.menu-drop a[role="menuitem"]:focus-visible {
+  background: var(--paper);
+}
+
+.menu-drop button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The ⋯ trigger, of which there are two: what can be done to the Conversation
+   being read, and what there is beyond the conversations at all. Both sit at the
+   right edge of a pane's header beside the thing that header names, and a mark
+   is what fits there — so they are painted here, once, and the pair of them
+   cannot drift apart. */
+.workbench-actions > .menu-trigger,
+.conversation-actions > .menu-trigger {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+.workbench-actions > .menu-trigger[aria-expanded="true"],
+.conversation-actions > .menu-trigger[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* A run of rows kept apart from the rest by a rule, where pressing one of them
+   does a different kind of thing than pressing the others. */
+.menu-drop .menu-group {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
+}
+
+.menu-drop .menu-heading {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
   color: var(--ink-soft);
 }
 
-.start-conversation-line {
+/* Wider than the one word in it, so it reads as a menu with room for the next
+   entry rather than as a label that happened to appear under the mark. */
+.workbench-actions > .menu-drop {
+  min-width: 9rem;
+}
+
+/* Starting a conversation: which repo the work is in, and nothing else — the
+   branch name is prefilled by the server and the brief is written in the
+   timeline. One decision, so one press: the button is the whole of the form,
+   and the menu it drops is the anchor everything below hangs from. */
+.new-conversation {
+  margin-bottom: 1.5rem;
+}
+
+/* The width of the pane, because it is the pane's one action and the menu comes
+   down the width of it. The mark is pushed to the far end, where a dropdown's
+   is. */
+.new-conversation > .menu-trigger {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 0.5rem;
-}
-
-.start-conversation select {
-  flex: 1 1 8rem;
-  min-width: 0;
-  font: inherit;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-}
-
-.start-conversation button,
-.field-line button,
-.edit-brief-buttons button {
+  width: 100%;
   padding: 0.5rem 1rem;
-  font: inherit;
   font-weight: 600;
   color: var(--paper);
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: 0.4rem;
-  cursor: pointer;
 }
 
-.start-conversation button:disabled,
-.field-line button:disabled,
-.edit-brief-buttons button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-/* The one button that undoes rather than does, so it is drawn as the outline of
-   the one beside it. */
-.edit-brief-buttons .cancel {
-  color: var(--accent);
-  background: none;
-}
-
-/* The roadmaps nothing is driving, under the box that starts a conversation:
-   another way in rather than something waiting on the human, so it is drawn as
-   the update banner is — a card with an accented edge — and not as a row of the
-   list below it. One card per Repo, with its roadmaps inside. */
-.abandoned {
-  margin-bottom: 1.5rem;
-}
-
-.abandoned-notice {
-  margin-bottom: 0.6rem;
-  padding: 0.7rem 0.9rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--accent);
-  border-radius: 0.6rem;
-  font-size: 0.9rem;
-}
-
-.abandoned-notice > p {
-  margin: 0;
-}
-
-.abandoned-notice ul {
-  list-style: none;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+/* As wide as the button it came down from, and over the list rather than in the
+   flow above it: opening it does not push the conversations down, which is the
+   whole of what the notices under the old box were doing. */
+.new-conversation > .menu-drop {
+  left: 0;
 }
 
 /* The roadmap's name over the stage that would be started, because on a phone
-   the two of them do not share a line. */
-.abandoned-notice li {
+   the two of them do not share a line — and the Repo beside the name, since the
+   group is flat and two repositories may each hold an `mvp`. */
+.adopt-roadmap .what {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
 }
 
-/* Each roadmap is a button, because pressing one starts a conversation to adopt
-   it with. Drawn as the text it already was rather than as a control: the card
-   it is in is the notice, and three buttons stacked in it would read as three
-   things to decide between rather than as what is lying about. */
-.abandoned-notice li button {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  width: 100%;
-  padding: 0.25rem 0.4rem;
-  margin: -0.25rem -0.4rem;
-  font: inherit;
-  color: inherit;
-  text-align: start;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.abandoned-notice li button:hover {
-  border-color: var(--edge);
-}
-
-.abandoned-notice li button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.abandoned-notice .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-.abandoned-notice .stage {
+.adopt-roadmap .in,
+.adopt-roadmap .stage {
+  font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+.new-conversation .empty {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
 }
 
 /* The conversations themselves, drawn as the set lists' rows are: the whole card
@@ -989,19 +1273,21 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-/* Which one is open, said with the accent down the near edge rather than with a
-   fill: the row is read, and a wash behind it would fight the words. */
+/* Which one is open, said in the accent border alone: the border is the mark
+   everywhere something is selected, and a card that also carried a stripe down
+   its near edge read as heavier than the rest of the list rather than as the one
+   being looked at. A fill is no better — the row is read, and a wash behind it
+   would fight the words. */
 .conversation-row.selected .open {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 /* A draft: nothing about it has been settled, so the card is drawn as the
    outline of one rather than as one.
 
-   `border-style` alone, so a selected draft is still the accent down its near
-   edge — a dotted accent border is a draft that is open, which is both things at
-   once and is what it should look like. */
+   `border-style` alone, so a selected draft still takes the accent — a dotted
+   accent border is a draft that is open, which is both things at once and is
+   what it should look like. */
 .conversation-row.draft .open {
   border-style: dotted;
 }
@@ -1010,13 +1296,14 @@ main:has(.workbench) {
    details pane's to say, and what the sidebar is saying is that there is nothing
    here to do. Still a row to press: a Done Conversation can be reopened.
 
-   0.65 rather than lower, because it is the card that should recede and not the
-   words in it: dimmed that far, `--ink` on this card lands almost exactly where
-   `--ink-soft` sits undimmed, so the name reads as small print rather than as
-   something failing. Which is why the line under it is lifted to `--ink` below —
-   left soft it would be dimmed twice. */
+   Far enough down that the card reads as closed at a glance rather than merely
+   quiet: a list of live work with a Done conversation in it should not have to be
+   read to tell which is which. The line under the name is lifted to `--ink`
+   below all the same — left soft it would be dimmed twice, and the card is what
+   should recede and not the words in it. Still a card to press: a Done
+   Conversation can be reopened. */
 .conversation-row.ended .open {
-  opacity: 0.65;
+  opacity: 0.45;
 }
 
 .conversation-row.ended .meta {
@@ -1106,23 +1393,31 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The mark at the right edge, which is how a card says what is happening to it
-   now that the state is no longer written under the name. One size for both, so
-   a card does not resize when a session finishes and leaves an ask behind it. */
-.conversation-row .mark {
+/* The mark at the right edge, which is how anything a session may be running on
+   says what is happening to it now that the state is no longer written in
+   words: a card in the sidebar, a session's row on the Timeline, and the
+   details pane that row opens. One size for every kind, so nothing resizes when
+   a session finishes and leaves an ask behind it. */
+.mark {
   flex: none;
-  width: 1rem;
-  height: 1rem;
+  align-self: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
 }
 
-/* Something is waiting on the human: an ask left open, a run stopped on an
-   Interruption, or a direction to choose. An icon rather than the dot it used to
-   be — a shape reads at a glance where a dot has to be looked at, and this is a
-   list that is glanced down. The border around the whole card is the other half
-   of the same mark; see `.conversation-row.waiting`. */
+/* Something is waiting on the human: an ask left open, driving that has halted,
+   a run waiting an account's window out, or a direction to choose. An icon
+   rather than the dot it used to be — a shape reads at a glance where a dot has
+   to be looked at, and this is a list that is glanced down, so it is a size up
+   on the session marks beside it. The border around the whole card is the other
+   half of the same mark; see `.conversation-row.waiting`. The accent rather than
+   the `--stopped` red, because not one of the four is anything going wrong. */
 .conversation-row .mark.waiting {
   display: grid;
   place-items: center;
+  width: 1rem;
+  height: 1rem;
   background: var(--accent);
   border-radius: 50%;
   color: var(--card);
@@ -1135,11 +1430,19 @@ main:has(.workbench) {
    Low contrast on purpose — it is there to be caught out of the corner of an
    eye rather than watched, and a sidebar of them should not be a sidebar of
    things demanding to be read. */
-.conversation-row .mark.working {
+.mark.working {
   border: 1.5px solid var(--edge);
   border-top-color: var(--ink-soft);
   border-radius: 50%;
   animation: turning 1.4s linear infinite;
+}
+
+/* And one that is running and has stopped talking: the same ring with no lit
+   arc at all, which is an empty circle. Quieter than the turning one on purpose
+   — a session sitting on an ask is not doing anything, and the mark that says
+   so should not be the one that catches an eye. */
+.mark.idle {
+  border: 1.5px solid var(--edge);
 }
 
 @keyframes turning {
@@ -1150,31 +1453,131 @@ main:has(.workbench) {
 
 /* Held still where motion is unwelcome. What is left is a ring with a mark on
    one side of it, which says a session is running as plainly as a turning one
-   does — all it loses is the liveliness. */
+   does — all it loses is the liveliness. And it is still told apart from the
+   idle ring, because the lit arc is what the two differ by rather than the
+   turning. */
 @media (prefers-reduced-motion: reduce) {
-  .conversation-row .mark.working {
+  .mark.working {
     animation: none;
   }
 }
 
-/* The pinned events, above the timeline and stuck to the top of what scrolls:
-   the fixed set — a task list, a stage list and a PR — each of which is
-   the current state of something the work is against rather than a moment in
-   the record. Sticky rather than fixed, because it belongs to the pane it is
-   the top of: a narrow window scrolls the whole page and a wide one scrolls
-   this pane, and sticky is right in both. */
+/* The pinned events, above the timeline and inside the chrome that holds the top
+   of the pane: the fixed set — a task list, a stage list and a PR — each of
+   which is the current state of something the work is against rather than a
+   moment in the record. What keeps them in view is `.pane-chrome`, which sticks
+   them and the header to the top edge as one block and carries the paper the
+   record passes behind; all this rule is now is the air they keep above and
+   below themselves.
+
+   One card is ever inside it: with more than one pinned the carousel below is
+   what is here, and the card is inside that. */
 .pinned {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  /* The paper behind it, so the record scrolls under it rather than through
-     it — and past the pane's own padding, so nothing shows down either side. */
-  margin: 0 -1rem 1rem;
-  padding: 0.75rem 1rem;
-  background: var(--paper);
+  padding: 0.75rem 0;
+}
+
+/* The carousel, which is what more than one pinned card is: they are held above
+   the record, so a stack of them is a stack the record is pushed down by — and a
+   pinned card is worth having in view rather than worth having all of at once.
+   One pinned card is not one of these at all, and is drawn exactly as it was.
+
+   Positioned, because the arrows are over the card's own edges. */
+.pinned .carousel {
+  position: relative;
+}
+
+/* The card that is showing. A sideways drag across it is the carousel's to read
+   as a swipe; an up-and-down one is still the pane's to scroll with, which is
+   what `pan-y` leaves the browser holding. */
+.pinned .carousel > .showing {
+  touch-action: pan-y;
+}
+
+/* The way between cards where there is a pointer to reach it with. Nothing at
+   all where there is not: a touch device swipes the card, and two buttons lying
+   over it would be two buttons in the way of the thing they are about. */
+.pinned .carousel > .step {
+  display: none;
+}
+
+@media (hover: hover) {
+  .pinned .carousel > .step {
+    display: grid;
+    position: absolute;
+    top: 50%;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    transform: translateY(-50%);
+    font: inherit;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--ink-soft);
+    background: var(--paper);
+    border: 1px solid var(--edge);
+    border-radius: 50%;
+    cursor: pointer;
+    /* Out of sight until the carousel is under the pointer or holding the
+       keyboard: at rest the card is whole, and an arrow is only wanted by
+       somebody already looking at what it would turn. Hidden rather than
+       faded, so what cannot be seen cannot be pressed by accident either. */
+    visibility: hidden;
+  }
+
+  .pinned .carousel:hover > .step,
+  .pinned .carousel:focus-within > .step {
+    visibility: visible;
+  }
+
+  .pinned .carousel > .back {
+    left: 0.35rem;
+  }
+
+  .pinned .carousel > .on {
+    right: 0.35rem;
+  }
+}
+
+/* And the dots beneath: how many cards there are, and which one is showing.
+   Always drawn, pointer or none — they are the whole of what the carousel says
+   about itself, and a swipe with nothing counting it is a card that came from
+   nowhere. */
+.pinned .carousel > .dots {
+  list-style: none;
+  display: flex;
+  justify-content: center;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+/* Each is a dot's worth of ink in a finger's worth of button: what is drawn is
+   the mark, and what is pressed is the box around it. */
+.pinned .carousel .dots button {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.pinned .carousel .dots button::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--edge);
+  border-radius: 50%;
+}
+
+/* The one showing, in the accent the page marks what is current with. */
+.pinned .carousel .dots button[aria-current]::before {
+  background: var(--accent);
 }
 
 /* The backlog and the roadmap: the whole list either way, because the whole
@@ -1237,10 +1640,15 @@ main:has(.workbench) {
   font-size: 0.9rem;
 }
 
-/* The number the entry answers to, as the list writes it. Monospaced so the
-   column reads straight down whatever the numbers are. */
+/* The number the entry answers to, as the list writes it, at the far end of the
+   row — `☐ Some task            01`. Monospaced so the column reads straight
+   down whatever the numbers are, and held against that edge by the margin the
+   heading's `progress` uses, so the title keeps whatever width it needs and
+   never has to be as wide as the row. */
 .pinned .task-list .n,
 .pinned .stage-list .n {
+  margin-left: auto;
+  flex: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -1253,11 +1661,33 @@ main:has(.workbench) {
   text-overflow: ellipsis;
 }
 
+/* Whether the entry is finished, drawn where the file it is read out of writes
+   it: a box at the head of the row rather than a word at the far end of it. A
+   column of boxes is read down in one pass, which is what a list of tasks is
+   ever looked at for. */
+.pinned .task-list .box,
+.pinned .stage-list .box {
+  flex: none;
+  font-size: 0.95rem;
+  line-height: 1;
+  color: var(--ink-soft);
+}
+
+/* And the word the box replaced, kept for the readers that need words: out of
+   the layout and still in the document, so a row read aloud or copied out says
+   which entries are finished. Not `display: none`, which would take it out of
+   the accessibility tree along with the layout. */
 .pinned .task-list .state,
 .pinned .stage-list .state {
-  margin-left: auto;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* One that is done is struck through and taken down, the way a checked item
@@ -1453,75 +1883,86 @@ main:has(.workbench) {
   font-size: 1.1rem;
 }
 
-.edit-brief {
-  padding: 0;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--accent);
-  background: none;
-  border: 0;
+/* The three documents on a timeline — the frozen brief, the handoff the grilling
+   wrote, and the instruction a manual task was set going with. All three are
+   prose, and read at the measure like every other block of it, on the card and
+   in the pane the card opens. */
+.brief-body,
+.handoff-body,
+.manual-task-body,
+.document {
+  max-width: var(--measure);
+}
+
+/* On the card, each of them is cut off at five lines: enough to say what the
+   document is about, and never enough to push the record off the screen. The
+   whole of it is in the details pane, which is what pressing the card opens.
+
+   The height is written in `em` rather than in lines, because what is clamped is
+   a rendering rather than a paragraph — a heading, a list and a fence are all in
+   there and no two of them are one line high. Five lines of body text is the
+   measure of it, and a document whose first block is taller simply shows less of
+   itself. */
+.clamp {
+  position: relative;
+  max-height: 7.5em;
+  overflow: hidden;
+}
+
+/* The cut, drawn only where the document goes on under it — `Clamped` in
+   `Timeline.tsx` is what measures. The last line fades into the card rather than
+   stopping at a straight edge, so what is missing reads as missing rather than
+   as the end of the document. */
+.clamp.cut::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2.5em;
+  background: linear-gradient(to bottom, transparent, var(--card));
+  pointer-events: none;
+}
+
+/* And what says the card can be pressed. The events that are buttons carry this
+   for nothing; these three are articles, because rendered markdown cannot live
+   inside a button, so the same two things a pressable card has — a pointer and a
+   border in the accent while it is the one open — are said here instead. */
+.timeline-event > .openable {
   cursor: pointer;
 }
 
-.edit-brief-buttons {
-  display: flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+.timeline-event > .openable.selected {
+  border-color: var(--accent);
 }
 
-/* The brief is prose, and reads at the measure like every other block of it. */
-.brief-body {
-  max-width: var(--measure);
+/* What is still the human's to change while the brief is a draft, under the
+   brief it belongs to: the branch, the base commit and the two pairings. Ruled
+   off from the prose above it, because the brief is the card's headline and this
+   is the setup that follows it — and gone entirely once grilling starts, which
+   is why nothing here is ever drawn disabled. */
+.conversation-setup {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--edge);
 }
 
-/* The handoff is the same kind of card, and prose for the same reason — what the
-   grilling settled, written out for whoever builds it. Nothing to press: it is
-   the agent's account of a conversation that is over. */
-.handoff > .markdown {
-  max-width: var(--measure);
+/* The gap under the last of them is the card's own padding, rather than that
+   plus the one every section keeps below itself. */
+.conversation-setup > :last-child {
+  margin-bottom: 0;
 }
 
-/* And a manual task is the same kind of card again, prose at the same measure:
-   what the human asked for by hand, in the words they asked for it in. Nothing
-   to press here either — what its session did arrives under it as the events
-   any work arrives as. */
-.manual-task > .markdown {
-  max-width: var(--measure);
-}
-
-/* What a conversation is, beside what has happened to it: the repo it is
-   attached to, and where it has got to. Read rather than changed — a
-   conversation is attached to a repo when it is started. */
-.conversation-facts {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.35rem 1rem;
-  margin: 0 0 1.5rem;
-  font-size: 0.9rem;
-}
-
-.conversation-facts dt {
-  color: var(--ink-soft);
-}
-
-.conversation-facts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.conversation-facts .path {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
-/* And what is still the human's to change while it drafts: the branch name and
-   the base commit, each a field with the button that records it. */
+/* The two fields the setup opens with: the branch, which keeps itself the way
+   the brief above it does, and the base commit with the button that records
+   it. */
 .branch-name,
-.base-commit {
+.base-branch {
   margin-bottom: 1.5rem;
 }
 
 .branch-name label,
-.base-commit label {
+.base-branch label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
@@ -1546,23 +1987,35 @@ main:has(.workbench) {
   padding: 0.5rem 0.6rem;
 }
 
-/* What an empty field means, which is a rule rather than a missing value — so it
-   is said in words under the field rather than left to be guessed. */
+/* What a control does not say for itself: the base dropdown's first entry is a
+   rule rather than a branch, and what it will resolve to is not known until
+   grilling starts. So it is said in words underneath. */
 .note {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-.note .default-branch,
-.base-commit input {
+.note .default-branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+/* The same control the pairings are picked with, because it is the same kind of
+   choice: one of a short list the repository already holds. */
+.base-branch select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
 .branch-name .error,
-.base-commit .error,
-.start-conversation .error,
-.edit-brief-form .error,
+.base-branch .error,
+.new-conversation .error,
+.brief > .error,
 .conversation-profiles .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -1575,9 +2028,25 @@ main:has(.workbench) {
   margin-bottom: 1.5rem;
 }
 
-.conversation-profiles h2 {
+.conversation-profiles h3 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
+}
+
+/* The two of them across one row where the pane is wide enough, and down the
+   page where it is not. The wrap does that on its own — each choice asks for
+   about half of a wide pane and refuses to go under a readable width, so a
+   narrow pane cannot fit two and puts the second on its own line. No breakpoint,
+   because the width that matters here is the pane's rather than the window's. */
+.pairings {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1rem;
+}
+
+.pairings > .profile-choice {
+  flex: 1 1 14rem;
+  min-width: 0;
 }
 
 .profile-choice {
@@ -1608,50 +2077,34 @@ main:has(.workbench) {
   font-size: 0.85rem;
 }
 
+/* A profile chosen before models were paired with them, which is half a choice:
+   the select shows nothing, and this is what it is showing nothing about. */
+.profile-choice .unpaired {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* Whether this conversation will grill. The server's rule rather than a count of
    the two fields above, so it is stated rather than inferred. */
 .readiness.ready {
   color: var(--added);
 }
 
-/* Where the work is actually being done, once there is somewhere. A fact rather
-   than a field: the path is Verkstead's to choose. */
-.conversation-worktree {
-  margin-bottom: 1.5rem;
-}
+/* A move: the conversation changing hands, written as the transition itself —
+   `Grilling → Implementing`. A line rather than a card, because there is nothing
+   to it but the fact, so it is drawn out of the run of cards the other events
+   make, as something that happened between them.
 
-.conversation-worktree h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.1rem;
-}
-
-.conversation-worktree .path {
-  margin: 0;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.85rem;
-  overflow-wrap: anywhere;
-}
-
-/* A worktree that has gone from under Verkstead. Struck through rather than
-   merely annotated, so the path reads as the thing that is wrong with it. */
-.conversation-worktree .path.missing {
-  color: var(--ink-soft);
-  text-decoration: line-through;
-}
-
-.conversation-worktree .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-/* A move: the conversation changing hands. A line rather than a card, because
-   there is nothing to it but the fact — so it is drawn out of the run of cards
-   the other events make, as something that happened between them. */
+   Centred, which is the other half of that: a line down the middle belongs to
+   the gap between two cards rather than to either of them, and the small dim
+   type keeps it a join and not an entry. */
 .timeline-event > .moved {
   margin: 0;
   padding: 0.15rem 0;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
+  text-align: center;
   background: none;
   border: 0;
   border-radius: 0;
@@ -1712,20 +2165,34 @@ main:has(.workbench) {
   justify-content: flex-start;
 }
 
+/* The mark at the right edge of the line rather than beside the metric: what it
+   says is about the row as a whole, and the right edge is where every other
+   thing that says it lives. */
+.agent-output .event-head .mark,
+.capture-summary .mark {
+  margin-left: auto;
+}
+
 .agent-output .what {
   font-size: 1.1rem;
   font-weight: 600;
 }
 
-.agent-output .lines {
+.agent-output .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-/* A session that is still talking. The colour the accent already is, because
-   what this says is that something is happening here rather than that something
-   is wrong. */
-.live {
+/* A liveness said in words, which is the unanswered Set's badge alone: a
+   session's own is the mark above, because a Timeline of rows shouting
+   `RUNNING` is a Timeline nobody reads. The colour the accent already is,
+   because what a badge like this says is that something is waiting on the human
+   here rather than that something is wrong.
+
+   Said inside the head it is a badge in, rather than by the word alone: a live
+   Screen marks itself `live` too, and a bare rule would put the capitals
+   through xterm's whole grid. */
+.event-head .live {
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -1745,10 +2212,10 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* A Question Set the session put to the human: the table of what was asked
-   against what was decided. A button, as a session's output is, and for the same
-   reason — the whole document is in the details pane and this is how it is
-   opened. */
+/* A Question Set the session put to the human, read as the interview it was: a
+   question line and its answer under it, pair after pair. A button, as a
+   session's output is, and for the same reason — the whole document is in the
+   details pane and this is how it is opened. */
 .timeline-event > .question-set {
   display: block;
   width: 100%;
@@ -1763,10 +2230,11 @@ main:has(.workbench) {
 }
 
 /* One still waiting on the human is the one thing on a timeline that is asking
-   for something, so it says so rather than sitting among the record. */
+   for something, so it says so rather than sitting among the record. The accent
+   border and the badge in the head, which is the mark twice over — the stripe
+   that used to run down its near edge has gone with every other one. */
 .timeline-event > .question-set.waiting {
   border-color: var(--accent);
-  box-shadow: inset 0.2rem 0 0 var(--accent);
 }
 
 .question-set .event-head {
@@ -1805,46 +2273,74 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* The summary itself: the number, the question and the answer. Fixed layout so
-   the three columns keep their proportions whatever the longest answer is, and
-   every cell clipped to its line — the whole of any of it is a click away. */
+/* The interview itself: a question line and its answer under it, pair after
+   pair, every pair of the Set. */
 .question-set .asked {
-  width: 100%;
-  table-layout: fixed;
-  border-collapse: collapse;
+  display: block;
   font-size: 0.85rem;
 }
 
-.question-set .asked td {
-  padding: 0.15rem 0.4rem 0.15rem 0;
+/* One exchange. A two-column grid rather than an indent on the answer, so the
+   width the label is given is stated once and both lines are measured against
+   it: the question text and the answer text start on the same edge however wide
+   a label like `Q12a` turns out to be.
+
+   `minmax(0, 1fr)` rather than `1fr`, because a track at its automatic minimum
+   is as wide as the longest thing in it: the texts below truncate, and a track
+   that refused to be narrower than a whole question would leave them nothing to
+   truncate inside. */
+.question-set .asked .ask {
+  --asked-label: 2.6rem;
+  display: grid;
+  grid-template-columns: var(--asked-label) minmax(0, 1fr);
+  padding: 0.15rem 0;
+}
+
+/* The label, as the detail page sets one: monospace, semibold and in the accent,
+   so a question is recognisable as the same question in either place. */
+.question-set .asked .n {
+  grid-column: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* Both texts in the second column: the question beside the label, the answer on
+   the row under it and so clear of the label without being told a width.
+
+   A line each, cut off with an ellipsis. The card is the summary and the whole
+   of the Set is a press away, so a question that ran to a paragraph would push
+   the rest of the interview off the pane. Blocks, because these are spans — a
+   button holds phrasing — and an inline box has no line to ellipsize. */
+.question-set .asked .question,
+.question-set .asked .answer {
+  grid-column: 2;
+  min-width: 0;
+  display: block;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  vertical-align: baseline;
 }
 
-.question-set .asked .n {
-  width: 3.5rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: var(--ink-soft);
-}
-
-/* A sub-question sits under the question it belongs to, which is the one thing
-   the table has to say about the shape of a Set. */
-.question-set .asked tr.nested .n {
-  padding-left: 0.9rem;
-}
-
+/* The question in the heavier weight: it is what the exchange is about, and the
+   answer under it is read against it. */
 .question-set .asked .question {
-  width: 50%;
+  font-weight: 600;
 }
 
 .question-set .asked .answer {
   color: var(--ink-soft);
 }
 
-/* Nothing decided here. On a waiting Set that is every row and means "not yet";
-   on a settled one it is the question the human left open. */
+/* A sub-question sits under the question it belongs to, which is the one thing
+   the summary has to say about the shape of a Set. The whole pair moves, so its
+   own two lines keep the edge they share. */
+.question-set .asked .ask.nested {
+  padding-left: 0.9rem;
+}
+
+/* Nothing decided here. On a waiting Set that is every question and means "not
+   yet"; on a settled one it is the question the human left open. */
 .question-set .asked .open {
   opacity: 0.6;
 }
@@ -1923,7 +2419,7 @@ main:has(.workbench) {
 /* The hash, shortened for reading. Monospaced wherever it appears, because it
    is a thing to type into git rather than a thing to read as words. */
 .commit .sha,
-.commit-summary .sha {
+.commit-header .sha {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -1942,7 +2438,7 @@ main:has(.workbench) {
 /* And what it moved, which is the design's summary for a commit: the counts,
    in a row that reads left to right as files, added, removed. */
 .commit .changed,
-.commit-summary .changed {
+.commit-header .changed {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
@@ -1952,170 +2448,88 @@ main:has(.workbench) {
 }
 
 .commit .added,
-.commit-summary .added {
+.commit-header .added {
   color: #1a7f37;
   font-weight: 600;
 }
 
 .commit .removed,
-.commit-summary .removed {
+.commit-header .removed {
   color: #b3382c;
   font-weight: 600;
 }
 
+/* And under those, the opening of what the commit said about itself. Cut off at
+   the five lines a document's card is cut off at — `CLAMPED_LINES` in
+   `Timeline.tsx` — and the whole of it, drawn, is in the pane the card opens.
+
+   A line clamp rather than the height `.clamp` uses, because this is prose and
+   nothing else: every line of it is one line high, so five lines is a count
+   here where a rendering with a heading and a fence in it can only be measured.
+   Which is also what pays for the ellipsis — it says the summary goes on,
+   exactly as the fade over a document does, and neither the markup nor a
+   measurement is needed to draw it. */
+.commit .snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  max-width: var(--measure);
+  margin: 0.45rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* One commit, opened: the same three facts the timeline row shows, above the
    diff — so a pane walked into on a phone still says which commit this is. */
-.commit-summary {
+.commit-header {
   margin: 0 0 1rem;
 }
 
-.commit-summary .subject {
+.commit-header .subject {
   margin: 0;
   font-weight: 600;
 }
 
-/* A run that stopped. A card and not a button, unlike the three events above it:
-   this one has something to press *inside* it, so the way into the details pane
-   is a control of its own rather than the whole card. */
-.timeline-event > .interruption.selected {
-  border-color: var(--accent);
+/* And under those, what the commit said about itself: the agent's own account of
+   the delta, read before the diff it is an account of. A rule under it, because
+   the two are one pane and the diff below has a heading of its own to start
+   with. A commit that carried no summary draws neither. */
+.commit-summary {
+  margin: 0 0 1.5rem;
+  padding: 0 0 1.25rem;
+  border-bottom: 1px solid var(--edge);
 }
 
-/* One nobody has answered is the other thing on a timeline that is asking for
-   something, so it is marked the way a waiting question set is — in the colour
-   that means stopped rather than the one that means happening. */
-.timeline-event > .interruption.open {
-  border-color: var(--stopped);
-  box-shadow: inset 0.2rem 0 0 var(--stopped);
-}
-
-.interruption .event-head {
-  justify-content: flex-start;
-}
-
-/* Not `.live`, which is the accent and means something is happening here. This
-   means the opposite: nothing is happening, and it is waiting on you. */
-.interruption .event-head .live {
-  color: var(--stopped);
-}
-
-/* The way into the evidence, on the other end of the heading line. Worded rather
-   than drawn as a chevron: what it opens is a thing with a name. */
-.interruption .open-event {
-  margin-left: auto;
-  padding: 0;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--accent);
-  background: none;
-  border: 0;
-  cursor: pointer;
-}
-
-/* Which step failed, and how it ended. The first reads as the heading of the
-   thing that went wrong; the second is the machine's own account of it. */
-.interruption .what,
-.interruption-summary .what {
-  margin: 0;
-  font-weight: 600;
-}
-
-.interruption .how,
-.interruption-summary .how {
-  margin: 0.15rem 0 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* What was decided, once it has been. The remedies go and this stays: a run that
-   was retried and stopped again has both stops on the record, each saying what
-   was chosen. */
-.interruption .settled {
-  margin: 0.75rem 0 0;
-  font-weight: 600;
-}
-
-.interruption .settled .note {
-  display: block;
-  margin-top: 0.15rem;
-  font-weight: 400;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* The three remedies, and what the human wants said alongside. The field is
-   above the buttons because it is written first: what it says goes with
-   whichever of them is then pressed. */
-.remedies {
-  margin-top: 1rem;
-}
-
-.remedies > label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.remedies .remedy-list {
-  list-style: none;
-  margin: 0.75rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.remedies .remedy {
-  font: inherit;
-  cursor: pointer;
-}
-
-/* Ending the run is the one of the three that cannot be taken back, so it does
-   not look like the other two. */
-.remedies .Abort .remedy {
-  color: var(--stopped);
-  border-color: var(--stopped);
-}
-
-.remedies .note {
-  margin: 0.25rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The one thing true of all three, said once under them rather than three times
-   over. */
-.remedies .left-as-it-is {
-  margin-top: 1rem;
-}
-
-/* A run waiting an account's window out. Drawn as the interruption's sibling,
-   because it is the same kind of card — a run that has stopped, with something
-   to press inside it — and marked the same way while it is open: nothing is
-   happening here, and it is waiting. What it does not have is a way into a
-   details pane, because it has no evidence to gather; three short facts are the
-   whole of it, and they are here. */
+/* A run waiting an account's window out. A card and not a button, unlike the
+   events above it: this one has something to press *inside* it, so the press is
+   a control of its own rather than the whole card. Marked while it is open the
+   way a waiting question set is — in the colour that means stopped rather than
+   the one that means happening. What it does not have is a way into a details
+   pane, because it has no evidence to gather; three short facts are the whole of
+   it, and they are here. */
 .timeline-event > .pause.selected {
   border-color: var(--accent);
 }
 
 .timeline-event > .pause.open {
   border-color: var(--stopped);
-  box-shadow: inset 0.2rem 0 0 var(--stopped);
 }
 
 .pause .event-head {
   justify-content: flex-start;
 }
 
+/* Not `.live`, which is the accent and means something is happening here. This
+   means the opposite: nothing is happening, and it is waiting on you. */
 .pause .event-head .live {
   color: var(--stopped);
 }
 
 /* Which account ran out and when it comes back, then the sentence the session
-   printed — the heading and the machine's own account of it, exactly as an
-   interruption's two lines are. */
+   printed: the first reads as the heading of the thing that stopped, and the
+   second is the machine's own account of it. */
 .pause .what {
   margin: 0;
   font-weight: 600;
@@ -2140,8 +2554,8 @@ main:has(.workbench) {
   color: var(--accent);
 }
 
-/* One press rather than a list of remedies, because there is one thing to do:
-   Verkstead is not driving anything here and has nothing to retry. */
+/* One press and no more, because there is one thing to do: Verkstead is not
+   driving anything here and has nothing to retry. */
 .resuming {
   margin-top: 1rem;
 }
@@ -2152,36 +2566,6 @@ main:has(.workbench) {
 }
 
 .resuming .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The evidence, in the details pane: what git made of the worktree, and the tail
-   of what the session said. Preformatted, because neither is markdown and the
-   columns are the whole of what makes a status readable — and scrolled sideways
-   rather than wrapped, for the same reason. */
-.interruption-summary {
-  margin: 0 0 1rem;
-}
-
-.evidence {
-  margin-bottom: 1.5rem;
-}
-
-.evidence .git-status,
-.evidence .tail {
-  margin: 0;
-  padding: 0.75rem;
-  overflow-x: auto;
-  background: var(--code-wash);
-  border-radius: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-
-.evidence .note {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -2229,25 +2613,49 @@ main:has(.workbench) {
   border-radius: 0.6rem;
 }
 
-/* The two ways of reading one session, switched between at the top of the pane.
+/* The two ways of reading one session, switched between in the pane's header.
    A pair rather than a row of tabs, because there are two of them and there is
    no third coming: what says which is showing is the pressed one, not a rule
-   about position. */
+   about position.
+
+   As wide as its two labels rather than as wide as the pane: it shares the
+   header row with the title, and a switch that stretched would leave the title
+   nothing. It does not shrink either — when the two will not fit beside each
+   other the header wraps and the switch takes the next line whole, which is
+   what `flex-wrap` on `.pane-head` is there for. */
 .record-switch {
+  position: relative;
   display: flex;
+  flex: 0 0 auto;
   gap: 0.25rem;
-  margin: 0 0 0.75rem;
+  max-width: 100%;
+  margin: 0;
   padding: 0.2rem;
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* What is under the pressed label: one element moved to it, rather than a
+   background drawn on it. A background belongs to the element it is on and
+   cannot travel between two; this can, which is what makes switching read as
+   one thing moving. Taken out of the flex row so its travel costs the labels
+   nothing, and first in the markup so they paint over it. Where it stands is
+   measured — see `Output.tsx`. */
+.record-switch .indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  background: var(--accent);
+  border-radius: 0.4rem;
+}
+
 .record-switch button {
-  flex: 1;
-  padding: 0.4rem 0.75rem;
+  position: relative;
+  padding: 0.35rem 0.7rem;
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--ink-soft);
   background: none;
   border: 0;
@@ -2257,26 +2665,66 @@ main:has(.workbench) {
 
 .record-switch button[aria-pressed="true"] {
   color: var(--paper);
-  background: var(--accent);
 }
 
-/* The Screen: the grid the session left, drawn as a terminal. The terminal
-   sizes itself from the grid it was handed, so this only has to give it a card
-   to sit on and somewhere to scroll sideways on a phone — a repaint is a
-   hundred columns wide whatever the pane is. */
+/* The slide itself: a tenth of a second, eased at both ends, and across both
+   what it travels — the labels are words of different lengths, so the mark
+   changes width on its way as well as place.
+
+   Given only where motion is welcome, as the toggle switch's is. Under
+   `prefers-reduced-motion` there is no transition to run and the mark is simply
+   wherever the pressed label is, which is the instant switch this replaced. */
+@media (prefers-reduced-motion: no-preference) {
+  .record-switch .indicator {
+    transition:
+      transform 0.1s ease-in-out,
+      width 0.1s ease-in-out;
+  }
+}
+
+/* The Screen: the grid the session is showing, drawn as a terminal — and the
+   one thing this pane ever holds that is sized by the pane rather than by what
+   is in it. A column down the pane's whole height: the terminal takes the room
+   left under the header and the switcher, and the note or the Hold bar under it
+   keeps its own. What makes the pane a column to fill is the rule at the end of
+   this section.
+
+   The grid a session left behind cannot be redrawn at all — it is fixed at the
+   size it was printed for — so it is shown at its own size and scrolls in the
+   card it sits on: sideways on a phone, as it always did, and downwards where
+   the pane is the shorter of the two. */
 .screen {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
   margin: 0;
 }
 
 .screen .terminal-host {
+  flex: 1;
+  min-height: 0;
   padding: 0.5rem;
-  overflow-x: auto;
+  overflow: auto;
+  /* A grid scrolled to its end stops there rather than handing the rest of the
+     gesture out to the pane and the page behind it. */
+  overscroll-behavior: contain;
   background: #000;
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
+/* A live one is redrawn at whatever size this pane has, so there is nothing here
+   to scroll to — and a scrollbar would be worse than useless: it takes a strip
+   off the pane, the strip changes what fits, and what fits is what goes up the
+   socket. Two watchers would trade sizes until one of them closed, with the
+   smaller of the two always winning, which is the opposite of the rule. */
+.screen.live .terminal-host {
+  overflow: hidden;
+}
+
 .screen .read-only {
+  flex: none;
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -2288,6 +2736,7 @@ main:has(.workbench) {
    work is waiting — the accent means something is happening. */
 .screen .holding {
   display: flex;
+  flex: none;
   gap: 0.75rem;
   align-items: center;
   justify-content: space-between;
@@ -2362,17 +2811,42 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.transcript .tool-use .tool {
+/* A call and the answer to it: one card rather than two rows, since one thing
+   happened. Shut it is the tool and the line about it, and open it is what the
+   tool was called with above what it said back. */
+.transcript .tool-call {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.transcript .tool-call > details > summary {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The one word a pair ever says about itself, at the far end of the line it is
+   on. Success says nothing — a session calls a hundred tools and ninety-nine of
+   them work — so the word is there to be found rather than to be read past. */
+.transcript .tool-call .failed {
+  flex: none;
+  margin-left: auto;
+  color: var(--stopped);
+}
+
+.transcript .tool-call .tool {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--ink);
 }
 
-.transcript .tool-use .about {
+.transcript .tool-call .about {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/* And an answer with no call above it to draw it, which is the one shape left
+   that says how it went in a word of its own. */
 .transcript .tool-result.failed > details > summary {
   color: var(--stopped);
 }
@@ -2393,6 +2867,18 @@ main:has(.workbench) {
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
+}
+
+/* Except inside a pair's card, where the two of them are wells of the paper
+   rather than boxes on it: the card is already the box around both, so a box of
+   their own would be a border drawn twice, and one rule is what separates the
+   call from the answer to it. */
+.transcript .tool-call pre {
+  margin: 0;
+  background: var(--paper);
+  border: 0;
+  border-top: 1px solid var(--edge);
+  border-radius: 0;
 }
 
 /* The backend's own bookkeeping, in one group under the conversation: a third
@@ -2447,7 +2933,12 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.start-grilling .start:disabled {
+/* Two ways of not being pressable, drawn the same because they read the same:
+   a press already in flight, and a conversation that is not ready yet. The
+   second one is only `aria-disabled`, so it still takes the press — and what it
+   does with it is say what is missing. */
+.start-grilling .start:disabled,
+.start-grilling .start.inert {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -2538,6 +3029,48 @@ main:has(.workbench) {
   font-size: 0.9rem;
 }
 
+/* Starting Verkstead driving again, above the way to move the conversation by
+   hand: the two are the same kind of thing — offered whenever nothing is
+   running rather than in one state — and each is set off by a rule of its own,
+   so the end of the record is still visible as an end. */
+.resume {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.resume h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.resume .resume-conversation {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.resume .resume-conversation:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.resume .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.resume .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
 /* The way to move a conversation by hand, under whichever of the two above is
    drawn rather than instead of one: neither of those is for a state this is
    for, and this is offered whenever nothing is running rather than in one
@@ -2604,59 +3137,45 @@ main:has(.workbench) {
   font-size: 0.9rem;
 }
 
-/* What can be done to the conversation as a whole. A menu rather than a button,
-   because aborting throws a worktree away and the header is somewhere the
-   cursor passes on the way to everything else. */
-.conversation-actions {
-  position: relative;
-}
+/* What can be done to the conversation as a whole. A menu rather than three
+   buttons, because the last of them throws a worktree away and the header is
+   somewhere the cursor passes on the way to everything else. Its trigger is the
+   ⋯ painted up with the sidebar's; what is its own is the drop.
 
-.conversation-actions summary {
-  list-style: none;
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-
-.conversation-actions summary::-webkit-details-marker {
-  display: none;
-}
-
-.conversation-actions[open] summary {
-  color: var(--ink);
-}
-
-/* Over the timeline rather than in the flow of the header, so opening the menu
-   does not move the title it hangs off. */
-.conversation-actions .menu {
-  position: absolute;
-  top: 1.75rem;
-  right: 0;
-  z-index: 1;
+   Room under each action for the sentence saying what it does, which is more
+   than a row of a menu holds — so this one is padded as a card rather than as
+   a list. */
+.conversation-actions > .menu-drop {
   width: 17rem;
   padding: 0.75rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
 }
 
-.conversation-actions .abort {
+/* One block per action, so that a button and the line saying what it does read
+   as one thing and the next action is plainly a different one. */
+.conversation-actions .action + .action {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* The only rows of a menu that keep an outline: each of these ends a run, and a
+   press that ends something should not read as the next line of prose. */
+.conversation-actions button {
+  display: inline-block;
+  width: auto;
   padding: 0.4rem 0.8rem;
-  font: inherit;
   font-weight: 600;
-  color: #b3382c;
+  color: var(--ink);
   background: none;
-  border: 1px solid #b3382c;
+  border: 1px solid var(--edge);
   border-radius: 0.4rem;
-  cursor: pointer;
 }
 
-.conversation-actions .abort:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
+/* The one that cannot be undone, in the colour of what cannot be undone. Both
+   stops are reversed by a resume, and read as the ordinary buttons they are. */
+.conversation-actions .abort {
+  color: #b3382c;
+  border-color: #b3382c;
 }
 
 .conversation-actions .note,
@@ -2665,23 +3184,44 @@ main:has(.workbench) {
   font-size: 0.85rem;
 }
 
+/* What a stop that is waiting for a task to finish says while it waits. */
+.conversation-actions .waiting {
+  color: var(--ink);
+}
+
 /* From 60rem the window holds the sidebar beside the level being read: the
    conversations stay, and the second column is the timeline or the details.
    Each pane scrolls on its own from here, because two columns of one page's
    scroll would move the list the human is not reading. */
 @media (min-width: 60rem) {
   .workbench {
-    grid-template-columns: 15rem 1fr;
+    /* The sidebar, the divider that moves it, and whichever level is being
+       read. A share of the window rather than a length: what the human is
+       trading away is a part of what they have, and what they have is not the
+       same window twice. The default behind the name is the 15rem this column
+       used to be fixed at, as a share of the window the third pane arrives
+       at. */
+    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
     height: 100dvh;
+    /* And nothing inside it may make the document taller than that. The frame
+       is the window's height here, so anything standing past the bottom of it
+       is a pane that has got its own height wrong — and left unclipped that
+       becomes page to scroll, which pushes the whole workbench off the screen
+       once the pane the human is reading runs out of its own. Clipped, the
+       mistake stays inside the pane it was made in. */
+    overflow: hidden;
   }
 
   .pane {
     overflow-y: auto;
+    /* A pane scrolled to its end stops there. Left to itself the browser hands
+       the rest of the gesture to the document, which is the same page-under-
+       the-panes scroll by another route. */
+    overscroll-behavior: contain;
   }
 
   .workbench > .conversations-pane {
     display: block;
-    border-right: 1px solid var(--edge);
   }
 
   .workbench:not([data-pane="details"]) > .timeline-pane,
@@ -2701,20 +3241,101 @@ main:has(.workbench) {
    to, so the ways between the panes go away. */
 @media (min-width: 80rem) {
   .workbench {
-    grid-template-columns: 15rem 25rem 1fr;
+    grid-template-columns:
+      var(--pane-sidebar, 20%) auto var(--pane-timeline, 30%) auto 1fr;
   }
 
   .workbench > .pane {
     display: block;
   }
 
-  .workbench > .details-pane {
-    border-left: 1px solid var(--edge);
-  }
-
   .pane-back,
   .pane-forward {
     display: none;
+  }
+}
+
+/* The details pane's content at the measure the rest of the app is read at, and
+   in the middle of the pane when the pane is wider than that.
+
+   A pane that can be dragged is a pane that can be dragged to the width of a
+   window, and a Set answered across two feet of screen is a Set nobody can read
+   a line of. 60rem is what every other page's column is capped at — the Set and
+   the Settings both — so what the pane holds is the same width there that it is
+   anywhere else, whatever the human has left the pane itself at.
+
+   Padding rather than a `max-width` on the content, because what is inside this
+   pane is a pane's worth of blocks rather than one wrapper to cap: the sticky
+   header, the sheets, the diffs, the terminal. Padding moves the whole column
+   in from both edges at once and every one of them is inside it — including
+   the header, which goes on bleeding its rem of paper out either side of what
+   it is the header of.
+
+   The percentage is of the pane, so below the first breakpoint — where the pane
+   is the window and the window is narrower than the measure — the `max` picks
+   the rem the pane always had, and this rule costs nothing. No media query
+   needed to say so. */
+.workbench > .details-pane {
+  padding-inline: max(1rem, (100% - 60rem) / 2);
+}
+
+/* The pane with a Screen in it, which is the one pane here that ends where the
+   window does rather than running on down the page. A column: the header and
+   the turn count keep their size and the Screen takes the rest, so the terminal
+   is given a height to fit itself to — and a live session's terminal is told
+   what it was given, which is why nothing scrolls under one.
+
+   Here rather than beside the Screen's own rules because of what it has to
+   agree with: the three rules above are what decide which panes are drawn, and
+   all this does to one of them is make a block into a column.
+
+   Only where a Screen is showing. The Transcript is a column of the page and
+   scrolls like everything else this pane holds, which is what switching back to
+   it puts back.
+
+   Below the first breakpoint the pane is the whole page with nothing standing
+   above it, so the window's height is the height it wants and `100dvh` says so.
+   Above it, the pane is a cell of a frame that is already exactly that tall, and
+   the height comes from the row instead — the same number by a different route,
+   and asking the viewport twice is what put blank page under the workbench: two
+   resolutions of one `dvh` that disagree by a pixel leave the pane standing past
+   the bottom of the frame, and that pixel is document to scroll.
+
+   And the room a scrolling pane leaves under its last line goes, because a pane
+   that does not scroll has no use for it. */
+.workbench > .details-pane:has(.screen) {
+  flex-direction: column;
+  height: 100dvh;
+  padding-bottom: 1.25rem;
+  overflow: hidden;
+}
+
+/* Said after the rule it takes the height back off, which is the only place it
+   could win — and `auto` rather than a length, because the row is what is being
+   handed the job and stretching an item to its row is what a grid does by
+   itself. It is how every other pane here is already the height it is. */
+@media (min-width: 60rem) {
+  .workbench > .details-pane:has(.screen) {
+    height: auto;
+  }
+}
+
+.workbench > .details-pane:has(.screen) > :not(.screen) {
+  flex: none;
+}
+
+/* And that it is a column at all, said twice, because the pane is shown by two
+   different rules: by name below the last breakpoint, and along with every
+   other pane above it. What must not happen is either of them turning into a
+   `display` for a pane that is meant to be hidden — so each is answered where
+   it is made rather than once over the top of both. */
+.workbench[data-pane="details"] > .details-pane:has(.screen) {
+  display: flex;
+}
+
+@media (min-width: 80rem) {
+  .workbench > .details-pane:has(.screen) {
+    display: flex;
   }
 }
 
@@ -2779,6 +3400,63 @@ div.meta .error {
    that holds the nav at its narrowest — 8rem, a margin at the window's edge
    and a gap — beside the column at its widest. */
 
+/* What the bar is made of, wherever it is drawn. Only *whether* it is drawn is
+   a width's answer — the blocks below hide it where the sidebar stands — so the
+   look of it is said once, out here, and the pane's own shapes inherit it along
+   with the window's. */
+
+/* A full-width line of its own, with the name given whatever room the mark
+   beside it does not want. Tall enough to be a thumb's target, and above the
+   backdrop so that pressing it again is still how the list is put away. */
+.contents-bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 0;
+  border-bottom: 1px solid var(--edge);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* One line, whatever it is naming: a Question's words run to whatever the bar
+   has and are cut there, the same as they are in the sidebar. */
+.contents-bar-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* A path in the bar is set as the Diff sets it, so the two read as the same
+   name — the sidebar's own rule for the same reason. */
+.contents-bar-name.contents-path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+}
+
+.contents-bar-mark {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+/* What a tap away from the open list lands on, so that it lands on nothing
+   else. Over the whole window and a wash darker, which is also what says the
+   list is in front of the page rather than part of it. */
+.contents-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 20%);
+}
+
 /* The bar. It names the line the sidebar would have lit — the section, file or
    Question the reader is in — and the list comes down under it when it is
    pressed. */
@@ -2796,58 +3474,6 @@ div.meta .error {
     margin: 0 -1rem 1.25rem;
     font-size: 0.9rem;
     line-height: 1.4;
-  }
-
-  /* A full-width line of its own, with the name given whatever room the mark
-     beside it does not want. Tall enough to be a thumb's target, and above the
-     backdrop so that pressing it again is still how the list is put away. */
-  .contents-bar {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    width: 100%;
-    min-height: 2.75rem;
-    padding: 0.6rem 1rem;
-    font: inherit;
-    color: var(--ink);
-    background: var(--card);
-    border: 0;
-    border-bottom: 1px solid var(--edge);
-    text-align: left;
-    cursor: pointer;
-  }
-
-  /* One line, whatever it is naming: a Question's words run to whatever the bar
-     has and are cut there, the same as they are in the sidebar. */
-  .contents-bar-name {
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-weight: 600;
-  }
-
-  /* A path in the bar is set as the Diff sets it, so the two read as the same
-     name — the sidebar's own rule for the same reason. */
-  .contents-bar-name.contents-path {
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    font-size: 0.85rem;
-  }
-
-  .contents-bar-mark {
-    flex: none;
-    color: var(--ink-soft);
-  }
-
-  /* What a tap away from the open list lands on, so that it lands on nothing
-     else. Over the whole window and a wash darker, which is also what says the
-     list is in front of the page rather than part of it. */
-  .contents-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgb(0 0 0 / 20%);
   }
 
   /* Shut, the list is not drawn at all: the bar is the whole of the nav until it
@@ -2948,7 +3574,7 @@ div.meta .error {
 
      Only a page with a nav in the margin: the lists have nothing there, and a
      column pushed sideways to clear nothing would just be off-centre. */
-  main:has(.contents) {
+  main:has(> .contents) {
     margin-left: 10rem;
   }
 
@@ -3002,7 +3628,7 @@ div.meta .error {
    from it again — elastic now, at 8rem of nav where the window is exactly
    80rem and back to the full width it wants by 92rem. */
 @media (min-width: 80rem) {
-  main:has(.contents) {
+  main:has(> .contents) {
     margin-left: auto;
   }
 
@@ -3014,6 +3640,122 @@ div.meta .error {
        its own at the window's edge. */
     width: min(14rem, calc(50vw - 32rem));
   }
+}
+
+/* And the same nav in a details pane, where the width that decides its shape is
+   the pane's rather than the window's: a pane is a column the human drags, and
+   a window wide enough for a sidebar says nothing about whether they left room
+   for one. Which of the two the pane stands at is measured in script and said
+   as `contents-roomy` — see `set/Contents` for why the stylesheet cannot ask
+   this one on its own.
+
+   Both blocks answer over whatever the window's own rules just said, which is
+   why every one of them is reached through `.contents-paned`: at any width the
+   window has already picked a shape, and in here it is not the one being
+   drawn. */
+
+/* The bar, which is what a pane narrower than the sidebar's margin gets. Pinned
+   to the top of the pane, since the pane is what scrolls. It spans the column
+   rather than bleeding past it: the pane's margins are the sidebar's room, and
+   there is nothing out there for the page to pass behind. */
+.contents.contents-paned {
+  position: sticky;
+  top: 0;
+  right: auto;
+  left: auto;
+  z-index: 2;
+  width: auto;
+  height: auto;
+  max-height: none;
+  margin: 0 0 1.25rem;
+  overflow: visible;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.contents-paned .contents-bar {
+  display: flex;
+}
+
+/* Shut, the list is not drawn at all; open, it hangs off the bar over the pane
+   rather than pushing it down. The window's own pair of rules, said again for
+   the shape the window did not pick.
+
+   Exclusive with the sidebar rather than merely earlier in the file: a nav that
+   was tapped open and then widened into a margin would otherwise be a list
+   wearing half of each shape. */
+.contents-paned:not(.contents-open) .contents-sections {
+  display: none;
+}
+
+.contents-paned.contents-open:not(.contents-roomy) .contents-sections {
+  display: block;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  /* Over the backdrop it is being held in front of the pane by. */
+  z-index: 1;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.6rem 1rem 0.8rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--edge);
+}
+
+.contents-paned:not(.contents-roomy) .contents-link {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* The sidebar, which is what a pane wide enough for a margin gets: the pane caps
+   what it holds at 60rem and centres it, so from 80rem of pane there is 10rem
+   either side — the 8rem the nav wants, a gap, and a rem of paper at the edge.
+
+   Sticky rather than fixed, because the pane is the box that scrolls and a
+   fixed nav would be pinned to the window while the pane moved underneath it.
+   A shell of no height, so the list it holds takes nothing out of the column:
+   the nav sits under the pane's own heading on arrival, exactly as the bar
+   does, and pins itself a rem down from the top edge as the pane goes up. */
+.contents.contents-paned.contents-roomy {
+  position: sticky;
+  top: 1.25rem;
+  right: auto;
+  left: auto;
+  z-index: 2;
+  width: auto;
+  height: 0;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* There is no bar here, and nothing for a backdrop to be in front of: the list
+   is in the margin already. */
+.contents-paned.contents-roomy .contents-bar,
+.contents-paned.contents-roomy .contents-backdrop {
+  display: none;
+}
+
+/* Out into the margin, hung off the column's own left edge rather than
+   positioned from the pane: the nav is a block of the column, so `right: 100%`
+   is exactly where the column begins and the gap is measured from there. Which
+   means it stays beside the column at every width past 80rem instead of
+   drifting away from it as the pane is dragged wider.
+
+   The pane's height, less the rem above it and one below, so a diff of forty
+   files scrolls its nav rather than running off the bottom. */
+.contents-paned.contents-roomy .contents-sections {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 100%;
+  width: 8rem;
+  max-height: calc(100dvh - 2.5rem);
+  margin-right: 1rem;
+  overflow-y: auto;
 }
 
 /* One line, cut where it runs out of column — the sidebar's own rule, for the same
@@ -3819,33 +4561,28 @@ div.meta .error {
 
 /* How a waiting Set stands, at the far end of the provenance line: the badge
    is the title of a small menu, and the way to close the Set if no agent ever
-   comes back for it is inside. The anchor the menu hangs from. */
-
-.standing {
-  position: relative;
-}
+   comes back for it is inside. */
 
 /* The badge as a pill, with the mark that says it opens: quiet, because
    waiting is the ordinary state — the outline is only what says this one is
    pressable, where the words around it are not. The word that colours it is
    the Liveness itself, exactly as on a list row. */
-.standing-trigger {
+.standing > .menu-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.7rem;
-  font: inherit;
   font-size: 0.85rem;
   color: var(--ink-soft);
   background: transparent;
   border: 1px solid var(--edge);
   border-radius: 999px;
-  cursor: pointer;
 }
 
-.standing-trigger:disabled {
+/* Waiting on the archive rather than refusing the press, which is the one
+   disabled trigger here that is not a *no*. */
+.standing > .menu-trigger:disabled {
   cursor: progress;
-  opacity: 0.65;
 }
 
 /* Which way the menu will go, and no part of what the badge says. */
@@ -3853,50 +4590,21 @@ div.meta .error {
   color: var(--ink-soft);
 }
 
-/* What a tap away from the open menu lands on, so that it lands on nothing
-   else: on a page whose whole purpose is answering carefully, a stray tap that
-   answers something is not a small thing. Invisible, unlike the bar's wash —
-   a menu one item long is not in front of the page the way the whole list
-   is. */
-.standing-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-}
-
-/* The menu, hung under the badge's end of the line. */
-.standing-actions {
-  position: absolute;
-  top: calc(100% + 0.3rem);
-  right: 0;
-  z-index: 3;
+/* One row, so it is as wide as its own words rather than as wide as anything. */
+.standing > .menu-drop {
   min-width: max-content;
   padding: 0.25rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.5rem;
 }
 
 /* Quiet, and quieter than accept-all: archiving is almost never the right thing
    to do to a Set, and the one time it is, the human came here for it. It is not
    a danger button either — nothing is destroyed, the Set is filed. */
-.standing-actions .archive {
-  display: block;
-  width: 100%;
+.standing .archive {
   padding: 0.4rem 0.7rem;
-  font: inherit;
   font-size: 0.85rem;
-  text-align: left;
   white-space: nowrap;
   color: var(--ink-soft);
-  background: transparent;
-  border: 0;
   border-radius: 0.35rem;
-  cursor: pointer;
-}
-
-.standing-actions .archive:hover {
-  background: var(--paper);
 }
 
 .questions,
@@ -4122,23 +4830,29 @@ div.meta .error {
   padding: 0;
 }
 
-/* The direction chooser, injected under the Questions of a Set that carried a
-   proposal. Drawn as the Options are drawn, because it is the same gesture: a
-   radio group where the recommendation is marked with the same ★ and nothing is
-   picked until it is picked. What is its own is the reasoning above it and the
-   line under it saying what picking does — the one control on the page whose
-   meaning is not in its label. */
+/* The chooser drawn as option rows: the direction one, injected under the
+   Questions of a Set that carried a proposal.
+
+   Drawn as a Question is drawn, because that is what it is: the agent's argument
+   is the ask, labelled and floated by the `.ask` rules above — the box it is in
+   wears that class, so there is nothing to set for it here — and the three under
+   it are a radio group where the recommendation is marked with the same ★ and
+   nothing is picked until it is picked. What is its own is the line at the foot
+   saying what picking does, this being the one control on the page whose meaning
+   is not in its label. */
 .direction-pick {
   margin-top: 1.5rem;
 }
 
-/* The agent's argument, set apart from the choices so it reads as something to
-   take in before making one. The Timeline's chooser sets it the same way. */
-.direction-pick .proposal {
-  margin-bottom: 0.75rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--edge);
-  color: var(--ink-soft);
+/* And a section of the page like the others, headed outside and carded within:
+   the heading carries `.section-heading`'s own gap, and the card is a
+   Question's box down to the corner — see `.question`, which is the same four
+   lines and has to stay the same four. */
+.direction-card {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
 }
 
 .direction-pick .directions {
@@ -4181,8 +4895,8 @@ div.meta .error {
   color: var(--accent);
 }
 
-/* What the direction is, under the name of it. Indented to the name rather than
-   to the radio, so the three read as three names with notes and not as six
+/* What the row means, under the name of it. Indented to the name rather than to
+   the radio, so the three read as three names with notes and not as six
    lines. */
 .direction-pick .note {
   margin: 0.2rem 0 0 2rem;
@@ -4401,33 +5115,14 @@ div.meta .error {
   color: var(--ink-soft);
 }
 
-/* The warning before a Response goes out with questions left open. It covers
-   the page because it is the one thing to decide at that moment; it never
-   refuses, so both ways out are buttons of equal weight. */
+/* The two confirm sheets — the warning before a Response goes out with
+   questions left open, and the one before a Set is archived. Both are drawn
+   through the same `.modal` the settings page's form is, so what is left here
+   is their own words. Each covers the page because it is the one thing to decide
+   at that moment; neither refuses, so both ways out are buttons of equal
+   weight. */
 
-.confirm-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 1rem;
-  background: rgb(0 0 0 / 45%);
-}
-
-.confirm {
-  width: 100%;
-  max-width: 28rem;
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 1.25rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.8rem;
-}
-
-.confirm > p:first-child {
+.confirm .modal-card > p:first-child {
   margin-top: 0;
   font-weight: 600;
 }
@@ -4466,14 +5161,6 @@ div.meta .error {
   color: var(--ink);
   background: transparent;
   border-color: var(--edge);
-}
-
-/* Wider than a phone: the dialog sits in the middle rather than rising from
-   the bottom edge, where a thumb would have put it. */
-@media (min-width: 30rem) {
-  .confirm-backdrop {
-    align-items: center;
-  }
 }
 
 /* The Gutter: the width every section of a Set page reserves down its left once
@@ -4545,9 +5232,12 @@ div.meta .error {
   /* The sections that reserve it: the card's own inset, and the Gutter inside
      that. A card with nothing to hang there reserves it empty and holds the
      axis anyway — the Preface and the Postscript both — which is the whole of
-     why the width is the page's rather than each section's. */
+     why the width is the page's rather than each section's. The Direction card
+     is here because it does have something to hang: its End label, in the place
+     a Question hangs its number. */
   .preface-body,
   .postscript-card,
+  .direction-card,
   .question {
     --bleed: var(--gutter);
     padding-left: calc(1rem + var(--gutter));
@@ -4667,7 +5357,8 @@ div.meta .error {
      paragraph starts on the axis like every other block, with the label beside
      it rather than in front of it. Which is why the margin that used to hold the
      words off the label goes — the Gutter is the whole of the gap now. */
-  .question > .ask > .text > .label {
+  .question > .ask > .text > .label,
+  .direction-card > .ask > .text > .label {
     width: var(--gutter);
     margin: 0 0 0 calc(-1 * var(--gutter));
   }

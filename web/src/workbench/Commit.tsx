@@ -1,28 +1,115 @@
-//! One commit, opened: its diff, in the details pane.
+//! One commit, opened: what it said about itself and its diff, in the details
+//! pane.
 //!
 //! Fetched here rather than carried by the Conversation, for the reason a
-//! Capture is: a diff is worth reading when somebody opens the one event it
-//! belongs to, and the timeline is read again every time the page hears the
+//! Capture is: a commit is worth reading whole when somebody opens the one event
+//! it belongs to, and the timeline is read again every time the page hears the
 //! world moved.
 //!
-//! It arrives as HTML the server already rendered — parsed per file,
+//! The diff arrives as HTML the server already rendered — parsed per file,
 //! highlighted, and folded — which is the same diff renderer the question sets'
 //! attached diff goes through. So there is nothing here to render, no diff
 //! parser in the browser, and one place where a diff is decided to look the way
 //! it does.
 //!
+//! The summary above it is the agent's own account of the commit: its message
+//! body, with git's trailers off it, rendered and sanitized on the server like
+//! every other document on a timeline. So there is no markdown parser here
+//! either — and a commit that carried none draws the pane as it always did.
+//!
+//! The one thing that is drawn here is a Diagram in that summary, which is the
+//! Set page's own arrangement: the server leaves the source block, the client
+//! draws over it, and a pane whose summary holds none never asks for mermaid.
+//!
+//! The file list down its margin is the Set page's own table of contents, drawn
+//! from the paths that travel beside the rendered markup: the same entries, the
+//! same scroll-spy and the same jump into a folded file. Which shape it takes is
+//! the pane's width's answer — see `set/Contents`.
+//!
 //! What the commit was called comes off the event rather than out of the diff.
 //! The diff arrives headerless on purpose: the renderer splits on `diff --git`,
 //! so a commit header above the first file would be dropped rather than shown.
 
-import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createMemo,
+  createSignal,
+  on,
+  onCleanup,
+  type JSX,
+} from "solid-js";
 
 import { Switch as Toggle } from "../Switch";
-import { loadCommitDiff } from "../api/client";
+import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
+import { Contents, navigation } from "../set/Contents";
+import { drawDiagrams } from "../set/diagrams";
+import type { Section } from "../set/outline";
+import { files, spied } from "../set/outline";
 import { ABBREVIATED } from "./Timeline";
+
+/// What the diff section is reached by, from the nav's own heading line. Its
+/// own name rather than the Set page's `diff`, because a commit's pane and a
+/// Set's page can be open at once and an id names one element.
+const DIFF = "commit-diff";
+
+/// And what the summary above it is reached by, for the same reason.
+const SUMMARY = "commit-summary";
+
+/// What the commit said about itself, put in the page and — where it holds one
+/// — drawn.
+///
+/// Its own component so that the drawing is worked out from the summary rather
+/// than from the pane: the summary arrives with the fetch, and a pane that
+/// reached for the renderer on its own mount would be reaching before there was
+/// anything to draw over.
+///
+/// The renderer is turned loose on this block alone rather than on the document,
+/// because a Set's page can be open behind the workbench and its Diagrams are its
+/// own to draw.
+function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
+  let block!: HTMLElement;
+
+  // On the summary that is in the block, rather than on this component's mount:
+  // opening a second commit is not a second mount. Neither the `Show` this sits
+  // under nor the `Match` holding the whole pane is keyed, so the next commit's
+  // markup is assigned into the block of the component the first one built — and
+  // a draw hung on `onMount` would have happened once, leaving the server's
+  // source block standing where the second commit's Diagram belongs.
+  //
+  // Following the HTML rather than the commit, because the HTML is the thing
+  // being drawn over: assigning it is a render effect, and those are all through
+  // before the first of these runs.
+  createEffect(
+    on(
+      () => props.html,
+      () => {
+        if (!props.diagrams) {
+          return;
+        }
+
+        // Stopped when the next summary arrives as much as when the pane goes: a
+        // drawing nobody stopped is still watching the colour scheme, and would
+        // go on redrawing nodes this block no longer holds.
+        onCleanup(drawDiagrams({ root: block }));
+      },
+    ),
+  );
+
+  return (
+    <section
+      id={SUMMARY}
+      class="commit-summary document markdown"
+      ref={block}
+      innerHTML={props.html}
+    />
+  );
+}
 
 export function Commit(props: {
   conversation: ConversationView;
@@ -30,13 +117,13 @@ export function Commit(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const diff = useReading(() => ({
+  const opened = useReading(() => ({
     // The event is in the key, so opening another commit is another query
-    // rather than the same one showing the wrong diff for a moment.
+    // rather than the same one showing the wrong commit for a moment.
     queryKey: ["commit", props.conversation.id, props.commit.id],
-    queryFn: () => loadCommitDiff(props.conversation.id, props.commit.id),
+    queryFn: () => loadCommitPane(props.conversation.id, props.commit.id),
 
-    // A commit's diff cannot change, so it is read once and never again.
+    // A commit cannot change, so it is read once and never again.
     // "static" and not a finite time: a Nudge invalidates every active query,
     // and invalidation beats any staleTime that is not this one. A re-read
     // would reassign the `innerHTML` below whether or not a byte changed —
@@ -55,6 +142,34 @@ export function Commit(props: {
     setWrapping(on);
   };
 
+  // The sections this pane is made of, in the order it is read: what the commit
+  // said about itself, and then the diff with every fold in it. Worked out from
+  // the pane rather than from a Set — but the entries are the Set page's own,
+  // off the same paths and pointing at the same renderer-stamped anchors.
+  //
+  // A commit that said nothing has no Summary line, exactly as it has no summary
+  // to jump to; one that changed nothing has no Diff line either, and a pane with
+  // neither gets no nav at all.
+  const sections = createMemo((): Section[] => {
+    const pane = opened.data;
+    const listed: Section[] = [];
+
+    if (pane?.summary) {
+      listed.push({ anchor: SUMMARY, name: "Summary", entries: [] });
+    }
+
+    const view = pane?.diff;
+    if (view !== null && view !== undefined) {
+      listed.push({ anchor: DIFF, name: "Diff", entries: files(view) });
+    }
+
+    return listed;
+  });
+
+  const watched = createMemo(() => spied(sections()));
+
+  const nav = navigation();
+
   return (
     <>
       <div class="pane-head">
@@ -69,7 +184,7 @@ export function Commit(props: {
         </button>
       </div>
 
-      <div class="commit-summary">
+      <div class="commit-header">
         <p class="subject">{props.commit.subject}</p>
         <p class="changed">
           <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
@@ -81,14 +196,36 @@ export function Commit(props: {
         </p>
       </div>
 
+      {/* Between the header and the diff, which is the order it is read in:
+          what the commit says about itself, then what it changed. A commit that
+          said nothing — a bookkeeping one, or any commit recorded before
+          summaries were kept — has nothing here at all. */}
+      <Show when={opened.data?.summary}>
+        {(summary) => (
+          <Summary
+            html={summary()}
+            diagrams={opened.data?.diagrams ?? false}
+          />
+        )}
+      </Show>
+
+      {/* After the summary and before the diff. The stylesheet takes it out of
+          the flow and puts it in the pane's margin where there is one. A commit
+          that changed no files has no folds to list, and gets none. */}
+      <Show when={sections().length > 0}>
+        <Contents sections={sections()} watched={watched()} nav={nav} paned />
+      </Show>
+
       <Switch>
-        <Match when={diff.isPending}>
+        <Match when={opened.isPending}>
           <p class="empty">Loading…</p>
         </Match>
-        <Match when={diff.isError}>
-          <p class="error">Could not read this commit: {diff.error?.message}</p>
+        <Match when={opened.isError}>
+          <p class="error">
+            Could not read this commit: {opened.error?.message}
+          </p>
         </Match>
-        <Match when={diff.data}>
+        <Match when={opened.data}>
           {(read) => (
             <Show
               when={read().diff}
@@ -99,7 +236,7 @@ export function Commit(props: {
               {(diff) => (
                 <section
                   class={wrapped() ? "diff wrapped" : "diff"}
-                  id="commit-diff"
+                  id={DIFF}
                 >
                   <div class="section-head">
                     <h2 class="section-heading">Diff</h2>

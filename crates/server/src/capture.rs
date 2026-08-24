@@ -8,8 +8,8 @@
 //!
 //! The tidying is the fallback rather than the first answer. A session whose
 //! backend keeps a log has its own prose on the Transcript beside this, and the
-//! two places that quote a session in miniature — the Timeline row and an
-//! Interruption's evidence — read that instead. What is left here is every
+//! two places that quote a session in miniature — the Timeline row and the
+//! evidence a halt's Notice carries — read that instead. What is left here is every
 //! session that has no such log, for which the terminal is the whole record.
 //!
 //! What the sandbox's own plumbing said goes through this too, and by the same
@@ -36,6 +36,22 @@ const LATEST_LIMIT: usize = 200;
 /// in lines, and a session that printed megabytes without one is a session
 /// whose earliest bytes are not what the Timeline is going to show.
 const LINE_LIMIT: usize = 64 * 1024;
+
+/// What the session's own log says of it, for the summary that reads it: how
+/// far its conversation has got, and the last thing the agent said.
+///
+/// Both off the Transcript rather than out of the terminal — see
+/// [`Reading::summary`] and [`crate::transcript::Tail`]. Both absent for a
+/// session whose backend keeps no log, which is the default here and is what
+/// leaves the summary reading the terminal and showing no turn count.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Told<'a> {
+    /// How many turns are on the Transcript, or `None` where there is none.
+    pub(crate) turns: Option<i64>,
+
+    /// The last thing the agent said in its own words.
+    pub(crate) said: Option<&'a str>,
+}
 
 /// One session's output, read as far as it has arrived.
 #[derive(Debug, Default)]
@@ -85,27 +101,32 @@ impl Reading {
         text
     }
 
-    /// What the Timeline shows: how many lines, and the last thing said.
+    /// What the Timeline shows: how far the conversation has got, and the last
+    /// thing said.
     ///
-    /// `said` is the agent's own latest prose, off the log it keeps of the
-    /// conversation it is having — see [`crate::transcript`]. Where there is
-    /// such a log that is what the row reads, because it is what the session
-    /// said: the terminal underneath it is a display being redrawn, and the last
-    /// line of one is as likely to be a spinner or the edge of a box as a
-    /// sentence.
+    /// `told` is what the session's own log says of it — see
+    /// [`crate::transcript`]. Where there is such a log its prose is what the
+    /// row reads, because it is what the session said: the terminal underneath
+    /// it is a display being redrawn, and the last line of one is as likely to
+    /// be a spinner or the edge of a box as a sentence. Its turns are the row's
+    /// metric for the same reason — a full-screen interface redraws itself with
+    /// cursor moves rather than newlines, so what the terminal offers to count
+    /// is not the size of anything.
     ///
-    /// `None` reads the terminal instead, and that is a whole answer rather than
-    /// an apology. It is every stub agent the test suite runs, every backend
-    /// that keeps no such log, and every session that has not said anything yet
-    /// — and for a session that never started, the terminal is the only place
-    /// the reason exists.
+    /// A `Told` with nothing in it reads the terminal instead, and that is a
+    /// whole answer rather than an apology. It is every stub agent the test
+    /// suite runs, every backend that keeps no such log, and every session that
+    /// has not said anything yet — and for a session that never started, the
+    /// terminal is the only place the reason exists. The row shows no metric at
+    /// all for one of those: there are no turns to count, and a zero would be a
+    /// claim about a conversation nothing here can see.
     ///
     /// The line being printed now counts as the latest where it has anything in
     /// it, and is not counted in the total. A session goes quiet in the middle
     /// of a line exactly when it has stopped to ask something, and a summary
     /// that waited for the newline would say nothing at the one moment somebody
     /// is reading it.
-    pub(crate) fn summary(&self, said: Option<&str>) -> Summary {
+    pub(crate) fn summary(&self, told: Told<'_>) -> Summary {
         let current = plain(&self.current);
 
         let printed = match current.is_empty() {
@@ -115,7 +136,8 @@ impl Reading {
 
         Summary {
             lines: self.lines,
-            latest: shorten(said.unwrap_or(printed)),
+            turns: told.turns,
+            latest: shorten(told.said.unwrap_or(printed)),
         }
     }
 
@@ -229,7 +251,7 @@ pub(crate) fn plain(line: &str) -> String {
 /// The last `lines` of a Capture that said anything, tidied of the terminal's
 /// own control sequences.
 ///
-/// What an Interruption keeps as evidence. The tail and not the whole, because
+/// What a halt's Notice keeps as evidence. The tail and not the whole, because
 /// the whole is on the Timeline already as the session's own Event and this is
 /// meant to be readable on a phone — and tidied for the same reason the one-line
 /// summary is, a wall of cursor moves being a record of a display rather than of
@@ -316,6 +338,15 @@ fn shorten(line: &str) -> String {
 mod tests {
     use super::*;
 
+    /// A log that has said something and been counted, for a summary that reads
+    /// it: one turn per statement, which is what these have.
+    fn spoke(said: &str) -> Told<'_> {
+        Told {
+            turns: Some(1),
+            said: Some(said),
+        }
+    }
+
     /// The Capture is what was printed, whatever the chunks it arrived in —
     /// which is the whole of what "byte for byte" means from in here.
     #[test]
@@ -341,7 +372,10 @@ mod tests {
         let kept = reading.take(b"before\xffafter\n");
 
         assert_eq!(kept, "before\u{fffd}after\n");
-        assert_eq!(reading.summary(None).latest, "before\u{fffd}after");
+        assert_eq!(
+            reading.summary(Told::default()).latest,
+            "before\u{fffd}after"
+        );
     }
 
     #[test]
@@ -350,7 +384,7 @@ mod tests {
 
         reading.take(b"first\r\nsecond\r\n\r\n");
 
-        let summary = reading.summary(None);
+        let summary = reading.summary(Told::default());
         assert_eq!(summary.lines, 3, "a blank line is a line that was printed");
         assert_eq!(
             summary.latest, "second",
@@ -366,7 +400,7 @@ mod tests {
 
         reading.take("╭──────────╮\n│ Thinking…\r".as_bytes());
 
-        let summary = reading.summary(Some("The counter lives in the limiter."));
+        let summary = reading.summary(spoke("The counter lives in the limiter."));
         assert_eq!(summary.latest, "The counter lives in the limiter.");
         assert_eq!(
             summary.lines, 1,
@@ -374,10 +408,41 @@ mod tests {
         );
     }
 
+    /// The metric the row shows is the Transcript's, and the terminal has no
+    /// opinion about it: a full-screen interface redraws with cursor moves, so
+    /// what it printed says nothing about how far the conversation has got.
+    #[test]
+    fn the_turns_the_row_shows_are_the_ones_the_transcript_was_counted_for() {
+        let mut reading = Reading::default();
+
+        reading.take("╭──────────╮\n│ Thinking…\r".as_bytes());
+
+        let summary = reading.summary(Told {
+            turns: Some(7),
+            said: Some("The counter lives in the limiter."),
+        });
+
+        assert_eq!(summary.turns, Some(7));
+    }
+
+    /// And a session that keeps no log has no turns to count, which is not a
+    /// count of none: the row shows no metric at all rather than a zero.
+    #[test]
+    fn a_session_with_no_transcript_has_no_turns_to_show() {
+        let mut reading = Reading::default();
+
+        reading.take(b"Nothing to say.\n");
+
+        let summary = reading.summary(Told::default());
+
+        assert_eq!(summary.turns, None);
+        assert_eq!(summary.lines, 1, "which the Capture still counted");
+    }
+
     #[test]
     fn a_statement_off_the_transcript_is_cut_to_a_row_like_any_other() {
         let said = "x".repeat(LATEST_LIMIT * 2);
-        let summary = Reading::default().summary(Some(&said));
+        let summary = Reading::default().summary(spoke(&said));
 
         assert_eq!(summary.latest.chars().count(), LATEST_LIMIT);
     }
@@ -390,7 +455,7 @@ mod tests {
 
         reading.take(b"thinking\nWhat should happen when the queue is full?");
 
-        let summary = reading.summary(None);
+        let summary = reading.summary(Told::default());
         assert_eq!(summary.lines, 1, "only the finished line is counted");
         assert_eq!(summary.latest, "What should happen when the queue is full?");
     }
@@ -401,7 +466,7 @@ mod tests {
 
         reading.take(b"\x1b[2m\x1b[38;5;244mdimmed\x1b[0m and bold\x1b[1m\x1b(B\n");
 
-        assert_eq!(reading.summary(None).latest, "dimmed and bold");
+        assert_eq!(reading.summary(Told::default()).latest, "dimmed and bold");
     }
 
     #[test]
@@ -410,7 +475,7 @@ mod tests {
 
         reading.take(b"\x1b]0;a title nobody printed\x07what was printed\n");
 
-        assert_eq!(reading.summary(None).latest, "what was printed");
+        assert_eq!(reading.summary(Told::default()).latest, "what was printed");
     }
 
     /// A spinner redraws its line over and over. What it says is the last of
@@ -421,7 +486,7 @@ mod tests {
 
         reading.take("Thinking.\rThinking..\rThinking…\n".as_bytes());
 
-        let summary = reading.summary(None);
+        let summary = reading.summary(Told::default());
         assert_eq!(summary.latest, "Thinking…");
         assert_eq!(summary.lines, 1, "one line, drawn three times");
     }
@@ -432,7 +497,10 @@ mod tests {
 
         reading.take("x".repeat(LATEST_LIMIT * 2).as_bytes());
 
-        assert_eq!(reading.summary(None).latest.chars().count(), LATEST_LIMIT);
+        assert_eq!(
+            reading.summary(Told::default()).latest.chars().count(),
+            LATEST_LIMIT
+        );
     }
 
     /// Everything printed is kept whatever the summary does with it — the

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, QuestionSet, SetCreated};
+use verkstead_schema::{Decided, Direction, QuestionSet, Response, Review, SetCreated};
 
 /// The word the `direction` column holds.
 ///
@@ -117,7 +117,7 @@ impl Lifecycle {
 /// back beside it — there is no Conversation without one, and everything done
 /// about a Conversation is done inside that repository.
 ///
-/// The two Profiles are read back the same way, because whether a Conversation
+/// The two Pairings are read back the same way, because whether a Conversation
 /// is ready to grill turns on what they are rather than on which ids they hold:
 /// a Profile whose pair has gone is not something to launch a session under, and
 /// the id alone cannot say so.
@@ -139,13 +139,14 @@ pub struct Conversation {
 
     pub state: Lifecycle,
 
-    /// The Agent Profile the grilling session runs under, once one is chosen.
-    pub grilling_profile: Option<super::Profile>,
+    /// The Profile and model the grilling session runs under, once they are
+    /// chosen.
+    pub grilling_pairing: Option<super::Pairing>,
 
-    /// And the one the implementation runs under. A separate choice because it
+    /// And the ones the implementation runs under. A separate choice because it
     /// is genuinely a separate account and model — and because the
     /// implementation session cannot simply carry the grilling one on.
-    pub implementation_profile: Option<super::Profile>,
+    pub implementation_pairing: Option<super::Pairing>,
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
@@ -288,24 +289,13 @@ pub enum Event {
     /// and are fetched when somebody looks.
     PullRequest(super::PullRequest),
 
-    /// A run that stopped: something Verkstead noticed and cannot resolve
-    /// itself, with the evidence it gathered and whatever the human did about
-    /// it — see [`super::interruptions`].
-    ///
-    /// Its body is not in the `body` column either, for the commit's reason:
-    /// what an Interruption is, is a row of separate facts. Boxed, as a Question
-    /// Set is: it carries a git status and the tail of a session's output, and
-    /// an enum every Brief and every move was as large as would cost a
-    /// Timeline's worth of memory to hold the one kind that needs it.
-    Interruption(Box<super::Interruption>),
-
     /// A run waiting out an Agent Profile's window: which account ran out, when
     /// it comes back, and what ended the wait — see [`super::pauses`].
     ///
-    /// Its body is not in the `body` column either, for the Interruption's
-    /// reason: what a Pause is, is a row of separate facts. Unboxed, unlike the
-    /// Interruption beside it — three short strings is no more than a Brief
-    /// carries, and there is no gathered evidence here to make the enum large.
+    /// Its body is not in the `body` column either, for the commit's reason:
+    /// what a Pause is, is a row of separate facts. Unboxed, unlike the Question
+    /// Set beside it — three short strings is no more than a Brief carries, and
+    /// nothing here is gathered evidence of a size to make the enum large.
     Pause(super::Pause),
 
     /// Something Verkstead has to say on its own account: which stage it has
@@ -318,8 +308,9 @@ pub enum Event {
     /// read afterwards, and a decision only the log knows about is one nobody
     /// looking at the work will ever find.
     ///
-    /// Never something to do about — an Interruption is what an open question
-    /// looks like, and this is closed by the time it is written.
+    /// Never something to do about, whatever it says: a Notice is written
+    /// after the fact, and what a run that stopped is waiting on is the halt
+    /// beside it rather than anything on the Timeline — see [`super::halts`].
     Notice(String),
 
     /// A Manual Task: the instruction the human typed at the end of the
@@ -331,9 +322,9 @@ pub enum Event {
     /// and what the session it starts does lands as the Events that work lands
     /// as.
     ///
-    /// Beside the run rather than a step of it. It moves no state, and it is
-    /// not a [`Step`](super::Step) — the unattended unit a done file ends —
-    /// however much the two look alike from the session's end.
+    /// Beside the run rather than a step of it. It moves no state, and it is not
+    /// a Step — the unattended unit a done file ends — however much the two look
+    /// alike from the session's end.
     ManualTask(String),
 }
 
@@ -377,7 +368,6 @@ impl Event {
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
-            Self::Interruption(_) => super::interruptions::INTERRUPTION,
             Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
@@ -401,8 +391,6 @@ impl Event {
             Self::Commit(_) => "",
             // Nothing either, and for the commit's reason.
             Self::PullRequest(_) => "",
-            // Nothing either, and for the commit's reason.
-            Self::Interruption(_) => "",
             // Nothing either, and for the commit's reason again.
             Self::Pause(_) => "",
             Self::Notice(markdown) => markdown,
@@ -430,7 +418,6 @@ impl Event {
         set: Option<SetOnTimeline>,
         commit: Option<super::Commit>,
         pull_request: Option<super::PullRequest>,
-        interruption: Option<super::Interruption>,
         pause: Option<super::Pause>,
     ) -> Result<Self> {
         Ok(match kind {
@@ -450,11 +437,6 @@ impl Event {
                 pull_request
                     .ok_or_else(|| anyhow!("a pull request Event has no pull request beside it"))?,
             ),
-            super::interruptions::INTERRUPTION => {
-                Self::Interruption(Box::new(interruption.ok_or_else(|| {
-                    anyhow!("an Interruption Event has no evidence beside it")
-                })?))
-            }
             super::pauses::PAUSE => {
                 Self::Pause(pause.ok_or_else(|| anyhow!("a Pause Event has no Pause beside it"))?)
             }
@@ -483,13 +465,12 @@ pub enum Edited {
     NotDrafting,
 }
 
-/// What became of choosing one of a Conversation's two Agent Profiles.
+/// What became of choosing one of a Conversation's two Pairings.
 ///
-/// No drafting refusal among them, unlike the Brief and the branch name: a
-/// Profile is a setting rather than a document something has been built from,
-/// and the implementation one is used after the grilling is over — freezing it
-/// when grilling starts would take it away exactly when the human has just
-/// learned what they want it to be.
+/// A drafting refusal among them, like the Brief and the branch name and for
+/// the same reason: both Pairings are fixed when grilling starts. The
+/// implementation one is used long after that, but what it is has to be settled
+/// before the work begins rather than swapped underneath it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Chosen {
     /// Recorded.
@@ -500,6 +481,9 @@ pub enum Chosen {
 
     /// There is no Profile with that id to choose.
     NoSuchProfile,
+
+    /// It is past drafting, so both Pairings are fixed.
+    NotDrafting,
 }
 
 /// What became of starting a Conversation grilling.
@@ -595,6 +579,26 @@ pub enum Reopening {
     /// after. Every other state is somewhere the work has got to, and Aborted
     /// is off the ladder rather than on it.
     NotDone,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of sending a wrapping Conversation back to be built.
+///
+/// The one way back down the ladder, and the only thing that takes it: a review
+/// whose findings were too big to fix in one sitting splits them out as a
+/// backlog, and a backlog is built rather than wrapped. What follows it is the
+/// finish step and [`super::record_pull_request`] again, which is the second wrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rebuilding {
+    /// Recorded: the Conversation is being built again, the move is on its
+    /// Timeline, and its review is back to waiting.
+    Started,
+
+    /// It is not wrapping up, so there is no wrap-up here to leave — it was
+    /// aborted out from under the session, or it is being built already.
+    NotWrapping,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -730,6 +734,27 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the stage branches table")?;
+
+    // The model half of a Conversation's two Pairings, one row per role. A
+    // table of its own for the reason the direction is one: there is no
+    // migration machinery here and `conversations` is STRICT and left alone —
+    // so the Profile half stays in the column it has always been in and the
+    // model half arrives beside it.
+    //
+    // One row per role by the primary key, and a role with no row is one whose
+    // Pairing has no model: either nothing has been chosen for it at all, or it
+    // was chosen before pairings existed, which the Profile column tells apart.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS pairing_models (
+             conversation_id INTEGER NOT NULL REFERENCES conversations(id),
+             role            TEXT NOT NULL,
+             model           TEXT NOT NULL,
+             PRIMARY KEY (conversation_id, role)
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the pairing models table")?;
 
     // Which roadmap a drafting Conversation is adopting, where it is adopting
     // one. A table of its own for the reason the direction is one: there is no
@@ -948,9 +973,9 @@ async fn started(
 /// - A **Question Set with no Response and no archiving** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - An **open Interruption**, which is a run stopped on a choice only they can
-///   make. Read off the table rather than off the Timeline, so the whole list
-///   costs one query.
+/// - A **halt**, which is a Conversation nothing is driving any more and which
+///   goes again only when the human says so. Read off the table rather than off
+///   the Timeline, so the whole list costs one query.
 /// - An **open Pause**, which is a run stopped because the account it was
 ///   spending is out of window. Read the same way and for the same reason. The
 ///   human may not have to do anything about one — the window comes back by
@@ -980,8 +1005,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                           )
                     )
                     OR EXISTS (
-                        SELECT 1 FROM interruptions i
-                        WHERE i.conversation_id = c.id AND i.remedy IS NULL
+                        SELECT 1 FROM halts h WHERE h.conversation_id = c.id
                     )
                     OR EXISTS (
                         SELECT 1 FROM pauses u
@@ -1074,20 +1098,46 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
         state: Lifecycle::read(&state)?,
-        grilling_profile: chosen_profile(pool, grilling_profile_id).await?,
-        implementation_profile: chosen_profile(pool, implementation_profile_id).await?,
+        grilling_pairing: pairing(pool, id, Role::Grilling, grilling_profile_id).await?,
+        implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
+            .await?,
         worktree: worktree(pool, id).await?,
         direction: direction(pool, id).await?,
         adopting: adopting(pool, id).await?,
     }))
 }
 
-/// The Profile an id names, where there is an id at all.
-async fn chosen_profile(pool: &SqlitePool, id: Option<i64>) -> Result<Option<super::Profile>> {
-    match id {
-        None => Ok(None),
-        Some(id) => super::load_profile(pool, id).await,
-    }
+/// One of a Conversation's two Pairings: the Profile its column names, and the
+/// model paired with it where one was.
+///
+/// A role with no Profile has no Pairing at all, whatever `pairing_models`
+/// holds: the model half alone is nothing to run a session under.
+async fn pairing(
+    pool: &SqlitePool,
+    conversation: i64,
+    role: Role,
+    profile_id: Option<i64>,
+) -> Result<Option<super::Pairing>> {
+    let Some(profile_id) = profile_id else {
+        return Ok(None);
+    };
+
+    let Some(profile) = super::load_profile(pool, profile_id).await? else {
+        return Ok(None);
+    };
+
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT model FROM pairing_models WHERE conversation_id = ? AND role = ?")
+            .bind(conversation)
+            .bind(role.stored())
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading the model Conversation {conversation} paired"))?;
+
+    Ok(Some(super::Pairing {
+        profile,
+        model: row.map(|(model,)| model),
+    }))
 }
 
 /// Where a Conversation's worktree was put, if it has one.
@@ -1130,61 +1180,127 @@ pub async fn adopting(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
     Ok(row.map(|(roadmap,)| roadmap))
 }
 
-/// Choose the Agent Profile the grilling session will run under.
-pub async fn set_grilling_profile(pool: &SqlitePool, id: i64, profile_id: i64) -> Result<Chosen> {
-    choose(pool, id, profile_id, "grilling_profile_id").await
+/// Which of the two roles a Pairing is being chosen for.
+///
+/// The word the `pairing_models` table holds, and the column the Profile half
+/// goes in — the two halves of one choice, so the role names both rather than
+/// letting a caller pass one and forget the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Grilling,
+    Implementation,
 }
 
-/// Choose the Agent Profile the implementation will run under.
-pub async fn set_implementation_profile(
+impl Role {
+    pub(crate) fn stored(self) -> &'static str {
+        match self {
+            Self::Grilling => "grilling",
+            Self::Implementation => "implementation",
+        }
+    }
+
+    pub(crate) fn column(self) -> &'static str {
+        match self {
+            Self::Grilling => "grilling_profile_id",
+            Self::Implementation => "implementation_profile_id",
+        }
+    }
+}
+
+/// Choose the Pairing the grilling session will run under.
+pub async fn set_grilling_pairing(
     pool: &SqlitePool,
     id: i64,
     profile_id: i64,
+    model: Option<&str>,
 ) -> Result<Chosen> {
-    choose(pool, id, profile_id, "implementation_profile_id").await
+    choose(pool, id, Role::Grilling, profile_id, model).await
 }
 
-/// Record one of the two choices.
+/// Choose the Pairing the implementation will run under.
+pub async fn set_implementation_pairing(
+    pool: &SqlitePool,
+    id: i64,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    choose(pool, id, Role::Implementation, profile_id, model).await
+}
+
+/// Record one of the two choices, both halves of it.
+///
+/// Refused past drafting, which is what fixes a Pairing when grilling starts:
+/// what runs the work is settled before the work starts, alongside the branch,
+/// the base commit and the Brief.
 ///
 /// The Profile is selected from `profiles` inside the statement rather than
 /// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
 /// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching.
+/// session that fails to start with nobody watching. Whether the Profile lists
+/// the model is decided above the store, where the Profile is read as a row.
 ///
-/// `column` is one of two literals this module passes, never anything a request
-/// reached.
-async fn choose(pool: &SqlitePool, id: i64, profile_id: i64, column: &str) -> Result<Chosen> {
-    if !conversation_exists(pool, id).await? {
-        return Ok(Chosen::NoSuchConversation);
+/// `model` is `None` for the one caller that carries a Pairing across rather
+/// than making one — see [`Pairing::model`] — and it takes the model row away,
+/// so a re-choice cannot leave the model half of an earlier one behind.
+async fn choose(
+    pool: &SqlitePool,
+    id: i64,
+    role: Role,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<Chosen> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Chosen::NoSuchConversation,
+            _ => Chosen::NotDrafting,
+        });
     }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
     let changed = sqlx::query(&format!(
         "UPDATE conversations
-         SET {column} = (SELECT id FROM profiles WHERE id = ?)
-         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)"
+         SET {} = (SELECT id FROM profiles WHERE id = ?)
+         WHERE id = ? AND EXISTS (SELECT 1 FROM profiles WHERE id = ?)",
+        role.column()
     ))
     .bind(profile_id)
     .bind(id)
     .bind(profile_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
     .rows_affected();
 
-    Ok(match changed {
-        0 => Chosen::NoSuchProfile,
-        _ => Chosen::Chosen,
-    })
-}
+    if changed == 0 {
+        return Ok(Chosen::NoSuchProfile);
+    }
 
-async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
-    let found: Option<(i64,)> = sqlx::query_as("SELECT 1 FROM conversations WHERE id = ?")
+    sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
-        .fetch_optional(pool)
+        .bind(role.stored())
+        .execute(&mut *tx)
         .await
-        .with_context(|| format!("looking for Conversation {id}"))?;
+        .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
 
-    Ok(found.is_some())
+    if let Some(model) = model {
+        sqlx::query("INSERT INTO pairing_models (conversation_id, role, model) VALUES (?, ?, ?)")
+            .bind(id)
+            .bind(role.stored())
+            .bind(model)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("pairing {model:?} with Conversation {id}'s Profile"))?;
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
+
+    Ok(Chosen::Chosen)
 }
 
 /// A Conversation's Timeline, oldest first — which is reading order, and which
@@ -1194,9 +1310,9 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// happened, and two Events stamped in the same millisecond must not come back
 /// in an arbitrary one.
 ///
-/// A Capture's summary is joined in rather than fetched per Event, and no
-/// Capture itself is: a Timeline is read every time an open page looks again,
-/// and what a session printed is megabytes the middle pane never shows.
+/// A Capture's summary is read for the whole Timeline rather than per Event,
+/// and no Capture itself is: a Timeline is read every time an open page looks
+/// again, and what a session printed is megabytes the middle pane never shows.
 ///
 /// A Question Set's whole body *is* joined in, which is the one place this pays
 /// for a deserialization per Event — see [`SetOnTimeline`] for why there is
@@ -1205,16 +1321,13 @@ async fn conversation_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Set would be a read for every Question the human has ever been put.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
-    /// Capture summary that is there for one kind of Event, the Set with
-    /// however it was settled that is there for another, and the commit that is
-    /// there for a third.
+    /// Set with however it was settled that is there for one kind of Event, and
+    /// the commit that is there for another.
     type Row = (
         i64,
         String,
         String,
         String,
-        Option<i64>,
-        Option<String>,
         Option<i64>,
         Option<String>,
         Option<String>,
@@ -1228,11 +1341,10 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     );
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT e.id, e.at, e.kind, e.body, cap.lines, cap.latest,
+        "SELECT e.id, e.at, e.kind, e.body,
                 q.id, q.body, r.submitted_at, r.body, a.archived_at,
                 c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
-         LEFT JOIN captures cap ON cap.event_id = e.id
          LEFT JOIN set_events s ON s.event_id = e.id
          LEFT JOIN question_sets q ON q.id = s.set_id
          LEFT JOIN responses r ON r.set_id = s.set_id
@@ -1246,27 +1358,37 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     .await
     .with_context(|| format!("reading the Timeline of Conversation {conversation_id}"))?;
 
-    // The one kind that is not joined into the query above, and the reason is
-    // arithmetic rather than judgement: a row of it is eight columns, the query
-    // is already at the sixteen a tuple can be read back as, and there is no
-    // seventeenth position to put them in. Its own read is cheap where the join
-    // would not have been — an Interruption is the rare Event, so this is a
-    // second query that nearly always comes back with nothing.
-    let mut interruptions = super::interruptions::on_timeline(pool, conversation_id).await?;
+    // The kinds that are not joined into the query above, and the reason is
+    // arithmetic rather than judgement: the query is at the sixteen columns a
+    // tuple can be read back as, and there is no seventeenth position to put
+    // one in. Each is one more read for the whole Timeline rather than a read
+    // per Event, which is what the joins were saving.
+    //
+    // The Capture summaries first, which is the one of the three that is on
+    // nearly every Timeline: how much a session printed, how many turns its
+    // conversation took, and the last thing it said.
+    let mut summaries = super::captures::on_timeline(pool, conversation_id).await?;
 
     // And the pull request, for the same arithmetic and a cheaper read still:
     // there is one per Conversation, and until the finish step has run there is
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
-    // And the Pauses, for the arithmetic again and at the Interruptions' cost:
-    // an account running out of window is the rare Event, so this is a second
+    // And the Commit Summaries, for the same arithmetic. The commit itself is
+    // joined into the query above; what the agent wrote under its subject is one
+    // more read, and a Timeline of bookkeeping commits answers it with nothing.
+    let mut summaries_of_commits =
+        super::commits::summaries_on_timeline(pool, conversation_id).await?;
+
+    // And the Pauses, for the arithmetic again and at the pull request's cost:
+    // an account running out of window is the rare Event, so this is one more
     // query that nearly always comes back with nothing.
     let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
 
     // And which of the Sets above were asked deferred, for the arithmetic again
-    // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than either:
-    // one indexed column, and most Conversations have no deferred Set at all.
+    // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than any of
+    // them: one indexed column, and most Conversations have no deferred Set at
+    // all.
     let deferred = super::deferrals::deferred_on_timeline(pool, conversation_id).await?;
 
     rows.into_iter()
@@ -1276,8 +1398,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 at,
                 kind,
                 body,
-                lines,
-                latest,
                 set_id,
                 set_body,
                 answered_at,
@@ -1290,10 +1410,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 deletions,
             ) = row;
 
-            let summary = lines
-                .zip(latest)
-                .map(|(lines, latest)| super::Summary { lines, latest });
-
             let commit = match (sha, subject, files, insertions, deletions) {
                 (Some(sha), Some(subject), Some(files), Some(insertions), Some(deletions)) => {
                     Some(super::Commit {
@@ -1302,6 +1418,9 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         files,
                         insertions,
                         deletions,
+                        // Absent for most commits, which is what a commit that
+                        // said nothing about itself looks like.
+                        summary: summaries_of_commits.remove(&id),
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be
@@ -1328,23 +1447,14 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
             // Taken out rather than looked up, because each belongs to exactly
             // one Event and the Events are walked once.
-            let interruption = interruptions.remove(&id);
+            let summary = summaries.remove(&id);
             let pull_request = pull_requests.remove(&id);
             let pause = pauses.remove(&id);
 
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(
-                    &kind,
-                    body,
-                    summary,
-                    set,
-                    commit,
-                    pull_request,
-                    interruption,
-                    pause,
-                )?,
+                event: Event::read(&kind, body, summary, set, commit, pull_request, pause)?,
             })
         })
         .collect()
@@ -1486,28 +1596,72 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
 /// Whether this Conversation's self-review has put its findings to the human,
 /// and which Set they are on.
 ///
-/// Read off the Sets themselves rather than written down when one is asked: a Set
-/// carrying a `review` block *is* the review's, which is the whole reason the
-/// block is a field being there rather than a convention. A second record saying
-/// which Set was the review's would be a second thing to keep true, and the one
-/// that could disagree.
-///
-/// The first one, where a Conversation somehow has two. Nothing should ask twice
-/// — the skill says the block goes on one Set and no others — and if something
-/// does, the review is the one that arrived first.
+/// Read off the Sets themselves rather than written down when one is asked — see
+/// [`proposals`]. The **first** of them is the review's: it is the session a
+/// wrap-up starts with, and the batch sessions that propose the same way about
+/// what was said on the pull request are all dispatched after it has settled.
 pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    Ok(proposals(pool, conversation_id).await?.first().copied())
+}
+
+/// And the newest of them, which is whatever was last put to the human: the
+/// review's own Set until a batch of comments is answered after it, and that
+/// batch's from then on.
+///
+/// The newest rather than the batch's own, because nothing on the record says
+/// which session asked one and nothing has to. One Worktree holds one agent and
+/// nothing advances past a halt, so the proposal a batch session made is the
+/// last one there is for as long as anything is asking about it.
+pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    Ok(proposals(pool, conversation_id).await?.last().copied())
+}
+
+/// Every Set of this Conversation's carrying a `review` block, oldest first —
+/// and only the ones this wrap asked.
+///
+/// A Set carrying the block *is* a proposal to fix things, which is the whole
+/// reason the block is a field being there rather than a convention. A second
+/// record saying which Sets were which would be a second thing to keep true, and
+/// the one that could disagree.
+///
+/// **This wrap's**, because a Conversation can wrap up more than once: a review
+/// that splits its findings out into a backlog leaves Wrapping to build them and
+/// comes back for a second wrap, and the first wrap's proposals are answered and
+/// done with. Counting them would be a second review that never ran, because the
+/// review it found asking was last month's. So the window opens at the newest
+/// move into Wrapping — and where there has been no such move, at the start of
+/// the Timeline, which is every Conversation that has not got that far.
+///
+/// **And only the ones still standing.** A Set archived unanswered is one nobody
+/// is ever going to answer, which is what Verkstead closes a proposal whose
+/// session is gone as — see [`super::archive_set`]. Counting one would be the
+/// same mistake the other way about: the review it found asking is a question
+/// nothing is left to act on, so no fresh reading of the branch could ever be
+/// recognised as the review of this wrap.
+async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT q.id, q.body
          FROM question_sets q
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
+         LEFT JOIN archivings a ON a.set_id = q.id
          WHERE e.conversation_id = ?
+           AND a.set_id IS NULL
+           AND e.id > COALESCE(
+                   (SELECT MAX(w.id) FROM timeline_events w
+                    WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),
+                   0)
          ORDER BY q.id",
     )
     .bind(conversation_id)
+    .bind(conversation_id)
+    .bind(Event::Moved(Lifecycle::Wrapping).kind())
+    .bind(Lifecycle::Wrapping.stored())
     .fetch_all(pool)
     .await
-    .with_context(|| format!("looking for Conversation {conversation_id}'s review"))?;
+    .with_context(|| format!("looking for Conversation {conversation_id}'s proposals"))?;
+
+    let mut proposing = Vec::new();
 
     for (set_id, body) in rows {
         // A Set this build cannot read is passed over rather than failing the
@@ -1521,11 +1675,175 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
         };
 
         if set.review.is_some() {
-            return Ok(Some(set_id));
+            proposing.push(set_id);
         }
     }
 
-    Ok(None)
+    Ok(proposing)
+}
+
+/// One finding the human said to fix, as the session that will fix it is told
+/// about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fixing {
+    /// The finding as the review wrote it for whoever fixes it.
+    pub what: String,
+
+    /// And whatever the human wrote alongside their Answer, or empty where they
+    /// wrote nothing — which is the ordinary way of agreeing with the
+    /// recommendation.
+    pub said: String,
+}
+
+/// The findings this Conversation's review was told to fix and nothing has
+/// landed, in the order the review raised them.
+///
+/// Empty is the ordinary answer, and it covers every way there is nothing owed:
+/// no review has asked, the Set is still waiting on the human, they declined
+/// every finding, or the session that was going to fix them did so. What is left
+/// is the one failure this exists for — the decisions were made and the doing did
+/// not happen — and the words it hands back are the review's own, which is what
+/// a session dispatched to finish the job is told.
+///
+/// **Landed is a commit after the Answers**, which is as much as anything here
+/// can know: what the fixes are is prose the review wrote, and no reading of a
+/// branch can say which commit was which finding. So this is a coarse question
+/// deliberately — a review whose accepted findings landed one commit and then
+/// stopped reads as landed, because a session that got that far is one that was
+/// working rather than one that fell over before it started.
+///
+/// The two stamps are the Response's and the commit Event's, both written by
+/// SQLite as this database's `now`, so comparing them as text is comparing the
+/// instants they name.
+pub async fn unlanded_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = review_asked(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    unlanded_on(pool, conversation_id, set_id).await
+}
+
+/// The same question of the newest proposal instead: what a batch session was
+/// told to fix and nothing has landed.
+///
+/// Which is the review's own Set until a batch has been answered, and that
+/// batch's from then on — see [`last_proposal`]. Asking it before any batch has
+/// asked anything is safe rather than wrong: the review settles only once
+/// nothing it was told to fix is owed, and no batch session is dispatched until
+/// it has.
+pub async fn unlanded_batch_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = last_proposal(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    unlanded_on(pool, conversation_id, set_id).await
+}
+
+/// What is owed on one proposal, which is the whole of what either of the two
+/// above is.
+async fn unlanded_on(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Result<Vec<Fixing>> {
+    let Some(stored) = super::load_set(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    // A Set this build cannot read carries no findings anybody here could act
+    // on, and passing over it is the whole of what there is to do about one —
+    // see [`super::Asked`].
+    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
+        return Ok(Vec::new());
+    };
+
+    let Some(answered) = super::load_response(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let fixing = decided_as(review, &answered.response, Decided::Fix);
+
+    if fixing.is_empty() || landed_since(pool, conversation_id, &answered.submitted_at).await? {
+        return Ok(Vec::new());
+    }
+
+    Ok(fixing)
+}
+
+/// The findings this Conversation's review was told to split out into a backlog
+/// of their own, in the order the review raised them.
+///
+/// The escape hatch's half of [`unlanded_fixes`], and it reads the same record
+/// the other way: a finding the human answered with the Option it named as
+/// *split it out* is work for a session of its own rather than work for the
+/// session that asked. Empty is the ordinary answer — a review that offered no
+/// split at all, one still waiting on the human, one whose splits were declined.
+///
+/// **Nothing here asks whether it landed**, unlike [`unlanded_fixes`]. What says
+/// a split has been carried out is a `.tasks/` backlog on the branch, and that is
+/// a question about the Worktree rather than about the record — so this says what
+/// was split out and its caller says whether the backlog is there.
+pub async fn split_out(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = review_asked(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let Some(stored) = super::load_set(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    // Passed over where this build cannot read the body, for [`unlanded_on`]'s
+    // reason.
+    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
+        return Ok(Vec::new());
+    };
+
+    let Some(answered) = super::load_response(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    Ok(decided_as(review, &answered.response, Decided::Split))
+}
+
+/// The findings a Response decided one way, as the session that acts on them is
+/// told about them.
+///
+/// One reading for both outcomes, because they are the same question asked of
+/// different Options — and what the human wrote beside their Answer travels with
+/// the finding either way, the schema following the pick to find it.
+fn decided_as(review: &Review, response: &Response, decided: Decided) -> Vec<Fixing> {
+    review
+        .findings
+        .iter()
+        .filter(|finding| finding.decided(response) == decided)
+        .map(|finding| Fixing {
+            what: finding.what.trim().to_owned(),
+            said: finding.said(response).to_owned(),
+        })
+        .collect()
+}
+
+/// Whether anything has been committed on this Conversation's branch since
+/// `submitted_at`.
+///
+/// The commits on the Timeline rather than the branch itself, for the reason
+/// every other reader of them asks the store: the branch is swept while the
+/// session runs and what it finds lands here, so this is where a fresh commit
+/// shows up — and asking it costs one small read where asking git costs a
+/// process.
+async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &str) -> Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT c.event_id
+         FROM commits c
+         JOIN timeline_events e ON e.id = c.event_id
+         WHERE c.conversation_id = ? AND e.at > ?
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(submitted_at)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("looking for what Conversation {conversation_id} committed since {submitted_at}")
+    })?;
+
+    Ok(found.is_some())
 }
 
 /// A Question Set of this Conversation's that arrived after `event_id` and is
@@ -1746,6 +2064,10 @@ async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// did not, the rule was the default branch's tip *at grill start* — so this is
 /// the moment that rule resolves to a commit, and after it there is a fact about
 /// what the work branched from rather than a rule about what it would have.
+///
+/// It is also where the Repo remembers what it was grilled with — see
+/// [`super::pairings::remember`] — because this is the moment the two Pairings
+/// stop being changeable and become what the work is actually running under.
 pub async fn start_grilling(
     pool: &SqlitePool,
     id: i64,
@@ -1796,6 +2118,12 @@ pub async fn start_grilling(
     .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
+
+    // And what it is being grilled with, against its Repo, so the next
+    // Conversation started on that Repo arrives with both pickers filled. In
+    // this transaction because this is the moment the Pairings are fixed: a
+    // memory written a moment later could be of a choice that never ran.
+    super::pairings::remember(&mut tx, id).await?;
 
     tx.commit().await.context("starting a grilling")?;
 
@@ -2039,6 +2367,61 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
     tx.commit().await.context("starting the implementation")?;
 
     Ok(Implementing::Started)
+}
+
+/// Send a wrapping Conversation back to be built, because its review split work
+/// out into a backlog.
+///
+/// The one move down the ladder there is. A review that judged its findings too
+/// big to fix where it stood wrote them as `.tasks/`, and a backlog is something
+/// to work a session at a time — so the Conversation goes back to Implementing
+/// and comes round to Wrapping again through its finish step, which is the
+/// second wrap.
+///
+/// Refused for anything but Wrapping, for the reason every other move is refused
+/// outside the state it leaves: a Conversation aborted out from under the session
+/// that wrote the backlog is not one to start building.
+///
+/// **The review's settle goes with it**, in the same transaction. *Settled once
+/// and stays settled* is a rule about one wrap rather than about the
+/// Conversation — see [`super::WaitingOn::Review`] — and a settle left standing
+/// would be a second wrap that reached Done having read none of what the backlog
+/// built. The checks and the comments need no such thing: both are asked of
+/// GitHub on every poll, so they settle from the answers the second wrap gets.
+///
+/// One transaction, as every move is: a Conversation that says Implementing
+/// always has the move on its Timeline to say when it got there.
+pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
+    let mut tx = pool.begin().await.context("building the split-out work")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Rebuilding::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+        return Ok(Rebuilding::NotWrapping);
+    }
+
+    super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Implementing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to implementing"))?;
+
+    moved(&mut tx, id, Lifecycle::Implementing).await?;
+
+    tx.commit().await.context("building the split-out work")?;
+
+    Ok(Rebuilding::Started)
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.

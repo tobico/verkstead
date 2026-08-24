@@ -4,25 +4,36 @@
   "blocked_on": 21,
   "branch": "task-runner",
   "direction": "task-list",
-  "grilling_profile": {
-    "agent_type": "Claude",
-    "broken": null,
-    "claude_dir": "/srv/accounts/fable/.claude",
-    "config_file": "/srv/accounts/fable/.claude.json",
-    "id": 1,
+  "grilling_pairing": {
     "model": "claude-fable-5",
-    "name": "fable"
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/fable/.claude",
+      "config_file": "/srv/accounts/fable/.claude.json",
+      "id": 1,
+      "models": [
+        "claude-fable-5"
+      ],
+      "name": "fable"
+    }
   },
   "held": null,
   "id": 5,
-  "implementation_profile": {
-    "agent_type": "Claude",
-    "broken": null,
-    "claude_dir": "/srv/accounts/opus/.claude",
-    "config_file": "/srv/accounts/opus/.claude.json",
-    "id": 2,
+  "implementation_pairing": {
     "model": "claude-opus-5",
-    "name": "opus"
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/opus/.claude",
+      "config_file": "/srv/accounts/opus/.claude.json",
+      "id": 2,
+      "models": [
+        "claude-opus-5",
+        "claude-haiku-4-5-20251001"
+      ],
+      "name": "opus"
+    }
   },
   "pinned": [
     {
@@ -54,6 +65,8 @@
     }
   ],
   "ready_to_grill": false,
+  "ready_to_resume": true,
+  "ready_to_stop": false,
   "repo": {
     "default_branch": "main",
     "id": 1,
@@ -86,6 +99,7 @@
         "id": 19,
         "insertions": 132,
         "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
+        "snippet": null,
         "subject": "chore: plan the task-runner tasks"
       }
     },
@@ -97,14 +111,10 @@
       }
     },
     {
-      "Interruption": {
+      "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
-        "git_status": "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n",
-        "how": "the session exited with status 1",
-        "id": 21,
-        "settled": null,
-        "tail": "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error",
-        "what": "the task in .tasks/03-commit-events.md"
+        "html": "<p><strong>The task in .tasks/03-commit-events.md</strong> stopped.</p>\n<p>the session exited with status 1</p>\n<h3>The worktree</h3>\n<div class=\"wide\">\n<pre><code>## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n</code></pre>\n</div>\n<h3>What the last session said</h3>\n<div class=\"wide\">\n<pre><code>error[E0432]: unresolved import `crate::sweep`\n  --&gt; crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error\n</code></pre>\n</div>",
+        "id": 21
       }
     }
   ],

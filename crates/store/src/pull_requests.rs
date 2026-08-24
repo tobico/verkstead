@@ -18,6 +18,13 @@
 //! and a branch is one pull request — and the state check above the insert means
 //! a second attempt at the same finish finds the move already made rather than
 //! recording a second PR against it.
+//!
+//! Which is why a *second wrap* records nothing new. A Conversation whose review
+//! split its findings out into a backlog leaves Wrapping to build them and
+//! finishes again, and what its finish step opens is the pull request it already
+//! had. So the record is reused rather than written twice: the move is made, and
+//! the lifecycle moves either side of it are what tell the re-entry's story on
+//! the Timeline.
 
 use std::collections::HashMap;
 
@@ -107,6 +114,12 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// the insert acts on it. That is what makes a second attempt at the same ending
 /// safe: the first made the move, and the second finds a Conversation that has
 /// nothing left to wrap.
+///
+/// A *second wrap* is the other thing that gets here, and it is not that. The
+/// Conversation left Wrapping to build a backlog its review split out — see
+/// [`super::implement_again`] — so it is Implementing again and this is an ending
+/// like any other, except that the branch is already on a pull request. There the
+/// record is reused: one row, one Event, and the move made over the top of them.
 pub async fn record_pull_request(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -131,36 +144,47 @@ pub async fn record_pull_request(
         return Ok(Wrapping::NothingToWrap);
     }
 
-    let (event_id,): (i64,) = sqlx::query_as(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, '')
-         RETURNING id",
-    )
-    .bind(conversation_id)
-    .bind(Event::PullRequest(pull_request.clone()).kind())
-    .fetch_one(&mut *tx)
-    .await
-    .with_context(|| {
-        format!("putting a pull request on the Timeline of Conversation {conversation_id}")
-    })?;
+    let recorded: Option<(i64,)> =
+        sqlx::query_as("SELECT event_id FROM pull_requests WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .with_context(|| {
+                format!("looking for the pull request Conversation {conversation_id} is already on")
+            })?;
 
-    sqlx::query(
-        "INSERT INTO pull_requests (event_id, conversation_id, number, title, url)
-         VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(event_id)
-    .bind(conversation_id)
-    .bind(pull_request.number)
-    .bind(&pull_request.title)
-    .bind(&pull_request.url)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| {
-        format!(
-            "recording pull request {} of Event {event_id}",
-            pull_request.number
+    if recorded.is_none() {
+        let (event_id,): (i64,) = sqlx::query_as(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, '')
+             RETURNING id",
         )
-    })?;
+        .bind(conversation_id)
+        .bind(Event::PullRequest(pull_request.clone()).kind())
+        .fetch_one(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("putting a pull request on the Timeline of Conversation {conversation_id}")
+        })?;
+
+        sqlx::query(
+            "INSERT INTO pull_requests (event_id, conversation_id, number, title, url)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(event_id)
+        .bind(conversation_id)
+        .bind(pull_request.number)
+        .bind(&pull_request.title)
+        .bind(&pull_request.url)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!(
+                "recording pull request {} of Event {event_id}",
+                pull_request.number
+            )
+        })?;
+    }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
         .bind(Lifecycle::Wrapping.stored())
@@ -199,7 +223,7 @@ pub async fn pull_request(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 /// The pull request on a Conversation's Timeline, against the Event it is.
 ///
 /// A map of at most one, read on its own rather than joined into the Timeline
-/// query, for the reason an Interruption's is: that query is already at the
+/// query, for the reason a Capture summary's is: that query is already at the
 /// sixteen columns a tuple can be read back as. This one is cheaper still —
 /// there is one PR per Conversation and there is usually none.
 pub(crate) async fn on_timeline(

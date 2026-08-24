@@ -12,6 +12,14 @@
 //! under. Keying off the type alone would draw a directory listing as though a
 //! person had read it out, so what decides is the block inside.
 //!
+//! **A call and its answer are linked, not merged.** The pane draws the two as
+//! one card, and what says which answer belongs to which call is the name the
+//! backend gave the call, carried on both turns. Joining them here would not
+//! survive an incremental reading: a batch ends wherever the log had got to, so
+//! a call whose answer falls in the next batch would have to be held back or
+//! sent twice. The link crosses the wire and the pane does the joining, over
+//! the whole record it has accumulated.
+//!
 //! **Three classes of line, not two.** Beside the conversation a log carries the
 //! backend's own bookkeeping — modes, reminders, attachments, snapshots — which
 //! is roughly a third of every log and none of it anything a reader came for. It
@@ -174,6 +182,11 @@ pub struct ToolUse {
     /// What the tool is called.
     pub name: String,
 
+    /// The name the backend gave this call, which its answer names back. Empty
+    /// where the log gave none, which leaves the call with nothing to pair it
+    /// to — still a call, still shown.
+    pub call: String,
+
     /// The one line about it. Empty where the call said nothing this could
     /// summarise, which leaves the name standing on its own.
     pub about: String,
@@ -188,6 +201,10 @@ pub struct ToolUse {
 pub struct ToolResult {
     /// The turn's place in the conversation, counted from 1.
     pub id: u32,
+
+    /// The call this answers, by the name the backend gave it. Empty where the
+    /// log gave none, which leaves the answer standing on its own.
+    pub call: String,
 
     /// Whether the tool failed.
     pub failed: bool,
@@ -282,7 +299,7 @@ const ABOUT_LIMIT: usize = 120;
 ///
 /// The prose alone — not its thinking, not the tools it called, not what was put
 /// to it. What this is for is the two places a session is quoted in miniature,
-/// its Timeline row and the evidence an Interruption carries, and both of those
+/// its Timeline row and the evidence a halt Notice carries, and both of those
 /// are asking what the session last *said*.
 ///
 /// Markdown as it stands rather than rendered, because neither of those two
@@ -307,6 +324,31 @@ pub fn statements(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// How many turns a batch of the Transcript's lines is.
+///
+/// What the Timeline row counts. A turn is whatever the pane would draw as one
+/// — the prose, the thinking, the tool call, the answer, the turn put to it —
+/// and the backend's own bookkeeping is not among them, so this is the same
+/// reading rather than a count of anything simpler.
+///
+/// The same reading and not a second opinion of it: the lines go through
+/// [`read`] exactly as they do for the pane, and what [`Reads::Counting`] takes
+/// out is the rendering rather than any of the judgement. A count worked out
+/// another way would be a second definition of what a turn is, and two of those
+/// would come apart the first time either moved.
+///
+/// Additive, which is what lets the relay keep a running total: a line is read
+/// on its own, so the turns of two batches are the turns of both.
+pub fn turns(lines: &[String]) -> usize {
+    let mut reading = Reading::new(Cursor::default(), Reads::Counting);
+
+    for line in lines {
+        read(line, &mut reading);
+    }
+
+    reading.turns.len()
+}
+
 /// The Transcript's lines, read into the conversation they record.
 ///
 /// One line can be more than one turn — an agent that wrote prose and then
@@ -325,11 +367,7 @@ pub fn transcript_view(lines: &[String]) -> TranscriptView {
 /// numbering is the only thing carried across — so a record accumulated a batch
 /// at a time is the record read whole, turn for turn.
 pub fn transcript_after(from: Cursor, lines: &[String]) -> TranscriptView {
-    let mut reading = Reading {
-        from,
-        turns: Vec::new(),
-        bookkeeping: Vec::new(),
-    };
+    let mut reading = Reading::new(from, Reads::Drawing);
 
     for line in lines {
         read(line, &mut reading);
@@ -350,11 +388,47 @@ struct Reading {
     /// record, which is the same thing said of a record nothing has read yet.
     from: Cursor,
 
+    /// Whether the turns are being drawn or only counted.
+    reads: Reads,
+
     turns: Vec<Turn>,
     bookkeeping: Vec<Bookkeeping>,
 }
 
+/// What a reading is for: the pane, which draws the turns, or the Timeline row,
+/// which counts them.
+///
+/// The same reading either way — the same lines, the same blocks, the same
+/// judgements about which of them is a turn and which is the backend talking to
+/// itself. What counting leaves out is only the rendering: the markdown, the
+/// JSON laid out to be read, the text of what a tool answered. All of that is a
+/// row's worth of work per line of a log, done on the loop that is following it
+/// while a session runs, for a number nobody was going to read the HTML of.
+///
+/// One code path rather than two, because the count the row shows and the turns
+/// the pane draws have to be the same number. Two readings kept in step by hand
+/// would fall out of it the first time a kind of block was added to one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reads {
+    /// Everything, rendered, for the pane to draw.
+    Drawing,
+
+    /// The turns alone. Everything rendered comes out empty, and nothing else
+    /// about the reading changes.
+    Counting,
+}
+
 impl Reading {
+    /// A reading about to begin, carrying on from `from`.
+    fn new(from: Cursor, reads: Reads) -> Reading {
+        Reading {
+            from,
+            reads,
+            turns: Vec::new(),
+            bookkeeping: Vec::new(),
+        }
+    }
+
     /// The conversation taking one more turn, numbered as it is taken.
     ///
     /// The `id` is the turn's place in the conversation, and it is counted
@@ -413,13 +487,15 @@ impl Turn {
 
 /// One line, put wherever it belongs.
 fn read(line: &str, into: &mut Reading) {
+    let reads = into.reads;
+
     let Ok(entry) = serde_json::from_str::<Value>(line) else {
         // Not JSON at all, which is a line torn by something or a format that
         // has stopped being JSONL. Either way it is what the session wrote, so
         // it is shown as it stands.
         into.take(Turn::Unread(Unread {
             id: UNPLACED,
-            line: line.to_owned(),
+            line: text(line, reads),
         }));
         return;
     };
@@ -427,32 +503,34 @@ fn read(line: &str, into: &mut Reading) {
     match entry["type"].as_str() {
         Some("assistant") => said(&entry, into),
         Some("user") => put(&entry, into),
-        Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry)),
-        _ => into.take(unread(&entry)),
+        Some(kind) if BOOKKEEPING.contains(&kind) => into.keep(kind.to_owned(), raw(&entry, reads)),
+        _ => into.take(unread(&entry, reads)),
     }
 }
 
 /// What the agent said: its prose, its reasoning, and the tools it called.
 fn said(entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
     let Some(blocks) = entry["message"]["content"].as_array() else {
-        into.take(unread(entry));
+        into.take(unread(entry, reads));
         return;
     };
 
     for block in blocks {
         match block["type"].as_str() {
             Some("text") => {
-                if let Some(prose) = prose(block, "text") {
+                if let Some(prose) = prose(block, "text", reads) {
                     into.take(Turn::Prose(prose));
                 }
             }
             Some("thinking") => {
-                if let Some(Prose { html, .. }) = prose(block, "thinking") {
+                if let Some(Prose { html, .. }) = prose(block, "thinking", reads) {
                     into.take(Turn::Reasoning(Reasoning { id: UNPLACED, html }));
                 }
             }
-            Some("tool_use") => into.take(Turn::ToolUse(called(block))),
-            _ => into.take(unread(block)),
+            Some("tool_use") => into.take(Turn::ToolUse(called(block, reads))),
+            _ => into.take(unread(block, reads)),
         }
     }
 }
@@ -465,15 +543,17 @@ fn said(entry: &Value, into: &mut Reading) {
 /// thing arriving under it: a line the backend wrote to itself in the human's
 /// voice, which is bookkeeping wearing a turn's clothes.
 fn put(entry: &Value, into: &mut Reading) {
+    let reads = into.reads;
+
     if entry["isMeta"].as_bool().unwrap_or(false) {
-        into.keep("user".to_owned(), raw(entry));
+        into.keep("user".to_owned(), raw(entry, reads));
         return;
     }
 
     match &entry["message"]["content"] {
         // A turn typed by the human arrives as the words themselves.
         Value::String(said) => {
-            if let Some(html) = rendered(said) {
+            if let Some(html) = rendered(said, reads) {
                 into.take(Turn::Put(Put { id: UNPLACED, html }));
             }
         }
@@ -481,16 +561,16 @@ fn put(entry: &Value, into: &mut Reading) {
             for block in blocks {
                 match block["type"].as_str() {
                     Some("text") => {
-                        if let Some(Prose { html, .. }) = prose(block, "text") {
+                        if let Some(Prose { html, .. }) = prose(block, "text", reads) {
                             into.take(Turn::Put(Put { id: UNPLACED, html }));
                         }
                     }
-                    Some("tool_result") => into.take(Turn::ToolResult(answered(block))),
-                    _ => into.take(unread(block)),
+                    Some("tool_result") => into.take(Turn::ToolResult(answered(block, reads))),
+                    _ => into.take(unread(block, reads)),
                 }
             }
         }
-        _ => into.take(unread(entry)),
+        _ => into.take(unread(entry, reads)),
     }
 }
 
@@ -500,27 +580,37 @@ fn put(entry: &Value, into: &mut Reading) {
 /// Nothing rather than an empty rendering, because an empty turn draws as a
 /// collapsed row with nothing behind it. Reasoning arrives this way when the
 /// backend redacted it: a signature, and no thinking to go with it.
-fn prose(block: &Value, key: &str) -> Option<Prose> {
-    rendered(block[key].as_str().unwrap_or_default()).map(|html| Prose { id: UNPLACED, html })
+fn prose(block: &Value, key: &str, reads: Reads) -> Option<Prose> {
+    rendered(block[key].as_str().unwrap_or_default(), reads)
+        .map(|html| Prose { id: UNPLACED, html })
 }
 
 /// The same for markdown that is already in hand.
-fn rendered(markdown: &str) -> Option<String> {
-    match markdown.trim().is_empty() {
-        true => None,
-        false => Some(crate::markdown::to_html(markdown)),
+///
+/// Whether there is a turn here at all is decided the same way for a reading
+/// that is only counting — an empty block is no turn either way — and it is the
+/// rendering that is skipped.
+fn rendered(markdown: &str, reads: Reads) -> Option<String> {
+    match (markdown.trim().is_empty(), reads) {
+        (true, _) => None,
+        (false, Reads::Counting) => Some(String::new()),
+        (false, Reads::Drawing) => Some(crate::markdown::to_html(markdown)),
     }
 }
 
 /// A tool call: which tool, the one line about it, and what it was called with.
-fn called(block: &Value) -> ToolUse {
+fn called(block: &Value, reads: Reads) -> ToolUse {
     let input = &block["input"];
 
     ToolUse {
         id: UNPLACED,
-        name: block["name"].as_str().unwrap_or_default().to_owned(),
-        about: about(input),
-        input: raw(input),
+        name: text(block["name"].as_str().unwrap_or_default(), reads),
+        call: text(block["id"].as_str().unwrap_or_default(), reads),
+        about: match reads {
+            Reads::Drawing => about(input),
+            Reads::Counting => String::new(),
+        },
+        input: raw(input, reads),
     }
 }
 
@@ -552,9 +642,19 @@ fn one_line(text: &str) -> String {
 /// to contain into headings. An answer that came back as blocks — which is how
 /// a screenshot arrives — keeps the text of it and says what the rest was,
 /// because a picture nobody can draw here is still something that happened.
-fn answered(block: &Value) -> ToolResult {
+fn answered(block: &Value, reads: Reads) -> ToolResult {
+    if reads == Reads::Counting {
+        return ToolResult {
+            id: UNPLACED,
+            call: String::new(),
+            failed: false,
+            text: String::new(),
+        };
+    }
+
     ToolResult {
         id: UNPLACED,
+        call: text(block["tool_use_id"].as_str().unwrap_or_default(), reads),
         failed: block["is_error"].as_bool().unwrap_or(false),
         text: match &block["content"] {
             Value::String(text) => text.clone(),
@@ -573,18 +673,30 @@ fn answered(block: &Value) -> ToolResult {
 }
 
 /// Whatever this is, shown as the JSON it is.
-fn unread(value: &Value) -> Turn {
+fn unread(value: &Value, reads: Reads) -> Turn {
     Turn::Unread(Unread {
         id: UNPLACED,
-        line: raw(value),
+        line: raw(value, reads),
     })
 }
 
 /// JSON laid out to be read. Collapsed in the pane either way — but a reader
 /// who opens one has opened it to read it, and a format change is a thing to
 /// understand rather than to squint at.
-fn raw(value: &Value) -> String {
-    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+fn raw(value: &Value, reads: Reads) -> String {
+    match reads {
+        Reads::Drawing => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
+        Reads::Counting => String::new(),
+    }
+}
+
+/// Text a turn carries as it stands — and nothing at all where the reading is
+/// only counting, which is what keeps a count from copying a log.
+fn text(said: &str, reads: Reads) -> String {
+    match reads {
+        Reads::Drawing => said.to_owned(),
+        Reads::Counting => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -605,12 +717,54 @@ mod tests {
     ];
 
     fn fixture() -> TranscriptView {
-        transcript_view(
-            &FIXTURE
-                .iter()
-                .map(|line| (*line).to_owned())
-                .collect::<Vec<String>>(),
-        )
+        transcript_view(&lines(FIXTURE))
+    }
+
+    fn lines(said: &[&str]) -> Vec<String> {
+        said.iter().map(|line| (*line).to_owned()).collect()
+    }
+
+    /// The count the Timeline row shows is the turns the pane draws, and the one
+    /// fixture with one of everything in it is where the two are held to that.
+    #[test]
+    fn the_count_is_the_turns_the_pane_would_draw() {
+        assert_eq!(turns(&lines(FIXTURE)), fixture().turns.len());
+        assert_eq!(
+            turns(&lines(FIXTURE)),
+            6,
+            "one of everything, and the backend's own bookkeeping counted as none of it"
+        );
+    }
+
+    /// One line is any number of turns and a batch is any number of lines, so
+    /// what the relay adds up as it follows a log has to be the count of the
+    /// whole record — see [`crate::turns`].
+    #[test]
+    fn the_counts_of_two_batches_are_the_count_of_both() {
+        let whole = lines(FIXTURE);
+        let (first, rest) = whole.split_at(3);
+
+        assert_eq!(turns(first) + turns(rest), turns(&whole));
+    }
+
+    /// An empty block is no turn to either reading: a redacted thought is a
+    /// signature with no thinking to go with it, and the pane draws nothing for
+    /// one.
+    #[test]
+    fn a_block_that_said_nothing_is_counted_as_no_turn() {
+        let said = lines(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"xx"}]}}"#,
+        ]);
+
+        assert_eq!(turns(&said), 0);
+        assert_eq!(turns(&said), transcript_view(&said).turns.len());
+    }
+
+    /// And a session that keeps no log has nothing to count, which is what the
+    /// row shows no metric for.
+    #[test]
+    fn a_transcript_with_nothing_on_it_is_no_turns() {
+        assert_eq!(turns(&[]), 0);
     }
 
     #[test]
@@ -635,6 +789,7 @@ mod tests {
                 Turn::ToolUse(ToolUse {
                     id: 4,
                     name: "Bash".to_owned(),
+                    call: "toolu_1".to_owned(),
                     about: "List the task files".to_owned(),
                     input: serde_json::to_string_pretty(&serde_json::json!({
                         "command": "ls .tasks",
@@ -644,6 +799,7 @@ mod tests {
                 }),
                 Turn::ToolResult(ToolResult {
                     id: 5,
+                    call: "toolu_1".to_owned(),
                     failed: false,
                     text: "04-render.md\n05-summaries.md".to_owned()
                 }),
@@ -798,6 +954,55 @@ mod tests {
         );
     }
 
+    /// A call and the answer to it name each other, which is what the pane
+    /// draws the two as one card on. The names come from the log rather than
+    /// from the order: an agent that called three tools at once wrote three
+    /// calls and then three answers, and only the names say which answered
+    /// which.
+    #[test]
+    fn a_call_and_its_answer_carry_the_name_that_joins_them() {
+        let view = transcript_view(&lines(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Read","input":{"file_path":"one.rs"}},{"type":"tool_use","id":"toolu_b","name":"Read","input":{"file_path":"two.rs"}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"two"},{"type":"tool_result","tool_use_id":"toolu_a","content":"one"}]}}"#,
+        ]));
+
+        let named: Vec<&str> = view
+            .turns
+            .iter()
+            .map(|turn| match turn {
+                Turn::ToolUse(call) => call.call.as_str(),
+                Turn::ToolResult(answer) => answer.call.as_str(),
+                _ => "",
+            })
+            .collect();
+
+        assert_eq!(
+            named,
+            ["toolu_a", "toolu_b", "toolu_b", "toolu_a"],
+            "the answers came back the other way round, and say so"
+        );
+    }
+
+    /// A log that named neither leaves both standing on their own rather than
+    /// pairing everything nameless with everything else.
+    #[test]
+    fn a_call_the_log_did_not_name_has_nothing_to_pair_it_to() {
+        let view = transcript_view(&lines(&[
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"one.rs"}}]}}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"one"}]}}"#,
+        ]));
+
+        assert!(
+            matches!(
+                &view.turns[..],
+                [Turn::ToolUse(call), Turn::ToolResult(answer)]
+                    if call.call.is_empty() && answer.call.is_empty()
+            ),
+            "{:?}",
+            view.turns
+        );
+    }
+
     /// An answer that came back as blocks rather than as text, which is how a
     /// screenshot arrives. Nothing of it is dropped: what cannot be drawn as
     /// text says what it was instead.
@@ -812,6 +1017,7 @@ mod tests {
             view.turns,
             vec![Turn::ToolResult(ToolResult {
                 id: 1,
+                call: "toolu_3".to_owned(),
                 failed: true,
                 text: "could not read it\n[image]".to_owned(),
             })]

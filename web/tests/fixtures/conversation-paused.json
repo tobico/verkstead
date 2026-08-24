@@ -4,28 +4,41 @@
   "blocked_on": 25,
   "branch": "deferred-asks",
   "direction": null,
-  "grilling_profile": {
-    "agent_type": "Claude",
-    "broken": null,
-    "claude_dir": "/srv/accounts/fable/.claude",
-    "config_file": "/srv/accounts/fable/.claude.json",
-    "id": 1,
-    "model": "claude-fable-5",
-    "name": "fable"
+  "grilling_pairing": {
+    "model": null,
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/fable/.claude",
+      "config_file": "/srv/accounts/fable/.claude.json",
+      "id": 1,
+      "models": [
+        "claude-fable-5"
+      ],
+      "name": "fable"
+    }
   },
   "held": null,
   "id": 6,
-  "implementation_profile": {
-    "agent_type": "Claude",
-    "broken": null,
-    "claude_dir": "/srv/accounts/opus/.claude",
-    "config_file": "/srv/accounts/opus/.claude.json",
-    "id": 2,
-    "model": "claude-opus-5",
-    "name": "opus"
+  "implementation_pairing": {
+    "model": null,
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/opus/.claude",
+      "config_file": "/srv/accounts/opus/.claude.json",
+      "id": 2,
+      "models": [
+        "claude-opus-5",
+        "claude-haiku-4-5-20251001"
+      ],
+      "name": "opus"
+    }
   },
   "pinned": [],
   "ready_to_grill": false,
+  "ready_to_resume": true,
+  "ready_to_stop": true,
   "repo": {
     "default_branch": "main",
     "id": 1,

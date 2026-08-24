@@ -15,13 +15,26 @@
 //! what it committed on the Timeline.
 //!
 //! **Two attempts, then it stops asking the machine and starts asking the
-//! human.** A check that is still red after [`ATTEMPTS`] fix sessions raises an
-//! Interruption and nothing further is dispatched for it: the human reads which
-//! checks failed and what the last session said, and picks a remedy. The count
+//! human.** A check that is still red after [`ATTEMPTS`] fix sessions halts the
+//! run and nothing further is dispatched for it: the human reads which checks
+//! failed and what the last session said, off the Notice. The count
 //! is per check rather than per Conversation — a suite where one job fails and
 //! is fixed and then a different one fails has not spent its attempts — and it
 //! is kept in the store, so a restarted server does not start the counting
 //! again.
+//!
+//! **A check that goes red while the review holds the Worktree is the review's
+//! to fix**, not a session of its own. The review session takes the Worktree
+//! before it asks and keeps it until it ends — which is across the human's
+//! answering — so a fix session dispatched at a red check would find nothing to
+//! take and queue behind hours of waiting. It does not queue: the reviewing
+//! skill sends the woken session to read the pull request's own check state once
+//! the answers arrive and fix whatever is failing beside the findings they
+//! accepted, before its push. That spends none of the check's [`ATTEMPTS`],
+//! because nothing here dispatched it: the count is what stops an unattended
+//! loop, and this fix rides work the human just approved. Whatever is still red
+//! after that push is red in front of a free Worktree, and the flow below is
+//! the flow it meets.
 //!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it
 //! does not unsettle, and it dispatches nothing. That is the only honest reading
@@ -38,13 +51,13 @@ use crate::store;
 ///
 /// Two, which is one automatic go and one more after it did not work. A third
 /// would be a machine spending an account on the same failure with nobody
-/// watching, which is the whole thing an Interruption exists instead of.
+/// watching, which is the whole thing halting exists instead of.
 const ATTEMPTS: i64 = 2;
 
 /// Watch `conversation_id`'s checks until it stops wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or a run stopped at an Interruption. Idle rather than looping, for the
+/// gone, or driving that halted. Idle rather than looping, for the
 /// runner's reason — a watcher that kept dispatching sessions at a check nothing
 /// was going to fix would be spending an account on the same failure over and
 /// over.
@@ -52,9 +65,9 @@ const ATTEMPTS: i64 = 2;
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
-    // The Timeline Event the last fix session printed into, so that an
-    // Interruption raised here carries the tail of what it said — which is where
-    // the reason it could not fix the check is usually written down.
+    // The Timeline Event the last fix session printed into, so that a halt
+    // written here carries the tail of what it said — which is where the reason
+    // it could not fix the check is usually written down.
     let mut writing = None;
 
     loop {
@@ -77,11 +90,11 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
 /// Forget what a Conversation's checks have already been tried, and watch them
 /// again.
 ///
-/// What a retried checks Interruption does. The attempts go first: the human has
-/// read the evidence and asked for another go, and a count left standing would be
-/// a watcher that raised the same Interruption on its next poll without
-/// dispatching anything.
-pub(crate) async fn retried(state: AppState, conversation_id: i64) {
+/// What Resume does to a Conversation that halted on its checks. The attempts
+/// go first: the human has read the Notice of what stopped and asked for another
+/// go, and a count left standing would be a watcher that halted all over again on
+/// its next poll without dispatching anything.
+pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
         tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks had been given failed");
         return;
@@ -93,10 +106,9 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
     );
 
     // The whole wrap-up rather than the checks alone: the review stopped being
-    // run when this Interruption was raised, because nothing advances past an
-    // open one, and a Conversation that came back with its checks watched and
-    // nobody reading its branch would wait on a review that was never going to
-    // happen.
+    // run when the halt was written, because nothing advances past one, and a
+    // Conversation that came back with its checks watched and nobody reading its
+    // branch would wait on a review that was never going to happen.
     crate::wrapping::watching(&state, conversation_id);
 }
 
@@ -128,17 +140,13 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
         return Watching::Done("the Conversation is not wrapping up any more");
     }
 
-    // Asked before anything is dispatched, for the runner's reason: the run
-    // does not advance past an Interruption or a Pause, which means no session is
-    // launched while the human is still being asked something or the account is
-    // out of window. Including the Interruption raised here.
-    match crate::interruptions::held_up(&state.pool, conversation_id).await {
-        Ok(Some(_)) => return Watching::Done("the run is blocked on the human"),
-        Ok(None) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            return Watching::Again(writing);
-        }
+    // Asked before anything is dispatched, for the runner's reason: *the run does
+    // not advance past a halt* means no session is launched while the human is
+    // the only thing that can start one. Including the halt written here, and
+    // including a run waiting an account's window out — see
+    // [`crate::halts::stopped`], which is where the two are one question.
+    if crate::halts::stopped(state, conversation_id).await {
+        return Watching::Done("driving has stopped");
     }
 
     let opened = match store::pull_request(&state.pool, conversation_id).await {
@@ -253,6 +261,11 @@ async fn fix(
     // fix session queued behind one would be dispatched about a suite nobody has
     // looked at since. Looking again in half a minute costs nothing and asks
     // GitHub afresh.
+    //
+    // Which is also why nothing is counted for a check the review ends up fixing
+    // itself: an attempt is spent where a session is dispatched, and none is
+    // here. The turn being taken is the whole of what folds this check into the
+    // woken session, and the two attempts are still there for it afterwards.
     let Some(_turn) = state.sessions.try_turn(conversation_id) else {
         tracing::debug!(
             conversation_id,
@@ -287,11 +300,16 @@ async fn fix(
     Watching::Again(said.or(writing))
 }
 
-/// Stop asking the machine: put what failed on the Timeline for the human.
+/// Stop asking the machine: halt, and put what failed on the Timeline.
 ///
-/// The evidence is what makes the choice answerable without opening a terminal —
+/// The evidence is what makes the stop readable without opening a terminal —
 /// which checks failed, where their runs are, and the tail of what the last fix
-/// session said, which [`crate::interruptions::raise`] reads off `writing`.
+/// session said, which [`crate::halts::halt`] reads off `writing`.
+///
+/// [`store::Halt::Deliberate`]: every fix session the branch was allowed has
+/// been spent, and Verkstead stopping there is a decision. A restart that
+/// started the fixing over would spend them all again on checks that are still
+/// red for whatever reason they were red the first time.
 async fn ask(
     state: &AppState,
     conversation_id: i64,
@@ -307,10 +325,10 @@ async fn ask(
         listed(failed),
     );
 
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Checks,
+        crate::halts::Decided::Verkstead,
         "getting the pull request's checks green again",
         &how,
         writing,
@@ -320,7 +338,7 @@ async fn ask(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "the checks would not go green and the Interruption saying so could not be raised"
+            "the checks would not go green and the halt saying so could not be recorded"
         );
     }
 

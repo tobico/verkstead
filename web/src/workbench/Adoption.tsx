@@ -8,11 +8,11 @@
 //!
 //! What the roadmap and the stage are is the server's reading of the repository
 //! at this conversation's base commit, redone every time the page is drawn.
-//! Overriding the base in the details pane is answered by the stage that is
+//! Overriding the base on the brief card is answered by the stage that is
 //! next *there*: what this names is never what the notice happened to show, it
 //! is what the press would actually start.
 //!
-//! The branch is not offered here or in the details pane. A stage is worked on
+//! The branch is not offered here or on the brief card. A stage is worked on
 //! its own slug — `04-wrap-up.md` becomes `wrap-up` — so the name the server
 //! invented when the row was made is discarded at the press, and what the
 //! sidebar shows until then is that invented name.
@@ -36,9 +36,9 @@ export const ADOPT_REFUSAL: Record<Adopted, string> = {
   NotDrafting: "This conversation has already been adopted.",
   NotAdopting:
     "This conversation is adopting nothing, so it has no roadmap to take a stage from.",
-  NoGrillingProfile: "Choose a grilling profile first, in the details pane.",
+  NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
-    "Choose an implementation profile first, in the details pane.",
+    "Choose an implementation profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   NoBaseCommit: "The repo has nothing to branch from any more.",

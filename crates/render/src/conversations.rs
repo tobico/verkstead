@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, ProfileEntry, RepoEntry, Standing};
+use crate::{DiffView, PairingView, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -45,11 +45,12 @@ pub enum Lifecycle {
 /// The branch is the row's name: a Conversation has no title of its own, and of
 /// what it does have the branch is the short line the human chose.
 ///
-/// Where it has got to is drawn rather than worded — a spinner for a session
-/// that is running, a dot for one that wants answering, a dotted border for a
-/// draft and a dimmed card for work that has stopped. Which is why the two facts
-/// below are facts and not one collapsed verdict: the row says what is true of
-/// the Conversation, and which mark that comes out as is the one rule the viewer
+/// Where it has got to is drawn rather than worded — a turning ring for a
+/// session getting on with it, the same ring empty for one that has gone quiet,
+/// a dot for a Conversation that wants answering, a dotted border for a draft
+/// and a dimmed card for work that has stopped. Which is why the facts below are
+/// facts and not one collapsed verdict: the row says what is true of the
+/// Conversation, and which mark that comes out as is the one rule the viewer
 /// keeps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -68,8 +69,18 @@ pub struct ConversationEntry {
     /// server that restarted says no about work it is no longer doing.
     pub working: bool,
 
+    /// And whether that session has stopped printing — the same quiet the
+    /// agent-output row's mark is drawn from, said here so that a card and the
+    /// row it opens tell the same truth about the same session.
+    ///
+    /// Always `false` where nothing is working, which is what keeps the two a
+    /// pair rather than a contradiction: idle is a thing a *running* session
+    /// is. Which mark it comes out as is the viewer's, and the rule there is
+    /// unchanged — waiting still wins over both.
+    pub idle: bool,
+
     /// Whether something about this Conversation is waiting on the human: an ask
-    /// left open, or a run stopped on an Interruption.
+    /// left open, or driving that has halted.
     ///
     /// Folded from every source before it leaves, so the viewer holds no list of
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -195,23 +206,54 @@ pub struct ConversationView {
 
     pub state: Lifecycle,
 
-    /// The Agent Profile the grilling session will run under, whole rather than
-    /// by id: the pane says what it is, and whether it is still runnable.
-    pub grilling_profile: Option<ProfileEntry>,
+    /// The Profile and model the grilling session will run under, whole rather
+    /// than by id: the pane says what they are, and whether the Profile is
+    /// still runnable.
+    pub grilling_pairing: Option<PairingView>,
 
-    /// And the one the implementation will run under. Chosen separately because
-    /// it is genuinely a separate account and model.
-    pub implementation_profile: Option<ProfileEntry>,
+    /// And the ones the implementation will run under. Chosen separately
+    /// because it is genuinely a separate account and model.
+    pub implementation_pairing: Option<PairingView>,
 
     /// Whether everything needed before grilling will start is settled: both
-    /// Profiles chosen and neither broken, a Brief with something in it, and a
-    /// Conversation still drafting.
+    /// Pairings complete and neither Profile broken, a Brief with something in
+    /// it, and a Conversation still drafting.
     ///
     /// The server's rule rather than something the page works out from the
     /// fields around it. Every one of the refusals is checked again when the
     /// button is pressed — this is what decides whether to offer the button, and
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
+
+    /// Whether there is driving to start again: the Conversation is in a state
+    /// something ought to be driving, and nothing is.
+    ///
+    /// What decides whether Resume is offered, and the server's rule rather
+    /// than something the page works out from the fields around it — *driven*
+    /// is a register of tasks that are running, and a page cannot see one.
+    /// Every refusal is checked again when the button is pressed; this says
+    /// only that it was worth offering as of the moment it was read.
+    ///
+    /// A question about a process as much as about the record, so a restarted
+    /// server reads every Conversation it left mid-run as one to resume —
+    /// which each of them is.
+    pub ready_to_resume: bool,
+
+    /// And whether there is driving to stop: the Conversation is in a state
+    /// something ought to be driving, and it has not halted.
+    ///
+    /// What decides whether Stop and Force stop are offered. Not the mirror of
+    /// [`ready_to_resume`]: a Conversation between one step and the next has
+    /// both, because nothing is running now and the run is going to launch
+    /// something the moment it can. A quiet Conversation is one to stop as much
+    /// as a busy one.
+    ///
+    /// Force stop is offered where this and [`working`] are both true — the
+    /// stop that ends a session is worth offering only where there is one.
+    ///
+    /// [`ready_to_resume`]: ConversationView::ready_to_resume
+    /// [`working`]: ConversationView::working
+    pub ready_to_stop: bool,
 
     /// What this Conversation is adopting, where it is adopting anything.
     ///
@@ -258,8 +300,8 @@ pub struct ConversationView {
     ///
     /// Beside `blocked_on` rather than folded into it, though a Hold sets that
     /// too. What the badge says is *the work has stopped and it is your move*,
-    /// and what this says is *which move* — where an Interruption is answered
-    /// with a Remedy, a Hold is answered by handing the keyboard back.
+    /// and what this says is *which move* — where a halt is answered by pressing
+    /// Resume, a Hold is answered by handing the keyboard back.
     ///
     /// Never on the Timeline, however long it lasts: the Timeline records the
     /// work rather than the watching. This is a fact about now, read off the
@@ -370,26 +412,14 @@ pub enum TimelineEvent {
     /// same reason.
     Commit(CommitEvent),
 
-    /// A run that stopped: what Verkstead noticed, the evidence it gathered, and
-    /// the three remedies — offered on the Event itself, because the Timeline is
-    /// where the human looks.
-    ///
-    /// The one kind of Event that carries its whole self rather than a summary
-    /// with the rest behind a fetch. Its evidence is four short strings, gathered
-    /// once and bounded when it was — see [`InterruptionEvent::tail`] — where a
-    /// Capture and a diff are megabytes. A second request for what the
-    /// remedies are being chosen against would be a page that could draw the
-    /// buttons before it could say what they were for.
-    Interruption(InterruptionEvent),
-
     /// A run waiting an account's window out: which Profile ran out, when it
     /// comes back, and the press that starts the work again.
     ///
-    /// Its whole self, like the Interruption above it and for the same reason:
-    /// there is something to press on it, and a page that had to fetch what it
-    /// was waiting for could draw the button before it could say what for. Three
-    /// short strings, where an Interruption's evidence is four — this one is not
-    /// a reading of anything that went wrong, because nothing did.
+    /// The one kind of Event that carries its whole self rather than a summary
+    /// with the rest behind a fetch: there is something to press on it, and a
+    /// page that had to fetch what it was waiting for could draw the button
+    /// before it could say what for. Three short strings, where a Capture and a
+    /// diff are megabytes.
     Pause(PauseEvent),
 
     /// Something Verkstead did on its own account, rendered inline like the
@@ -412,113 +442,12 @@ pub enum TimelineEvent {
     ManualTask(ManualTaskEvent),
 }
 
-/// One of the three things the human can do about an Interruption.
-///
-/// Roadrunner's remedies and roadrunner's meanings. In every case the repository
-/// is left as the session left it: none of the three reverts, resets or stashes
-/// anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Remedy {
-    /// Run the step again in a fresh session, told whatever the human wrote
-    /// alongside.
-    Retry,
-
-    /// Verkstead stops driving, so the human can take the step on themselves.
-    TakeOver,
-
-    /// The run ends here.
-    Abort,
-}
-
-/// A run that stopped, as the Timeline shows it: what went wrong, what the
-/// evidence was, and how the human settled it.
-///
-/// The evidence is a reading of a Worktree and a session at the moment they went
-/// wrong, taken then and kept — both move on, and a git status read when the page
-/// looked would be a status of whatever happened next.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct InterruptionEvent {
-    pub id: i64,
-
-    /// When the run stopped, RFC 3339.
-    pub at: String,
-
-    /// Which step failed, in words — "task 03 of the backlog".
-    pub what: String,
-
-    /// How it ended: the exit status, or that it ended without landing anything.
-    pub how: String,
-
-    /// What git made of the Worktree, as `git status` said it. Empty where the
-    /// repository would not answer, or where there was nothing pending.
-    pub git_status: String,
-
-    /// The tail of what the session said: its own prose off the Transcript, or
-    /// what it printed with the terminal's control sequences taken out where it
-    /// kept no log. The tail and not the whole: what went wrong is at the end,
-    /// and the whole of it is on the Timeline already as the session's own
-    /// Event. Empty where it said nothing at all.
-    pub tail: String,
-
-    /// How the human settled it, or `null` while it is still open — which is the
-    /// state the run is stopped in, and what the remedies are drawn for.
-    pub settled: Option<RemedyTaken>,
-}
-
-/// How an Interruption was settled: which remedy, whatever the human wrote
-/// alongside it, and when.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct RemedyTaken {
-    pub remedy: Remedy,
-
-    /// What the human wrote alongside the choice — "try again but leave the
-    /// migration alone". Empty where they wrote nothing, which is the ordinary
-    /// case for the two remedies that launch nothing.
-    pub note: String,
-
-    /// When they chose, RFC 3339.
-    pub at: String,
-}
-
-/// The remedy the human is choosing, and what they want said alongside it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct RemedyChoice {
-    pub remedy: Remedy,
-
-    /// What to tell the fresh session, for a retry. Carried for the other two as
-    /// well and recorded either way: a human who wrote why they were taking over
-    /// has said something worth keeping on the record, even though nothing reads
-    /// it back to an agent.
-    pub note: String,
-}
-
-/// What became of choosing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum RemedySettled {
-    /// Recorded, and the remedy has been acted on.
-    Settled,
-
-    /// This Conversation has no such Interruption — an Event id that belongs to
-    /// another Conversation names nothing.
-    NoSuchInterruption,
-
-    /// It was settled before this arrived — from another device, or by a second
-    /// press. Not an error and not something to act on twice: the first choice
-    /// stands.
-    AlreadySettled,
-}
-
 /// A run waiting an account's window out, as the Timeline shows it.
 ///
 /// Nothing here went wrong, which is what makes it a different Event from the
-/// Interruption it is shaped like: the account is out of window, the agent is
-/// waiting for the same reset, and the Conversation is *blocked on you* only in
-/// the sense that the human may decide not to wait.
+/// Notice a halt writes: the account is out of window, the agent is waiting for
+/// the same reset, and the Conversation is *blocked on you* only in the sense
+/// that the human may decide not to wait.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PauseEvent {
@@ -542,13 +471,18 @@ pub struct PauseEvent {
 
     /// What ended the wait, or `null` while it is still on — which is the state
     /// the run is stopped in, and what the resume press is drawn for.
-    pub resumed: Option<Resumed>,
+    pub resumed: Option<PauseEnded>,
 }
 
 /// How a Pause ended: what started the work again, and when.
+///
+/// Named for the Pause rather than for the resuming, because [`Resumed`] is
+/// already what pressing **Resume** on a halt answers with. The two are
+/// different things said with one word — one is a wait that is over, the other
+/// is a run that has been started again — so this takes the longer name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct Resumed {
+pub struct PauseEnded {
     pub by: By,
 
     /// When it ended, RFC 3339.
@@ -769,9 +703,9 @@ pub struct PullRequestComment {
 /// A commit as the Timeline shows it: what it was called, and how much of the
 /// repository it moved.
 ///
-/// The summary and not the diff. A commit's diff is what the details pane
-/// fetches, from the repository the commit is in — see [`CommitDiff`] — and the
-/// Timeline is re-read every time an open page hears the world moved.
+/// The line and not what is behind it. A commit's summary and its diff are what
+/// the details pane fetches — see [`CommitPane`] — and the Timeline is re-read
+/// every time an open page hears the world moved.
 ///
 /// There is no state here and no action on it. Commits are viewable and nothing
 /// else: the design gives them no per-commit review, because feedback about the
@@ -801,20 +735,53 @@ pub struct CommitEvent {
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// What the commit said about itself, as prose alone: its Commit Summary
+    /// flattened to a line with the Diagram left out, for the card to clamp —
+    /// see [`crate::markdown::to_prose`].
+    ///
+    /// The prose and not the rendering, unlike every other document on a card.
+    /// A commit's card is a button, rendered markdown cannot live inside one,
+    /// and the summary is on the card to be read rather than to be read *at*:
+    /// what it looks like whole is the pane's, and the card says what it says.
+    ///
+    /// `None` where the commit carried no summary — which is every bookkeeping
+    /// commit and every commit recorded before summaries were kept — and where
+    /// what it carried was a Diagram and nothing else. Both draw the card that
+    /// has always been drawn.
+    pub snippet: Option<String>,
 }
 
-/// One commit's diff, as the details pane receives it.
+/// One commit, as the details pane receives it: what it said about itself, and
+/// what it changed.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is read when somebody opens the one Event it belongs to.
+/// moved, and a commit is read whole when somebody opens the one Event it
+/// belongs to.
 ///
-/// Rendered with the folds and the highlighting an attached Diff already gets,
-/// because it is the same renderer on the same kind of input — see
+/// The diff is rendered with the folds and the highlighting an attached Diff
+/// already gets, because it is the same renderer on the same kind of input — see
 /// [`crate::diff`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct CommitDiff {
+pub struct CommitPane {
+    /// The Commit Summary, rendered and sanitized like every other document an
+    /// agent wrote — `null` where the commit carried none, which is every
+    /// bookkeeping commit and every commit recorded before summaries were kept.
+    pub summary: Option<String>,
+
+    /// Whether that summary came out holding a Diagram, and so whether the pane
+    /// carries the client-side renderer at all.
+    ///
+    /// Answered here, off the HTML above, exactly as a Set's own flag is — see
+    /// [`crate::SetView::diagrams`]. It travels with the pane because it is a
+    /// fact about this commit's own account of itself, and because mermaid is
+    /// megabytes: the pane that asks for the bundle is the one with something to
+    /// draw with it. `false` where there is no summary, there being nothing
+    /// there to hold a Diagram.
+    pub diagrams: bool,
+
     /// `null` where the commit changed nothing a diff can show, which is a merge
     /// or an empty commit. A commit the repository no longer has is not this: it
     /// is a 404, because there is nothing there to draw a pane about.
@@ -923,8 +890,8 @@ pub struct BriefEvent {
     pub frozen: bool,
 }
 
-/// A session's output as the Timeline shows it: how much there is, the last
-/// thing that was said, and whether more is coming.
+/// A session's output as the Timeline shows it: how far its conversation has
+/// got, the last thing that was said, and whether more is coming.
 ///
 /// The summary and not the Capture. A grilling session prints megabytes over
 /// an hour, and the Timeline is re-read every time an open page hears the world
@@ -941,6 +908,15 @@ pub struct AgentOutputEvent {
     /// How many lines it has printed.
     pub lines: i64,
 
+    /// How many turns its conversation has taken, as the Transcript pane draws
+    /// them — which is the metric the row and the pane show.
+    ///
+    /// `null` where the session keeps no log, and the two places that show this
+    /// show nothing at all rather than a zero: a session with no Transcript has
+    /// no turns to be wrong about. Not the same as a count of none, which is a
+    /// session that has a log and has not said anything into it yet.
+    pub turns: Option<i64>,
+
     /// The last thing the agent said, off its own log — or, where it kept none,
     /// the last line it printed with the terminal's control sequences taken
     /// out. Empty where it has said nothing yet.
@@ -953,6 +929,19 @@ pub struct AgentOutputEvent {
     /// restarted has no sessions, which is why this is read off what is running
     /// rather than off what was written.
     pub running: bool,
+
+    /// And whether that session has stopped printing — quiet long enough for
+    /// the mark to say it is sitting there rather than working.
+    ///
+    /// Beside `running` rather than instead of it, because the two are
+    /// different questions and a page draws three answers from them: no mark,
+    /// a turning ring, and a still one. Always `false` where nothing is
+    /// running, which is what makes those three the only ones there are.
+    ///
+    /// Computed on every read, off the same clock that ends a session that has
+    /// gone quiet — so a page opened onto a session that has been idle for an
+    /// hour says so at once rather than waiting to be told.
+    pub idle: bool,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1102,9 +1091,14 @@ pub enum Shown {
 
 /// And what a watcher says back up it.
 ///
-/// Two kinds of thing, each saying which it is: the socket is a conversation in
-/// both directions, and what a watcher does to a Screen is either look at it a
-/// different size or type into it.
+/// Three kinds of thing, each saying which it is: the socket is a conversation
+/// in both directions, and what a watcher does to a Screen is look at it a
+/// different size, type into it, or move a mouse over it.
+///
+/// The last two carry the same thing — bytes on their way to the session's own
+/// terminal — and are told apart for one reason, which is the Hold. Typing
+/// takes it and mousing never does, so which of the two the human did has to
+/// survive the crossing rather than be guessed at from the bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Watching {
@@ -1125,6 +1119,20 @@ pub enum Watching {
     /// own terminal has already turned a keypress into the ones a session
     /// expects.
     Typed(String),
+
+    /// What the mouse did, on its way to the same terminal.
+    ///
+    /// A session whose interface tracks the mouse is sent a report of every
+    /// move, click and scroll over its Screen, down the path a keystroke takes
+    /// — so one of these is a keystroke in every respect but the one that
+    /// matters here: **it never takes the Hold**. The Hold is the human
+    /// deliberately intervening, and a cursor crossing a live Screen is not
+    /// that.
+    ///
+    /// Written through whether the Conversation is held or not, exactly as
+    /// [`Watching::Typed`] is: a human mid-intervention uses the mouse as much
+    /// as the keyboard.
+    Moused(String),
 }
 
 /// What handing a Conversation's keyboard back came to.
@@ -1180,15 +1188,22 @@ pub fn agent_output_event(
     id: i64,
     at: String,
     lines: i64,
+    turns: Option<i64>,
     latest: String,
     running: bool,
+    idle: bool,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
         at,
         lines,
+        turns,
         latest,
         running,
+        // Idle is a thing a running session is, and the caller reads the two
+        // off different places — so the pair is made consistent here rather
+        // than at each of them.
+        idle: running && idle,
     })
 }
 
@@ -1326,10 +1341,14 @@ pub fn brief_event(id: i64, at: String, markdown: String, frozen: bool) -> Timel
     })
 }
 
-/// A commit as an Event. Nothing to render — the summary is five facts git
-/// counted — and here beside the move for the reason that one is: one place
-/// knows how a Timeline is made.
-pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent {
+/// A commit as an Event: five facts git counted, and the snippet of what the
+/// commit said about itself that its card clamps.
+///
+/// Here beside the move for the reason that one is: one place knows how a
+/// Timeline is made. The snippet is rendered on the way through, which is the
+/// one thing here there is anything to render — a summary of nothing but a
+/// Diagram comes out empty, and a card with nothing to say says nothing.
+pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent {
     TimelineEvent::Commit(CommitEvent {
         id,
         at,
@@ -1338,6 +1357,11 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
         files: commit.files,
         insertions: commit.insertions,
         deletions: commit.deletions,
+        snippet: commit
+            .summary
+            .as_deref()
+            .map(crate::markdown::to_prose)
+            .filter(|prose| !prose.is_empty()),
     })
 }
 
@@ -1345,25 +1369,43 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
 /// holds it.
 ///
 /// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than six parameters, because five of them are numbers
-/// and a subject, and a call with those in the wrong order would compile.
+/// the store — and rather than seven parameters, because five of them are
+/// numbers and a subject, and a call with those in the wrong order would
+/// compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitSummary {
+pub struct CommitRecord {
     pub sha: String,
     pub subject: String,
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// The Commit Summary as the agent wrote it, or `None` where the commit
+    /// carried none. Markdown, as everything an agent writes is.
+    pub summary: Option<String>,
 }
 
-/// One commit's diff as the details pane receives it, rendered on the way.
+/// One commit as the details pane receives it, rendered on the way.
 ///
 /// Here rather than in the server for the reason the Brief's rendering is: this
-/// is the crate with the diff parser and the highlighter in it. A patch with
-/// nothing in it comes back as nothing to show, exactly as an empty attached
-/// Diff does.
-pub fn commit_diff(patch: &str) -> CommitDiff {
-    CommitDiff {
+/// is the crate with the markdown, the diff parser and the highlighter in it. A
+/// patch with nothing in it comes back as nothing to show, exactly as an empty
+/// attached Diff does — and so does a summary of nothing but whitespace, which
+/// the pane would otherwise draw as a gap above the diff.
+pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
+    let summary = summary
+        .map(crate::markdown::to_html)
+        .filter(|html| !html.trim().is_empty());
+
+    CommitPane {
+        // Asked of the rendered summary rather than of the message it came from,
+        // for the reason a Set's own flag is: the rendering is where a fence
+        // either became a Diagram or did not, and the renderer in the page reads
+        // that same answer out of that same markup.
+        diagrams: summary
+            .as_deref()
+            .is_some_and(crate::markdown::holds_diagram),
+        summary,
         diff: crate::diff::to_html(patch),
     }
 }
@@ -1442,41 +1484,9 @@ pub struct Comment {
     pub markdown: String,
 }
 
-/// A run that stopped, as an Event. Nothing to render — the evidence is four
-/// strings read off a Worktree and a terminal, and neither git status nor a
-/// session's last words are markdown — and here beside the rest for the reason a
-/// move is: one place knows how a Timeline is made.
-pub fn interruption_event(id: i64, at: String, stopped: Stopped) -> TimelineEvent {
-    TimelineEvent::Interruption(InterruptionEvent {
-        id,
-        at,
-        what: stopped.what,
-        how: stopped.how,
-        git_status: stopped.git_status,
-        tail: stopped.tail,
-        settled: stopped.settled,
-    })
-}
-
-/// What the caller of [`interruption_event`] hands over: the Interruption as the
-/// store holds it.
-///
-/// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than five parameters, because four of them are strings
-/// and a call with those in the wrong order would compile.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stopped {
-    pub what: String,
-    pub how: String,
-    pub git_status: String,
-    pub tail: String,
-    pub settled: Option<RemedyTaken>,
-}
-
 /// A run waiting an account's window out, as an Event. Nothing to render — a
 /// Profile's name and a line off a terminal are not markdown — and here beside
-/// the rest for the reason the Interruption above it is: one place knows how a
-/// Timeline is made.
+/// the rest for the reason a move is: one place knows how a Timeline is made.
 pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
     TimelineEvent::Pause(PauseEvent {
         id,
@@ -1491,15 +1501,15 @@ pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
 /// What the caller of [`pause_event`] hands over: the Pause as the store holds
 /// it.
 ///
-/// Its own type rather than the store's, for [`Stopped`]'s reason: this crate
-/// does not depend on the store, and a call with two strings in the wrong order
-/// would compile.
+/// Its own type rather than the store's, because this crate does not depend on
+/// the store — and rather than four parameters, two of which are strings: a
+/// call with those in the wrong order would compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Waiting {
     pub profile: String,
     pub said: String,
     pub resets_at: Option<String>,
-    pub resumed: Option<Resumed>,
+    pub resumed: Option<PauseEnded>,
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief
@@ -1597,13 +1607,14 @@ pub struct BranchRename {
     pub branch: String,
 }
 
-/// The commit to branch from, or `null` to go back to the default-branch rule.
+/// The branch to come off, or `null` to go back to the default-branch rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct BaseCommitOverride {
-    /// Whatever names a commit in the repository — a short hash, a tag, a branch
-    /// — which the server resolves before it records anything.
-    pub commit: Option<String>,
+pub struct BaseBranchChoice {
+    /// One of the repository's own branches, local or remote-tracking, by name.
+    /// Stored as the name and resolved when grilling starts, so the work comes
+    /// off wherever that branch stands then.
+    pub branch: Option<String>,
 }
 
 /// What became of an edit to a Brief.
@@ -1634,7 +1645,7 @@ pub enum BranchRenamed {
     NotABranchName,
 }
 
-/// What became of overriding the base commit.
+/// What became of choosing the branch the work comes off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum BaseRecorded {
@@ -1645,9 +1656,11 @@ pub enum BaseRecorded {
     /// grilling started.
     NotDrafting,
 
-    /// Nothing in that repository answers to what was typed. Refused now rather
-    /// than at grill start, where it would be a failure with nobody watching.
-    NoSuchCommit,
+    /// That repository has no branch by that name. Refused now rather than at
+    /// grill start, where it would be a failure with nobody watching — and
+    /// asked of the branches themselves, because a branch is the whole of what
+    /// there is to pick.
+    NoSuchBranch,
 }
 
 /// What became of starting a Conversation grilling.
@@ -1711,6 +1724,11 @@ pub struct ManualTaskSubmission {
 
     /// Which saved Profile the one-off session runs as.
     pub profile_id: i64,
+
+    /// And which of that Profile's models it runs on. The composer prefills the
+    /// Conversation's implementation Pairing and otherwise demands a pick:
+    /// there is no default model anywhere.
+    pub model: String,
 }
 
 /// What became of submitting one.
@@ -1743,10 +1761,69 @@ pub enum ManualTaskStarted {
     /// the press.
     NoSuchProfile,
 
+    /// It is still there and no longer lists the model picked beside it — its
+    /// list was edited between the page being drawn and the press.
+    NoSuchModel,
+
     /// The instruction is on the Timeline and no session could be started for
     /// it. The reason is in the server's log, as a worktree git refused is: this
     /// is the one refusal with nothing for the human to correct.
     NotStarted,
+}
+
+/// What became of pressing Resume.
+///
+/// Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+/// own on top of theirs: Resume is never silent. Either something is running —
+/// which needs no announcement, the session showing up on the Timeline — or
+/// nothing is, and the one place that can say why is the answer to the press.
+/// A recompute that quietly found nothing to launch is exactly the failure this
+/// whole feature is replacing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resumed {
+    /// Driving has started again: the halt is cleared and what the lifecycle
+    /// and the branch say should be running is being launched.
+    Resumed,
+
+    NoSuchConversation,
+
+    /// It is drafting, done or aborted, so nothing was ever supposed to be
+    /// driving it. None of the three is a Conversation standing still.
+    NotDriven,
+
+    /// Something is driving it already — a session, a runner, a wrap-up's
+    /// watchers. The second press of the button is the first one arriving
+    /// again, and starting a second driver would be two agents in one Worktree.
+    AlreadyDriven,
+
+    /// There is no Worktree on the record to work in. A Conversation past
+    /// drafting is supposed to have one, so this is a record that cannot be
+    /// true.
+    NowhereToWork,
+
+    /// There is one on the record, the directory it names is not a worktree any
+    /// more, and it could not be made again from the branch. The one refusal
+    /// here with nothing for the human to correct: the reason is in the
+    /// server's log, as a worktree git refused at grill time is.
+    WorktreeRefused,
+
+    /// It says it is implementing and nothing says how the work is being built,
+    /// which is another record that cannot be true: a Conversation implements
+    /// because a direction was picked.
+    NoDirection,
+
+    /// The backlog it was working has nothing left in it — never written, or
+    /// finished with. Either way there is no step to read off `.tasks/`.
+    NothingToWork,
+
+    /// The grilling Pairing has gone, and a grilling runs under that one
+    /// whatever else has happened since.
+    NoGrillingPairing,
+
+    /// And the implementation Pairing has gone, which is what every session of
+    /// the work itself runs under.
+    NoImplementationPairing,
 }
 
 /// What became of pressing Adopt.
@@ -1840,6 +1917,43 @@ pub enum ConversationReopened {
     /// again. The reason is in the server's log — this is the one refusal with
     /// nothing for the human to correct.
     WorktreeRefused,
+}
+
+/// What became of pressing Stop or Force stop.
+///
+/// One answer for both presses, because they ask for the same thing and differ
+/// only in what they will wait for: the run is to stop, and nothing is to be
+/// started for this Conversation until Resume is pressed. [`Stopped`] and
+/// [`Stopping`] are the two ways that is now true — see each.
+///
+/// Named the way [`Resumed`]'s refusals are, and for the same reason: a press
+/// that quietly did nothing would leave the human watching a run they thought
+/// they had stopped.
+///
+/// [`Stopped`]: ConversationStopped::Stopped
+/// [`Stopping`]: ConversationStopped::Stopping
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationStopped {
+    /// It has stopped: the halt is written, the Notice is on the Timeline, and
+    /// nothing more will be launched. Force stop always answers this, and so
+    /// does a Stop pressed with nothing running to see out.
+    Stopped,
+
+    /// It is stopping: the session running now runs to its own end, and the
+    /// Conversation halts before anything else is started. What Stop answers
+    /// where there was something to see out.
+    Stopping,
+
+    /// It has stopped already, so the halt standing is the one that explains it.
+    /// Getting going again is Resume's, not a second stop's.
+    AlreadyHalted,
+
+    /// It is drafting, done or aborted, so nothing was ever driving it and there
+    /// is nothing to stop.
+    NotDriven,
+
+    NoSuchConversation,
 }
 
 /// What became of aborting one.

@@ -28,13 +28,13 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationReopened, ConversationView, Cursor, GrillingStarted, HandedBack,
-    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder,
-    PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice,
-    RemedySettled, RepoEntry, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
+    ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
+    GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
+    NewConversation, NewOrder, PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -51,6 +51,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/archive", post(archive_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
+        // What one Repo's branches are, which is what a drafting Conversation
+        // picks the one it comes off out of. Under the Repo rather than under
+        // the Conversation: the branches are the repository's, and two
+        // Conversations against one Repo are looking at the same list.
+        .route("/api/ui/repos/{id}/branches", get(branches))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -92,11 +97,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/screen/{event}/attach",
             get(crate::screen::attach),
         )
-        // And one commit's diff, fetched the same way and for the same reason —
-        // see [`commit_diff`].
+        // And one commit — its summary and its diff — fetched the same way and
+        // for the same reason; see [`commit_pane`].
         .route(
             "/api/ui/conversations/{id}/commit/{event}",
-            get(commit_diff),
+            get(commit_pane),
         )
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
@@ -108,7 +113,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
-        .route("/api/ui/conversations/{id}/base", post(set_base_commit))
+        .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method.
@@ -138,38 +143,44 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
         //
-        // And what the human does about a run that stopped. Per Event rather
+        // And the press that says *do not wait for the window*. Per Event rather
         // than per Conversation, because that is what is being answered: the
-        // Timeline is where the question was put, and a route that took only
-        // the Conversation would answer whichever Interruption happened to be
-        // open when it arrived.
-        .route(
-            "/api/ui/conversations/{id}/interruption/{event}",
-            post(settle_interruption),
-        )
-        // And the press that says *do not wait for the window*. Per Event for
-        // the Interruption's reason, and with nothing in the body: there is one
-        // thing to do about a Pause, and a choice of one is a press rather than
-        // a form.
+        // Timeline is where the wait was said, and a route that took only the
+        // Conversation would answer whichever Pause happened to be open when it
+        // arrived. Nothing in the body: there is one thing to do about a Pause,
+        // and a choice of one is a press rather than a form.
         .route(
             "/api/ui/conversations/{id}/pause/{event}/resume",
             post(resume_pause),
         )
         // And what the human sets going by hand, wherever nothing is running.
-        // Per Conversation rather than per Event, unlike settling an
-        // Interruption: a Manual Task answers nothing on the Timeline — it is a
-        // new thing to do, and the Event it becomes is written by this.
+        // Per Conversation rather than per Event, unlike a Set: a Manual Task
+        // answers nothing on the Timeline — it is a new thing to do, and the
+        // Event it becomes is written by this.
         .route(
             "/api/ui/conversations/{id}/manual-task",
             post(start_manual_task),
         )
+        // And the press beside it, which is the other way a stopped Conversation
+        // gets going: what Verkstead itself should be doing, worked out again
+        // from where the work now stands. Per Conversation for the same reason,
+        // and with no body at all — there is nothing to say about it beyond
+        // which Conversation it is.
+        .route("/api/ui/conversations/{id}/resume", post(resume))
+        // And the two presses that stop it, which are Resume's opposite number
+        // and take a body for the same reason it does: none. Which Conversation
+        // it is is the whole of what either says, and which press it was is the
+        // route — a Stop that waits for the step it is on, and one that does
+        // not.
+        .route("/api/ui/conversations/{id}/stop", post(stop))
+        .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
         .route(
-            "/api/ui/conversations/{id}/grilling-profile",
-            post(choose_grilling_profile),
+            "/api/ui/conversations/{id}/grilling-pairing",
+            post(choose_grilling_pairing),
         )
         .route(
-            "/api/ui/conversations/{id}/implementation-profile",
-            post(choose_implementation_profile),
+            "/api/ui/conversations/{id}/implementation-pairing",
+            post(choose_implementation_pairing),
         )
         .route("/api/ui/profiles", get(profiles).post(create_profile))
         .route("/api/ui/profiles/{id}", post(edit_profile))
@@ -269,7 +280,23 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
-    let view: SetView = verkstead_render::set_view(stored.id, conversation, set, standing);
+    //
+    // On the blocking pool, for the Diff inside it: a Set is asked with the whole
+    // of a dirty working tree attached, and parsing and colouring that is not
+    // work to do on an async worker thread while other requests wait behind it.
+    let set_id = stored.id;
+    let view = tokio::task::spawn_blocking(move || {
+        verkstead_render::set_view(set_id, conversation, set, standing)
+    })
+    .await;
+
+    let view: SetView = match view {
+        Ok(view) => view,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "rendering a Question Set failed");
+            return unavailable("the Question Set could not be read");
+        }
+    };
 
     Json(SetReading::Set(Box::new(view))).into_response()
 }
@@ -332,10 +359,6 @@ async fn submit_response(
     Json(match submission {
         store::Submission::Accepted(taken) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
-
-            if let Some(reviewed) = taken.reviewed {
-                crate::review::answered(&state, reviewed);
-            }
 
             Submitted::Accepted
         }
@@ -402,6 +425,28 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
     Json(rows).into_response()
 }
 
+/// `GET /api/ui/repos/{id}/branches` — every branch of one registered Repo,
+/// local and remote-tracking, for the dropdown that picks what the work comes
+/// off.
+///
+/// Read out of git every time rather than kept anywhere: branches are the
+/// repository's own and move without Verkstead hearing about it, so a stored
+/// list would be one more thing to be wrong.
+async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match crate::repos::branches(&state.pool, id).await {
+        Ok(Some(branches)) => Json(branches).into_response(),
+        Ok(None) => no_such_repo(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
+            unavailable("the Repo's branches could not be read")
+        }
+    }
+}
+
 /// `POST /api/ui/repos` — take on the repository at a path.
 ///
 /// Every refusal is the server's: the Watched Paths are a security boundary, and
@@ -445,12 +490,14 @@ async fn abandoned_roadmaps(State(state): State<AppState>) -> HttpResponse {
 
 /// `GET /api/ui/conversations` — the sidebar, newest first.
 ///
-/// Two facts ride out on every row beyond what the store holds: whether a
-/// session is running on it, and whether it is waiting on the human. Both are
-/// read here at the moment the list is drawn, and neither is stored — a running
-/// session is a process this server holds, and what is waiting is an `OR` the
-/// store computes over rows that move on their own. Which mark either one comes
-/// out as is the viewer's, and the rule there is one line: waiting wins.
+/// Three facts ride out on every row beyond what the store holds: whether a
+/// session is running on it, whether that session has gone quiet, and whether
+/// it is waiting on the human. All three are read here at the moment the list
+/// is drawn, and none of them is stored — a running session is a process this
+/// server holds, how long it has been silent is a clock on that process, and
+/// what is waiting is an `OR` the store computes over rows that move on their
+/// own. Which mark they come out as is the viewer's, and the rule there is one
+/// line: waiting wins over both of the others.
 async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
@@ -466,15 +513,29 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // between them any more meaningfully than it changes between reads.
     let working = state.sessions.working();
 
+    // And which of those have gone quiet, which is the other half of what the
+    // card's mark says. A second read of the same register rather than one
+    // answer: `working` is what the whole sidebar is drawn from and this is a
+    // fact about the few rows in it.
+    let quiet = state.sessions.quiet();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
-        .map(|conversation| ConversationEntry {
-            id: conversation.id,
-            branch: conversation.branch,
-            repo: conversation.repo,
-            state: lifecycle(conversation.state),
-            working: working.contains(&conversation.id),
-            waiting: conversation.waiting,
+        .map(|conversation| {
+            let working = working.contains(&conversation.id);
+
+            ConversationEntry {
+                id: conversation.id,
+                branch: conversation.branch,
+                repo: conversation.repo,
+                state: lifecycle(conversation.state),
+                working,
+                // Idle is a thing a running session is, and the two sets are
+                // read a moment apart — so the pair is made consistent here
+                // rather than left to the page that draws it.
+                idle: working && quiet.contains(&conversation.id),
+                waiting: conversation.waiting,
+            }
         })
         .collect();
 
@@ -486,7 +547,7 @@ async fn start_conversation(
     State(state): State<AppState>,
     Json(new): Json<NewConversation>,
 ) -> HttpResponse {
-    match crate::conversations::start(&state.pool, new.repo_id).await {
+    match crate::conversations::start(&state, new.repo_id).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation failed");
@@ -530,7 +591,7 @@ async fn start_adoption(
     State(state): State<AppState>,
     Json(new): Json<NewAdoption>,
 ) -> HttpResponse {
-    match crate::conversations::start_adopting(&state.pool, new.repo_id, &new.roadmap).await {
+    match crate::conversations::start_adopting(&state, new.repo_id, &new.roadmap).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
@@ -580,6 +641,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // stopped is right again on the next read, a second later.
     let writing = state.sessions.writing(id);
 
+    // And whether that session has stopped printing, which is the other half of
+    // what the mark on its row says. Read here beside the register above rather
+    // than per Event: there is at most one session running on a Conversation,
+    // so the answer cannot differ between the Events it is drawn against.
+    let idling = state.sessions.idling(id);
+
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -588,31 +655,31 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // The two Profiles are read as rows rather than as ids: what the pane says
-    // about one, and whether it can still be run under, is the same reading the
-    // Profile list gets.
-    let grilling_profile = match crate::profiles::entry(
+    // The two Pairings are read as rows rather than as ids: what the pane says
+    // about a Profile, and whether it can still be run under, is the same
+    // reading the Profile list gets.
+    let grilling_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.grilling_profile,
+        conversation.grilling_pairing,
     )
     .await
     {
-        Ok(profile) => profile,
+        Ok(pairing) => pairing,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Profile failed");
+            tracing::error!(error = ?error, conversation_id = id, "reading a grilling Pairing failed");
             return unavailable("the Conversation could not be read");
         }
     };
 
-    let implementation_profile = match crate::profiles::entry(
+    let implementation_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.implementation_profile,
+        conversation.implementation_pairing,
     )
     .await
     {
-        Ok(profile) => profile,
+        Ok(pairing) => pairing,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Profile failed");
+            tracing::error!(error = ?error, conversation_id = id, "reading an implementation Pairing failed");
             return unavailable("the Conversation could not be read");
         }
     };
@@ -679,8 +746,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     let ready_to_grill = crate::conversations::ready_to_grill(
         conversation.state,
-        grilling_profile.as_ref(),
-        implementation_profile.as_ref(),
+        grilling_pairing.as_ref(),
+        implementation_pairing.as_ref(),
         brief,
     );
 
@@ -722,22 +789,40 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         _ => None,
     };
 
-    // What the work has stopped on, read off the Timeline for the reason the
-    // Brief is: it is already here. The store's index makes at
-    // most one open, so the last one that is unsettled is the one — and it is
-    // the *only* one, which is what makes *the run stops here* a fact rather
-    // than a promise.
-    // A Pause answers this too, and the two are read in one pass: a run stopped
-    // because its account is out of window is stopped, and *blocked on you* with
-    // nowhere to go would be a badge the human could not act on. The newest
-    // unsettled of either, the store's two indexes making at most one of each.
-    let stopped_at = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Interruption(interruption) if interruption.settled.is_none() => {
-            Some(event.id)
-        }
+    // What the work is waiting an account's window out on, read off the Timeline
+    // for the reason the Brief is: it is already here. The store's index makes at
+    // most one open, so the last one that is unresumed is the one — and it is the
+    // *only* one, which is what makes *the run stops here* a fact rather than a
+    // promise. It carries *blocked on you* like a halt: a run that has stopped is
+    // stopped, and a badge with nowhere to go would be one the human could not
+    // act on.
+    let waiting_at = timeline.iter().rev().find_map(|event| match &event.event {
         store::Event::Pause(pause) if pause.resumed.is_none() => Some(event.id),
         _ => None,
     });
+
+    // Whether driving has stopped: a halt says the Conversation is stopped
+    // now, and the Notice it points at says what stopped and why.
+    let halted = match store::halted(&state.pool, id).await {
+        Ok(halted) => halted.map(|halted| halted.event_id),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation had stopped failed");
+            None
+        }
+    };
+
+    // And whether there is driving to start again, which is the same kind of
+    // fact about the other end of the ladder: the Conversation says it is being
+    // worked on and nothing is working on it. Asked of the running server as
+    // much as of the record — see [`crate::resume::ready`].
+    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, halted.is_some());
+
+    // And whether there is driving to stop, which is the same fact read the
+    // other way: a Conversation that says it is being worked on and has not
+    // halted is one the human may pull the brake on. Nothing about the register
+    // here — a run between two steps is as much a run to stop as a busy one. See
+    // [`crate::stops::ready`].
+    let ready_to_stop = crate::stops::ready(conversation.state, halted.is_some());
 
     // And what the human has taken the keyboard of, which is the other thing the
     // work can be stopped on and the one that is nowhere on the Timeline: a Hold
@@ -745,12 +830,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // watching. Read off the running server, which is the only thing that knows.
     let held = state.sessions.holding(id);
 
-    // The badge points at whichever of the two is in force, and at the Hold
-    // first. The two cannot really be open together — an Interruption is raised
-    // about a session that is over, and nothing raises one behind a Hold — and
-    // where they somehow are, the keyboard is the thing the human is holding
-    // right now.
-    let blocked_on = held.or(stopped_at);
+    // The badge points at whichever of the three is in force, and at the Hold
+    // first. No two of them can really be in force together — nothing halts
+    // behind a Hold, and a run waiting a window out is one nothing is driving to
+    // halt — and where two somehow are, the keyboard is the thing the human is
+    // holding right now and the halt is the thing they have to press Resume on.
+    let blocked_on = held.or(halted).or(waiting_at);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -771,9 +856,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         base_commit: conversation.base_commit,
         state: lifecycle(conversation.state),
         ready_to_grill,
+        ready_to_resume,
+        ready_to_stop,
         adopting,
-        grilling_profile,
-        implementation_profile,
+        grilling_pairing,
+        implementation_pairing,
         worktree,
         direction: conversation.direction,
         pinned,
@@ -811,8 +898,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         event.id,
                         event.at,
                         summary.lines,
+                        summary.turns,
                         summary.latest,
                         writing == Some(event.id),
+                        idling,
                     ),
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,
@@ -859,43 +948,38 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
-                    // The counts and the subject, and not the diff: the diff is in
-                    // the repository, and what fetches it is the pane that shows it.
+                    // The counts, the subject and what the commit said about
+                    // itself, and not the diff: the diff is in the repository,
+                    // and what fetches it is the pane that shows it. The summary
+                    // goes over whole and comes out as the snippet the card
+                    // clamps — the renderer's, so that the cutting of a commit's
+                    // own words happens where every other rendering of them does.
                     store::Event::Commit(commit) => verkstead_render::commit_event(
                         event.id,
                         event.at,
-                        verkstead_render::CommitSummary {
+                        verkstead_render::CommitRecord {
                             sha: commit.sha,
                             subject: commit.subject,
                             files: commit.files,
                             insertions: commit.insertions,
                             deletions: commit.deletions,
+                            summary: commit.summary,
                         },
                     ),
-                    // Whole, evidence and all, unlike the three above it. The
-                    // evidence was bounded when it was gathered — see the server's
-                    // `interruptions` module — and the remedies are chosen against
-                    // it, so a page that had to fetch it separately could draw the
-                    // buttons before it could say what they were for.
-                    store::Event::Interruption(interruption) => {
-                        verkstead_render::interruption_event(
-                            event.id,
-                            event.at,
-                            stopped(*interruption),
-                        )
-                    }
-                    // Whole as well, and for the Interruption's reason: there is
-                    // a press on it, and a page that had to fetch what the run
-                    // was waiting for could draw the button before it could say
-                    // what for. Three short strings rather than four — nothing
-                    // went wrong here, so there is no evidence to gather.
+                    // Whole, unlike the three above it: there is a press on it,
+                    // and a page that had to fetch what the run was waiting for
+                    // could draw the button before it could say what for. Three
+                    // short strings, because nothing went wrong here and there
+                    // is no evidence to gather.
                     store::Event::Pause(pause) => {
                         verkstead_render::pause_event(event.id, event.at, waiting(pause))
                     }
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
                     // back — and the one nobody wrote for a human to press
-                    // anything about.
+                    // anything about. What a halt's Notice says is what stopped,
+                    // why, and the evidence — see [`crate::halts`], which writes
+                    // the markdown.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
                     }
@@ -1068,19 +1152,21 @@ async fn screen(
     }
 }
 
-/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
-/// rendered.
+/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's summary and
+/// its diff, rendered.
 ///
 /// Its own request rather than a field on the Conversation, exactly as a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is worth reading when somebody opens the one Event it
-/// belongs to.
+/// moved, and a commit is worth reading whole when somebody opens the one Event
+/// it belongs to.
 ///
-/// Read out of the repository rather than out of the store. The commit is in git
-/// — that is what a commit *is* — and keeping a second copy of every patch would
-/// be a database growing with the work rather than with the record of it. What
-/// the store holds is the line the Timeline draws.
-async fn commit_diff(
+/// The diff is read out of the repository rather than out of the store. The
+/// commit is in git — that is what a commit *is* — and keeping a second copy of
+/// every patch would be a database growing with the work rather than with the
+/// record of it. The summary is the other way about: the sweep kept it when it
+/// recorded the commit, so it comes off the Event beside the line the Timeline
+/// draws.
+async fn commit_pane(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
 ) -> HttpResponse {
@@ -1111,10 +1197,19 @@ async fn commit_diff(
         }
     };
 
-    let patch = match tokio::task::spawn_blocking(move || crate::commits::patch(&repo, &commit.sha))
-        .await
-    {
-        Ok(patch) => patch,
+    // Read and rendered in the one blocking task. Parsing a patch and colouring
+    // every line of it is as much work as running the `git` that produced it, and
+    // an async worker thread is the wrong place for either: a large diff run
+    // inline here would hold up every other request sharing that thread.
+    let rendered = tokio::task::spawn_blocking(move || {
+        crate::commits::patch(&repo, &commit.sha)
+            .as_deref()
+            .map(|patch| verkstead_render::commit_pane(commit.summary.as_deref(), patch))
+    })
+    .await;
+
+    let rendered = match rendered {
+        Ok(rendered) => rendered,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit's diff failed");
             return unavailable("the commit could not be read");
@@ -1124,11 +1219,11 @@ async fn commit_diff(
     // A commit the repository will not say anything about is one that has gone —
     // collected, or on a branch somebody rewrote. There is nothing to draw a pane
     // about, which is what a 404 means everywhere else here.
-    let Some(patch) = patch else {
+    let Some(rendered) = rendered else {
         return no_such_commit();
     };
 
-    Json(verkstead_render::commit_diff(&patch)).into_response()
+    Json(rendered).into_response()
 }
 
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
@@ -1249,23 +1344,22 @@ async fn rename_branch(
     }
 }
 
-/// `POST /api/ui/conversations/{id}/base` — override the base commit, or put the
-/// Conversation back on the default-branch rule.
-async fn set_base_commit(
+/// `POST /api/ui/conversations/{id}/base` — choose the branch the work comes
+/// off, or put the Conversation back on the default-branch rule.
+async fn set_base_branch(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(override_): Json<BaseCommitOverride>,
+    Json(choice): Json<BaseBranchChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::BaseRecorded::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::set_base_commit(&state.pool, id, override_.commit.as_deref()).await
-    {
+    match crate::conversations::set_base_branch(&state.pool, id, choice.branch.as_deref()).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "recording a base commit failed");
-            unavailable("the base commit could not be recorded")
+            tracing::error!(error = ?error, conversation_id = id, "recording a base branch failed");
+            unavailable("the base branch could not be recorded")
         }
     }
 }
@@ -1311,39 +1405,6 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/interruption/{event}` — what the human is
-/// doing about a run that stopped.
-///
-/// One press for the choice and the doing: retry
-/// launches a fresh session for the same step, taking whatever was written
-/// alongside; take over stops Verkstead driving; abort ends the run. In every
-/// case the repository is left as the session left it.
-///
-/// `AlreadySettled` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the human answers from whichever device is to
-/// hand, and the second press of a button is something to say in words rather
-/// than something to retry.
-async fn settle_interruption(
-    State(state): State<AppState>,
-    Path((id, event)): Path<(String, String)>,
-    Json(choice): Json<RemedyChoice>,
-) -> HttpResponse {
-    // Two ids out of a URL a human may have typed, read as permissively as every
-    // other pair here: neither of them naming a number cannot name an
-    // Interruption.
-    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
-        return Json(RemedySettled::NoSuchInterruption).into_response();
-    };
-
-    match crate::interruptions::settle(&state, id, event, choice.remedy, &choice.note).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "settling an Interruption failed");
-            unavailable("the interruption could not be settled")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
 /// waiting for the window.
 ///
@@ -1352,10 +1413,10 @@ async fn settle_interruption(
 /// row and start the work again from where it stopped, and the Worktree is
 /// untouched by either: a Pause never changed anything in it.
 ///
-/// `AlreadyResumed` is an outcome rather than an error, for the reason a settled
-/// Interruption is one: the window may have come back while the page was open,
-/// and the press arriving second is something to say in words rather than
-/// something to retry.
+/// `AlreadyResumed` is an outcome rather than an error, for the reason every
+/// other named outcome here is one: the window may have come back while the page
+/// was open, and the press arriving second is something to say in words rather
+/// than something to retry.
 async fn resume_pause(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
@@ -1395,11 +1456,71 @@ async fn start_manual_task(
         return Json(ManualTaskStarted::NoSuchConversation).into_response();
     };
 
-    match crate::manual::submit(&state, id, &submission.instruction, submission.profile_id).await {
+    match crate::manual::submit(&state, id, &submission).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
             unavailable("the manual task could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/resume` — start driving it again.
+///
+/// What should be running is recomputed from the state the Conversation is in
+/// and what its branch has written, rather than being read off whatever stopped:
+/// a halt is answered whenever the human gets to it, and the work moves on in
+/// the meantime.
+///
+/// Answered as soon as the decision is made rather than once the session is up.
+/// What Resume starts takes as long as it takes — a grilling relaunch waits for
+/// the Worktree, and a wrap-up is four watchers — and the browser is waiting for
+/// *whether* it started, which is what the named outcomes say.
+async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Resumed::NoSuchConversation).into_response();
+    };
+
+    match crate::resume::resume(&state, id, crate::resume::Resuming::Pressed).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
+            unavailable("the conversation could not be resumed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/stop` — pause after the current task.
+///
+/// Answered as soon as the decision is made, like Resume: what the browser is
+/// waiting for is *whether* the run is stopping, and a session left to reach its
+/// own end takes as long as the step takes.
+async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationStopped::NoSuchConversation).into_response();
+    };
+
+    match crate::stops::stop(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation failed");
+            unavailable("the conversation could not be stopped")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/force-stop` — halt now, and end what is
+/// running.
+async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationStopped::NoSuchConversation).into_response();
+    };
+
+    match crate::stops::force(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation where it stood failed");
+            unavailable("the conversation could not be stopped")
         }
     }
 }
@@ -1445,8 +1566,8 @@ async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
 /// The only way one ends. Nothing here judges anything: what the human left is
 /// judged by whichever driver was waiting at the gate, by the ordinary
 /// end-of-session rules — the Step's commit landed so the run goes on, or it did
-/// not and there is an Interruption. Handing back is what lets that question be
-/// asked, not what answers it.
+/// not and driving halts. Handing back is what lets that question be asked, not
+/// what answers it.
 ///
 /// Refused for nothing. A Conversation that is not held is one already handed
 /// back, which is the same answer arriving twice rather than a mistake.
@@ -1472,9 +1593,9 @@ async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> Htt
     Json(HandedBack::HandedBack).into_response()
 }
 
-/// `POST /api/ui/conversations/{id}/grilling-profile` — which account and model
+/// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model
 /// the grilling session runs under.
-async fn choose_grilling_profile(
+async fn choose_grilling_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(choice): Json<ProfileChoice>,
@@ -1483,18 +1604,18 @@ async fn choose_grilling_profile(
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_grilling(&state.pool, id, choice.profile_id).await {
+    match crate::profiles::choose_grilling(&state.pool, id, &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Profile failed");
-            unavailable("the grilling profile could not be chosen")
+            tracing::error!(error = ?error, conversation_id = id, "choosing a grilling Pairing failed");
+            unavailable("the grilling pairing could not be chosen")
         }
     }
 }
 
-/// `POST /api/ui/conversations/{id}/implementation-profile` — and the one the
+/// `POST /api/ui/conversations/{id}/implementation-pairing` — and the one the
 /// implementation runs under, which is a separate choice.
-async fn choose_implementation_profile(
+async fn choose_implementation_pairing(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(choice): Json<ProfileChoice>,
@@ -1503,11 +1624,11 @@ async fn choose_implementation_profile(
         return Json(verkstead_render::ProfileChosen::NoSuchConversation).into_response();
     };
 
-    match crate::profiles::choose_implementation(&state.pool, id, choice.profile_id).await {
+    match crate::profiles::choose_implementation(&state.pool, id, &choice).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Profile failed");
-            unavailable("the implementation profile could not be chosen")
+            tracing::error!(error = ?error, conversation_id = id, "choosing an implementation Pairing failed");
+            unavailable("the implementation pairing could not be chosen")
         }
     }
 }
@@ -1577,57 +1698,24 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
     }
 }
 
-/// An Interruption as the viewer receives it: the evidence, and how it was
-/// settled if it was.
-///
-/// The one Event whose whole self rides on the Timeline. Held to the viewer's
-/// vocabulary here, as a lifecycle state is, because the two enums are the same
-/// three remedies said in two crates that do not depend on each other.
-fn stopped(interruption: store::Interruption) -> verkstead_render::Stopped {
-    verkstead_render::Stopped {
-        what: interruption.evidence.what,
-        how: interruption.evidence.how,
-        git_status: interruption.evidence.git_status,
-        tail: interruption.evidence.tail,
-        settled: interruption
-            .settled
-            .map(|settled| verkstead_render::RemedyTaken {
-                remedy: remedy(settled.remedy),
-                note: settled.note,
-                at: settled.at,
-            }),
-    }
-}
-
 /// A Pause as the viewer receives it: which account ran out, when it comes back,
 /// and what ended the wait if anything has.
 ///
-/// Held to the viewer's vocabulary here for the same reason [`stopped`] is: the
-/// two enums are one pair of words said in two crates that do not depend on each
-/// other.
+/// The one Event whose whole self rides on the Timeline. Held to the viewer's
+/// vocabulary here, as a lifecycle state is, because the two enums are one pair
+/// of words said in two crates that do not depend on each other.
 fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
     verkstead_render::Waiting {
         profile: pause.profile,
         said: pause.said,
         resets_at: pause.resets_at,
-        resumed: pause.resumed.map(|resumed| verkstead_render::Resumed {
+        resumed: pause.resumed.map(|resumed| verkstead_render::PauseEnded {
             by: match resumed.by {
                 store::By::Human => verkstead_render::By::Human,
                 store::By::Reset => verkstead_render::By::Reset,
             },
             at: resumed.at,
         }),
-    }
-}
-
-/// The store's word for a remedy as the viewer receives it, the other way round
-/// from [`crate::interruptions`]'s: this is what was chosen, and that is what to
-/// choose.
-fn remedy(remedy: store::Remedy) -> verkstead_render::Remedy {
-    match remedy {
-        store::Remedy::Retry => verkstead_render::Remedy::Retry,
-        store::Remedy::TakeOver => verkstead_render::Remedy::TakeOver,
-        store::Remedy::Abort => verkstead_render::Remedy::Abort,
     }
 }
 
@@ -1856,6 +1944,15 @@ fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Conversation {id}")),
+    )
+}
+
+/// There is no such Repo to read the branches of. Worded like the two above,
+/// and for their reason: what was asked for is what a URL held.
+fn no_such_repo(id: &str) -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new(format!("there is no Repo {id}")),
     )
 }
 

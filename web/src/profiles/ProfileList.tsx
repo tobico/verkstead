@@ -12,6 +12,17 @@
 //! what it already says — a second form for the same four fields would be a
 //! second opinion about what a profile is.
 //!
+//! It is drawn over the page as a modal rather than standing above the list.
+//! What this section is for is reading what is saved and checking it is still
+//! there; a form wanted twice a year had the top of the section every time, and
+//! pushed the list it is about down under itself.
+//!
+//! The models are one of those four, and a profile carries the whole list of
+//! them: a profile reaches one account with one configuration, so what it can
+//! launch is its own rather than a list every profile shares. They are typed as
+//! free text a line apiece, because a list of the models there are goes stale
+//! the week another one ships.
+//!
 //! The agent type is not offered. There is one, and a select with a single
 //! option is theatre; the discriminator is real because it is on the record, and
 //! the picker arrives when there is something to pick between.
@@ -23,6 +34,7 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
+import { Modal } from "../Modal";
 import { createProfile, deleteProfile, editProfile, listProfiles } from "../api/client";
 import type {
   Broken,
@@ -42,7 +54,8 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   Saved: "",
   NoSuchProfile: "That profile is gone.",
   Nameless: "Give the profile a name — it is what you pick it by.",
-  Modelless: "Give the profile a model — a session has to know what it runs on.",
+  Modelless:
+    "Give the profile at least one model — a session has to know what it runs on.",
   NameTaken: "Another profile is called that already.",
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
@@ -78,8 +91,12 @@ const BLANK: ProfileEdit = {
   name: "",
   claude_dir: "",
   config_file: "",
-  model: "",
+  models: [],
 };
+
+/// The fields of the form that are one line of text. The models are the one
+/// that is not, and they are typed into through [`typedModels`] below.
+type TextField = Exclude<keyof ProfileEdit, "models">;
 
 export function ProfileList(): JSX.Element {
   const queries = useQueryClient();
@@ -92,23 +109,32 @@ export function ProfileList(): JSX.Element {
 
     // Merged by the id each row carries flat. The server asks the filesystem
     // about every pair on every read, so a profile whose directory has been
-    // moved changes underneath a page nobody has touched — and the form below
-    // is open over the row it is rewriting while that happens.
+    // moved changes underneath a page nobody has touched — and the form is open
+    // over the row it is rewriting while that happens.
     freshness: { reconcile: "id" },
   }));
 
-  // Which profile the form is about: `null` for a new one, an id for the one
-  // being rewritten. The form is the same either way.
+  // Whether the form is up at all, and which profile it is about: `null` for a
+  // new one, an id for the one being rewritten. The form is the same either way.
+  const [open, setOpen] = createSignal(false);
   const [rewriting, setRewriting] = createSignal<number | null>(null);
   const [form, setForm] = createSignal<ProfileEdit>(BLANK);
   const [refused, setRefused] = createSignal<ProfileSaved | null>(null);
   const [refusedRemoval, setRefusedRemoval] =
     createSignal<ProfileDeleted | null>(null);
 
-  const done = () => {
+  /// Take the form away, saved or not. What was typed goes with it: a form
+  /// opened again is opened at whatever it is about now, and a half-filled one
+  /// kept from last time would be a draft nothing here promised to keep.
+  const shut = () => {
+    setOpen(false);
     setRefused(null);
     setRewriting(null);
     setForm(BLANK);
+  };
+
+  const done = () => {
+    shut();
     void queries.invalidateQueries({ queryKey: ["profiles"] });
     // A rewritten profile is shown on whichever conversation chose it, and
     // whether one is ready to grill turns on what its profiles are.
@@ -144,16 +170,24 @@ export function ProfileList(): JSX.Element {
       setRefusedRemoval(null);
       // The form was about the profile that is now gone.
       if (rewriting() === id) {
-        setRewriting(null);
-        setForm(BLANK);
+        shut();
       }
       void queries.invalidateQueries({ queryKey: ["profiles"] });
     },
   }));
 
+  /// Open it empty, which is what adding a profile is.
+  const add = () => {
+    setRewriting(null);
+    setRefused(null);
+    setForm(BLANK);
+    setOpen(true);
+  };
+
   /// Fill the form in with what a profile already says, which is what editing
   /// one is.
   const rewrite = (profile: ProfileEntry) => {
+    setOpen(true);
     setRewriting(profile.id);
     setRefused(null);
     setRefusedRemoval(null);
@@ -161,13 +195,23 @@ export function ProfileList(): JSX.Element {
       name: profile.name,
       claude_dir: profile.claude_dir,
       config_file: profile.config_file,
-      model: profile.model,
+      models: [...profile.models],
     });
   };
 
-  /// One field of the form, typed into.
-  const typed = (field: keyof ProfileEdit) => (value: string) => {
+  /// One of the form's one-line fields, typed into.
+  const typed = (field: TextField) => (value: string) => {
     setForm({ ...form(), [field]: value });
+    setRefused(null);
+  };
+
+  /// And the models, which are that same typing split at its newlines.
+  ///
+  /// Split and nothing else: the empty line under the one being written is part
+  /// of writing the next, so trimming here would fight the human. What is blank
+  /// is dropped by the server at the moment of saving.
+  const typedModels = (value: string) => {
+    setForm({ ...form(), models: value.split("\n") });
     setRefused(null);
   };
 
@@ -178,95 +222,14 @@ export function ProfileList(): JSX.Element {
 
   return (
     <section class="profiles">
-      <h2>Agent profiles</h2>
-
-      <form class="edit-profile" onSubmit={submit}>
-        <h3>{rewriting() === null ? "Add a profile" : "Edit profile"}</h3>
-
-        <label for="profile-name">Name</label>
-        <input
-          id="profile-name"
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder="work"
-          value={form().name}
-          onInput={(ev) => typed("name")(ev.currentTarget.value)}
-        />
-
-        <label for="profile-model">Default model</label>
-        <input
-          id="profile-model"
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder="claude-opus-5"
-          value={form().model}
-          onInput={(ev) => typed("model")(ev.currentTarget.value)}
-        />
-
-        <label for="profile-dir">
-          Claude directory, mounted at <code>~/.claude</code>
-        </label>
-        <input
-          id="profile-dir"
-          type="text"
-          inputmode="url"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder="/home/you/accounts/work/.claude"
-          value={form().claude_dir}
-          onInput={(ev) => typed("claude_dir")(ev.currentTarget.value)}
-        />
-
-        <label for="profile-config">
-          Config file, mounted at <code>~/.claude.json</code>
-        </label>
-        <input
-          id="profile-config"
-          type="text"
-          inputmode="url"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder="/home/you/accounts/work/.claude.json"
-          value={form().config_file}
-          onInput={(ev) => typed("config_file")(ev.currentTarget.value)}
-        />
-
-        <div class="edit-profile-buttons">
-          <button type="submit" disabled={save.isPending}>
-            {rewriting() === null ? "Save" : "Save changes"}
-          </button>
-          <Show when={rewriting() !== null}>
-            <button
-              type="button"
-              class="cancel"
-              onClick={() => {
-                setRewriting(null);
-                setForm(BLANK);
-                setRefused(null);
-              }}
-            >
-              Cancel
-            </button>
-          </Show>
-        </div>
-
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{PROFILE_REFUSAL[outcome()]}</p>}
-        </Show>
-        {/* A server that could not answer at all, which is the one thing here
-            that is an error rather than an outcome. */}
-        <Show when={save.isError}>
-          <p class="error">
-            The profile could not be saved: {save.error?.message}
-          </p>
-        </Show>
-      </form>
+      {/* The heading, with the one thing there is to do to the list under it on
+          the other end of its line. */}
+      <div class="section-head">
+        <h2>Agent profiles</h2>
+        <button type="button" onClick={add}>
+          Add a profile
+        </button>
+      </div>
 
       <Show when={refusedRemoval()}>
         {(outcome) => <p class="error">{PROFILE_REMOVAL_REFUSAL[outcome()]}</p>}
@@ -306,6 +269,102 @@ export function ProfileList(): JSX.Element {
           )}
         </Match>
       </Switch>
+
+      {/* One form for both, drawn over the page. What it is about is the signal
+          above rather than anything of the modal: it is opened empty by the
+          button on the heading, and opened filled in by a row. */}
+      <Modal
+        class="edit-profile"
+        open={open()}
+        close={shut}
+        labelledBy="edit-profile-title"
+      >
+        <form onSubmit={submit}>
+          <h3 id="edit-profile-title">
+            {rewriting() === null ? "Add a profile" : "Edit profile"}
+          </h3>
+
+          <label for="profile-name">Name</label>
+          <input
+            id="profile-name"
+            type="text"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="work"
+            value={form().name}
+            onInput={(ev) => typed("name")(ev.currentTarget.value)}
+          />
+
+          {/* One per line, and no default among them: the list says what this
+              account can launch, and which of them a session runs is picked
+              when the session is set up. */}
+          <label for="profile-models">Models, one per line</label>
+          <textarea
+            id="profile-models"
+            rows={3}
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder={"claude-opus-5\nclaude-fable-5"}
+            value={form().models.join("\n")}
+            onInput={(ev) => typedModels(ev.currentTarget.value)}
+          />
+
+          <label for="profile-dir">
+            Claude directory, mounted at <code>~/.claude</code>
+          </label>
+          <input
+            id="profile-dir"
+            type="text"
+            inputmode="url"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="/home/you/accounts/work/.claude"
+            value={form().claude_dir}
+            onInput={(ev) => typed("claude_dir")(ev.currentTarget.value)}
+          />
+
+          <label for="profile-config">
+            Config file, mounted at <code>~/.claude.json</code>
+          </label>
+          <input
+            id="profile-config"
+            type="text"
+            inputmode="url"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck={false}
+            placeholder="/home/you/accounts/work/.claude.json"
+            value={form().config_file}
+            onInput={(ev) => typed("config_file")(ev.currentTarget.value)}
+          />
+
+          <div class="edit-profile-buttons">
+            <button type="submit" disabled={save.isPending}>
+              {rewriting() === null ? "Save" : "Save changes"}
+            </button>
+            {/* Drawn whichever the form is about, unlike the inline one it
+                replaces: Escape and a press on the backdrop are ways out this
+                modal has, and a button saying so is the one a thumb has. */}
+            <button type="button" class="cancel" onClick={shut}>
+              Cancel
+            </button>
+          </div>
+
+          <Show when={refused()}>
+            {(outcome) => <p class="error">{PROFILE_REFUSAL[outcome()]}</p>}
+          </Show>
+          {/* A server that could not answer at all, which is the one thing here
+              that is an error rather than an outcome. */}
+          <Show when={save.isError}>
+            <p class="error">
+              The profile could not be saved: {save.error?.message}
+            </p>
+          </Show>
+        </form>
+      </Modal>
     </section>
   );
 }
@@ -330,7 +389,11 @@ function ProfileRow(props: {
       <div>
         <span class="title">{props.profile.name}</span>
         <span class="meta">
-          <span class="model">{props.profile.model}</span>
+          {/* Every model, because the list is the whole of what a profile says
+              it can run and a row showing one of them would be picking. */}
+          <For each={props.profile.models}>
+            {(model) => <span class="model">{model}</span>}
+          </For>
           <span class="agent-type">{props.profile.agent_type}</span>
         </span>
         <span class="meta">

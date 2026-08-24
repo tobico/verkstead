@@ -33,7 +33,7 @@ import type {
   SetView,
 } from "../api/types";
 import { setWrapping, wrapping } from "../device";
-import { DIRECTION, DIRECTIONS } from "../directions";
+import { DIRECTION, DIRECTION_LABEL, DIRECTIONS } from "../directions";
 import { Answering } from "./Answering";
 import { AskText } from "./AskText";
 import { Contents, PageHeader, navigation } from "./Contents";
@@ -57,13 +57,18 @@ import { settledAge, utcStamp } from "./when";
 /// is on, or the pane header of the Timeline Event it belongs to. Nothing is
 /// drawn where there is none.
 ///
-/// `contents` is the table of contents down the margin, which is the page's and
-/// not the pane's: it is a description of a column the whole window wide, and a
-/// details pane is a column beside two others.
+/// `contents` is where the table of contents is being drawn, and what decides
+/// which width it picks its shape from: the window on a page, and the pane's own
+/// width in a details pane — where the 60rem cap leaves a margin of its own for
+/// the sidebar to stand in. `"none"` is a sheet drawn without one at all.
+///
+/// The floating header belongs to the page alone. It names where the reader is
+/// across the top of the column, and a pane already has a header of its own
+/// there.
 export function Sheet(props: {
   set: SetView;
   lead?: JSX.Element;
-  contents?: boolean;
+  contents?: "page" | "pane" | "none";
 }): JSX.Element {
   // The renderer, named by a Set that has a Diagram on it to draw and by no
   // other: mermaid is megabytes, so a Set without one loads none of them. What a
@@ -166,9 +171,12 @@ export function Sheet(props: {
     return null;
   };
 
-  /// Whether the table of contents is drawn at all — on by default, because the
+  /// Where the table of contents is drawn — the page by default, because the
   /// page is what a Set is usually read as.
-  const listed = () => props.contents !== false;
+  const where = () => props.contents ?? "page";
+
+  /// Whether it is drawn at all.
+  const listed = () => where() !== "none";
 
   return (
     <>
@@ -179,11 +187,24 @@ export function Sheet(props: {
           the stylesheet, so where it sits here is a reading order rather than
           a position. */}
       <Show when={listed()}>
-        <Contents sections={sections()} watched={watched()} nav={nav} />
+        <Contents
+          sections={sections()}
+          watched={watched()}
+          nav={nav}
+          paned={where() === "pane"}
+        />
         {/* Under the nav in reading order and pinned to the top edge by the
             stylesheet, which is also what keeps it off a narrow viewport: there
-            the nav's own bar is already doing this job. */}
-        <PageHeader watched={watched()} nav={nav} wrapped={wrapped()} flip={flip} />
+            the nav's own bar is already doing this job. And off a pane, which
+            has the pane header across its top already. */}
+        <Show when={where() === "page"}>
+          <PageHeader
+            watched={watched()}
+            nav={nav}
+            wrapped={wrapped()}
+            flip={flip}
+          />
+        </Show>
       </Show>
       {/* One line about the Set rather than from it: where it came from at the
           near end, and how it stands at the far end — the date it settled, or
@@ -361,36 +382,49 @@ function Chosen(props: {
 }): JSX.Element {
   return (
     <section class="direction-pick decided" id="direction">
+      {/* Headed and carded exactly as the chooser is — see `Choosing` — because
+          the record is that same section read after the fact, and a heading the
+          answering page had and this one dropped would be two pages. */}
       <h2 class="section-heading">Direction</h2>
-      <div class="proposal markdown" innerHTML={props.proposal.rationale_html} />
-      <ul class="directions">
-        <For each={DIRECTIONS}>
-          {(offered) => (
-            <li
-              class="direction"
-              classList={{
-                recommended: props.proposal.direction === offered,
-                chosen: props.picked === offered,
-              }}
-            >
-              <span class="direction-name">{DIRECTION[offered]}</span>
-              <Show when={props.proposal.direction === offered}>
-                <span class="star" title="the agent's Recommendation">
-                  ★
-                </span>
-              </Show>
-              <Show when={props.picked === offered}>
-                <span class="chose">chosen</span>
-              </Show>
-            </li>
-          )}
-        </For>
-      </ul>
-      <Show when={props.picked === null}>
-        <p class="semantics">
-          No direction was picked, so the proposal went back to the agent.
-        </p>
-      </Show>
+      <div class="direction-card">
+        {/* Asked as a Question is asked, and read back the same way: the label
+            floated in the accent with the agent's argument running beside it,
+            keeping the place a Question's number keeps. */}
+        <div class="ask">
+          <AskText
+            name={DIRECTION_LABEL}
+            html={props.proposal.rationale_html}
+          />
+        </div>
+        <ul class="directions">
+          <For each={DIRECTIONS}>
+            {(offered) => (
+              <li
+                class="direction"
+                classList={{
+                  recommended: props.proposal.direction === offered,
+                  chosen: props.picked === offered,
+                }}
+              >
+                <span class="direction-name">{DIRECTION[offered]}</span>
+                <Show when={props.proposal.direction === offered}>
+                  <span class="star" title="the agent's Recommendation">
+                    ★
+                  </span>
+                </Show>
+                <Show when={props.picked === offered}>
+                  <span class="chose">chosen</span>
+                </Show>
+              </li>
+            )}
+          </For>
+        </ul>
+        <Show when={props.picked === null}>
+          <p class="semantics">
+            No direction was picked, so the proposal went back to the agent.
+          </p>
+        </Show>
+      </div>
     </section>
   );
 }
@@ -670,6 +704,10 @@ function isAnswer(answer: Answer): boolean {
 /// as much a Response as any other. It has to read as one rather than as a page
 /// whose Answers failed to arrive, which is what a column of Unanswered with no
 /// word about why would look like.
+///
+/// Which is the whole of what this says, so a Set answered in silence gets
+/// nothing: with no comment there is no counter-question to explain, and the
+/// line was only the column of Unanswered read back at whoever was reading it.
 function nothingAnswered(response: Response): string | null {
   if (response.answers.some(isAnswer)) {
     return null;
@@ -680,6 +718,5 @@ function nothingAnswered(response: Response): string | null {
   return commented
     ? "Nothing here was answered. The comment below is the whole Response — a " +
         "counter-question — and every question went back to the agent still open."
-    : "Nothing here was answered, and nothing was said about the Set either: " +
-        "every question went back to the agent still open.";
+    : null;
 }

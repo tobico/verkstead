@@ -33,7 +33,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_schema::Nudge;
 
-use crate::capture::Reading;
+use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
@@ -56,6 +56,16 @@ const CHUNK: usize = 8 * 1024;
 /// busy the agent's spinner was. Half a second is under what a human reads as a
 /// delay and two orders of magnitude off what a redraw costs.
 const FLUSH_EVERY: Duration = Duration::from_millis(500);
+
+/// How long a session has to print nothing before it is called idle.
+///
+/// Short, because what it measures is a terminal rather than an agent: claude
+/// repaints its spinner many times a second while it is working, so a session
+/// that has printed nothing for this long is one that has stopped — sitting on
+/// a Blocking Ask, or waiting for the human at a Hold. Three seconds is clear
+/// of the longest gap a working session leaves, and short enough that the mark
+/// says so while it still matters.
+pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
 
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
@@ -167,13 +177,19 @@ impl Agents {
         Agents { pace, ..self }
     }
 
-    /// What a session for `profile` on `prompt`, named `session`, runs.
+    /// What a session under `pairing` on `prompt`, named `session`, runs.
     ///
-    /// The model is the Profile's, said on the command line rather than left to
+    /// The model is the Pairing's, said on the command line rather than left to
     /// whatever the account's own settings hold: which model a session runs is
-    /// half of what an Agent Profile *is*. The prompt follows it as the one
-    /// positional argument, which is where an interactive claude takes the thing
-    /// it is to start on.
+    /// the half of the choice the Profile does not make. A Conversation that
+    /// chose its Profile before there was a model to choose beside it runs on
+    /// the one that Profile carried — see [`store::Pairing::runs_on`]. The
+    /// prompt follows it as the one positional argument, which is where an
+    /// interactive claude takes the thing it is to start on.
+    ///
+    /// A Profile listing no models is refused when it is saved, so the flag is
+    /// only ever left off for a row somebody edited by hand — and left off
+    /// rather than passed empty, for the reason the name below is.
     ///
     /// The name comes after the prompt rather than before it, and claude reads
     /// its options on either side of the positional one. What is on the other
@@ -187,10 +203,14 @@ impl Agents {
     /// and the flag is then left off entirely rather than passed empty: an agent
     /// told to run under no name at all would refuse to start, where one not
     /// told anything picks its own.
-    fn argv(&self, profile: &store::Profile, prompt: &str, session: Option<&str>) -> Vec<String> {
+    fn argv(&self, pairing: &store::Pairing, prompt: &str, session: Option<&str>) -> Vec<String> {
         let mut argv = self.agent.clone();
-        argv.push("--model".to_owned());
-        argv.push(profile.model.clone());
+
+        if let Some(model) = pairing.runs_on() {
+            argv.push("--model".to_owned());
+            argv.push(model.to_owned());
+        }
+
         argv.push(prompt.to_owned());
 
         if let Some(session) = session {
@@ -265,9 +285,9 @@ pub(crate) struct Session {
 
 /// How a session ended, as whoever was driving it hears.
 ///
-/// The distinction the Interruptions turn on: [`Ended::Stopped`] is a session
-/// Verkstead put an end to because its step had landed, and every other variant
-/// is a session that stopped without being asked to.
+/// The distinction the halts turn on: [`Ended::Stopped`] is a session Verkstead
+/// put an end to because its step had landed, and every other variant is a
+/// session that stopped without being asked to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Ended {
     /// Ran to the end and exited cleanly. Which is not the same as *did the
@@ -289,8 +309,8 @@ pub(crate) enum Ended {
 }
 
 impl Ended {
-    /// The sentence an Interruption's evidence records, or `None` where the
-    /// session ended the way it was meant to.
+    /// The sentence a halt's Notice records, or `None` where the session ended
+    /// the way it was meant to.
     ///
     /// One place decides what each way of ending is *called*, so the words the
     /// human reads on the Timeline and the words the log used are the same
@@ -305,12 +325,12 @@ impl Ended {
 
     /// Whether Verkstead is what ended it.
     ///
-    /// The one way of ending that is never an Interruption, whatever the Worktree
-    /// then says. Everything else a driver sees is a session that stopped without
-    /// being asked to, and the human is owed the choice about it; this is the
-    /// human having already made one — they aborted the Conversation — or the
-    /// step having landed. Raising an Interruption about it would be asking them
-    /// what to do about the thing they just did.
+    /// The one way of ending that never halts, whatever the Worktree then says.
+    /// Everything else a driver sees is a session that stopped without being
+    /// asked to, and the human is owed the telling about it; this is the human
+    /// having already stopped it themselves — they aborted the Conversation — or
+    /// the step having landed. Halting over it would be telling them driving had
+    /// stopped, about the thing they just stopped.
     pub(crate) fn on_purpose(&self) -> bool {
         matches!(self, Self::Stopped)
     }
@@ -356,6 +376,15 @@ impl Quiet {
             .lock()
             .expect("a session's quiet clock is not poisoned")
             .elapsed()
+    }
+
+    /// When it last said anything, for whoever wants to sleep until it has been
+    /// quiet long enough rather than to ask how long it has been.
+    fn since(&self) -> Instant {
+        *self
+            .0
+            .lock()
+            .expect("a session's quiet clock is not poisoned")
     }
 }
 
@@ -486,6 +515,25 @@ impl Sessions {
             .map(|running| running.event_id)
     }
 
+    /// Whether a Conversation's running session has stopped printing.
+    ///
+    /// `false` for a Conversation with nothing running, which is the answer
+    /// that reads right wherever it is asked: idle is a thing a *running*
+    /// session is, and a session that has ended is neither.
+    ///
+    /// Read at the moment a Conversation is drawn rather than stored, as
+    /// [`Sessions::writing`] is and for the same reason — how long a process has
+    /// been quiet is a fact about a process. The crossing is announced as it
+    /// happens too, because a session going quiet is exactly when it stops
+    /// producing the Nudges an open page re-reads on; see [`relay`].
+    pub(crate) fn idling(&self, conversation_id: i64) -> bool {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .is_some_and(|running| running.quiet.for_how_long() >= IDLE_AFTER)
+    }
+
     /// What a Conversation's running session is drawing, or `None` where the
     /// Event named is not one this Conversation has a session still running for.
     ///
@@ -541,6 +589,34 @@ impl Sessions {
             .collect()
     }
 
+    /// And which of those have stopped printing — [`Sessions::idling`] for the
+    /// whole sidebar at once, and one lock rather than one per row for the same
+    /// reason [`Sessions::working`] is.
+    ///
+    /// A subset of [`Sessions::working`] by construction, because both are the
+    /// same register read: idle is a thing a running session is, and a
+    /// Conversation with nothing in it is in neither set.
+    pub(crate) fn quiet(&self) -> HashSet<i64> {
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .iter()
+            .filter(|(_, running)| running.quiet.for_how_long() >= IDLE_AFTER)
+            .map(|(conversation_id, _)| *conversation_id)
+            .collect()
+    }
+
+    /// Whether this server can launch an agent at all.
+    ///
+    /// The served router always can — see [`crate::router_with_ui`] — so this
+    /// is only ever false for a router built without [`Agents`], which is every
+    /// test about something other than sessions. What such a server cannot do
+    /// is take a Conversation up: nothing is driving one, nothing ever will,
+    /// and there is no session for Resume to start.
+    pub(crate) fn runs_sessions(&self) -> bool {
+        self.agents.is_some()
+    }
+
     /// The pace the runner works a backlog at — see [`Agents::pace`].
     ///
     /// [`Pace::default`] where this server runs no sessions at all, which is a
@@ -590,7 +666,7 @@ impl Sessions {
         self.holds.until_handed_back(conversation_id).await
     }
 
-    /// Run `profile`'s agent on `prompt`, inside `conversation`'s sandbox, and
+    /// Run `pairing`'s agent on `prompt`, inside `conversation`'s sandbox, and
     /// put what it prints on the Timeline as it arrives.
     ///
     /// The session that was started, for whoever is driving it — see
@@ -608,7 +684,7 @@ impl Sessions {
         pool: &SqlitePool,
         nudges: &Nudges,
         conversation: &store::Conversation,
-        profile: &store::Profile,
+        pairing: &store::Pairing,
         prompt: &str,
     ) -> Result<Option<Session>> {
         let Some(agents) = self.agents.clone() else {
@@ -638,7 +714,7 @@ impl Sessions {
         // the whole of why the log it writes can be found at all — see
         // [`session_name`].
         let session = session_name();
-        let argv = agents.argv(profile, prompt, session.as_deref());
+        let argv = agents.argv(pairing, prompt, session.as_deref());
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
@@ -646,7 +722,7 @@ impl Sessions {
         // decided before anything is spawned.
         let built = tokio::task::spawn_blocking({
             let conversation = conversation.clone();
-            let profile = profile.clone();
+            let profile = pairing.profile.clone();
             let home = agents.home.clone();
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
@@ -740,14 +816,15 @@ impl Sessions {
         // [`crate::transcript`].
         let tail = session
             .as_deref()
-            .map(|session| Tail::of(conversation_id, profile, session));
+            .map(|session| Tail::of(conversation_id, &pairing.profile, session));
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the Pause names,
         // and a Profile renamed while a session runs was not the account this
         // one is on — see [`crate::limits`].
-        let limits = crate::limits::Watch::on(conversation_id, event_id, profile.name.clone());
+        let limits =
+            crate::limits::Watch::on(conversation_id, event_id, pairing.profile.name.clone());
 
         let (stop, stopping) = oneshot::channel();
 
@@ -851,8 +928,8 @@ impl Sessions {
                     });
 
                     // Last of all, for the reason the drop it replaced was last:
-                    // whoever is driving acts on this — it raises Interruptions
-                    // and launches the next step — and everything above has to
+                    // whoever is driving acts on this — it halts the run or
+                    // launches the next step — and everything above has to
                     // have happened by then. Chief among them the final sweep of
                     // the branch, because a session's last act is usually a
                     // commit and a driver told *over* before it landed would be
@@ -1046,8 +1123,18 @@ struct Printing {
 /// session says that is about the account rather than about the work — see
 /// [`crate::limits`].
 ///
+/// The one thing this loop announces that is not something it wrote down is the
+/// session falling quiet, and then waking: a page draws a session that has
+/// stopped differently from one getting on with it, and going quiet is
+/// precisely when a session stops producing the Nudges that would carry the
+/// news. So both crossings are announced on the Conversation's own kind, once
+/// each — into idle [`IDLE_AFTER`] after the last thing read, and out of it on
+/// the first thing read after that. The waking one is for the sidebar alone:
+/// what a session prints is announced on the Screen's kind, which reaches the
+/// Conversation being watched and not the list of them.
+///
 /// What comes back is how it ended, which is what whoever is driving decides
-/// between carrying on and raising an Interruption by.
+/// between carrying on and halting by.
 ///
 /// One parameter per thing the loop reads or writes, which is what makes the
 /// list long: gathering them would be a struct built at one call site and taken
@@ -1081,9 +1168,14 @@ async fn relay(
     let mut tailed = Instant::now();
     let mut ending = false;
 
+    // Whether the session has already been said to be quiet, so that it is said
+    // once per silence rather than every time round the loop.
+    let mut idle = false;
+
     loop {
         let deadline = tokio::time::Instant::from_std(flushed + FLUSH_EVERY);
         let following = tokio::time::Instant::from_std(tailed + FLUSH_EVERY);
+        let idling = tokio::time::Instant::from_std(quiet.since() + IDLE_AFTER);
 
         tokio::select! {
             read = terminal.read(&mut buffer) => match read {
@@ -1092,6 +1184,18 @@ async fn relay(
                 Ok(0) => break,
                 Ok(taken) => {
                     quiet.spoke();
+                    // Coming back out of the silence is a crossing too, and the
+                    // sidebar hears about it on nothing else: what a session
+                    // prints is announced on the Screen's kind, which reaches
+                    // the Conversation being watched rather than the list of
+                    // them. Said once, on the way out.
+                    if idle {
+                        idle = false;
+
+                        nudges.announce(Nudge::Conversation {
+                            conversation: printing.conversation_id,
+                        });
+                    }
 
                     let text = reading.take(&buffer[..taken]);
                     screen.printed(&text);
@@ -1104,13 +1208,14 @@ async fn relay(
                 }
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
-                let said = tail.as_ref().and_then(Tail::latest);
-                flush(pool, nudges, printing, &mut pending, &reading, said).await;
+                flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
                 // On the same cadence as the flush, and after it: what is being
                 // looked for is in what was just written down, and a Pause the
                 // Timeline had no output under would be a wait with nothing
                 // above it saying where the session had got to.
-                limits.look(pool, nudges, said).await;
+                limits
+                    .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                    .await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1118,19 +1223,32 @@ async fn relay(
                 // the next flush: an agent that has stopped to think is one
                 // whose terminal has gone quiet, and that is exactly when the
                 // row saying what it last said is being read.
-                if let Some(tail) = tail.as_mut()
-                    && tail.poll(pool, nudges, event_id).await
+                if let Some(followed) = tail.as_mut()
+                    && followed.poll(pool, nudges, event_id).await
                 {
-                    summarise(pool, nudges, printing, &reading, tail.latest()).await;
+                    summarise(pool, nudges, printing, &reading, told(&tail)).await;
 
                     // The other record a session leaves behind, looked at the
                     // moment it moves: a backend that says its window is spent
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
-                    limits.look(pool, nudges, tail.latest()).await;
+                    limits
+                        .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                        .await;
                 }
 
                 tailed = Instant::now();
+            }
+            _ = tokio::time::sleep_until(idling), if !idle => {
+                idle = true;
+
+                // The row on the Timeline and the sidebar card alike, which is
+                // what the Conversation's own kind reaches. Nothing was written
+                // — this is the one Nudge that is about a session having done
+                // nothing.
+                nudges.announce(Nudge::Conversation {
+                    conversation: printing.conversation_id,
+                });
             }
             _ = &mut stopping, if !ending => {
                 ending = true;
@@ -1149,16 +1267,15 @@ async fn relay(
     screen.printed(&last);
     pending.push_str(&last);
 
-    let said = tail.as_ref().and_then(Tail::latest);
-    flush(pool, nudges, printing, &mut pending, &reading, said).await;
+    flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
 
     // And no look at it, deliberately: everything from here down is a session
     // that has gone. A limit the agent waits out never ends its session — that
     // is the whole of why a Pause is a wait rather than a failure — so a limit
     // in a session's last words is a session that did not come back from one,
-    // which is the Interruption whoever is driving is about to raise. Pausing as
-    // well would leave the run stopped on two things at once, and the Remedy
-    // would launch nothing.
+    // which is the halt whoever is driving is about to write. Pausing as well
+    // would leave the run stopped on two things at once, and Resume would
+    // launch nothing.
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1191,28 +1308,40 @@ async fn relay(
     // Which is also why the summary is written again here. Those final lines
     // are ordinarily the whole point of the row — an agent says what it did as
     // it goes — and by now there is no output left to carry them.
-    if let Some(tail) = tail.as_mut()
-        && tail.poll(pool, nudges, event_id).await
+    if let Some(followed) = tail.as_mut()
+        && followed.poll(pool, nudges, event_id).await
     {
-        summarise(pool, nudges, printing, &reading, tail.latest()).await;
+        summarise(pool, nudges, printing, &reading, told(&tail)).await;
     }
 
     ended
 }
 
+/// What the session's log says of it, for the summary the Timeline reads —
+/// nothing at all where there is no log to follow.
+fn told(tail: &Option<Tail>) -> Told<'_> {
+    match tail {
+        Some(tail) => Told {
+            turns: tail.turns(),
+            said: tail.latest(),
+        },
+        None => Told::default(),
+    }
+}
+
 /// Put what has been printed since last time in the store, and tell whoever is
 /// watching that it is there.
 ///
-/// `said` is the last thing the session's agent said in its own log, which is
-/// what the Timeline row is summarised by where there is one — see
-/// [`Reading::summary`].
+/// `told` is what the session's agent has said and how many turns it has taken,
+/// off the log it keeps of its own conversation — which is what the Timeline row
+/// is summarised by where there is one, see [`Reading::summary`].
 async fn flush(
     pool: &SqlitePool,
     nudges: &Nudges,
     printing: Printing,
     pending: &mut String,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     if pending.is_empty() {
         return;
@@ -1223,7 +1352,7 @@ async fn flush(
         event_id,
     } = printing;
 
-    match store::append_capture(pool, event_id, pending, &reading.summary(said)).await {
+    match store::append_capture(pool, event_id, pending, &reading.summary(told)).await {
         // Kept rather than dropped: the next flush carries it, and a store that
         // is briefly unwritable should cost latency rather than a hole in a
         // record nothing can go back and fill.
@@ -1253,14 +1382,14 @@ async fn summarise(
     nudges: &Nudges,
     printing: Printing,
     reading: &Reading,
-    said: Option<&str>,
+    told: Told<'_>,
 ) {
     let Printing {
         conversation_id,
         event_id,
     } = printing;
 
-    match store::summarise_capture(pool, event_id, &reading.summary(said)).await {
+    match store::summarise_capture(pool, event_id, &reading.summary(told)).await {
         Err(error) => {
             tracing::error!(error = ?error, event_id, "summarising a session failed")
         }
@@ -1284,8 +1413,17 @@ mod tests {
             name: "fable".to_owned(),
             claude_dir: PathBuf::from("/srv/accounts/fable/.claude"),
             config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
-            model: "claude-fable-5".to_owned(),
+            models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
             agent_type: store::AgentType::Claude,
+        }
+    }
+
+    /// That Profile, paired with the second of its models — so the argv below
+    /// says the pick and not the list.
+    fn pairing() -> store::Pairing {
+        store::Pairing {
+            profile: profile(),
+            model: Some("claude-opus-5".to_owned()),
         }
     }
 
@@ -1310,10 +1448,37 @@ mod tests {
     /// The prompt is what the grilling starts from, and an interactive claude
     /// takes what it is to start on as a positional argument.
     #[test]
-    fn a_session_runs_the_profiles_model_on_the_prompt() {
+    fn a_session_runs_the_pairings_model_on_the_prompt() {
         let state = tempfile::tempdir().unwrap();
         let argv = agents(vec!["claude".to_owned()], state.path()).argv(
-            &profile(),
+            &pairing(),
+            "# Rate limiting\n",
+            None,
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "claude".to_owned(),
+                "--model".to_owned(),
+                "claude-opus-5".to_owned(),
+                "# Rate limiting\n".to_owned(),
+            ]
+        );
+    }
+
+    /// And a Conversation that chose its Profile before there was a model to
+    /// choose beside it runs on the one that Profile carries, which is how
+    /// everything chosen before pairings existed goes on working.
+    #[test]
+    fn an_unpaired_choice_runs_on_the_profiles_own_model() {
+        let state = tempfile::tempdir().unwrap();
+        let unpaired = store::Pairing {
+            profile: profile(),
+            model: None,
+        };
+        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+            &unpaired,
             "# Rate limiting\n",
             None,
         );
@@ -1335,7 +1500,7 @@ mod tests {
     fn a_named_session_is_run_under_the_name_it_was_given() {
         let state = tempfile::tempdir().unwrap();
         let argv = agents(vec!["claude".to_owned()], state.path()).argv(
-            &profile(),
+            &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
         );
@@ -1345,7 +1510,7 @@ mod tests {
             vec![
                 "claude".to_owned(),
                 "--model".to_owned(),
-                "claude-fable-5".to_owned(),
+                "claude-opus-5".to_owned(),
                 "# Rate limiting\n".to_owned(),
                 "--session-id".to_owned(),
                 "d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12".to_owned(),

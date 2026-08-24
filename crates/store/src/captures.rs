@@ -20,6 +20,8 @@
 //! process, and a table cannot hold one: what a restarted server has is the
 //! Capture of a session that is over, which is exactly what these rows say.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
@@ -35,6 +37,18 @@ pub struct Summary {
     /// How many lines the session has printed.
     pub lines: i64,
 
+    /// How many turns its conversation has taken, counted as the Transcript
+    /// pane draws them: the agent's prose, its thinking, a tool it called, what
+    /// the tool said back, a turn put to it. The backend's own bookkeeping is
+    /// not one of them.
+    ///
+    /// `None` where there is no log to count off — every stub agent, every
+    /// backend that keeps none, and every session Verkstead could not name.
+    /// Which is not the same as none counted yet: a session with no Transcript
+    /// says nothing here rather than saying zero, and the row shows no metric
+    /// at all.
+    pub turns: Option<i64>,
+
     /// The last thing the agent said, off the log it keeps of its own
     /// conversation — or, where it keeps none, the last line it printed with
     /// the terminal's control sequences taken out. Empty where the session has
@@ -42,7 +56,7 @@ pub struct Summary {
     pub latest: String,
 }
 
-/// The Capture tables. Both hang off a Timeline Event: a Capture is one Event's
+/// The Capture tables. Each hangs off a Timeline Event: a Capture is one Event's
 /// full self, and the Event is what a Conversation's Timeline holds.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
@@ -67,6 +81,23 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the capture_chunks table")?;
+
+    // How many turns the session's conversation has taken, in a table of its
+    // own rather than a column on `captures`: there is no migration machinery
+    // here and that table is STRICT and left alone.
+    //
+    // Which turns out to be the shape the count wants anyway. A session that
+    // keeps no log has no turns to count, and no row here — where a column
+    // would have had to hold a zero and be told apart from a real one.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS capture_turns (
+             event_id INTEGER PRIMARY KEY REFERENCES captures(event_id),
+             turns    INTEGER NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the capture_turns table")?;
 
     Ok(())
 }
@@ -147,13 +178,7 @@ pub async fn append_capture(
     .await
     .with_context(|| format!("adding to the Capture of Event {event_id}"))?;
 
-    sqlx::query("UPDATE captures SET lines = ?, latest = ? WHERE event_id = ?")
-        .bind(summary.lines)
-        .bind(&summary.latest)
-        .bind(event_id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("summarising the Capture of Event {event_id}"))?;
+    write_summary(&mut tx, event_id, summary).await?;
 
     tx.commit().await.context("adding to a Capture")?;
 
@@ -173,15 +198,89 @@ pub async fn append_capture(
 /// [`append_capture`], which is what keeps a Timeline from saying something the
 /// details pane disagrees with.
 pub async fn summarise_capture(pool: &SqlitePool, event_id: i64, summary: &Summary) -> Result<()> {
+    let mut tx = pool.begin().await.context("summarising a Capture")?;
+
+    write_summary(&mut tx, event_id, summary).await?;
+
+    tx.commit().await.context("summarising a Capture")?;
+
+    Ok(())
+}
+
+/// Write what the Timeline row reads: the summary's own row, and the turn count
+/// beside it.
+///
+/// One place rather than two, because the two writers are the same write — see
+/// [`summarise_capture`] for why there are two of them at all.
+///
+/// A summary with no count writes none and takes none away. `None` is a session
+/// with no Transcript to count off, and the row that is not in `capture_turns`
+/// is exactly how the Timeline knows to show no metric.
+async fn write_summary(
+    tx: &mut sqlx::SqliteConnection,
+    event_id: i64,
+    summary: &Summary,
+) -> Result<()> {
     sqlx::query("UPDATE captures SET lines = ?, latest = ? WHERE event_id = ?")
         .bind(summary.lines)
         .bind(&summary.latest)
         .bind(event_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| format!("summarising the Capture of Event {event_id}"))?;
 
+    if let Some(turns) = summary.turns {
+        sqlx::query(
+            "INSERT INTO capture_turns (event_id, turns) VALUES (?, ?)
+             ON CONFLICT (event_id) DO UPDATE SET turns = excluded.turns",
+        )
+        .bind(event_id)
+        .bind(turns)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("counting the turns on the Transcript of Event {event_id}"))?;
+    }
+
     Ok(())
+}
+
+/// Every Capture summary on a Conversation's Timeline, by the Event each one
+/// belongs to.
+///
+/// Read on its own rather than joined into the Timeline's own query, for the
+/// reason a pull request's is: that query is at the sixteen columns a tuple
+/// can be read back as, and a summary is now three of them. One read for the
+/// Timeline either way — what is not done here is a read per Event, which is
+/// the whole reason the summary is held rather than derived.
+pub(crate) async fn on_timeline(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<HashMap<i64, Summary>> {
+    let rows: Vec<(i64, i64, Option<i64>, String)> = sqlx::query_as(
+        "SELECT c.event_id, c.lines, t.turns, c.latest
+         FROM captures c
+         JOIN timeline_events e ON e.id = c.event_id
+         LEFT JOIN capture_turns t ON t.event_id = c.event_id
+         WHERE e.conversation_id = ?",
+    )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the Captures of Conversation {conversation_id}"))?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(event_id, lines, turns, latest)| {
+            (
+                event_id,
+                Summary {
+                    lines,
+                    turns,
+                    latest,
+                },
+            )
+        })
+        .collect())
 }
 
 /// One Conversation's Capture, whole and in order, or `None` where that

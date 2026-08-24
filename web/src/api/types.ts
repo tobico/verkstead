@@ -123,8 +123,8 @@ title: string,
 stage: AdoptedStage | null, };
 
 /**
- * A session's output as the Timeline shows it: how much there is, the last
- * thing that was said, and whether more is coming.
+ * A session's output as the Timeline shows it: how far its conversation has
+ * got, the last thing that was said, and whether more is coming.
  *
  * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
@@ -141,6 +141,16 @@ at: string,
  */
 lines: number, 
 /**
+ * How many turns its conversation has taken, as the Transcript pane draws
+ * them — which is the metric the row and the pane show.
+ *
+ * `null` where the session keeps no log, and the two places that show this
+ * show nothing at all rather than a zero: a session with no Transcript has
+ * no turns to be wrong about. Not the same as a count of none, which is a
+ * session that has a log and has not said anything into it yet.
+ */
+turns: number | null, 
+/**
  * The last thing the agent said, off its own log — or, where it kept none,
  * the last line it printed with the terminal's control sequences taken
  * out. Empty where it has said nothing yet.
@@ -154,7 +164,21 @@ latest: string,
  * restarted has no sessions, which is why this is read off what is running
  * rather than off what was written.
  */
-running: boolean, };
+running: boolean, 
+/**
+ * And whether that session has stopped printing — quiet long enough for
+ * the mark to say it is sitting there rather than working.
+ *
+ * Beside `running` rather than instead of it, because the two are
+ * different questions and a page draws three answers from them: no mark,
+ * a turning ring, and a still one. Always `false` where nothing is
+ * running, which is what makes those three the only ones there are.
+ *
+ * Computed on every read, off the same clock that ends a session that has
+ * gone quiet — so a page opened onto a session that has been idle for an
+ * hour says so at once rather than waiting to be told.
+ */
+idle: boolean, };
 
 /**
  * Which coding agent a Profile runs.
@@ -255,19 +279,20 @@ columns: Array<string>, options: Array<OptionView>, };
 export type Author = { name: string, email: string, };
 
 /**
- * The commit to branch from, or `null` to go back to the default-branch rule.
+ * The branch to come off, or `null` to go back to the default-branch rule.
  */
-export type BaseCommitOverride = { 
+export type BaseBranchChoice = { 
 /**
- * Whatever names a commit in the repository — a short hash, a tag, a branch
- * — which the server resolves before it records anything.
+ * One of the repository's own branches, local or remote-tracking, by name.
+ * Stored as the name and resolved when grilling starts, so the work comes
+ * off wherever that branch stands then.
  */
-commit: string | null, };
+branch: string | null, };
 
 /**
- * What became of overriding the base commit.
+ * What became of choosing the branch the work comes off.
  */
-export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCommit";
+export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchBranch";
 
 /**
  * One line of the backend's own bookkeeping.
@@ -368,31 +393,12 @@ export type By = "Human" | "Reset";
 export type Capture = { text: string, };
 
 /**
- * One commit's diff, as the details pane receives it.
- *
- * Its own request rather than a field on the Conversation, for the reason a
- * Capture is: a Timeline is read every time an open page hears the world
- * moved, and a diff is read when somebody opens the one Event it belongs to.
- *
- * Rendered with the folds and the highlighting an attached Diff already gets,
- * because it is the same renderer on the same kind of input — see
- * [`crate::diff`].
- */
-export type CommitDiff = { 
-/**
- * `null` where the commit changed nothing a diff can show, which is a merge
- * or an empty commit. A commit the repository no longer has is not this: it
- * is a 404, because there is nothing there to draw a pane about.
- */
-diff: DiffView | null, };
-
-/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
- * The summary and not the diff. A commit's diff is what the details pane
- * fetches, from the repository the commit is in — see [`CommitDiff`] — and the
- * Timeline is re-read every time an open page hears the world moved.
+ * The line and not what is behind it. A commit's summary and its diff are what
+ * the details pane fetches — see [`CommitPane`] — and the Timeline is re-read
+ * every time an open page hears the world moved.
  *
  * There is no state here and no action on it. Commits are viewable and nothing
  * else: the design gives them no per-commit review, because feedback about the
@@ -418,7 +424,62 @@ sha: string,
  * arrives headerless, which is what lets it be rendered by the same
  * renderer an attached Diff is.
  */
-subject: string, files: number, insertions: number, deletions: number, };
+subject: string, files: number, insertions: number, deletions: number, 
+/**
+ * What the commit said about itself, as prose alone: its Commit Summary
+ * flattened to a line with the Diagram left out, for the card to clamp —
+ * see [`crate::markdown::to_prose`].
+ *
+ * The prose and not the rendering, unlike every other document on a card.
+ * A commit's card is a button, rendered markdown cannot live inside one,
+ * and the summary is on the card to be read rather than to be read *at*:
+ * what it looks like whole is the pane's, and the card says what it says.
+ *
+ * `None` where the commit carried no summary — which is every bookkeeping
+ * commit and every commit recorded before summaries were kept — and where
+ * what it carried was a Diagram and nothing else. Both draw the card that
+ * has always been drawn.
+ */
+snippet: string | null, };
+
+/**
+ * One commit, as the details pane receives it: what it said about itself, and
+ * what it changed.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * Capture is: a Timeline is read every time an open page hears the world
+ * moved, and a commit is read whole when somebody opens the one Event it
+ * belongs to.
+ *
+ * The diff is rendered with the folds and the highlighting an attached Diff
+ * already gets, because it is the same renderer on the same kind of input — see
+ * [`crate::diff`].
+ */
+export type CommitPane = { 
+/**
+ * The Commit Summary, rendered and sanitized like every other document an
+ * agent wrote — `null` where the commit carried none, which is every
+ * bookkeeping commit and every commit recorded before summaries were kept.
+ */
+summary: string | null, 
+/**
+ * Whether that summary came out holding a Diagram, and so whether the pane
+ * carries the client-side renderer at all.
+ *
+ * Answered here, off the HTML above, exactly as a Set's own flag is — see
+ * [`crate::SetView::diagrams`]. It travels with the pane because it is a
+ * fact about this commit's own account of itself, and because mermaid is
+ * megabytes: the pane that asks for the bundle is the one with something to
+ * draw with it. `false` where there is no summary, there being nothing
+ * there to hold a Diagram.
+ */
+diagrams: boolean, 
+/**
+ * `null` where the commit changed nothing a diff can show, which is a merge
+ * or an empty commit. A commit the repository no longer has is not this: it
+ * is a 404, because there is nothing there to draw a pane about.
+ */
+diff: DiffView | null, };
 
 /**
  * What became of aborting one.
@@ -431,11 +492,12 @@ export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversa
  * The branch is the row's name: a Conversation has no title of its own, and of
  * what it does have the branch is the short line the human chose.
  *
- * Where it has got to is drawn rather than worded — a spinner for a session
- * that is running, a dot for one that wants answering, a dotted border for a
- * draft and a dimmed card for work that has stopped. Which is why the two facts
- * below are facts and not one collapsed verdict: the row says what is true of
- * the Conversation, and which mark that comes out as is the one rule the viewer
+ * Where it has got to is drawn rather than worded — a turning ring for a
+ * session getting on with it, the same ring empty for one that has gone quiet,
+ * a dot for a Conversation that wants answering, a dotted border for a draft
+ * and a dimmed card for work that has stopped. Which is why the facts below are
+ * facts and not one collapsed verdict: the row says what is true of the
+ * Conversation, and which mark that comes out as is the one rule the viewer
  * keeps.
  */
 export type ConversationEntry = { id: number, branch: string, 
@@ -451,8 +513,19 @@ repo: string, state: Lifecycle,
  */
 working: boolean, 
 /**
+ * And whether that session has stopped printing — the same quiet the
+ * agent-output row's mark is drawn from, said here so that a card and the
+ * row it opens tell the same truth about the same session.
+ *
+ * Always `false` where nothing is working, which is what keeps the two a
+ * pair rather than a contradiction: idle is a thing a *running* session
+ * is. Which mark it comes out as is the viewer's, and the rule there is
+ * unchanged — waiting still wins over both.
+ */
+idle: boolean, 
+/**
  * Whether something about this Conversation is waiting on the human: an ask
- * left open, or a run stopped on an Interruption.
+ * left open, or driving that has halted.
  *
  * Folded from every source before it leaves, so the viewer holds no list of
  * them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -468,6 +541,23 @@ waiting: boolean, };
  * something different for the human to go and do each time.
  */
 export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
+
+/**
+ * What became of pressing Stop or Force stop.
+ *
+ * One answer for both presses, because they ask for the same thing and differ
+ * only in what they will wait for: the run is to stop, and nothing is to be
+ * started for this Conversation until Resume is pressed. [`Stopped`] and
+ * [`Stopping`] are the two ways that is now true — see each.
+ *
+ * Named the way [`Resumed`]'s refusals are, and for the same reason: a press
+ * that quietly did nothing would leave the human watching a run they thought
+ * they had stopped.
+ *
+ * [`Stopped`]: ConversationStopped::Stopped
+ * [`Stopping`]: ConversationStopped::Stopping
+ */
+export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyHalted" | "NotDriven" | "NoSuchConversation";
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
@@ -487,19 +577,20 @@ repo: RepoEntry, branch: string,
  */
 base_commit: string | null, state: Lifecycle, 
 /**
- * The Agent Profile the grilling session will run under, whole rather than
- * by id: the pane says what it is, and whether it is still runnable.
+ * The Profile and model the grilling session will run under, whole rather
+ * than by id: the pane says what they are, and whether the Profile is
+ * still runnable.
  */
-grilling_profile: ProfileEntry | null, 
+grilling_pairing: PairingView | null, 
 /**
- * And the one the implementation will run under. Chosen separately because
- * it is genuinely a separate account and model.
+ * And the ones the implementation will run under. Chosen separately
+ * because it is genuinely a separate account and model.
  */
-implementation_profile: ProfileEntry | null, 
+implementation_pairing: PairingView | null, 
 /**
  * Whether everything needed before grilling will start is settled: both
- * Profiles chosen and neither broken, a Brief with something in it, and a
- * Conversation still drafting.
+ * Pairings complete and neither Profile broken, a Brief with something in
+ * it, and a Conversation still drafting.
  *
  * The server's rule rather than something the page works out from the
  * fields around it. Every one of the refusals is checked again when the
@@ -507,6 +598,38 @@ implementation_profile: ProfileEntry | null,
  * what it says is true only as of the moment it was read.
  */
 ready_to_grill: boolean, 
+/**
+ * Whether there is driving to start again: the Conversation is in a state
+ * something ought to be driving, and nothing is.
+ *
+ * What decides whether Resume is offered, and the server's rule rather
+ * than something the page works out from the fields around it — *driven*
+ * is a register of tasks that are running, and a page cannot see one.
+ * Every refusal is checked again when the button is pressed; this says
+ * only that it was worth offering as of the moment it was read.
+ *
+ * A question about a process as much as about the record, so a restarted
+ * server reads every Conversation it left mid-run as one to resume —
+ * which each of them is.
+ */
+ready_to_resume: boolean, 
+/**
+ * And whether there is driving to stop: the Conversation is in a state
+ * something ought to be driving, and it has not halted.
+ *
+ * What decides whether Stop and Force stop are offered. Not the mirror of
+ * [`ready_to_resume`]: a Conversation between one step and the next has
+ * both, because nothing is running now and the run is going to launch
+ * something the moment it can. A quiet Conversation is one to stop as much
+ * as a busy one.
+ *
+ * Force stop is offered where this and [`working`] are both true — the
+ * stop that ends a session is worth offering only where there is one.
+ *
+ * [`ready_to_resume`]: ConversationView::ready_to_resume
+ * [`working`]: ConversationView::working
+ */
+ready_to_stop: boolean, 
 /**
  * What this Conversation is adopting, where it is adopting anything.
  *
@@ -557,8 +680,8 @@ blocked_on: number | null,
  *
  * Beside `blocked_on` rather than folded into it, though a Hold sets that
  * too. What the badge says is *the work has stopped and it is your move*,
- * and what this says is *which move* — where an Interruption is answered
- * with a Remedy, a Hold is answered by handing the keyboard back.
+ * and what this says is *which move* — where a halt is answered by pressing
+ * Resume, a Hold is answered by handing the keyboard back.
  *
  * Never on the Timeline, however long it lasts: the Timeline records the
  * work rather than the watching. This is a fact about now, read off the
@@ -654,46 +777,6 @@ at: string,
 html: string, };
 
 /**
- * A run that stopped, as the Timeline shows it: what went wrong, what the
- * evidence was, and how the human settled it.
- *
- * The evidence is a reading of a Worktree and a session at the moment they went
- * wrong, taken then and kept — both move on, and a git status read when the page
- * looked would be a status of whatever happened next.
- */
-export type InterruptionEvent = { id: number, 
-/**
- * When the run stopped, RFC 3339.
- */
-at: string, 
-/**
- * Which step failed, in words — "task 03 of the backlog".
- */
-what: string, 
-/**
- * How it ended: the exit status, or that it ended without landing anything.
- */
-how: string, 
-/**
- * What git made of the Worktree, as `git status` said it. Empty where the
- * repository would not answer, or where there was nothing pending.
- */
-git_status: string, 
-/**
- * The tail of what the session said: its own prose off the Transcript, or
- * what it printed with the terminal's control sequences taken out where it
- * kept no log. The tail and not the whole: what went wrong is at the end,
- * and the whole of it is on the Timeline already as the session's own
- * Event. Empty where it said nothing at all.
- */
-tail: string, 
-/**
- * How the human settled it, or `null` while it is still open — which is the
- * state the run is stopped in, and what the remedies are drawn for.
- */
-settled: RemedyTaken | null, };
-
-/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -741,7 +824,7 @@ html: string, };
  * each of them is something different for the human to go and do, and a single
  * "cannot start" would leave them guessing which.
  */
-export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NotStarted";
+export type ManualTaskStarted = "Started" | "NoSuchConversation" | "NowhereToWork" | "AlreadyRunning" | "EmptyInstruction" | "NoSuchProfile" | "NoSuchModel" | "NotStarted";
 
 /**
  * What the human typed into the Manual Task composer: the instruction, and the
@@ -761,7 +844,13 @@ instruction: string,
 /**
  * Which saved Profile the one-off session runs as.
  */
-profile_id: number, };
+profile_id: number, 
+/**
+ * And which of that Profile's models it runs on. The composer prefills the
+ * Conversation's implementation Pairing and otherwise demands a pick:
+ * there is no default model anywhere.
+ */
+model: string, };
 
 /**
  * A move as the page receives it: when, and to what.
@@ -862,12 +951,47 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
+ * One of a Conversation's two Pairings, as the page shows it: the Profile
+ * whole, and the model paired with it.
+ *
+ * The Profile whole rather than by id because the pane says what it is and
+ * whether it is still runnable — and the model beside it because a Pairing is
+ * both halves, and either half alone is not something to launch a session
+ * with.
+ */
+export type PairingView = { profile: ProfileEntry, 
+/**
+ * The model of that Profile's list this Conversation's sessions run on.
+ *
+ * `null` is a Profile chosen before pairings existed, which is not a
+ * Pairing: the page draws it as nothing chosen, because while the
+ * Conversation is drafting that is a choice to make again. One past
+ * drafting keeps running on the model its Profile carried, which nothing
+ * here has to say — its Pairings are fixed and there is no picking left.
+ */
+model: string | null, };
+
+/**
+ * How a Pause ended: what started the work again, and when.
+ *
+ * Named for the Pause rather than for the resuming, because [`Resumed`] is
+ * already what pressing **Resume** on a halt answers with. The two are
+ * different things said with one word — one is a wait that is over, the other
+ * is a run that has been started again — so this takes the longer name.
+ */
+export type PauseEnded = { by: By, 
+/**
+ * When it ended, RFC 3339.
+ */
+at: string, };
+
+/**
  * A run waiting an account's window out, as the Timeline shows it.
  *
  * Nothing here went wrong, which is what makes it a different Event from the
- * Interruption it is shaped like: the account is out of window, the agent is
- * waiting for the same reset, and the Conversation is *blocked on you* only in
- * the sense that the human may decide not to wait.
+ * Notice a halt writes: the account is out of window, the agent is waiting for
+ * the same reset, and the Conversation is *blocked on you* only in the sense
+ * that the human may decide not to wait.
  */
 export type PauseEvent = { id: number, 
 /**
@@ -894,7 +1018,7 @@ resets_at: string | null,
  * What ended the wait, or `null` while it is still on — which is the state
  * the run is stopped in, and what the resume press is drawn for.
  */
-resumed: Resumed | null, };
+resumed: PauseEnded | null, };
 
 /**
  * What became of pressing resume.
@@ -912,14 +1036,19 @@ export type PauseResumed = "Resumed" | "NoSuchPause" | "AlreadyResumed";
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
- * Which Profile a Conversation is choosing for one of its two roles.
+ * Which Profile and model a Conversation is pairing for one of its two roles.
  */
-export type ProfileChoice = { profile_id: number, };
+export type ProfileChoice = { profile_id: number, 
+/**
+ * One of that Profile's models. Never absent: there is no default model
+ * anywhere, so a Pairing is picked whole or not at all.
+ */
+model: string, };
 
 /**
  * What became of choosing one.
  */
-export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile";
+export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile" | "NoSuchModel" | "NotDrafting";
 
 /**
  * What became of removing a Profile.
@@ -943,9 +1072,12 @@ claude_dir: string,
  */
 config_file: string, 
 /**
- * What a session runs on unless it is told otherwise.
+ * The models this account can run a session on, in the order they were
+ * typed. The form takes them a line apiece; blank lines and repeated
+ * whitespace are the server's to drop, and a list that comes to nothing is
+ * refused.
  */
-model: string, };
+models: Array<string>, };
 
 /**
  * One row of the Profile list.
@@ -954,7 +1086,13 @@ model: string, };
  * typed to save them: those are what will be bind-mounted, so those are what is
  * worth showing.
  */
-export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, model: string, agent_type: AgentType, 
+export type ProfileEntry = { id: number, name: string, claude_dir: string, config_file: string, 
+/**
+ * Every model this account can run a session on. At least one, and none of
+ * them preferred over the others: the list says what is available and
+ * nothing more.
+ */
+models: Array<string>, agent_type: AgentType, 
 /**
  * `null` while the pair is where it was left, which is the ordinary case.
  */
@@ -1192,48 +1330,6 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
- * One of the three things the human can do about an Interruption.
- *
- * Roadrunner's remedies and roadrunner's meanings. In every case the repository
- * is left as the session left it: none of the three reverts, resets or stashes
- * anything.
- */
-export type Remedy = "Retry" | "TakeOver" | "Abort";
-
-/**
- * The remedy the human is choosing, and what they want said alongside it.
- */
-export type RemedyChoice = { remedy: Remedy, 
-/**
- * What to tell the fresh session, for a retry. Carried for the other two as
- * well and recorded either way: a human who wrote why they were taking over
- * has said something worth keeping on the record, even though nothing reads
- * it back to an agent.
- */
-note: string, };
-
-/**
- * What became of choosing one.
- */
-export type RemedySettled = "Settled" | "NoSuchInterruption" | "AlreadySettled";
-
-/**
- * How an Interruption was settled: which remedy, whatever the human wrote
- * alongside it, and when.
- */
-export type RemedyTaken = { remedy: Remedy, 
-/**
- * What the human wrote alongside the choice — "try again but leave the
- * migration alone". Empty where they wrote nothing, which is the ordinary
- * case for the two remedies that launch nothing.
- */
-note: string, 
-/**
- * When they chose, RFC 3339.
- */
-at: string, };
-
-/**
  * One row of the Repo list.
  *
  * The path is the resolved one the server recorded rather than whatever was
@@ -1280,13 +1376,16 @@ comment?: string | null,
 direction?: Direction | null, };
 
 /**
- * How a Pause ended: what started the work again, and when.
+ * What became of pressing Resume.
+ *
+ * Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+ * own on top of theirs: Resume is never silent. Either something is running —
+ * which needs no announcement, the session showing up on the Timeline — or
+ * nothing is, and the one place that can say why is the answer to the press.
+ * A recompute that quietly found nothing to launch is exactly the failure this
+ * whole feature is replacing.
  */
-export type Resumed = { by: By, 
-/**
- * When it ended, RFC 3339.
- */
-at: string, };
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.
@@ -1584,7 +1683,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.
@@ -1617,6 +1716,11 @@ export type ToolResult = {
  */
 id: number, 
 /**
+ * The call this answers, by the name the backend gave it. Empty where the
+ * log gave none, which leaves the answer standing on its own.
+ */
+call: string, 
+/**
  * Whether the tool failed.
  */
 failed: boolean, 
@@ -1637,6 +1741,12 @@ id: number,
  * What the tool is called.
  */
 name: string, 
+/**
+ * The name the backend gave this call, which its answer names back. Empty
+ * where the log gave none, which leaves the call with nothing to pair it
+ * to — still a call, still shown.
+ */
+call: string, 
 /**
  * The one line about it. Empty where the call said nothing this could
  * summarise, which leaves the name standing on its own.
@@ -1788,11 +1898,16 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * Two kinds of thing, each saying which it is: the socket is a conversation in
- * both directions, and what a watcher does to a Screen is either look at it a
- * different size or type into it.
+ * Three kinds of thing, each saying which it is: the socket is a conversation
+ * in both directions, and what a watcher does to a Screen is look at it a
+ * different size, type into it, or move a mouse over it.
+ *
+ * The last two carry the same thing — bytes on their way to the session's own
+ * terminal — and are told apart for one reason, which is the Hold. Typing
+ * takes it and mousing never does, so which of the two the human did has to
+ * survive the crossing rather than be guessed at from the bytes.
  */
-export type Watching = { "Resized": Size } | { "Typed": string };
+export type Watching = { "Resized": Size } | { "Typed": string } | { "Moused": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

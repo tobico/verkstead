@@ -1,11 +1,12 @@
 //! Telling the devices what happened while nobody was watching.
 //!
 //! Two kinds of thing are worth a phone lighting up. **Needs-you**: a Question
-//! Set has arrived, a Hold has stood a while with nobody coming back to it, a
-//! run has stopped on something Verkstead cannot resolve, or the account it was
-//! spending ran out of window. And **milestones**: the work is on a pull
-//! request, a roadmap has moved on to its next stage or run out of stages, or a
-//! Conversation has reached Done. One push per subscribed device in every case,
+//! Set has arrived, a Hold has stood a while with nobody coming back to it,
+//! driving has halted on something Verkstead decided to stop for, or the account
+//! the run was spending ran out of window. And **milestones**: the work is on a
+//! pull request, a roadmap has moved on to its next stage or run out of stages,
+//! or a Conversation has reached Done. One push per subscribed device in every
+//! case,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
 //! service worker to draw the notification and to know which page to open, and
@@ -21,13 +22,21 @@
 //! the one place Verkstead reaches the public internet, and none of it is
 //! reliable enough to make the record depend on: a service that cannot be
 //! reached costs a notification, and never the Set, the pull request or the
-//! Interruption it was about.
+//! halt it was about.
 //!
 //! A Hold's push is a reminder and nothing more. It ends no Hold — only the
 //! hand-back does that — and it leaves nothing on the Timeline, which records
 //! the work rather than the watching. That holds for every push here: each is
 //! sent from the one place that already knows the thing happened, and none of
 //! them writes anything down.
+//!
+//! A halt's push is the opposite: the run has stopped and will not start again
+//! until the human presses Resume, so a silent stop is one they find days late.
+//! Only the halts Verkstead decided on are worth a phone, though — a stop
+//! nobody chose is one a restart picks up unasked, and telling somebody about a
+//! run that is about to carry on by itself is a notification that asks for
+//! nothing. The Notice on the Timeline is what says it in full either way; this
+//! is only what reaches a pocket.
 //!
 //! A push service is also the only thing that can tell us a device has gone —
 //! the app was uninstalled, the subscription expired — and it says so with a
@@ -187,11 +196,12 @@ pub(crate) enum News {
     /// A Hold has stood a while with nobody coming back to the keyboard.
     Waiting,
 
-    /// A run stopped on something Verkstead cannot resolve, and the Conversation
-    /// is blocked on the human until a Remedy is chosen — see
-    /// [`crate::interruptions`]. `what` is the step it stopped at, in the words
-    /// the Interruption's own evidence carries.
-    Stopped { what: String },
+    /// Driving stopped on something Verkstead decided to stop for, and the
+    /// Conversation stays stopped until Resume is pressed — see
+    /// [`crate::halts`]. `stopped` is what ought to have been happening, with
+    /// its first letter up: the same words the Notice opens with, so that the
+    /// phone and the Timeline say the same thing about the same stop.
+    Halted { stopped: String },
 
     /// The account a run was spending ran out of window, so the run is waiting
     /// on the human or on the clock — see [`crate::limits`].
@@ -232,7 +242,7 @@ impl News {
             // The step rather than how it went wrong: which part of the run
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
-            News::Stopped { what } => format!("{branch} stopped while {what}"),
+            News::Halted { stopped } => format!("{stopped} stopped on {branch}"),
             // The account and when it comes back, because those are the two
             // things that decide whether the human does anything about it: an
             // account back in twenty minutes is one to leave alone.
@@ -260,7 +270,7 @@ impl News {
     fn about(&self) -> &'static str {
         match self {
             News::Waiting => "the Hold",
-            News::Stopped { .. } => "the Interruption",
+            News::Halted { .. } => "the halt",
             News::OutOfWindow { .. } => "the Pause",
             News::OnAPullRequest { .. } => "the pull request",
             News::StageStarted { .. } => "the stage that started",
@@ -274,7 +284,7 @@ impl News {
 /// without making the thing that happened wait for it.
 ///
 /// Returns as soon as the work is handed to the runtime, exactly as a Set's push
-/// does: the caller's job is to put the Interruption, the pull request or the
+/// does: the caller's job is to put the halt, the pull request or the
 /// Pause on the record, and none of this may delay that or fail it. A push
 /// service that cannot be reached costs a notification and nothing else.
 pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
@@ -514,8 +524,8 @@ mod tests {
     fn all() -> Vec<News> {
         vec![
             News::Waiting,
-            News::Stopped {
-                what: "implementing the work inline".to_owned(),
+            News::Halted {
+                stopped: "Implementing the work".to_owned(),
             },
             News::OutOfWindow {
                 profile: "implementation".to_owned(),

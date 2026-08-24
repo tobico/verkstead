@@ -74,3 +74,49 @@ Object.defineProperty(window, "ResizeObserver", {
     disconnect() {}
   },
 });
+
+// A fourth gap in the same environment, and the one the modal component is
+// built on: jsdom has an `HTMLDialogElement` carrying nothing but the `open`
+// attribute — no `showModal`, no `close`, and none of the behaviour a modal
+// dialog is otherwise taken for granted for. A page drawing one would throw
+// before a test could read it.
+//
+// So this is the platform's own contract, as much of it as anything here
+// reaches for: opening marks the dialog open, Escape asks the topmost open one
+// to close the way a browser does — a cancellable `cancel`, then a `close` —
+// and closing fires `close` once. What is missing is what jsdom could not have
+// had anyway: the top layer, `::backdrop`, the page behind going inert, and the
+// focus being moved in and handed back.
+const opened = new Set<HTMLDialogElement>();
+
+function opens(this: HTMLDialogElement) {
+  if (this.open) return;
+  this.setAttribute("open", "");
+  opened.add(this);
+}
+
+Object.assign(HTMLDialogElement.prototype, {
+  show: opens,
+  showModal: opens,
+  close(this: HTMLDialogElement, value?: string) {
+    if (!this.open) return;
+    if (value !== undefined) this.returnValue = value;
+    this.removeAttribute("open");
+    opened.delete(this);
+    this.dispatchEvent(new Event("close"));
+  },
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+
+  // The topmost, which with no top layer to consult is the last one opened.
+  const dialog = [...opened].pop();
+  if (dialog && dialog.dispatchEvent(new Event("cancel", { cancelable: true }))) {
+    dialog.close();
+  }
+});
+
+// An uncleaned render leaves its dialog in that set, and the next test's Escape
+// would reach for a dialog no longer on the page.
+afterEach(() => opened.clear());

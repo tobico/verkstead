@@ -31,6 +31,7 @@ mod followers;
 pub mod github;
 /// Grilling a Conversation again, where the session that was grilling it died.
 mod grillings;
+mod halts;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///
@@ -39,7 +40,6 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod hold;
-mod interruptions;
 mod limits;
 mod manual;
 mod nudge;
@@ -47,7 +47,10 @@ mod profiles;
 mod push;
 mod reply;
 mod repos;
+mod responding;
 mod responses;
+/// Starting to drive a Conversation again, from wherever it now stands.
+mod resume;
 mod review;
 mod runner;
 /// What a session can reach: the bwrap surface built around one Conversation's
@@ -79,6 +82,9 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// The human stopping a Conversation on purpose: Stop, which waits for the step
+/// it is on, and Force stop, which does not.
+mod stops;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one
 /// `script` made inside the sandbox.
@@ -425,16 +431,14 @@ fn routed(
         data_dir,
     };
 
-    // Before anything is served, because both are about what was already
-    // happening rather than about anything a request will start: a Conversation
-    // left wrapping up by a server that stopped has a pull request GitHub has
-    // gone on building, and a Conversation left grilling on a pick was waiting
-    // on an artifact from a session that stopped with the server. Nobody but
-    // these is going to look at either.
-    let resumed = vec![wrapping::resume(&state), conversations::resume(&state)];
+    // Before anything is served, because it is about what was already happening
+    // rather than about anything a request will start: every Conversation the
+    // last server was driving is one nothing is driving now, and nobody but this
+    // is going to look at any of them — see [`resume::at_startup`].
+    let resumed = vec![resume::at_startup(&state)];
 
-    // And then, once both are done, the check for the Conversations nothing took
-    // up: a restart holds no driver registrations at all, so what is still
+    // And then, once that is done, the check for the Conversations it could not
+    // take up: a restart holds no driver registrations at all, so what is still
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
@@ -567,6 +571,13 @@ pub async fn run(config: Config) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(config.listen)
         .await
         .with_context(|| format!("binding {}", config.listen))?;
+
+    // The syntax definitions built on a blocking thread while the server comes
+    // up, rather than under the first Diff somebody opens. Nothing waits on it:
+    // it is spawned and left, so serving starts when the bind does, and a
+    // request that arrives before it finishes simply waits where it would have
+    // waited anyway.
+    tokio::task::spawn_blocking(verkstead_render::warm_highlighter);
 
     tracing::info!(
         listen = %config.listen,

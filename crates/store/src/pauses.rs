@@ -7,16 +7,15 @@
 //! adds is that the wait is *said*: which Profile ran out, when the window comes
 //! back where that could be read, and a press to start again.
 //!
-//! Shaped like an Interruption and deliberately, because it is the same kind of
-//! fact: a Timeline Event that is *open*, a run that does not advance past one,
-//! and a Conversation carrying *blocked on you* until it is closed. At most one
-//! open per Conversation, by the partial unique index — two Pauses would be two
-//! things to answer about one wait.
+//! Shaped like a halt and deliberately, because it stops a run the same way: the
+//! run does not advance past one, and the Conversation carries *blocked on you*
+//! until it is closed. At most one open per Conversation, by the partial unique
+//! index — two Pauses would be two things to answer about one wait.
 //!
-//! Where it differs is how it closes. An Interruption waits on the human alone;
-//! a Pause is closed either by their press or by the reset time passing, and the
-//! row says which — see [`Resumed`]. Neither reverts anything: the repository is
-//! left exactly as the session left it, as it is after every Remedy.
+//! Where it differs is how it closes. A halt waits on the human alone; a Pause is
+//! closed either by their press or by the reset time passing, and the row says
+//! which — see [`Resumed`]. Neither reverts anything: the repository is left
+//! exactly as the session left it, as it is after a halt.
 //!
 //! Nothing here recognises a limit, and nothing here acts on one. What the
 //! wording is, and what starting the work again means, is the server's — see its
@@ -32,8 +31,8 @@ pub struct Pause {
     /// What the Agent Profile whose account ran out is called, as it was called
     /// then.
     ///
-    /// The name and not the id, for the reason an Interruption's evidence is
-    /// kept rather than fetched: a Profile can be renamed or deleted, and a
+    /// The name and not the id, for the reason a halt's evidence is gathered
+    /// rather than fetched: a Profile can be renamed or deleted, and a
     /// Pause that could no longer say which account it was would be a wait
     /// nobody could account for.
     pub profile: String,
@@ -93,7 +92,8 @@ impl By {
     }
 
     /// What a stored word names. One this does not know is a database written by
-    /// a Verkstead this one does not understand, exactly as an unknown remedy is.
+    /// a Verkstead this one does not understand, exactly as an unknown lifecycle
+    /// state is.
     fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "human" => Self::Human,
@@ -110,7 +110,7 @@ pub enum Resuming {
     Resumed,
 
     /// This Conversation has no such Pause. An Event id belonging to another
-    /// Conversation names nothing here, exactly as an Interruption's does.
+    /// Conversation names nothing here.
     NoSuchPause,
 
     /// It had ended already — the human pressed twice, or the reset arrived
@@ -130,12 +130,12 @@ pub struct Waiting {
     pub resets_at: Option<String>,
 }
 
-/// The pauses table. It hangs off a Timeline Event as an Interruption does: a
+/// The pauses table. It hangs off a Timeline Event as a pull request does: a
 /// Pause is one Event's full self, and the Event is what a Timeline holds.
 ///
-/// The Conversation is on the row as well as on the Event above it, for the
-/// Interruptions table's reason — the partial unique index needs it, and SQLite
-/// cannot index a column that lives in another table.
+/// The Conversation is on the row as well as on the Event above it, because the
+/// partial unique index needs it and SQLite cannot index a column that lives in
+/// another table.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pauses (
@@ -174,8 +174,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// rather than the strange one — and the first Pause is the one the human is
 /// being told about.
 ///
-/// One transaction, for [`super::record_interruption`]'s reason: an Event without
-/// its row is a Timeline holding a Pause that cannot say what it is waiting for.
+/// One transaction, because an Event without its row is a Timeline holding a
+/// Pause that cannot say what it is waiting for.
 pub async fn record_pause(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -241,8 +241,8 @@ pub async fn record_pause(
 /// Which Event a Conversation's open Pause is, or `None` where nothing is waiting.
 ///
 /// What the runner asks before it launches anything, beside the same question
-/// about an Interruption: a run does not advance while an account is out of
-/// window, and the one place that is decided is here.
+/// about a halt: a run does not advance while an account is out of window, and
+/// the one place that is decided is here.
 pub async fn open_pause(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     let row: Option<(i64,)> = sqlx::query_as(
         "SELECT event_id FROM pauses WHERE conversation_id = ? AND resumed_at IS NULL",
@@ -288,9 +288,8 @@ pub async fn waiting_pauses(pool: &SqlitePool) -> Result<Vec<Waiting>> {
 /// The Pause one of a Conversation's Events is, or `None` where that Conversation
 /// has no such Event.
 ///
-/// The Conversation is part of the question rather than trusted from the path,
-/// exactly as an Interruption's is: a Pause is reached through the Timeline it is
-/// on.
+/// The Conversation is part of the question rather than trusted from the path: a
+/// Pause is reached through the Timeline it is on.
 pub async fn pause(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -326,9 +325,8 @@ pub async fn pause(
 
 /// Every Pause on a Conversation's Timeline, by the Event each one is.
 ///
-/// A read of its own rather than a join, exactly as the Interruptions' is and for
-/// the same arithmetic: the Timeline's query is already at the sixteen positions
-/// a tuple can be read back as. It costs little where the join would not have —
+/// A read of its own rather than a join, for the arithmetic: the Timeline's
+/// query is already at the sixteen positions a tuple can be read back as. It costs little where the join would not have —
 /// most Conversations answer this with nothing.
 pub(crate) async fn on_timeline(
     pool: &SqlitePool,
@@ -367,9 +365,10 @@ pub(crate) async fn on_timeline(
 
 /// End one: the wait is over, and this is what ended it.
 ///
-/// Recorded before anything acts on it, for the reason an Interruption's remedy
-/// is: a Pause acted on without being closed is one the run could be started
-/// again from twice, and two launches is two agents in one Worktree.
+/// Recorded before anything acts on it, for the reason a halt is cleared before
+/// anything is launched over it: a Pause acted on without being closed is one the
+/// run could be started again from twice, and two launches is two agents in one
+/// Worktree.
 ///
 /// [`Resuming::AlreadyResumed`] is an ordinary outcome. The human presses from
 /// whichever device is to hand, and the sweep may have got there first — a wait
@@ -416,9 +415,8 @@ pub async fn resume_pause(
 
 /// The word the `kind` column holds for a Pause.
 ///
-/// A constant beside the Event's own spelling, for the Interruption's reason: the
-/// row is written before there is an Event to ask, [`record_pause`] inserting
-/// both in one transaction.
+/// A constant beside the Event's own spelling, because the row is written before
+/// there is an Event to ask: [`record_pause`] inserts both in one transaction.
 pub(crate) const PAUSE: &str = "pause";
 
 /// A Pause out of the columns a row holds, or the row being a Verkstead this one

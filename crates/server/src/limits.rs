@@ -30,7 +30,7 @@
 //!
 //! **Nothing here touches the Worktree.** A Pause stops Verkstead advancing and
 //! does nothing else, so a run picked up again finds the repository exactly as
-//! the session left it — the same promise every Remedy makes.
+//! the session left it — the same promise a halt makes.
 
 use std::time::Duration;
 
@@ -505,51 +505,44 @@ pub(crate) async fn resume(
         conversation: conversation_id,
     });
 
-    driving_again(state, conversation_id).await;
+    driving_again(state, conversation_id, by).await;
 
     Ok(PauseResumed::Resumed)
 }
 
 /// Start driving the Conversation again, where nothing is driving it.
 ///
-/// Asked before anything is started, because the ordinary case is that something
-/// already is: a session waiting its own limit out is a run somebody is still
-/// seeing out, and starting a second driver over the top of it would be two
-/// agents in one Worktree.
-async fn driving_again(state: &AppState, conversation_id: i64) {
-    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => {
-            tracing::error!(
-                conversation_id,
-                "there is no Conversation left to go on with"
-            );
-            return;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to go on with failed");
-            return;
-        }
+/// Through the one standing way in — see [`crate::resume`] — rather than through
+/// anything of this module's own. What ought to be running after a wait is the
+/// same question Resume asks after a halt, recomputed from the state the
+/// Conversation is in now, and a second answer to it here would be a second thing
+/// to keep true.
+///
+/// Which of [`crate::resume::Resuming`]'s two it is follows the record of how the
+/// wait ended, and the one thing that turns on it is whether a wrapping
+/// Conversation's spent check-fix attempts are forgotten. The human pressing *go
+/// on without waiting* has read the Pause and is asking for another go; the
+/// window coming back has been read by nobody, exactly as a restart has.
+///
+/// [`Resumed::AlreadyDriven`] is the ordinary answer and not a failure: a session
+/// waiting its own limit out is a run somebody is still seeing out, and the wait
+/// ending is the whole of what there was to do.
+async fn driving_again(state: &AppState, conversation_id: i64, by: store::By) {
+    let resuming = match by {
+        store::By::Human => crate::resume::Resuming::Pressed,
+        store::By::Reset => crate::resume::Resuming::Restarted,
     };
 
-    if state.drivers.driven(
-        &state.sessions.working(),
-        conversation_id,
-        conversation.state,
-    ) {
-        tracing::info!(
+    match crate::resume::resume(state, conversation_id, resuming).await {
+        Ok(resumed) => tracing::info!(
             conversation_id,
-            "the run was already being driven, so the wait ending is the whole of it"
-        );
-        return;
+            resumed = ?resumed,
+            "the run that was waiting on a usage limit was asked to go on"
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "starting a run again after its window came back failed");
+        }
     }
-
-    // Registered here and handed on, exactly as a retried Interruption's is: the
-    // gap between deciding to drive and something driving is where a stall sweep
-    // would find a Conversation with nothing on it.
-    let driving = state.drivers.driving(conversation_id);
-
-    crate::stalls::retried(state.clone(), conversation_id, String::new(), driving).await;
 }
 
 /// End every Pause whose window has come back, from now until the process stops.

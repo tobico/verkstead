@@ -11,7 +11,7 @@
 //! Kept apart from the drawing of it for the same reason: this is the one
 //! description both shapes of the nav and the floating header are built from.
 
-import type { SetView } from "../api/types";
+import type { DiffView, SetView } from "../api/types";
 
 /// The id a Question is reached by: its label, lowercased — `Q3` becomes `q3`,
 /// which is also what a human writing the link by hand would type.
@@ -103,6 +103,22 @@ export type Section = {
   entries: Entry[];
 };
 
+/// The files of a Diff as lines of the table of contents: one per fold, named
+/// by the path and jumping to the anchor the renderer stamped on it.
+///
+/// Its own function because a Diff is read in two places — attached to a Set,
+/// and as the whole of what a commit's details pane holds — and the two are the
+/// same folds in the same order. The renderer counts the folds from one, and so
+/// does this.
+export function files(diff: DiffView): Entry[] {
+  return diff.paths.map((path, index) => ({
+    anchor: `diff-${index + 1}`,
+    label: null,
+    text: shortened(path),
+    whole: path,
+  }));
+}
+
 /// The page's sections top to bottom, each with its own parts under it.
 export function outline(set: SetView): Section[] {
   const sections: Section[] = [];
@@ -112,18 +128,7 @@ export function outline(set: SetView): Section[] {
   }
 
   if (set.diff !== null) {
-    sections.push({
-      anchor: "diff",
-      name: "Diff",
-      entries: set.diff.paths.map((path, index) => ({
-        // The renderer counts the folds from one, and these are the same folds
-        // in the same order.
-        anchor: `diff-${index + 1}`,
-        label: null,
-        text: shortened(path),
-        whole: path,
-      })),
-    });
+    sections.push({ anchor: "diff", name: "Diff", entries: files(set.diff) });
   }
 
   // Unconditional, like the heading it points at: every Set has Questions.

@@ -49,10 +49,6 @@ const GRILLING: &str = "~/.claude/skills/grilling/SKILL.md";
 /// The implementation skill's, the same way.
 const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
 
-/// And the breakdown skill's — Verkstead's fork of to-tasks, which is what the
-/// task-list direction runs instead of building anything itself.
-const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
-
 /// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
 /// roadmap direction runs instead of building anything itself.
 const STAGING: &str = "~/.claude/skills/staging/SKILL.md";
@@ -75,6 +71,11 @@ const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
 /// inside: the fresh context that reads the branch none of the sessions that
 /// wrote it ever saw.
 const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
+
+/// And the responding skill's, which a batch of comments left on the pull
+/// request after the review is answered inside: the review's propose-then-fix
+/// shape again, about what somebody has just said rather than about the branch.
+const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
 
 /// And the manual-task skill's, which the one-off session a human sets going by
 /// hand runs inside — the one skill nothing in the pipeline ever launches.
@@ -175,10 +176,9 @@ pub(crate) fn grilling(brief: &str) -> String {
 /// outlives the session having it: the Questions that were asked and the Answers
 /// that came back.
 ///
-/// Under the Brief, where the retry note goes and for its reason: the Brief says
-/// what the work is, and this says what has already been decided about it — the
-/// newer and the less general of the two, so it goes second. The note the human
-/// wrote goes after both, being newer and less general still.
+/// Under the Brief, and for the reason everything written under one is: the
+/// Brief says what the work is, and this says what has already been decided
+/// about it — the newer and the less general of the two, so it goes second.
 ///
 /// A Conversation with nothing answered yet is the Brief and nothing else. A
 /// heading over an empty digest would tell the session that something had been
@@ -217,33 +217,15 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
-/// What a retried task-list tail is started on: the Brief, under the line that
-/// sends the agent into the breakdown skill.
+/// What a roadmap Conversation's own work is started on where Resume launches it:
+/// the Brief, under the line that sends the agent into the staging fork.
 ///
-/// One document rather than two, unlike the sessions that build. A task list
-/// writes no handoff — the backlog *is* what the grilling settled, committed to
-/// the branch — so there is never one for this to carry. The ordinary way into
-/// the breakdown is the grilling session reading on with the whole thread still
-/// in its context and no prompt sent at all; this is the retry, which grounds
-/// itself in the Brief, the repository, and whatever the human wrote when they
-/// asked for the tail to be run again.
-pub(crate) fn breaking_down(brief: &str) -> String {
-    on_the_documents(
-        &format!(
-            "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
-        ),
-        brief,
-        None,
-    )
-}
-
-/// What a retried roadmap tail is started on: the Brief again, under the line
-/// that sends the agent into the staging fork.
-///
-/// One document for the reason the breakdown gets one, one level up: the stage
-/// briefs are what the grilling settled, and nothing crosses out of this
-/// Conversation that has to be told anything else. The ordinary way in is the
-/// grilling session reading on; this is the retry.
+/// One document rather than two, unlike the sessions that build. A roadmap
+/// writes no handoff — the stage briefs are what the grilling settled, committed
+/// to the branch — so there is never one for this to carry. The ordinary way in
+/// is the grilling session reading on with the whole thread still in its context
+/// and no prompt sent at all; this is Resume, which grounds itself in the Brief
+/// and the repository.
 pub(crate) fn staging(brief: &str) -> String {
     on_the_documents(
         &format!(
@@ -322,14 +304,58 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
 /// is the first thing to see the branch whole, and priming it with the shape the
 /// work was cut into would be handing it the very frame the sessions that wrote
 /// it were each stuck inside.
-pub(crate) fn reviewing(brief: &str, handoff: Option<&str>) -> String {
-    on_the_documents(
+///
+/// `said` is what was written on the pull request before this session started —
+/// the comments whole, in the order they were said in, with where each was said.
+/// It goes *last*, under the documents, where the newest and least general thing
+/// goes in every other prompt here: the documents say what the work is, and this
+/// says what somebody has already said about it. A pull request nobody has
+/// written on carries none of it, rather than a heading saying nothing was said.
+pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) -> String {
+    let prompt = on_the_documents(
         &format!(
             "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
              work described below is what it was meant to be."
         ),
         brief,
         handoff,
+    );
+
+    match said {
+        Some(said) => format!(
+            "{prompt}\n# What has been said on the pull request\n\n{}\n",
+            said.trim()
+        ),
+        None => prompt,
+    }
+}
+
+/// What a batch session is started on: the comments it is about, under the two
+/// documents and the line that sends the agent into the responding skill.
+///
+/// The same three pieces the review gets, in the same order and for the same
+/// reasons — the documents say what the work is, and what was said goes last
+/// because it is the newest and least general thing. What differs is which
+/// comments and how many: the review is given everything standing on the pull
+/// request when it starts, and this is given one batch of what was said after
+/// it.
+///
+/// `said` is never empty here, unlike the review's. A batch session exists
+/// because something was said, so there is no version of this prompt with
+/// nothing under the heading.
+pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> String {
+    let prompt = on_the_documents(
+        &format!(
+            "Read {RESPONDING} and answer what has just been said on this branch's pull \
+             request, the way it says. The work described below is what it was meant to be."
+        ),
+        brief,
+        handoff,
+    );
+
+    format!(
+        "{prompt}\n# What has just been said on the pull request\n\n{}\n",
+        said.trim()
     )
 }
 
@@ -337,15 +363,17 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>) -> String {
 /// documents the work was built from and the line that sends the agent into the
 /// addressing skill.
 ///
-/// One function for all three callers — a failed check, a review finding, an
-/// unaddressed pull request comment — because they are one job: somebody has
-/// said that work already pushed is not right yet, and what differs is the
-/// feedback rather than anything about how to take it. Three prompts saying the
-/// same thing in three places is three things to keep true.
+/// One function for all three callers — a failed check, and the fixes either
+/// proposal was answered with where the session that proposed them never landed
+/// them — because they are one job: somebody has said that work already pushed
+/// is not right yet, and what differs is the feedback rather than anything about
+/// how to take it. Three prompts saying the same thing in three places is three
+/// things to keep true.
 ///
 /// The feedback goes *last*, under the documents rather than over them, for the
-/// reason a retry note does: it is the newest thing said and the least general.
-/// The documents say what the work is; this says what is wrong with it.
+/// reason everything written under them goes there: it is the newest thing said
+/// and the least general. The documents say what the work is; this says what is
+/// wrong with it.
 pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> String {
     let prompt = on_the_documents(
         &format!(
@@ -382,38 +410,14 @@ pub(crate) fn manual_task(instruction: &str) -> String {
     )
 }
 
-/// The same prompt, with what the human said when they asked for the step to be
-/// tried again.
-///
-/// Written under the documents rather than over them, because it is the newest
-/// thing said and the least general: the Brief and the handoff describe the work,
-/// and this describes what to do differently this time. "Try again but leave the
-/// migration alone" is only worth writing if it reaches whatever can act on it,
-/// and the prompt is the one thing a session is certain to read.
-///
-/// A retry with nothing written alongside is the prompt unchanged. The ordinary
-/// remedy is a human who has read the evidence and thinks the step is worth
-/// another run as it stands, and a heading over an empty note would be the
-/// session told that something had been said.
-pub(crate) fn retrying(prompt: &str, note: &str) -> String {
-    let note = note.trim();
-
-    if note.is_empty() {
-        return prompt.to_owned();
-    }
-
-    format!("{prompt}\n# What I said when I asked you to try this again\n\n{note}\n")
-}
-
 /// The same prompt, with the Answers to the Conversation's Deferred Asks that
 /// no session has been told about yet.
 ///
-/// Written under the documents, where a retry note is written and for its
-/// reason: the Brief and the handoff describe the work, and this is what the
-/// human has since decided about it — newer than either, and less general. A
-/// Deferred Ask is one whose Answer does not change the work about to be done,
-/// so it reaches the session that does the work after rather than the one that
-/// asked.
+/// Written under the documents rather than over them, because it is the newest
+/// thing said and the least general: the Brief and the handoff describe the work,
+/// and this is what the human has since decided about it. A Deferred Ask is one
+/// whose Answer does not change the work about to be done, so it reaches the
+/// session that does the work after rather than the one that asked.
 ///
 /// Nothing to fold is the prompt unchanged, which is every session of an
 /// ordinary run: a heading over an empty digest would tell one that something
@@ -447,6 +451,14 @@ fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String
 
 #[cfg(test)]
 mod tests {
+    /// The breakdown skill's path — Verkstead's fork of to-tasks, which is what
+    /// the task-list direction runs instead of building anything itself.
+    ///
+    /// The one mount path no prompt here names. Nothing launches a session into
+    /// the breakdown: the grilling session reads on into it, in the grilling
+    /// skill's own words, so what this is for is holding that promise to a test.
+    const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
+
     use super::*;
 
     /// What the skill is read as, whichever way this build carries it.
@@ -454,6 +466,29 @@ mod tests {
         let file = Bundled::get(name).unwrap_or_else(|| panic!("{name} is one of the skills"));
 
         String::from_utf8(file.data.to_vec()).expect("a skill is markdown")
+    }
+
+    /// Where the shared commit-summary block starts, and the last line of it.
+    /// Every skill that commits work carries the block word for word; what
+    /// follows it differs from skill to skill, so the end is found by its own
+    /// last line rather than by whatever section comes after.
+    const SUMMARY_BLOCK: &str = "### What the message body says";
+    const SUMMARY_BLOCK_END: &str = "the in-process throttle it replaces goes away.\n";
+
+    /// The block as one skill carries it, cut out so that the five can be held
+    /// against each other.
+    fn summary_block(name: &str) -> String {
+        let text = skill(name);
+        let start = text
+            .find(SUMMARY_BLOCK)
+            .unwrap_or_else(|| panic!("{name} should ask for the commit's summary:\n{text}"));
+        let rest = &text[start..];
+        let end = rest
+            .find(SUMMARY_BLOCK_END)
+            .unwrap_or_else(|| panic!("{name} should carry the whole block:\n{rest}"))
+            + SUMMARY_BLOCK_END.len();
+
+        rest[..end].to_string()
     }
 
     /// The whole reason the fork exists: the twelve lines it came from say to
@@ -734,27 +769,23 @@ mod tests {
         );
     }
 
-    /// Two sessions can be reading this: the grilling one carrying on from the
-    /// pick, and a fresh one launched because that tail was retried. They differ
-    /// in what the reader has to ground itself in — its own conversation, or the
-    /// Brief and the repository — so the skill has to say both.
+    /// One session reads this, and the skill says which: the grilling one,
+    /// carrying on from the pick with everything it settled still in its
+    /// context. Nothing else launches a breakdown, so a skill that offered a
+    /// second way in would be describing a session nobody starts.
     #[test]
-    fn the_breakdown_skill_works_from_both_ways_in() {
+    fn the_breakdown_skill_is_read_by_the_grilling_session_carrying_on() {
         let breaking_down = skill("breaking-down/SKILL.md");
 
         assert!(
-            breaking_down.contains("the grilling session, reading on"),
-            "the ordinary way in is the session that settled the work carrying on: \
+            breaking_down.contains("reading on"),
+            "the way in is the session that settled the work carrying on: \
              {breaking_down}"
         );
         assert!(
-            breaking_down.contains("a fresh session"),
-            "and the other is a retried tail: {breaking_down}"
-        );
-        assert!(
-            breaking_down.contains("there is no handoff document"),
-            "which is grounded in the Brief, the repository and the retry note — a \
-             task list writes no handoff for it to have been handed: {breaking_down}"
+            breaking_down.contains("no handoff document"),
+            "and there is nothing else for it to have been handed — a task list \
+             writes no handoff: {breaking_down}"
         );
     }
 
@@ -885,12 +916,12 @@ mod tests {
         );
         assert!(
             staging.contains("a fresh session"),
-            "and the other is a retried tail: {staging}"
+            "and the other is the one Resume launches: {staging}"
         );
         assert!(
-            staging.contains("there is no handoff document"),
-            "which is grounded in the Brief, the repository and the retry note — a \
-             roadmap writes no handoff for it to have been handed: {staging}"
+            staging.contains("no handoff document"),
+            "which is grounded in the Brief and the repository — a roadmap writes \
+             no handoff for it to have been handed: {staging}"
         );
     }
 
@@ -1266,20 +1297,22 @@ mod tests {
         );
     }
 
-    /// The one thing the reviewing skill has to be, and the one thing it has to
-    /// not be: it reads the branch and it changes none of it.
+    /// What the reviewing skill has to be, now that the session it runs is the
+    /// whole of a wrap-up: it reads the branch, it proposes, and it lands what
+    /// was agreed to.
     #[test]
-    fn the_reviewing_skill_reviews_and_does_not_fix() {
+    fn the_reviewing_skill_proposes_and_then_fixes() {
         let reviewing = skill("reviewing/SKILL.md");
 
         assert!(
-            reviewing.contains("do not fix"),
-            "nothing it finds is changed by this session: {reviewing}"
+            reviewing.contains("You propose, and then you fix what was agreed to"),
+            "nothing is changed before the human has said so, and everything they \
+             accepted is changed here: {reviewing}"
         );
         assert!(
-            !reviewing.contains("git commit") && !reviewing.contains("git push"),
-            "and it lands nothing: this is the one session here that commits nothing at \
-             all — {reviewing}"
+            reviewing.contains("git commit") && reviewing.contains("git push"),
+            "which means this session lands its own work, unlike the review this \
+             replaced — {reviewing}"
         );
         assert!(
             reviewing.contains("gh pr diff"),
@@ -1287,9 +1320,8 @@ mod tests {
         );
     }
 
-    /// How the findings reach the human, which is the whole of what this session
-    /// produces: one Set, a Question per finding, and the block that says which
-    /// Answer to each means fix it.
+    /// The half of it the human decides: one Set, a Question per finding, and the
+    /// block that says which Answer to each means fix it.
     #[test]
     fn the_reviewing_skill_says_how_a_finding_becomes_work() {
         let reviewing = skill("reviewing/SKILL.md");
@@ -1305,10 +1337,6 @@ mod tests {
              {reviewing}"
         );
         assert!(
-            reviewing.contains("`what` is what the fix session is told"),
-            "the finding carries its own words for whoever fixes it: {reviewing}"
-        );
-        assert!(
             reviewing.contains("verkstead guide") && reviewing.contains("verkstead ask"),
             "put through the CLI like every other Set: {reviewing}"
         );
@@ -1318,9 +1346,63 @@ mod tests {
         );
     }
 
-    /// A review that finds nothing asks nothing, and says so where the human is
-    /// already looking: the last line a session prints is what its Timeline row
-    /// shows.
+    /// The escape hatch: a finding too big for the sitting may offer to be split
+    /// out instead, and what the session then writes for it is a backlog rather
+    /// than a fix.
+    #[test]
+    fn the_reviewing_skill_offers_a_split_only_where_the_work_is_too_big() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("split: Q3.2"),
+            "the Option that means split it out is named beside the one that means fix \
+             it: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Offer it rarely, and never by default"),
+            "and offered only where the work is genuinely too big — an ordinary review \
+             carries no split at all: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("`.tasks/` backlog") && reviewing.contains("TODO.md"),
+            "what a split pick is owed is a backlog, written here: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Do not build any of it"),
+            "and written rather than built, because a backlog is worked a session at a \
+             time: {reviewing}"
+        );
+    }
+
+    /// The other half: the session waits for the answers rather than being ended
+    /// on the ask, and what it does with them is what the human wrote.
+    #[test]
+    fn the_reviewing_skill_waits_for_the_answers_and_acts_on_what_they_said() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("The answers are yours to wait for"),
+            "nothing ends this session on the ask and nobody else is dispatched: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("background command"),
+            "so the ask that blocks for hours is run as one: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("part of the instruction"),
+            "what they wrote beside a yes changes what is done about it: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("declined is over"),
+            "and a finding they declined is left alone: {reviewing}"
+        );
+    }
+
+    /// A review with nothing to raise asks nothing, and says so where the human
+    /// is already looking: the last line a session prints is what its Timeline
+    /// row shows. Nothing to raise is both halves, now that the comments are the
+    /// other source of a decision.
     #[test]
     fn the_reviewing_skill_says_what_to_do_having_found_nothing() {
         let reviewing = skill("reviewing/SKILL.md");
@@ -1333,6 +1415,63 @@ mod tests {
             reviewing.contains("last thing you print"),
             "and what it found is said where the Timeline will show it: {reviewing}"
         );
+        assert!(
+            reviewing.contains("both halves"),
+            "but a branch it would not have touched still proposes about what was \
+             said on it: {reviewing}"
+        );
+    }
+
+    /// The comments are the other half of what a review proposes about, and the
+    /// only session that will ever act on them — so the skill has to say both
+    /// that they are folded into the one Set and that none of them is acted on
+    /// before the human has answered.
+    #[test]
+    fn the_reviewing_skill_folds_the_pull_requests_comments_into_its_one_set() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("What has been said on the pull request"),
+            "the comments are named by the heading they arrive under: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("You are the only session that will act on these"),
+            "nothing else is dispatched about them, so leaving one out answers \
+             nobody: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("still a proposal until they have said yes"),
+            "and a comment is not an instruction: it goes into the Set like every \
+             other finding — {reviewing}"
+        );
+    }
+
+    /// A check that goes red while the review waits on the human has nobody
+    /// dispatched to it — the review is holding the Worktree — so the woken
+    /// session deals with it itself, before its push.
+    #[test]
+    fn the_reviewing_skill_folds_a_red_check_into_the_woken_session() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("gh pr checks"),
+            "the woken session reads the pull request's own check state: {reviewing}"
+        );
+        assert!(
+            reviewing.find("gh pr checks") < reviewing.find("git push"),
+            "and fixes what is failing before it pushes, so the push is what puts \
+             the fix back in front of the checks — {reviewing}"
+        );
+        assert!(
+            reviewing.contains("nothing to propose about a red check"),
+            "a red check is the branch being broken rather than a decision, so it \
+             never becomes a finding: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("whatever they decided"),
+            "and a review whose every finding was declined still fixes one: \
+             {reviewing}"
+        );
     }
 
     /// The review session is put inside the skill the same way every other is,
@@ -1342,6 +1481,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
         );
 
         assert!(
@@ -1354,7 +1494,150 @@ mod tests {
         );
         assert!(
             !prompt.contains(ADDRESSING) && !prompt.contains(NEXT_TASK),
-            "and nothing sends this session to change anything: {prompt:?}"
+            "and no other skill is named: what this session does once it has reviewed \
+             is the reviewing skill's own — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What has been said on the pull request"),
+            "a pull request nobody has written on carries no heading saying so: \
+             {prompt:?}"
+        );
+    }
+
+    /// And what was said on the pull request goes in last, where the newest and
+    /// least general thing goes in every prompt here.
+    #[test]
+    fn a_review_session_is_told_what_was_said_on_the_pull_request_last() {
+        let prompt = reviewing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            Some("**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round."),
+        );
+
+        assert!(
+            prompt.contains("This is the wrong way round.")
+                && prompt.contains("`src/window.rs` line 12"),
+            "what was said and where, whole: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
+            "under the documents: they say what the work is and this says what \
+             somebody has already said about it — {prompt:?}"
+        );
+    }
+
+    /// What the responding skill has to be: the review's shape about a batch of
+    /// comments, which is the whole of what stops one being acted on ungated.
+    #[test]
+    fn the_responding_skill_proposes_before_it_changes_anything() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("You propose, and then you fix what was agreed to"),
+            "nothing anybody wrote is acted on before the human has said so, and \
+             everything they accepted is done here: {responding}"
+        );
+        assert!(
+            responding.contains("Change nothing yet"),
+            "which means the session that reads the batch changes nothing until the \
+             answers arrive: {responding}"
+        );
+        assert!(
+            responding.contains("still a proposal until they have said yes"),
+            "a comment is not an instruction, however plainly it is written: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("git commit") && responding.contains("git push"),
+            "and then it lands its own work, which is why nothing else is \
+             dispatched: {responding}"
+        );
+    }
+
+    /// The half the human decides: one Set for the batch, a Question per comment
+    /// worth doing something about, and the block that says which Answer means
+    /// do it.
+    #[test]
+    fn the_responding_skill_says_how_a_comment_becomes_work() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("review:") && responding.contains("findings:"),
+            "the Set is marked by the block it carries, so the skill has to name it: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("fix: Q1.1"),
+            "and name the Option that means do it, in the Guide's own notation: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("verkstead guide") && responding.contains("verkstead ask"),
+            "put through the CLI like every other Set: {responding}"
+        );
+        assert!(
+            responding.contains("The answers are yours to wait for"),
+            "and nothing ends this session on the ask, as nothing ends the review's: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("No `split` here"),
+            "and the escape hatch is the review's alone: a batch session that split \
+             something out would be owed a backlog nobody reads it for — {responding}"
+        );
+    }
+
+    /// A batch that asks for nothing asks nothing, and says so where the human is
+    /// already looking: the last line a session prints is what its Timeline row
+    /// shows.
+    #[test]
+    fn the_responding_skill_says_what_to_do_with_a_batch_that_asks_for_nothing() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("Ask nothing"),
+            "a Set with nothing in it is a row for the human to dismiss: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("last thing you print"),
+            "and what was said is answered where the Timeline will show it: \
+             {responding}"
+        );
+    }
+
+    /// A batch session is put inside the skill the same way every other is, and
+    /// primed with the two documents *and* the comments it is about.
+    #[test]
+    fn a_batch_session_is_started_on_the_documents_with_the_comments_last() {
+        let prompt = responding(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            "**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round.",
+        );
+
+        assert!(
+            prompt.contains(RESPONDING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("This is the wrong way round.")
+                && prompt.contains("`src/window.rs` line 12"),
+            "and so does what was said, with where it was said: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
+            "under the documents: they say what the work is and this says what \
+             somebody has just said about it — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(ADDRESSING) && !prompt.contains(REVIEWING),
+            "and no other skill is named: a batch is neither a fix nor a review — \
+             {prompt:?}"
         );
     }
 
@@ -1390,30 +1673,6 @@ mod tests {
         assert!(
             !prompt.contains("What the grilling settled"),
             "nothing is said about a document that was never written: {prompt:?}"
-        );
-    }
-
-    /// The Brief, into the other skill. What differs is the line above it, which
-    /// is the whole of what sends a session one way or the other.
-    #[test]
-    fn a_breakdown_session_is_started_on_the_brief_inside_the_fork() {
-        let prompt = breaking_down("# Rate limiting\n\nThe API has none.\n");
-
-        assert!(
-            prompt.contains(BREAKING_DOWN),
-            "the fork is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(IMPLEMENTING),
-            "and nothing sends this session to build the work instead: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none."),
-            "the Brief goes in whole: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("What the grilling settled"),
-            "and nothing is said about a document a task list never has: {prompt:?}"
         );
     }
 
@@ -1552,7 +1811,7 @@ mod tests {
     }
 
     /// The Answers to a Deferred Ask go where the newest and least general
-    /// thing said goes: under the documents, exactly where a retry note goes.
+    /// thing said goes: under the documents the prompt is built from.
     #[test]
     fn deferred_answers_are_folded_under_the_documents() {
         let prompt = folded(
@@ -1577,6 +1836,109 @@ mod tests {
         let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(folded(&prompt, "  \n"), prompt);
+    }
+
+    /// The workbench shows a commit's message body beside its diff, and nothing
+    /// else tells a session to write one — so every skill that commits work has
+    /// to say it. One wording across the six, because six wordings would be
+    /// six things to keep true and the human reads them as one convention.
+    #[test]
+    fn every_skill_that_commits_work_asks_for_the_commits_summary() {
+        let block = summary_block("next-task/SKILL.md");
+
+        for name in [
+            "implementing/SKILL.md",
+            "manual-task/SKILL.md",
+            "addressing/SKILL.md",
+            "reviewing/SKILL.md",
+            "responding/SKILL.md",
+        ] {
+            assert_eq!(
+                summary_block(name),
+                block,
+                "{name} should carry the same block, word for word"
+            );
+        }
+    }
+
+    /// And what the block says, held once: which commits get a summary, when the
+    /// diagram is required, what kind of diagram it is, and that it comes first.
+    #[test]
+    fn the_summary_block_says_which_commits_and_what_goes_in_one() {
+        let block = summary_block("next-task/SKILL.md");
+
+        assert!(
+            block.contains("delivers work") && block.contains("as its message body"),
+            "the body is the summary, and it is the delivering commits that carry one: \
+             {block}"
+        );
+        for bookkeeping in [
+            "backlog commit",
+            "roadmap commit",
+            "the finish commit",
+            "ADR",
+        ] {
+            assert!(
+                block.contains(bookkeeping),
+                "and {bookkeeping} is bookkeeping, which carries none: {block}"
+            );
+        }
+        assert!(
+            block.contains("file's deletion rides along with the code"),
+            "a task's commit is still a delivering one, deletion and all: {block}"
+        );
+        assert!(
+            block.contains("more than three changed lines"),
+            "the diagram is required past a threshold rather than always: {block}"
+        );
+        assert!(
+            block.contains("delta rather than the system"),
+            "and it is the delta diagram the retired gates Topic taught: {block}"
+        );
+        assert!(
+            block.contains("Tag each node `new`, `modified`") && block.contains("`removed`"),
+            "tagged with what happened to each part, which is what the viewer colours \
+             from the diff's own shades: {block}"
+        );
+        assert!(
+            block.contains("Around ten nodes"),
+            "and small enough to read on a phone: {block}"
+        );
+        assert!(
+            block.find("The diagram first") < block.find("The prose after it"),
+            "the glance comes before the reading, in the block as in the message: {block}"
+        );
+    }
+
+    /// The skills that only keep the books are left alone: a plan, a roadmap or
+    /// a stage's backlog is not work delivered, and a summary over one would be
+    /// a diagram of a file that was written rather than of a change.
+    #[test]
+    fn the_bookkeeping_skills_ask_for_no_summary() {
+        for name in [
+            "breaking-down/SKILL.md",
+            "staging/SKILL.md",
+            "next-stage/SKILL.md",
+        ] {
+            let text = skill(name);
+
+            assert!(
+                !text.contains(SUMMARY_BLOCK),
+                "{name} commits bookkeeping, which carries no summary:\n{text}"
+            );
+        }
+    }
+
+    /// And the one bookkeeping commit inside a working skill stays subject-only
+    /// for the same reason: taking the list away delivers nothing.
+    #[test]
+    fn the_next_task_forks_finish_commit_stays_subject_only() {
+        let next_task = skill("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains(r#"git commit -m "chore: finish <feature-name>""#),
+            "the finish is a subject and nothing under it: {next_task}"
+        );
     }
 
     /// Installing is what puts them where a sandbox can bind them.

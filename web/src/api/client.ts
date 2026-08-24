@@ -14,15 +14,17 @@ import type {
   BranchRenamed,
   BriefSaved,
   Capture,
-  CommitDiff,
+  CommitPane,
   ConversationAborted,
   ConversationEntry,
   ConversationReopened,
+  ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandedBack,
   ManualTaskStarted,
   PauseResumed,
+  ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
   ProfileEdit,
@@ -31,10 +33,9 @@ import type {
   PullRequestDetails,
   PushKey,
   Registered,
-  Remedy,
-  RemedySettled,
   RepoEntry,
   Response as Decided,
+  Resumed,
   Screen,
   SetReading,
   SettingsEdit,
@@ -98,6 +99,15 @@ export function archiveSet(id: number): Promise<Archived> {
 /// The Repos Verkstead has been told about, by name.
 export function listRepos(): Promise<RepoEntry[]> {
   return get<RepoEntry[]>("/api/ui/repos");
+}
+
+/// Every branch of one registered Repo, local and remote-tracking both — which
+/// is what a drafting Conversation picks the one it comes off out of.
+///
+/// Read out of git by the server every time it is asked: branches move without
+/// Verkstead hearing about it, so there is nothing here that could be kept.
+export function listBranches(repoId: number): Promise<string[]> {
+  return get<string[]>(`/api/ui/repos/${repoId}/branches`);
 }
 
 /// Ask Verkstead to take on the repository at an absolute path.
@@ -231,16 +241,17 @@ export function screenSocket(id: number, event: number): string {
   return at.href;
 }
 
-/// One commit's diff, rendered.
+/// One commit, rendered: what it said about itself, and its diff.
 ///
-/// Fetched by the pane that shows it for the Capture's reason, and read out
-/// of the repository by the server rather than out of its database: the commit
-/// is in git, which is what a commit is.
-export function loadCommitDiff(
+/// Fetched by the pane that shows it for the Capture's reason. The diff is read
+/// out of the repository by the server rather than out of its database — the
+/// commit is in git, which is what a commit is — where the summary was kept by
+/// the sweep that recorded the commit.
+export function loadCommitPane(
   id: number,
   event: number,
-): Promise<CommitDiff> {
-  return get<CommitDiff>(`/api/ui/conversations/${id}/commit/${event}`);
+): Promise<CommitPane> {
+  return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
 /// What is on the pull request the finish step opened: its commit list and its
@@ -283,13 +294,16 @@ export function renameBranch(
   return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
 }
 
-/// Override the commit the work branches from, or pass `null` to put the
-/// Conversation back on the default-branch rule.
-export function setBaseCommit(
+/// Choose the branch the work comes off, or pass `null` to put the Conversation
+/// back on the default-branch rule.
+///
+/// The name rather than where it stands: it is resolved when grilling starts, so
+/// the work comes off wherever that branch is then.
+export function setBaseBranch(
   id: number,
-  commit: string | null,
+  branch: string | null,
 ): Promise<BaseRecorded> {
-  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { commit });
+  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { branch });
 }
 
 /// Give a Conversation somewhere to work and set it grilling: a branch off its
@@ -338,29 +352,6 @@ export function handBack(id: number): Promise<HandedBack> {
   return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
 }
 
-/// Say what to do about a run that stopped: run the step again, take it on
-/// manually, or end the run.
-///
-/// One press for the choice and the doing. The note
-/// is what a retried session is told alongside — "try again but leave the
-/// migration alone" — and is sent for the other two as well: a human who wrote
-/// why they were taking over has said something worth keeping on the record.
-///
-/// In every case the repo is left as the session left it. None of the three
-/// reverts, resets or stashes anything, which is what makes taking over a remedy
-/// at all.
-export function settleInterruption(
-  id: number,
-  event: number,
-  remedy: Remedy,
-  note: string,
-): Promise<RemedySettled> {
-  return post<RemedySettled>(
-    `/api/ui/conversations/${id}/interruption/${event}`,
-    { remedy, note },
-  );
-}
-
 /// Go on without waiting for the account's window to come back.
 ///
 /// The human's half of the two ways a pause ends; the other is the reset time
@@ -380,24 +371,61 @@ export function resumePause(
   );
 }
 
-/// Set a manual task going: this one instruction, under the profile picked
+/// Set a manual task going: this one instruction, under the pairing picked
 /// beside it, in a session of its own.
 ///
 /// Outside the pipeline, so nothing about the conversation moves. What it leaves
 /// behind is the instruction on the timeline, whatever the session printed, and
 /// whatever that committed.
 ///
-/// The profile is sent rather than left to the server to read off the
+/// The pairing is sent rather than left to the server to read off the
 /// conversation, because the pick is one-off: it is what *this* task runs under
-/// and never becomes the conversation's own implementation profile.
+/// and never becomes the conversation's own implementation pairing.
 export function startManualTask(
   id: number,
   instruction: string,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ManualTaskStarted> {
-  return post<ManualTaskStarted>(
-    `/api/ui/conversations/${id}/manual-task`,
-    { instruction, profile_id: profileId },
+  return post<ManualTaskStarted>(`/api/ui/conversations/${id}/manual-task`, {
+    instruction,
+    ...pairing,
+  });
+}
+
+/// Start driving a conversation again, from wherever the work now stands.
+///
+/// Nothing is sent with it. What should be running is the server's to work out
+/// from the conversation's state and its branch — a press that named a step
+/// would be a page deciding something it read a moment ago and cannot check.
+///
+/// What comes back either says driving has started or names the reason nothing
+/// could: resume is never silent, and the refusals are what that means.
+export function resume(id: number): Promise<Resumed> {
+  return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
+}
+
+/// Stop driving a conversation after the task it is on.
+///
+/// Nothing new is started and nothing running is cut short: the session going
+/// now runs to its own end, and the conversation halts before the next launch.
+/// Nothing is sent, for the reason nothing goes with a resume — which
+/// conversation it is is the whole of it.
+export function stopConversation(id: number): Promise<ConversationStopped> {
+  return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
+}
+
+/// And stop it now: whatever is running is ended where it stands, and the halt
+/// is written at once.
+///
+/// The step is left however far the session had got, uncommitted work and all.
+/// Nothing else goes either — the worktree stays, the branch stays, and a
+/// question set nobody has answered is left standing.
+export function forceStopConversation(
+  id: number,
+): Promise<ConversationStopped> {
+  return post<ConversationStopped>(
+    `/api/ui/conversations/${id}/force-stop`,
+    {},
   );
 }
 
@@ -433,24 +461,25 @@ export function deleteProfile(id: number): Promise<ProfileDeleted> {
 }
 
 /// Choose which account and model a conversation's grilling session runs under.
-export function chooseGrillingProfile(
+export function chooseGrillingPairing(
   id: number,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
-  return post<ProfileChosen>(`/api/ui/conversations/${id}/grilling-profile`, {
-    profile_id: profileId,
-  });
+  return post<ProfileChosen>(
+    `/api/ui/conversations/${id}/grilling-pairing`,
+    pairing,
+  );
 }
 
 /// And the one its implementation runs under, which is a separate choice: the
 /// implementation session cannot simply carry the grilling one on.
-export function chooseImplementationProfile(
+export function chooseImplementationPairing(
   id: number,
-  profileId: number,
+  pairing: ProfileChoice,
 ): Promise<ProfileChosen> {
   return post<ProfileChosen>(
-    `/api/ui/conversations/${id}/implementation-profile`,
-    { profile_id: profileId },
+    `/api/ui/conversations/${id}/implementation-pairing`,
+    pairing,
   );
 }
 

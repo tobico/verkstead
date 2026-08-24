@@ -230,7 +230,7 @@ async fn grilling() -> Grilling {
             name: "work".to_owned(),
             claude_dir,
             config_file,
-            model: "claude-opus-5".to_owned(),
+            models: vec!["claude-opus-5".to_owned()],
             agent_type: store::AgentType::Claude,
         },
     )
@@ -243,10 +243,10 @@ async fn grilling() -> Grilling {
         .unwrap()
         .expect("the Conversation starts");
 
-    store::set_grilling_profile(&pool, id, profile.id)
+    store::set_grilling_pairing(&pool, id, profile.id, profile.model())
         .await
         .unwrap();
-    store::set_implementation_profile(&pool, id, profile.id)
+    store::set_implementation_pairing(&pool, id, profile.id, profile.model())
         .await
         .unwrap();
 

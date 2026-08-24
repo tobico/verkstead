@@ -6,8 +6,8 @@
 //! is the work that comes after, and the one thing every session is certain to
 //! read is the prompt it was started on. So they go there, under the documents
 //! the prompt is built from: the Brief says what the work is, and this is newer
-//! and less general than the Brief, which is exactly where a retry note goes and
-//! for the same reason.
+//! and less general than the Brief, which is exactly where everything written
+//! under the documents goes and for the same reason.
 //!
 //! **Folded once and never again**, which is why the folding is written down
 //! rather than worked out from what happens to be answered — see

@@ -4,8 +4,8 @@
 //!
 //! Three small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
-//! pull request, the commits a fix session lands, the Interruption where it
-//! stops asking the machine. What is kept here is the bookkeeping underneath:
+//! pull request, the commits a fix session lands, the Notice of the halt where
+//! it stops asking the machine. What is kept here is the bookkeeping underneath:
 //! facts that decide what Verkstead does next and that nobody would want a row
 //! on a Timeline for.
 //!
@@ -42,10 +42,15 @@ pub enum WaitingOn {
 
     /// The self-review has been answered — or found nothing to ask about.
     ///
-    /// Unlike the checks, this is settled once and stays settled. A review is
-    /// something that happened rather than a state of the branch: the human has
-    /// read what it found and said which of it to fix, and a commit landing
-    /// afterwards does not un-say that.
+    /// Unlike the checks, this is settled once and stays settled — within one
+    /// wrap. A review is something that happened rather than a state of the
+    /// branch: the human has read what it found and said which of it to fix, and
+    /// a commit landing afterwards does not un-say that.
+    ///
+    /// Across re-entry it does not hold, and could not: a wrap-up that split its
+    /// findings out into a backlog leaves Wrapping to build them, and what comes
+    /// back is a branch nobody has read. So the move out takes this settle with
+    /// it — see [`super::implement_again`] — and the second wrap reviews afresh.
     Review,
 
     /// Nothing has been said on the pull request that has not had a session
@@ -195,10 +200,29 @@ pub async fn unsettle_wrap_up(
     conversation_id: i64,
     waiting_on: WaitingOn,
 ) -> Result<()> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("putting something a wrap-up waits on back to waiting")?;
+
+    unsettle(&mut connection, conversation_id, waiting_on).await
+}
+
+/// The same, inside a transaction that is doing something else as well.
+///
+/// Which is the move out of Wrapping: leaving takes the review's settle with it,
+/// in the same breath as the state changes, so a Conversation being built again
+/// is never one carrying a settled review of work that has not been done yet.
+/// See [`super::implement_again`].
+pub(crate) async fn unsettle(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    waiting_on: WaitingOn,
+) -> Result<()> {
     sqlx::query("DELETE FROM wrap_up_settled WHERE conversation_id = ? AND waiting_on = ?")
         .bind(conversation_id)
         .bind(waiting_on.stored())
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| {
             format!(
@@ -345,6 +369,49 @@ pub async fn record_addressed_comments(
     Ok(())
 }
 
+/// Forget that a session was dispatched about these comments, so the next poll
+/// dispatches another one.
+///
+/// The other half of [`record_addressed_comments`], and what a batch session
+/// that did not finish leaves behind: the comments were recorded as addressed as
+/// it was dispatched, and a session that fell over before it put anything to the
+/// human addressed none of them. Forgetting them is what makes Resume the batch
+/// over again, in a session as fresh as the first.
+///
+/// Only ever called for a batch nothing is left running about — the session is
+/// gone and the run has halted with a Notice saying so — so there is nothing
+/// racing this to dispatch about them in the meantime.
+pub async fn forget_addressed_comments(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    comments: &[String],
+) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("forgetting which comments have been dispatched for")?;
+
+    for comment in comments {
+        sqlx::query("DELETE FROM addressed_comments WHERE conversation_id = ? AND comment_id = ?")
+            .bind(conversation_id)
+            .bind(comment)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "forgetting that {comment:?} was dispatched for on Conversation \
+                     {conversation_id}"
+                )
+            })?;
+    }
+
+    tx.commit()
+        .await
+        .context("forgetting which comments have been dispatched for")?;
+
+    Ok(())
+}
+
 /// Move the Conversation to Done, where its wrap-up has settled everything it
 /// waits on.
 ///
@@ -445,9 +512,9 @@ pub(crate) async fn forget_the_round(
 /// Forget what a Conversation's checks have already been given, so they start
 /// again from nothing.
 ///
-/// What a retried Interruption does. The human has read the evidence and asked
-/// for another go, and a count left standing would be a retry that raised the
-/// same Interruption on its next poll without dispatching anything.
+/// What Resume does. The human has read the Notice of what stopped and asked
+/// for another go, and a count left standing would be a watcher that halted all
+/// over again on its next poll without dispatching anything.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")
         .bind(conversation_id)

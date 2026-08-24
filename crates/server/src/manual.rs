@@ -8,8 +8,8 @@
 //!
 //! **Outside the pipeline in every sense.** No state changes on account of one.
 //! A Done Conversation stays Done and does not re-enter wrapping when the
-//! session commits; an open Interruption stays open, with *blocked on you* still
-//! on it, because the Remedies are the only thing that settles one. What a
+//! session commits; a halt stays where it is, with *blocked on you* still on it,
+//! because starting to drive again is the only thing that clears one. What a
 //! Manual Task leaves behind is its instruction on the record, whatever its
 //! session printed, and whatever that committed — all of which land as the
 //! ordinary Events they land as everywhere else.
@@ -30,7 +30,7 @@
 //! prints nothing for hours, so it is quiet *and* nothing of its own awaiting an
 //! answer, or it is left where it is.
 
-use verkstead_render::ManualTaskStarted;
+use verkstead_render::{ManualTaskStarted, ManualTaskSubmission};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
@@ -39,7 +39,7 @@ use crate::skills;
 use crate::store;
 
 /// Set a Manual Task going: the instruction on the Timeline, and a session under
-/// `profile_id` doing what it says.
+/// the Pairing `choice` names doing what it says.
 ///
 /// Returns as soon as the session is running. Seeing it out is a task of its own
 /// — a manual task takes as long as it takes, and the browser that submitted it
@@ -50,10 +50,9 @@ use crate::store;
 pub(crate) async fn submit(
     state: &AppState,
     conversation_id: i64,
-    instruction: &str,
-    profile_id: i64,
+    submission: &ManualTaskSubmission,
 ) -> anyhow::Result<ManualTaskStarted> {
-    let instruction = instruction.trim();
+    let instruction = submission.instruction.trim();
 
     if instruction.is_empty() {
         return Ok(ManualTaskStarted::EmptyInstruction);
@@ -75,8 +74,23 @@ pub(crate) async fn submit(
         return Ok(ManualTaskStarted::NowhereToWork);
     }
 
-    let Some(profile) = store::load_profile(&state.pool, profile_id).await? else {
+    let Some(profile) = store::load_profile(&state.pool, submission.profile_id).await? else {
         return Ok(ManualTaskStarted::NoSuchProfile);
+    };
+
+    // The model half of the pick, held to the Profile's list the way the two
+    // Pairing choices are: a Profile whose list was edited between the composer
+    // being drawn and the press is a session that would launch on a model that
+    // account cannot run.
+    if !profile.models.contains(&submission.model) {
+        return Ok(ManualTaskStarted::NoSuchModel);
+    }
+
+    // The pick is one-off, and it is a Pairing rather than a row of the record:
+    // nothing about this is written down as the Conversation's.
+    let pairing = store::Pairing {
+        profile,
+        model: Some(submission.model.clone()),
     };
 
     // Tried for rather than waited for, and the two are different answers to the
@@ -113,7 +127,7 @@ pub(crate) async fn submit(
 
     let started = state
         .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
+        .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await?;
 
     let Some(session) = started else {
@@ -128,7 +142,8 @@ pub(crate) async fn submit(
     tracing::info!(
         conversation_id,
         event_id = session.event_id,
-        profile = profile.name,
+        profile = pairing.profile.name,
+        model = submission.model,
         "a manual task is running"
     );
 
@@ -148,12 +163,9 @@ pub(crate) async fn submit(
 /// ends up having done is on the Timeline — what it printed, what it asked, what
 /// it committed — and the Conversation is exactly where it was.
 ///
-/// The one exception is a session that ended badly, which stops at an
-/// Interruption like every other session that ended badly — see [`stop`]. That
-/// is deliberately not a message: the human submits from a phone and walks away,
-/// so *blocked on you* and the push it fires are the only things that reach
-/// them, and Retry is the only way to have another go without typing the
-/// instruction out again.
+/// The one exception is a session that ended badly, which halts like every other
+/// session that ended badly — see [`stop`]. The human submits from a phone and
+/// walks away, so *blocked on you* and the Notice under it are what reach them.
 ///
 /// What it does end with, either way, is the check for a Conversation nothing
 /// is driving — see [`crate::stalls::sweep`]. Nothing is relaunched by it: the
@@ -169,19 +181,29 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
         () = quiet_and_nothing_asked(&state, conversation_id, event_id, &quiet, grace) => None,
     };
 
-    let Some(ended) = ended else {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "a manual session has gone quiet with nothing of its own open, so it is \
-             being ended",
-        );
+    let ended = match ended {
+        Some(ended) => ended,
+        None => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "a manual session has gone quiet with nothing of its own open, so it is \
+                 being ended",
+            );
 
-        state.sessions.end(conversation_id).await;
-        drop(turn);
+            state.sessions.end(conversation_id).await;
 
-        crate::stalls::sweep(&state).await;
-        return;
+            // And then asked how it ended, rather than taken to have ended the
+            // way this branch meant it to. The grace runs out on a session that
+            // fell over a moment ago as readily as on one sitting there
+            // thinking: a session's last word reaches its driver behind a final
+            // sweep of the branch, and a slow one is a session that has gone
+            // with nobody told yet. Ending it settles the question — the relay
+            // is finished by the time that returns, so how it ended is there to
+            // read, and a session Verkstead ended is
+            // [`crate::sessions::Ended::Stopped`] either way.
+            session.ended().await
+        }
     };
 
     // Nothing is read off the Worktree to decide this, unlike every step of a
@@ -199,164 +221,37 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
     crate::stalls::sweep(&state).await;
 }
 
-/// Put a manual session that fell over on the Timeline for the human to answer.
+/// Put a manual session that fell over on the Timeline for the human to read.
 ///
-/// The ordinary Interruption with the ordinary three Remedies: the evidence is
-/// gathered the way every other one's is, and *take over manually* and *abort*
-/// mean exactly what they mean everywhere — nothing reverts, resets or stashes,
-/// and the Worktree is left as the session left it.
+/// The ordinary halt with the ordinary Notice: the evidence is gathered the way
+/// every other one's is, and nothing reverts, resets or stashes — the Worktree
+/// is left exactly as the session left it.
 ///
-/// Nothing is refused for. By the time this runs the session is gone, and an
-/// Interruption that could not be raised is a manual task that failed with
-/// nothing saying so — which is a thing to see in the log, and the same thing
-/// either way.
+/// [`store::Halt::Deliberate`]. The human typed the instruction and walked away,
+/// so a restart running it again on its own would be a machine repeating an act
+/// of theirs unasked; whether it goes again is theirs to say.
+///
+/// Nothing is refused for. By the time this runs the session is gone, and a halt
+/// that could not be recorded is a manual task that failed with nothing saying
+/// so — which is a thing to see in the log, and the same thing either way.
 async fn stop(state: &AppState, conversation_id: i64, writing: i64, how: &str) {
-    let raised = crate::interruptions::raise(
+    let halted = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Manual,
+        crate::halts::Decided::Verkstead,
         "doing what the manual task said",
         how,
         Some(writing),
     )
     .await;
 
-    if let Err(error) = raised {
+    if let Err(error) = halted {
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a manual task failed and the Interruption saying so could not be raised"
+            "a manual task failed and the halt saying so could not be recorded"
         );
     }
-}
-
-/// Run the instruction again, in a fresh session, after the human pressed Retry
-/// on the Interruption their last go stopped at.
-///
-/// Where every other retry is dispatched off `.tasks/` or off GitHub, this is
-/// dispatched off the Timeline: a retry is handed the step the evidence names,
-/// and [`store::Step::Manual`] is a bare word with no room for what was typed.
-/// So the instruction is read back from where the submission wrote it — see
-/// [`asked_for`].
-///
-/// Under the Conversation's implementation Profile, whichever Profile the
-/// submission picked. The pick belonged to that submission and was never kept:
-/// keeping it would be a one-off choice quietly becoming the Conversation's,
-/// which is the one thing the composer promises it is not.
-///
-/// `note` is what the human wrote beside the Retry, and it reaches the agent
-/// under the instruction exactly where a retried step's note goes — see
-/// [`skills::retrying`].
-pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String) {
-    // Waited for rather than tried for, which is the other way round from a
-    // submission. A submission is a browser holding a request open against a
-    // page that has since moved on, so a Turn somebody else holds makes it
-    // stale; a retry is the human's answer to an Interruption, arriving whenever
-    // they got to it, and nothing is waiting on the reply. So whatever is
-    // running finishes, and this goes next.
-    let turn = state.sessions.turn(conversation_id).await;
-
-    let Some(instruction) = asked_for(&state, conversation_id).await else {
-        return;
-    };
-
-    // Read back here rather than carried from the submission, for the reason
-    // every launch reads it back: a retry may be pressed the next morning, and
-    // where an agent is about to be let loose is the one thing that must not be
-    // guessed at.
-    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation,
-        Ok(None) => {
-            tracing::error!(
-                conversation_id,
-                "there is no Conversation left to run a manual task in"
-            );
-            return;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to run a manual task in failed");
-            return;
-        }
-    };
-
-    let Some(profile) = conversation.implementation_profile.clone() else {
-        tracing::error!(
-            conversation_id,
-            "the implementation Profile is gone, so the manual task was not run again"
-        );
-        return;
-    };
-
-    let prompt = skills::retrying(&skills::manual_task(&instruction), &note);
-
-    // One Worktree holds one agent. The session this is retrying died rather
-    // than being ended, so a register still holding a relay that has not
-    // finished unwinding would be two agents editing each other's files.
-    state.sessions.end(conversation_id).await;
-
-    let started = state
-        .sessions
-        .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
-        .await;
-
-    let session = match started {
-        Ok(Some(session)) => session,
-        Ok(None) => {
-            tracing::error!(
-                conversation_id,
-                "no session could be started to run the manual task again"
-            );
-            return;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "a retried manual task could not be started");
-            return;
-        }
-    };
-
-    tracing::info!(
-        conversation_id,
-        event_id = session.event_id,
-        "a manual task is running again"
-    );
-
-    follow(state, conversation_id, session, turn).await;
-}
-
-/// The instruction of the newest Manual Task on the Conversation's Timeline, or
-/// `None` where there is none to read.
-///
-/// The newest, because that is the one the Interruption being retried was raised
-/// about: a manual session holds the Turn for as long as it runs, so a second
-/// Manual Task cannot be submitted part-way through the first, and the retry
-/// itself writes no new one — what was asked for was asked for once.
-///
-/// `None` is a broken record rather than an ordinary answer. An Interruption
-/// naming [`store::Step::Manual`] was raised by a session that a submission
-/// started, and a submission writes the instruction down before it launches
-/// anything.
-async fn asked_for(state: &AppState, conversation_id: i64) -> Option<String> {
-    let timeline = match store::timeline(&state.pool, conversation_id).await {
-        Ok(timeline) => timeline,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading back what a manual task was asked to do failed");
-            return None;
-        }
-    };
-
-    let asked = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::ManualTask(instruction) => Some(instruction.clone()),
-        _ => None,
-    });
-
-    if asked.is_none() {
-        tracing::error!(
-            conversation_id,
-            "a manual task was retried with no instruction left on the Timeline to run again"
-        );
-    }
-
-    asked
 }
 
 /// Wait until the session has printed nothing for `grace` *and* has no Question

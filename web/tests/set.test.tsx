@@ -462,7 +462,12 @@ describe("the record of a settled Set", () => {
     );
   });
 
-  it("says when nothing was answered and nothing was said either", async () => {
+  /// The one variant of this notice that says nothing worth reading: every
+  /// question already reads Unanswered and there is no comment for the line to
+  /// account for, so it only repeats the page back at whoever is on it. Its two
+  /// siblings stay — the counter-question above, and the archived-unanswered
+  /// line below — because each of those says something the rows do not.
+  it("says nothing at the head of a Set answered in silence", async () => {
     const silent: Decided = {
       answers: ["Q1", "Q2", "Q2a", "Q2b", "Q3"].map((label) => ({
         label,
@@ -475,9 +480,11 @@ describe("the record of a settled Set", () => {
       standing: { Answered: { submitted_at: "2026-08-03T09:07:11.000Z", response: silent } },
     });
 
-    expect(page.querySelector(".counter-question")!.textContent).toContain(
-      "nothing was said about the Set either",
-    );
+    expect(page.querySelector(".counter-question")).toBeNull();
+    expect(
+      page.querySelectorAll(".unanswered"),
+      "the rows are the whole of the account, and they were always there",
+    ).toHaveLength(5);
     expect(page.querySelector(".set-comment")).toBeNull();
   });
 

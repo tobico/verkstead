@@ -27,10 +27,10 @@
 //! unattended.
 //!
 //! A `gh` that cannot answer — absent, not logged in, no PR on the branch —
-//! leaves the Conversation where it is with the reason on the Timeline, as an
-//! Interruption. That is the honest shape of it: the run has stopped, Verkstead
+//! halts, leaving the Conversation where it is with the reason on the Timeline
+//! as a Notice. That is the honest shape of it: the run has stopped, Verkstead
 //! cannot resolve it, and what to do about it is the human's — install `gh`, log
-//! in, open the PR by hand and retry.
+//! in, or open the PR by hand, and resume.
 
 use std::path::PathBuf;
 
@@ -43,9 +43,9 @@ use crate::store;
 /// Find the pull request `conversation_id`'s last session opened, and move the
 /// Conversation on to wrapping it up.
 ///
-/// `writing` is the Timeline Event that session printed into, so that an
-/// Interruption raised here carries the tail of what it last said — which is
-/// usually where the reason it opened nothing is written down.
+/// `writing` is the Timeline Event that session printed into, so that a halt
+/// written here carries the tail of what it last said — which is usually where
+/// the reason it opened nothing is written down.
 ///
 /// Nothing is refused for and nothing is returned: this runs at the end of an
 /// unattended run with nobody watching, and what it has to say it says on the
@@ -152,16 +152,27 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// watched, its comments read, its branch reviewed where nobody has read it yet,
 /// and the rule that ends the whole thing waiting to be true.
 ///
-/// One place that says what a wrap-up *is*, because four things start one and all
-/// four have to start the whole of it: the finish step opening the pull request,
-/// a server coming back up over a Conversation it left wrapping, and either of
-/// the two Interruptions being retried — each of which stopped the rest too,
-/// since nothing advances past an open one.
+/// One place that says what a wrap-up *is*, because everything that starts one
+/// has to start the whole of it: the finish step opening the pull request, a
+/// Resume pressed on a wrap-up that halted, a server coming back up over a
+/// Conversation it left wrapping — see [`crate::resume`] for both of those — and
+/// Resume being pressed on a halted wrap-up, which stopped
+/// the rest too, since nothing advances past an open one.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
-/// them twice is not starting two of anything: a review that has already asked
-/// returns, a second settling watcher finds the move already made, and a
-/// Conversation that has stopped wrapping up stops every one of them.
+/// them twice is not starting two of anything: a review that has already settled
+/// returns, a second of anything queues on the Worktree behind the first and
+/// finds the work done, and a Conversation that has stopped wrapping up stops
+/// every one of them.
+///
+/// Which is also why a restart and a Resume both come through here rather than
+/// picking their own step. What either of them is looking at is a wrap-up with
+/// nothing running, and that is one situation with several possible causes: a
+/// branch nobody has read, a review whose session went between its ask and the
+/// answers, a batch's proposal in the same state, fixes the human approved and
+/// nobody landed. Each of the four asks the record what it is looking at rather
+/// than being told — see [`crate::review::run`] and
+/// [`crate::responding::unattended`].
 pub(crate) fn watching(state: &AppState, conversation_id: i64) {
     driving(state, conversation_id, crate::checks::watch);
     driving(state, conversation_id, crate::comments::watch);
@@ -177,9 +188,9 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64) {
 /// any one of the four is still going, and each of them ends in its own time —
 /// the review once it has asked, the rest once the Conversation stops wrapping
 /// up. Counted rather than flagged, so a second set started over the top of the
-/// first — which is what retrying either of the wrap-up's Interruptions does —
-/// does not have the first of them to finish taking the Conversation off the
-/// register. See [`crate::drivers`].
+/// first — which is what Resume on a halted wrap-up does — does not have the
+/// first of them to finish taking the Conversation off the register. See
+/// [`crate::drivers`].
 fn driving<W, F>(state: &AppState, conversation_id: i64, watcher: W)
 where
     W: FnOnce(AppState, i64) -> F,
@@ -195,58 +206,44 @@ where
     });
 }
 
-/// Start watching every Conversation that was already wrapping up, and say when
-/// it is done.
+/// Whether the Conversation is still wrapping up, which is the only state
+/// anything a wrap-up dispatches belongs to.
 ///
-/// What a restarting server does. A pull request goes on being built while
-/// Verkstead is down, and a review is a session that does not survive the process
-/// that started it — so a server that came back up and watched nothing would
-/// leave a Conversation wrapping for ever with nobody having said so.
+/// Asked on the far side of every wait for the Worktree: a Conversation aborted
+/// while something queued has nowhere left to work, and a queue is where most of
+/// a wrap-up's waiting happens.
 ///
-/// The task is handed back rather than let go, because something waits on it:
-/// the stall sweep judges a Conversation by whether anything is registered as
-/// driving it, and every wrap-up taken up here registers as it is started — so a
-/// sweep that looked first would call every one of them stalled. See
-/// [`crate::stalls::sweeping`].
-#[must_use = "the sweep waits for the wrap-ups to be taken up before it judges \
-              whether anything is driving them"]
-pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
-            Ok(conversations) => conversations,
-            Err(error) => {
-                tracing::error!(error = ?error, "listing the Conversations to resume wrapping up failed");
-                return;
-            }
-        };
-
-        for conversation in conversations
-            .into_iter()
-            .filter(|conversation| conversation.state == store::Lifecycle::Wrapping)
-        {
-            tracing::info!(
-                conversation_id = conversation.id,
-                "a Conversation was left wrapping up, so its wrap-up is taken up again",
-            );
-
-            watching(&state, conversation.id);
+/// A store that will not answer reads as *no*, which is the right way round for
+/// the one thing this decides: on the other side of it is an agent being let
+/// loose in a Worktree.
+pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state == store::Lifecycle::Wrapping,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left wrapping up");
+            false
         }
-    })
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation was wrapping up failed");
+            false
+        }
+    }
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.
 ///
-/// An Interruption rather than a line of its own, because that is exactly what
-/// this is: a run that has stopped on something Verkstead cannot resolve itself.
-/// The three remedies all mean something here — retry once `gh` is logged in,
-/// take over and open the PR by hand, or abort the run.
+/// A halt rather than a line of its own, because that is exactly what this is: a
+/// run that has stopped on something Verkstead cannot resolve itself. Resume
+/// once `gh` is logged in, or open the pull request by hand, or abort the run.
+///
+/// [`store::Halt::Deliberate`]: the finish step ran and left no pull request, so
+/// what is wrong is out here rather than in a driver that went away, and a
+/// restart looking again would find the same missing thing.
 async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Option<i64>) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Finish,
+        crate::halts::Decided::Verkstead,
         "finding the pull request the finish step opened",
         why,
         writing,
@@ -256,7 +253,7 @@ async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Opt
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a finish step left no pull request and the Interruption saying so could not be raised"
+            "a finish step left no pull request and the halt saying so could not be recorded"
         );
     }
 }

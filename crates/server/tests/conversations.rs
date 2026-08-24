@@ -3,8 +3,8 @@
 //!
 //! Asked of the *server*, through the endpoints, because that is where the
 //! decisions are: whether a name is one git would take for a branch, and whether
-//! anything in the repository answers to what was typed as a base commit. A form
-//! that checked either would be a courtesy.
+//! the repository really has the branch the work is to come off. A form that
+//! checked either would be a courtesy.
 //!
 //! Starting the grilling is where that stops being true: the branch and the
 //! worktree are made against a real repository, in a real data directory, and
@@ -195,11 +195,11 @@ async fn rename(app: &Router, id: i64, branch: &str) -> BranchRenamed {
     .await
 }
 
-async fn base(app: &Router, id: i64, commit: Option<&str>) -> BaseRecorded {
+async fn base(app: &Router, id: i64, branch: Option<&str>) -> BaseRecorded {
     post(
         app,
         &format!("/api/ui/conversations/{id}/base"),
-        &serde_json::json!({ "commit": commit }),
+        &serde_json::json!({ "branch": branch }),
     )
     .await
 }
@@ -430,56 +430,70 @@ async fn the_name_is_taken_without_the_whitespace_around_it() {
     assert_eq!(opened(&app, id).await.branch, "rate-limiting");
 }
 
-/// The override is a commit, so what is recorded is the commit the repository
-/// resolved — a tag or a branch would move, and pinning is the whole point of
-/// overriding the rule.
+/// What is stored is the branch's name rather than where it stands: the whole
+/// point of picking one is coming off whatever is on it when the work starts.
 #[tokio::test]
-async fn a_base_commit_override_is_recorded_as_the_commit_the_repo_resolved() {
+async fn a_picked_branch_is_recorded_by_name() {
     let (_watched, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
-    let short = &head[..8];
+    git(&repo, &["branch", "release"]);
 
-    assert_eq!(base(&app, id, Some(short)).await, BaseRecorded::Recorded);
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
     assert_eq!(
         opened(&app, id).await.base_commit.as_deref(),
-        Some(&head[..])
+        Some("release")
     );
 }
 
+/// A remote-tracking branch is as pickable as a local one: an unmerged branch
+/// somebody else pushed is a thing to build on, and it is not checked out here.
 #[tokio::test]
-async fn a_branch_name_resolves_to_the_commit_it_points_at() {
+async fn a_remote_tracking_branch_is_pickable_too() {
     let (_watched, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
     let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["update-ref", "refs/remotes/origin/theirs", &head]);
 
-    assert_eq!(base(&app, id, Some("main")).await, BaseRecorded::Recorded);
+    assert_eq!(
+        base(&app, id, Some("origin/theirs")).await,
+        BaseRecorded::Recorded
+    );
     assert_eq!(
         opened(&app, id).await.base_commit.as_deref(),
-        Some(&head[..])
+        Some("origin/theirs")
     );
 }
 
 /// Refused now rather than at grill start, where it would be a failure with
-/// nobody watching.
+/// nobody watching — and refused for a commit that resolves perfectly well,
+/// because a branch is the whole of what there is to pick.
 #[tokio::test]
-async fn a_base_commit_the_repository_has_never_heard_of_is_refused() {
-    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+async fn anything_that_is_not_one_of_the_repos_branches_is_refused() {
+    let (_watched, _dir, app, repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    assert_eq!(
-        base(&app, id, Some("deadbeefdeadbeef")).await,
-        BaseRecorded::NoSuchCommit
-    );
-    assert_eq!(opened(&app, id).await.base_commit, None);
+    let head = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["tag", "v0.1.0"]);
+
+    for asked in ["nowhere", "v0.1.0", head.as_str()] {
+        assert_eq!(
+            base(&app, id, Some(asked)).await,
+            BaseRecorded::NoSuchBranch,
+            "{asked} is not a branch of that repo"
+        );
+        assert_eq!(opened(&app, id).await.base_commit, None);
+    }
 }
 
-/// Emptying the field is taking the override away, not naming a commit called
-/// nothing — and what it goes back to is the rule.
+/// Picking the first entry of the dropdown is the override taken away, not a
+/// branch called nothing — and what it goes back to is the rule.
 #[tokio::test]
-async fn clearing_the_base_commit_puts_the_conversation_back_on_the_rule() {
+async fn clearing_the_base_branch_puts_the_conversation_back_on_the_rule() {
     let (_watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
@@ -641,7 +655,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "model": "claude-opus-5",
+            "models": ["claude-opus-5"],
         }),
     )
     .await;
@@ -655,11 +669,13 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
         .id
 }
 
+/// Pair a Profile with the one model [`profile`] gives every Profile here, for
+/// one of a Conversation's two roles.
 async fn choose(app: &Router, id: i64, role: &str, profile_id: i64) {
     let chosen: verkstead_render::ProfileChosen = post(
         app,
-        &format!("/api/ui/conversations/{id}/{role}-profile"),
-        &serde_json::json!({ "profile_id": profile_id }),
+        &format!("/api/ui/conversations/{id}/{role}-pairing"),
+        &serde_json::json!({ "profile_id": profile_id, "model": "claude-opus-5" }),
     )
     .await;
     assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
@@ -801,20 +817,27 @@ async fn starting_records_the_commit_the_work_branched_from() {
     );
 }
 
-/// An overridden commit is what the work branches from, and it is not the tip.
+/// The picked branch is what the work branches from, and it is not the default
+/// branch's tip.
 #[tokio::test]
-async fn an_overridden_base_commit_is_what_the_branch_is_made_off() {
+async fn the_picked_branch_is_what_the_branch_is_made_off() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
 
     let first = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "release"]);
     std::fs::write(repo.join("second.md"), "# more\n").unwrap();
     git(&repo, &["add", "second.md"]);
     git(&repo, &["commit", "-m", "second"]);
 
-    assert_eq!(base(&app, id, Some(&first)).await, BaseRecorded::Recorded);
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
+    // The name while it was a choice; the commit it stood at once the work is on
+    // it, which is what the branch was actually made off.
     let view = opened(&app, id).await;
     assert_eq!(view.base_commit.as_deref(), Some(first.as_str()));
 
@@ -823,6 +846,39 @@ async fn an_overridden_base_commit_is_what_the_branch_is_made_off() {
     assert!(
         !worktree.join("second.md").exists(),
         "the worktree should hold the commit it branched from, not the tip"
+    );
+}
+
+/// A branch is a moving target and picking one says so: what the work comes off
+/// is wherever it stands when grilling starts, not where it stood when it was
+/// picked.
+#[tokio::test]
+async fn a_picked_branch_is_resolved_where_it_stands_at_grill_start() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    git(&repo, &["branch", "release"]);
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
+
+    // The branch moves on after it was picked, which is the whole question.
+    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
+    git(&repo, &["add", "second.md"]);
+    git(&repo, &["commit", "-m", "second"]);
+    let moved_to = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "--force", "release", &moved_to]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.base_commit.as_deref(), Some(moved_to.as_str()));
+
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+    assert!(
+        worktree.join("second.md").exists(),
+        "the work should come off where the branch stands now"
     );
 }
 
@@ -903,25 +959,17 @@ async fn starting_is_refused_when_the_brief_is_empty() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 }
 
-/// A commit that resolved when the human typed it can be gone by the time the
+/// A branch that was there when the human picked it can be gone by the time the
 /// button is pressed, which is exactly why it is asked again.
 #[tokio::test]
-async fn starting_is_refused_when_the_base_commit_no_longer_resolves() {
+async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
 
-    // A commit that exists to be recorded and then is reachable from nothing, so
-    // that expiring the reflog and pruning takes it away for good.
-    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
-    git(&repo, &["add", "second.md"]);
-    git(&repo, &["commit", "-m", "second"]);
-    let doomed = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "doomed"]);
+    assert_eq!(base(&app, id, Some("doomed")).await, BaseRecorded::Recorded);
 
-    assert_eq!(base(&app, id, Some(&doomed)).await, BaseRecorded::Recorded);
-
-    git(&repo, &["reset", "--hard", "HEAD~1"]);
-    git(&repo, &["reflog", "expire", "--expire=now", "--all"]);
-    git(&repo, &["gc", "--prune=now", "--quiet"]);
+    git(&repo, &["branch", "-D", "doomed"]);
 
     assert_eq!(grill(&app, id).await, GrillingStarted::NoBaseCommit);
 
@@ -2179,6 +2227,7 @@ async fn the_stage_an_adoption_names_is_read_at_the_base_commit() {
         &["03-implementation.md", "04-wrap-up.md"],
     );
     let before = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "predecessor", &before]);
 
     // The default branch moves on: stage 03 is ticked off there.
     roadmap(&repo, OPEN_AT_FOUR, &[]);
@@ -2190,7 +2239,10 @@ async fn the_stage_an_adoption_names_is_read_at_the_base_commit() {
         "with no override, the default branch's tip is what is read",
     );
 
-    assert_eq!(base(&app, id, Some(&before)).await, BaseRecorded::Recorded);
+    assert_eq!(
+        base(&app, id, Some("predecessor")).await,
+        BaseRecorded::Recorded
+    );
     assert_eq!(
         stage_of(&opened(&app, id).await).label,
         "03",
@@ -2423,13 +2475,17 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
         &["03-implementation.md", "04-wrap-up.md"],
     );
     let before = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "predecessor", &before]);
 
     // The default branch moves on: stage 03 is ticked off there, so 04 is what
     // the tip has open.
     roadmap(&repo, OPEN_AT_FOUR, &[]);
 
     let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
-    assert_eq!(base(&app, id, Some(&before)).await, BaseRecorded::Recorded);
+    assert_eq!(
+        base(&app, id, Some("predecessor")).await,
+        BaseRecorded::Recorded
+    );
 
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 
@@ -2585,10 +2641,10 @@ async fn only_a_drafting_adopting_conversation_can_be_adopted() {
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
 }
 
-/// A commit that resolved when the human fixed it can be gone by the time the
+/// A branch that was there when the human picked it can be gone by the time the
 /// button is pressed, which is exactly why it is asked again.
 #[tokio::test]
-async fn adopting_is_refused_when_the_base_commit_no_longer_resolves() {
+async fn adopting_is_refused_when_the_base_branch_no_longer_resolves() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     roadmap(
         &repo,
@@ -2598,18 +2654,10 @@ async fn adopting_is_refused_when_the_base_commit_no_longer_resolves() {
 
     let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
 
-    // A commit that exists to be recorded and then is reachable from nothing, so
-    // that expiring the reflog and pruning takes it away for good.
-    std::fs::write(repo.join("second.md"), "# more\n").unwrap();
-    git(&repo, &["add", "second.md"]);
-    git(&repo, &["commit", "-m", "second"]);
-    let doomed = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "doomed"]);
+    assert_eq!(base(&app, id, Some("doomed")).await, BaseRecorded::Recorded);
 
-    assert_eq!(base(&app, id, Some(&doomed)).await, BaseRecorded::Recorded);
-
-    git(&repo, &["reset", "--hard", "HEAD~1"]);
-    git(&repo, &["reflog", "expire", "--expire=now", "--all"]);
-    git(&repo, &["gc", "--prune=now", "--quiet"]);
+    git(&repo, &["branch", "-D", "doomed"]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::NoBaseCommit);
     nothing_adopted(&app, id, &repo).await;

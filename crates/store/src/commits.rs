@@ -5,12 +5,13 @@
 //! So each one becomes an Event — what it changed, in a line — and the details
 //! pane shows its diff.
 //!
-//! The summary is held here rather than read back out of git every time a page
-//! looks, for the reason a Capture's is: every open page reads the whole
-//! Timeline, and a repository asked once per commit per read would be a git
-//! process per row of it. The diff itself is *not* held, and that is the other
-//! half of the same judgement — it is megabytes the Timeline never shows, and
-//! the repository already has it.
+//! What the Timeline draws — the line about a commit, and the Commit Summary the
+//! agent wrote under its subject — is held here rather than read back out of git
+//! every time a page looks, for the reason a Capture's is: every open page reads
+//! the whole Timeline, and a repository asked once per commit per read would be a
+//! git process per row of it. The diff itself is *not* held, and that is the
+//! other half of the same judgement — it is megabytes the Timeline never shows,
+//! and the repository already has it.
 //!
 //! Nothing here talks to git. What is recorded is what the server read off a
 //! repository — see the server's `commits` module — exactly as a worktree is
@@ -22,19 +23,19 @@
 //! commit records it once, whether the second sweep is a poll that overlapped,
 //! a session restarting, or a server that came back up.
 
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::conversations::Event;
 
 /// A commit as its Timeline Event holds it: which commit, what it was called,
-/// and how much of the repository it moved.
+/// how much of the repository it moved, and what it said about itself.
 ///
-/// The subject alone and not the whole message. The Timeline gives a commit one
-/// line, and the rest of the message is in the diff the details pane fetches —
-/// which is also why the message has to come from here at all: the diff arrives
-/// headerless, so the Event is the only thing that can say what the commit was
-/// called.
+/// The message and not the diff. The diff the details pane fetches arrives
+/// headerless, so this is the only thing that can say what the commit was called
+/// — and the only thing that can say what the agent wrote under it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Commit {
     /// The full hash. Full rather than shortened, because a short hash is a
@@ -50,6 +51,15 @@ pub struct Commit {
 
     pub insertions: i64,
     pub deletions: i64,
+
+    /// What the commit says about itself: the body of its message with the
+    /// trailing trailer block taken off, or `None` where nothing was left of it.
+    ///
+    /// The agent writes it, so it is markdown — a Diagram of the delta, then
+    /// prose — and the details pane renders it above the diff. A bookkeeping
+    /// commit carries none, and neither does any commit recorded before this was
+    /// kept: `None` is the ordinary case rather than the damaged one.
+    pub summary: Option<String>,
 }
 
 /// The commits table. It hangs off a Timeline Event, as a Capture does: a
@@ -75,6 +85,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the commits table")?;
+
+    // The Commit Summary, beside the commit rather than in it. A column on the
+    // table above would need every row that is already there to grow one, and
+    // there is no migration machinery here to do that with — where a table of its
+    // own is simply absent for the commits recorded before it existed, which is
+    // exactly what "that commit carries no summary" means.
+    //
+    // Keyed by the Event and not by the Conversation and sha: the commit row
+    // above is what owns the identity, and this hangs off the same Event it does.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS commit_summaries (
+             event_id INTEGER PRIMARY KEY REFERENCES timeline_events(id),
+             summary  TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the commit summaries table")?;
 
     Ok(())
 }
@@ -156,6 +184,18 @@ pub async fn record_commit(
     .await
     .with_context(|| format!("recording commit {} of Event {event_id}", commit.sha))?;
 
+    // In the same transaction as the commit it belongs to, so that *exactly once*
+    // covers the summary too: a commit is either on the Timeline with everything
+    // it came with, or it is not there at all and the next sweep offers it again.
+    if let Some(summary) = &commit.summary {
+        sqlx::query("INSERT INTO commit_summaries (event_id, summary) VALUES (?, ?)")
+            .bind(event_id)
+            .bind(summary)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("recording the summary of Event {event_id}"))?;
+    }
+
     tx.commit().await.context("recording a commit")?;
 
     Ok(Some(event_id))
@@ -190,10 +230,14 @@ pub async fn commit(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<Commit>> {
-    let row: Option<(String, String, i64, i64, i64)> = sqlx::query_as(
-        "SELECT sha, subject, files, insertions, deletions
-         FROM commits
-         WHERE event_id = ? AND conversation_id = ?",
+    // Left-joined, because a commit with no summary is the ordinary commit
+    // rather than a row that has gone missing: every commit recorded before
+    // summaries were kept is one, and so is every bookkeeping commit since.
+    let row: Option<(String, String, i64, i64, i64, Option<String>)> = sqlx::query_as(
+        "SELECT c.sha, c.subject, c.files, c.insertions, c.deletions, s.summary
+         FROM commits c
+         LEFT JOIN commit_summaries s ON s.event_id = c.event_id
+         WHERE c.event_id = ? AND c.conversation_id = ?",
     )
     .bind(event_id)
     .bind(conversation_id)
@@ -201,13 +245,39 @@ pub async fn commit(
     .await
     .with_context(|| format!("reading the commit of Event {event_id}"))?;
 
-    Ok(
-        row.map(|(sha, subject, files, insertions, deletions)| Commit {
+    Ok(row.map(
+        |(sha, subject, files, insertions, deletions, summary)| Commit {
             sha,
             subject,
             files,
             insertions,
             deletions,
-        }),
+            summary,
+        },
+    ))
+}
+
+/// The Commit Summaries on a Conversation's Timeline, by the Event each one
+/// belongs to.
+///
+/// Its own read rather than a column on the Timeline's own query, for the reason
+/// a Capture's summaries are: that query is at the number of columns a tuple can
+/// be read back as, and there is no position left to put one in. One more read
+/// for the whole Timeline, and most Timelines answer it with nothing.
+pub(crate) async fn summaries_on_timeline(
+    pool: &SqlitePool,
+    conversation_id: i64,
+) -> Result<HashMap<i64, String>> {
+    let rows: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT s.event_id, s.summary
+         FROM commit_summaries s
+         JOIN commits c ON c.event_id = s.event_id
+         WHERE c.conversation_id = ?",
     )
+    .bind(conversation_id)
+    .fetch_all(pool)
+    .await
+    .with_context(|| format!("reading the commit summaries of Conversation {conversation_id}"))?;
+
+    Ok(rows.into_iter().collect())
 }

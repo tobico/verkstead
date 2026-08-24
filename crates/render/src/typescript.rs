@@ -17,14 +17,14 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
-    ConversationEntry, ConversationReopened, ConversationView, GrillingStarted, HandedBack,
+    AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
+    ConversationReopened, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
     ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
     ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted,
-    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -80,7 +80,7 @@ fn the_viewers_types_are_written_from_these() {
     BriefSaved::export_all(&config).unwrap();
     BranchRename::export_all(&config).unwrap();
     BranchRenamed::export_all(&config).unwrap();
-    BaseCommitOverride::export_all(&config).unwrap();
+    BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
     // And the three actions that make, unmake and make again what a
@@ -131,26 +131,20 @@ fn the_viewers_types_are_written_from_these() {
     // so it is the outcome alone.
     HandedBack::export_all(&config).unwrap();
 
-    // And what a session committed. The summary rides on the Timeline too; the
+    // And what a session committed. The snippet rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
-    CommitDiff::export_all(&config).unwrap();
+    CommitPane::export_all(&config).unwrap();
 
     // And what the finish step opened. The PR itself rides on the Conversation
     // as a pinned Event — a number, a title and a URL; what is *on* it is its
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
 
-    // What the human does about a run that stopped. The Interruption itself
-    // rides on the Timeline whole, evidence and all — it is the one Event with
-    // nothing behind a second fetch — so this is the choice going back and how
-    // it was answered.
-    RemedyChoice::export_all(&config).unwrap();
-    RemedySettled::export_all(&config).unwrap();
-
-    // And what the human does about a run waiting an account's window out. The
-    // Pause rides on the Timeline whole for the Interruption's reason, and there
-    // is nothing to send with the press — so this is the outcome alone.
+    // What the human does about a run waiting an account's window out. The Pause
+    // rides on the Timeline whole — it is the one Event with nothing behind a
+    // second fetch — and there is nothing to send with the press, so this is the
+    // outcome alone.
     PauseResumed::export_all(&config).unwrap();
 
     // What the human sets going by hand at the end of a Timeline, and every way
@@ -158,6 +152,17 @@ fn the_viewers_types_are_written_from_these() {
     // `ConversationView` above, rendered like the handoff.
     ManualTaskSubmission::export_all(&config).unwrap();
     ManualTaskStarted::export_all(&config).unwrap();
+
+    // And the press beside it, which takes no request shape at all: what to
+    // start again is recomputed from the lifecycle and the branch, so all there
+    // is to send is which Conversation. What comes back is the outcome — a
+    // start, or the named reason there was nothing to start.
+    Resumed::export_all(&config).unwrap();
+
+    // And the two presses that stop it, which take no request shape either and
+    // answer with one outcome between them: the run is stopping, or the named
+    // reason there was nothing to stop.
+    ConversationStopped::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

@@ -39,7 +39,7 @@ function press(page: ParentNode, text: string) {
 /// Open the standing menu — the badge is its title — and choose the one thing
 /// in it, which is the offer to close the Set unanswered.
 function reachForArchive(page: ParentNode) {
-  const trigger = page.querySelector(".standing-trigger");
+  const trigger = page.querySelector(".standing > .menu-trigger");
   expect(trigger, "expected the badge to open the standing menu").toBeTruthy();
   fireEvent.click(trigger!);
   press(page, "Archive unanswered");
@@ -61,7 +61,7 @@ describe("the offer to close a Set unanswered", () => {
     // The badge is the menu's title, and the offer is nowhere on the page
     // until the menu is asked for: archiving is almost never the right thing
     // to do to a Set.
-    const trigger = page.querySelector(".standing .standing-trigger")!;
+    const trigger = page.querySelector(".standing > .menu-trigger")!;
     expect(trigger.querySelector(".liveness")!.textContent).toBe(
       "agent waiting",
     );
@@ -73,6 +73,13 @@ describe("the offer to close a Set unanswered", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(page.querySelector("button.archive")!.textContent).toBe(
       "Archive unanswered",
+    );
+
+    // And it is the one menu the rest of the UI drops, rather than a second
+    // one built here — which is what says it takes Escape, takes a press away
+    // from it and stands off the page the way every other menu does.
+    expect(page.querySelector(".standing > .menu-drop button.archive")).toBe(
+      page.querySelector("button.archive"),
     );
   });
 
@@ -121,8 +128,8 @@ describe("the offer to close a Set unanswered", () => {
 
     reachForArchive(page);
 
-    const asking = page.querySelector(".confirm")!;
-    expect(asking.getAttribute("role")).toBe("dialog");
+    const asking = page.querySelector("dialog.confirm")!;
+    expect((asking as HTMLDialogElement).open, "opened as a modal").toBe(true);
     // The one irreversible act in the UI has to be asked about as one — and it
     // has to say where the Set stays, because it is not being deleted.
     expect(asking.querySelector(".note")!.textContent).toContain(
