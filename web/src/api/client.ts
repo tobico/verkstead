@@ -17,6 +17,7 @@ import type {
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
+  ConversationReopened,
   ConversationView,
   GrillingStarted,
   HandedBack,
@@ -315,6 +316,16 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
+}
+
+/// Open a second round on a Conversation Verkstead has finished with: a new
+/// brief to write, on the branch the first round was built on.
+///
+/// Nothing is sent, for the reason nothing is sent to start a grilling. The
+/// worktree is ordinarily still there and is kept; one whose directory has gone
+/// is checked out again on the same branch, which is the server's to do.
+export function reopenConversation(id: number): Promise<ConversationReopened> {
+  return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
 }
 
 /// Give a session's keyboard back, which is the one thing that ends a Hold.

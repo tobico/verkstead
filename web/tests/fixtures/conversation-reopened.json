@@ -35,14 +35,14 @@
       }
     }
   ],
-  "ready_to_grill": false,
+  "ready_to_grill": true,
   "repo": {
     "default_branch": "main",
     "id": 1,
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
-  "state": "Wrapping",
+  "state": "Draft",
   "timeline": [
     {
       "Brief": {
@@ -90,6 +90,29 @@
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Rebase this onto <code>main</code> and force-push — the conflict is in <code>src/limits.rs</code> alone.</p>\n",
         "id": 32
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 33,
+        "state": "Done"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 34,
+        "state": "Draft"
+      }
+    },
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "frozen": false,
+        "html": "<h1>Rate limiting, per account</h1>\n",
+        "id": 35,
+        "markdown": "# Rate limiting, per account\n\n"
       }
     }
   ],

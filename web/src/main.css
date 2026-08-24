@@ -1661,6 +1661,16 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
+/* The round boundary, which is the one move worth seeing from across the page:
+   everything above it was built from a different brief. */
+.timeline-event > .moved.draft {
+  font-weight: 600;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--edge);
+  padding-top: 0.6rem;
+  margin-top: 0.4rem;
+}
+
 /* And something Verkstead did on its own account, which reads as the same kind
    of thing again — a fact about the work, said by the one voice on a Timeline
    that is neither the human's nor an agent's. Marked off by a rule at its left
@@ -2443,6 +2453,35 @@ main:has(.workbench) {
 }
 
 .start-grilling .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* And what happens next on one that is finished, in the same place and never at
+   the same time: a conversation is either drafting a round or it has finished
+   one. Drawn quieter than `Start grilling` — reopening is a deliberate second
+   thought about work that is over, rather than the obvious next press. */
+.reopen {
+  margin-top: 1rem;
+}
+
+.reopen .reopen-conversation {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.reopen .reopen-conversation:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.reopen .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }

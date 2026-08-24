@@ -2135,6 +2135,38 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
 
+    // And the same Conversation reopened, which is the one shape a viewer test
+    // cannot reach any other way: a second round starts on a Conversation
+    // Verkstead has finished with, and finishing one is a wrap-up settling
+    // everything it waits on. Walked there rather than written, because what a
+    // round boundary looks like is exactly what this fixture is for — the frozen
+    // Brief above it, the one being written below.
+    for waiting_on in verkstead_store::WAITED_ON {
+        store::settle_wrap_up(&pool, wrapping, waiting_on)
+            .await
+            .unwrap();
+    }
+    store::finish_wrap_up(&pool, wrapping).await.unwrap();
+
+    store::reopen_conversation(
+        &pool,
+        wrapping,
+        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+    )
+    .await
+    .unwrap();
+
+    store::save_brief(&pool, wrapping, "# Rate limiting, per account\n\n")
+        .await
+        .unwrap();
+
+    write(
+        "conversation-reopened.json",
+        &pin_health(&pin_timeline(
+            &get(&app, &format!("/api/ui/conversations/{wrapping}")).await,
+        )),
+    );
+
     // And a seventh, whose direction was a staged roadmap: the staging session
     // has written `docs/roadmaps/` into its worktree, and Verkstead reads it
     // back as the pinned stage-list Event.

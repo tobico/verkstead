@@ -11,12 +11,12 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Ask, Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON,
-    WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts,
-    load_conversation, open_database, pick_direction, record_addressed_comments,
-    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
-    settle_wrap_up, start_conversation, start_grilling, submit_response, timeline,
-    unsettle_wrap_up, wrap_up_settled,
+    Ask, Event, Finished, Fixing, Lifecycle, Reopening, Reviewed, Settlements, Submission,
+    WAITED_ON, WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts,
+    forget_fix_attempts, load_conversation, open_database, pick_direction,
+    record_addressed_comments, record_fix_attempt, record_pull_request, register_repo,
+    reopen_conversation, review_asked, save_brief, settle_wrap_up, start_conversation,
+    start_grilling, submit_response, timeline, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -287,6 +287,51 @@ async fn a_wrap_up_with_all_three_settled_is_done_and_the_move_is_on_the_timelin
     );
 }
 
+/// A second round wraps up from nothing. The round before it settled all three
+/// and addressed whatever was said on the pull request; a round that inherited
+/// the first would be over the moment it reached Wrapping.
+///
+/// The comments are what it keeps, and deliberately: a comment somebody wrote and
+/// a session answered stays answered, where every check and every review belongs
+/// to the round that ran them.
+#[tokio::test]
+async fn reopening_forgets_what_the_round_before_it_settled() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    for waiting_on in WAITED_ON {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    record_fix_attempt(&pool, id, "build").await.unwrap();
+    record_addressed_comments(&pool, id, &["IC_1".to_owned()])
+        .await
+        .unwrap();
+
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    assert_eq!(
+        reopen_conversation(&pool, id, Path::new("/state/worktrees/rate-limiting"))
+            .await
+            .unwrap(),
+        Reopening::Reopened
+    );
+
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap(),
+        Vec::new(),
+        "the new round waits on all three again"
+    );
+    assert_eq!(
+        fix_attempts(&pool, id, "build").await.unwrap(),
+        0,
+        "and its checks start from no attempts spent"
+    );
+    assert_eq!(
+        addressed_comments(&pool, id).await.unwrap(),
+        vec!["IC_1".to_owned()],
+        "but a comment already answered stays answered"
+    );
+}
 /// Any one of the three missing keeps it in Wrapping — each of them in turn,
 /// because a rule that held for two of the three would be a wrap-up that
 /// finished with work outstanding.

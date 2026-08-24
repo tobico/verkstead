@@ -37,6 +37,7 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>Deferred asks</h1>\n<p>An ask that never idles the session that sends it.</p>\n",
         "id": 22,
         "markdown": "# Deferred asks\n\nAn ask that never idles the session that sends it.\n"

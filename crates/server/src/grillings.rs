@@ -189,15 +189,15 @@ fn open(timeline: &[store::TimelineEvent]) -> Vec<i64> {
         .collect()
 }
 
-/// The Brief the Conversation started from, which is what a grilling is a
-/// grilling of.
+/// The Brief the round started from, which is what a grilling is a grilling of.
 ///
-/// The first, as [`crate::conversations::documents`] reads it: a Brief is frozen
-/// the moment the Conversation moves out of Draft, and the one on the Timeline
-/// is the one the dead session was primed with.
+/// The last, as [`crate::conversations::documents`] reads it: a Brief is frozen
+/// the moment its round moves out of Draft, and the newest on the Timeline is the
+/// one the dead session was primed with.
 fn brief(timeline: &[store::TimelineEvent]) -> String {
     timeline
         .iter()
+        .rev()
         .find_map(|event| match &event.event {
             store::Event::Brief(markdown) => Some(markdown.clone()),
             _ => None,

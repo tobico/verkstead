@@ -18,20 +18,21 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
-    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, Started,
-    TimelineEvent,
+    ConversationReopened, ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
+    Registered, Started, TimelineEvent,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching};
+use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
 /// A router watching `watched`, plus the directory holding its database and its
 /// data directory alive.
 ///
 /// One directory holds both, which is what the real server does: the database is
 /// `verkstead.db` inside the Data Directory.
-async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
+async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router, SqlitePool) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -39,7 +40,7 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
     let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, router_watching(pool.clone(), watched, data_dir), pool)
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -76,8 +77,27 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 /// A watched directory holding one registered repository, and the app over it.
 async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let (watched, dir, app, _pool, repo, repo_id) = workbench_with_store().await;
+    (watched, dir, app, repo, repo_id)
+}
+
+/// The same, with the store beside the app.
+///
+/// Only for the states no endpoint reaches. Driving a Conversation to Done means
+/// running a whole pipeline to its end — a backlog worked, a pull request opened,
+/// a wrap-up settled — and what reopening is about is what the human can do
+/// *after* one, so what these write is the state and what they ask is what the
+/// press does when it is written.
+async fn workbench_with_store() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Router,
+    SqlitePool,
+    PathBuf,
+    i64,
+) {
     let watched = tempfile::tempdir().unwrap();
-    let (dir, app) = app_watching(watched.path()).await;
+    let (dir, app, pool) = app_watching(watched.path()).await;
     let repo = repository(watched.path().join("verkstead"));
 
     let registered: Registered =
@@ -86,7 +106,7 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, 
 
     let repo_id = listed_repos(&app).await;
 
-    (watched, dir, app, repo, repo_id)
+    (watched, dir, app, pool, repo, repo_id)
 }
 
 /// The id of the one registered Repo.
@@ -133,6 +153,17 @@ fn brief(view: &ConversationView) -> &verkstead_render::BriefEvent {
             _ => None,
         })
         .expect("every Conversation has a Brief from the moment it exists")
+}
+
+/// Every Brief on a Conversation's Timeline, in order: one per round.
+fn briefs(view: &ConversationView) -> Vec<&verkstead_render::BriefEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Brief(brief) => Some(brief),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The states a Conversation's Timeline says it has moved through, in order.
@@ -652,6 +683,15 @@ async fn abort(app: &Router, id: i64) -> ConversationAborted {
     .await
 }
 
+async fn reopen(app: &Router, id: i64) -> ConversationReopened {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/reopen"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
 /// Everything a Conversation needs before it will grill: both Profiles chosen
 /// and a Brief written. Hands back the Conversation's id.
 async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
@@ -906,6 +946,167 @@ async fn starting_is_refused_when_the_branch_is_already_there() {
     assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
 }
 
+/// Reopening a finished Conversation gives it a second Brief to write and leaves
+/// the first exactly where it is — and the worktree it already had is the one it
+/// carries on in.
+#[tokio::test]
+async fn reopening_keeps_the_worktree_and_adds_a_brief_to_write() {
+    let (watched, _dir, app, pool, repo, repo_id) = workbench_with_store().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let worked_in = opened(&app, id).await.worktree.unwrap().path;
+    store::set_state(&pool, id, store::Lifecycle::Done)
+        .await
+        .unwrap();
+
+    assert_eq!(reopen(&app, id).await, ConversationReopened::Reopened);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(
+        view.worktree.as_ref().map(|worktree| worktree.path.clone()),
+        Some(worked_in),
+        "the round before it worked here, and so does this one",
+    );
+    assert!(
+        !view.worktree.as_ref().unwrap().missing,
+        "and it is still on disk"
+    );
+
+    // One worktree, not two: nothing was checked out again, because nothing had
+    // gone.
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+
+    let briefs = briefs(&view);
+    assert_eq!(briefs.len(), 2, "the frozen one, and the new round's");
+    assert_eq!(briefs[0].markdown, "# Rate limiting\n\nThe API has none.\n");
+    assert!(briefs[0].frozen, "what the first round was built from");
+    assert_eq!(briefs[1].markdown, "");
+    assert!(!briefs[1].frozen, "and the one there is to write");
+
+    // The round boundary is on the record like every other move, and it is the
+    // last thing to have happened.
+    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Draft]);
+}
+
+/// A worktree deleted by hand comes back on the branch the work is on. A branch
+/// that has been worked is not a branch to start over, so this is a checkout
+/// rather than a start.
+#[tokio::test]
+async fn a_reopened_conversation_whose_worktree_has_gone_gets_one_back_on_its_branch() {
+    let (watched, _dir, app, pool, repo, repo_id) = workbench_with_store().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let branch = view.branch.clone();
+    let worked_in = PathBuf::from(view.worktree.unwrap().path);
+
+    // What a machine rebuilt, or a human tidying up, leaves behind: the directory
+    // gone and git still holding its registration.
+    std::fs::remove_dir_all(&worked_in).unwrap();
+    store::set_state(&pool, id, store::Lifecycle::Done)
+        .await
+        .unwrap();
+    assert!(opened(&app, id).await.worktree.unwrap().missing);
+
+    assert_eq!(reopen(&app, id).await, ConversationReopened::Reopened);
+
+    let view = opened(&app, id).await;
+    let worktree = view.worktree.unwrap();
+    assert_eq!(worktree.path, worked_in.to_string_lossy());
+    assert!(!worktree.missing, "it is back where it was");
+
+    // On the branch it was always on, rather than on a new one.
+    assert_eq!(
+        git(&worked_in, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        branch,
+    );
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// And the second round is grilled the way the first was: the same press, on the
+/// branch that has already been worked.
+#[tokio::test]
+async fn a_second_round_grills_on_the_branch_the_first_one_worked() {
+    let (watched, _dir, app, pool, repo, repo_id) = workbench_with_store().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let first = opened(&app, id).await;
+    store::set_state(&pool, id, store::Lifecycle::Done)
+        .await
+        .unwrap();
+    assert_eq!(reopen(&app, id).await, ConversationReopened::Reopened);
+
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting, again\n").await,
+        BriefSaved::Saved,
+        "the new round's Brief is the human's to write",
+    );
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::Started,
+        "the branch is this Conversation's own, so it is not one to refuse for",
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.branch, first.branch);
+    assert_eq!(view.base_commit, first.base_commit);
+    assert_eq!(
+        moves(&view),
+        [Lifecycle::Grilling, Lifecycle::Draft, Lifecycle::Grilling],
+    );
+
+    let briefs = briefs(&view);
+    assert_eq!(briefs[1].markdown, "# Rate limiting, again\n");
+    assert!(
+        briefs.iter().all(|brief| brief.frozen),
+        "both rounds are grilled now, so neither Brief is being written",
+    );
+
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// Reopening is offered on Done and nowhere else. Aborted is off the ladder and
+/// stays there, and every other state is somewhere the work has got to.
+#[tokio::test]
+async fn a_conversation_that_is_not_finished_cannot_be_reopened() {
+    let (watched, _dir, app, _pool, _repo, repo_id) = workbench_with_store().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(reopen(&app, id).await, ConversationReopened::NotDone);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+    assert_eq!(reopen(&app, id).await, ConversationReopened::NotDone);
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(reopen(&app, id).await, ConversationReopened::NotDone);
+
+    assert_eq!(briefs(&opened(&app, id).await).len(), 1);
+}
+
+#[tokio::test]
+async fn reopening_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        reopen(&app, 404).await,
+        ConversationReopened::NoSuchConversation
+    );
+
+    // An id that is not a number cannot name a Conversation, and gets the same
+    // answer — the id comes out of a URL the human may have typed.
+    let refused: ConversationReopened = post(
+        &app,
+        "/api/ui/conversations/nonsense/reopen",
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(refused, ConversationReopened::NoSuchConversation);
+}
 /// Two branches and two worktrees for one piece of work is what starting twice
 /// would mean.
 #[tokio::test]
@@ -2120,6 +2321,55 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
             .exists()
+    );
+}
+
+/// A stage Conversation reopened is drafting again on the branch its stage was
+/// worked on. Adopting is how that work *started*, so a second press is not
+/// another adoption: what the reopened round has is a Brief of its own, grilled
+/// the ordinary way.
+#[tokio::test]
+async fn a_reopened_stage_is_not_a_stage_to_adopt_again() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app, pool) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert_eq!(registered, Registered::Added);
+
+    let repo_id = listed_repos(&app).await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    store::set_state(&pool, id, store::Lifecycle::Done)
+        .await
+        .unwrap();
+    assert_eq!(reopen(&app, id).await, ConversationReopened::Reopened);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(
+        view.adopting, None,
+        "the adoption has happened; what is offered now is the ordinary start",
+    );
+
+    assert_eq!(
+        press_adopt(&app, id).await,
+        Adopted::NotDrafting,
+        "and the press behind it is refused, however it was reached",
+    );
+
+    assert_eq!(
+        briefs(&view).len(),
+        2,
+        "the stage brief, and the round's own to write",
     );
 }
 

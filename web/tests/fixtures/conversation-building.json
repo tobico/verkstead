@@ -37,6 +37,7 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>Pausing when an account runs out of window</h1>\n<p>A session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.</p>\n",
         "id": 10,
         "markdown": "# Pausing when an account runs out of window\n\nA session that hits its usage limit mid-run fails silently and the\nconversation looks stalled.\n"

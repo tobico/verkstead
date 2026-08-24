@@ -58,8 +58,10 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// it was — which is why it is reachable from all of them and leads nowhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
-    /// The brief is being written. Everything about the Conversation is still
-    /// the human's to change.
+    /// The brief of the round it is in is being written. On a first round that
+    /// is everything about the Conversation — the Brief, the branch name and the
+    /// base commit alike; on a reopened one it is the Brief alone, the branch
+    /// having been worked already.
     Draft,
 
     /// A grilling session is running against it.
@@ -71,7 +73,9 @@ pub enum Lifecycle {
     /// The work is on a PR and the wrap-up loop has it.
     Wrapping,
 
-    /// Finished. It can be reopened with a new round.
+    /// Finished. It can be reopened with a new round, which puts it back to
+    /// [`Lifecycle::Draft`] with a Brief of its own to write — see
+    /// [`reopen_conversation`].
     Done,
 
     /// Stopped, from wherever it had got to. The worktree is gone; the branch is
@@ -571,6 +575,26 @@ pub enum Implementing {
     /// It was not grilling, so there was no grilling for this to end. Nothing
     /// recorded and nothing wrong.
     NotGrilling,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of reopening a finished one.
+///
+/// Reopening twice has no outcome of its own, unlike aborting twice: the first
+/// press leaves the Conversation drafting, and a second finds a state that is
+/// not Done — which is [`Reopening::NotDone`], the round being open already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reopening {
+    /// Reopened: the Conversation is drafting again, with a Brief of its own to
+    /// write and the round boundary on its Timeline.
+    Reopened,
+
+    /// It is not Done, so there is no finished round here to open another
+    /// after. Every other state is somewhere the work has got to, and Aborted
+    /// is off the ladder rather than on it.
+    NotDone,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -1576,13 +1600,14 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
     Ok(found.map(|(id,)| id))
 }
 
-/// Rewrite a drafting Conversation's Brief.
+/// Rewrite the Brief of the round a drafting Conversation is in.
 ///
-/// The Brief Event is edited in place rather than added to: while a Conversation
-/// is drafting there is one Brief and this is it. The frozen-Brief rule the
-/// design states — a reopened round adds a new Brief rather than editing the old
-/// one — is the drafting guard here, keeping its half of the bargain from the
-/// start.
+/// The Brief Event is edited in place rather than added to, and it is the
+/// *newest* of them: the frozen-Brief rule the design states — a reopened round
+/// adds a new Brief rather than editing the old one — makes every Brief but the
+/// last one a record of a round that has been built, and the drafting guard is
+/// what keeps this to the round nobody has grilled yet. A Conversation on its
+/// first round has one Brief, and the newest is it.
 pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
@@ -1590,7 +1615,11 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 
     sqlx::query(
         "UPDATE timeline_events SET body = ?
-         WHERE conversation_id = ? AND kind = ?",
+         WHERE id = (
+             SELECT id FROM timeline_events
+             WHERE conversation_id = ? AND kind = ?
+             ORDER BY id DESC LIMIT 1
+         )",
     )
     .bind(markdown)
     .bind(id)
@@ -1606,9 +1635,17 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 ///
 /// Whether the name is one git would take is decided above the store, where git
 /// itself is asked — this records what it is given.
+///
+/// Refused once the branch has been made, which drafting alone no longer says:
+/// a reopened round is drafting again on a branch that has been worked — see
+/// [`branch_made`].
 pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET branch = ? WHERE id = ?")
@@ -1627,9 +1664,17 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<E
 /// `None` is the ordinary case and not a cleared field: the design says the base
 /// commit is the default branch's tip *at grill start*, so while drafting there
 /// is no value to hold — only whether the human has overridden the rule.
+///
+/// Refused once the branch has been made, for [`rename_branch`]'s reason: the rule
+/// resolved to a commit when the work branched, and a reopened round carries on
+/// from what was built rather than branching again.
 pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
@@ -1664,6 +1709,28 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
         Lifecycle::Draft => None,
         _ => Some(Edited::NotDrafting),
     })
+}
+
+/// Whether this Conversation's branch has been made already.
+///
+/// The worktree row is what says so: it is written when the branch and the
+/// checkout are made, and forgotten only by aborting. Drafting used to answer
+/// this on its own — a Conversation was drafting exactly until its branch
+/// existed — and a reopened round is the case that separated the two: it is
+/// drafting a second Brief on a branch that has already been worked.
+///
+/// Which is why the branch name and the base commit are refused off this as
+/// well as off the state. The Brief is not: writing the new round's Brief is
+/// the whole of what reopening is for.
+async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("looking for the worktree of Conversation {id}"))?;
+
+    Ok(row.is_some())
 }
 
 /// Record that a Conversation has started grilling: what it branched from, where
@@ -1715,12 +1782,18 @@ pub async fn start_grilling(
     .await
     .with_context(|| format!("moving Conversation {id} to grilling"))?;
 
-    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
-        .bind(id)
-        .bind(worktree)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+    // Written over whatever is there, because a second round has one already: a
+    // reopened Conversation is drafting on the checkout it was reopened with, and
+    // this writes the same path back — see [`reopen_conversation`].
+    sqlx::query(
+        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+    )
+    .bind(id)
+    .bind(worktree)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
 
@@ -1775,6 +1848,94 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
     tx.commit().await.context("aborting a Conversation")?;
 
     Ok(Aborting::Aborted)
+}
+
+/// Record that a finished Conversation has been reopened: it is drafting a
+/// second Brief, on the branch the first round was built on.
+///
+/// Done is the one state this is reachable from. Aborted is off the ladder and
+/// stays there, and every other state is somewhere the work has got to — there
+/// is nothing to reopen about work that is still going on.
+///
+/// **The frozen Brief is left exactly where it is and a new one is added.** That
+/// is the whole rule the design states: the first Brief is what the first round
+/// was built from, and a Timeline that had lost it would have lost why the work
+/// is the shape it is. What [`save_brief`] writes from here on is the new one.
+///
+/// The move is written first and the Brief after it, which is reading order: the
+/// move is where the round boundary falls, and the Brief under it belongs to the
+/// round that starts there.
+///
+/// The worktree is recorded rather than made, as [`start_grilling`] records one:
+/// the directory is the server's to keep or to check out again before this is
+/// called. Written over whatever was there, because a Conversation that had one
+/// keeps it and one whose directory had gone gets it back in the same place.
+///
+/// One transaction, for [`start_grilling`]'s reason: a Conversation left saying
+/// `done` with a second Brief on its Timeline would be one nothing could grill
+/// and nothing would tidy.
+pub async fn reopen_conversation(pool: &SqlitePool, id: i64, worktree: &Path) -> Result<Reopening> {
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = pool.begin().await.context("reopening a Conversation")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Reopening::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Done {
+        return Ok(Reopening::NotDone);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Draft.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to drafting"))?;
+
+    sqlx::query(
+        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+    )
+    .bind(id)
+    .bind(worktree)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    // The round before this one is over and its bookkeeping goes with it, so
+    // that the wrap-up of the round starting here waits on the same things from
+    // nothing — see [`super::wrap_up::forget_the_round`].
+    super::wrap_up::forget_the_round(&mut tx, id).await?;
+
+    moved(&mut tx, id, Lifecycle::Draft).await?;
+
+    // Empty, because the new round has not been written yet — exactly as the
+    // first Brief is empty from the moment there is a Conversation. It is a
+    // second Event and never an edit of the first: what the first round was
+    // built from stays on the record beside it.
+    let brief = Event::Brief(String::new());
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(id)
+    .bind(brief.kind())
+    .bind(brief.body())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("writing the new round's Brief of Conversation {id}"))?;
+
+    tx.commit().await.context("reopening a Conversation")?;
+
+    Ok(Reopening::Reopened)
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the

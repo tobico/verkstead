@@ -909,6 +909,18 @@ pub struct BriefEvent {
 
     /// The same, as HTML — rendered and sanitized by the server on the way out.
     pub html: String,
+
+    /// Whether this Brief is done being written: the round it belongs to has
+    /// been grilled, so it is the record of what that round was built from
+    /// rather than a document to edit.
+    ///
+    /// The server's rule rather than something the page works out from the
+    /// Conversation around it, as `ready_to_grill` is — and it is a fact about
+    /// one Brief rather than about the Conversation, because a reopened one has
+    /// a frozen Brief and an open one on the same Timeline. An adopting
+    /// Conversation's first Brief is frozen from the start: it is the stage
+    /// brief, and nobody here writes it.
+    pub frozen: bool,
 }
 
 /// A session's output as the Timeline shows it: how much there is, the last
@@ -1304,12 +1316,13 @@ fn decided(
 /// Here rather than in the server for the reason the Set's rendering is: this is
 /// the crate with the markdown parser in it, and whatever serves the viewer, the
 /// rendering happens in one place.
-pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
+pub fn brief_event(id: i64, at: String, markdown: String, frozen: bool) -> TimelineEvent {
     TimelineEvent::Brief(BriefEvent {
         id,
         at,
         html: crate::markdown::to_html(&markdown),
         markdown,
+        frozen,
     })
 }
 
@@ -1801,6 +1814,31 @@ pub enum Adopted {
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+}
+
+/// What became of reopening a finished one with a new round.
+///
+/// Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
+/// press that gives a Conversation somewhere to work, and what stops one is
+/// something different for the human to go and do each time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationReopened {
+    /// Reopened: it is drafting again, with a Brief of its own to write and a
+    /// worktree to work in.
+    Reopened,
+
+    NoSuchConversation,
+
+    /// It is not Done, so there is no finished round to open another after.
+    /// Aborted is off the ladder, and every other state is somewhere the work
+    /// has got to.
+    NotDone,
+
+    /// The worktree's directory had gone and git would not check the branch out
+    /// again. The reason is in the server's log — this is the one refusal with
+    /// nothing for the human to correct.
     WorktreeRefused,
 }
 

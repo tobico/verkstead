@@ -37,6 +37,7 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>Retry policy for the outbound queue</h1>\n<p>Failed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.</p>\n",
         "id": 3,
         "markdown": "# Retry policy for the outbound queue\n\nFailed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.\n"

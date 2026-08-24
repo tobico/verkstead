@@ -40,6 +40,9 @@ _Avoid_: task, session, job, thread, ticket
 The checkout a Conversation's work is done in, made when grilling starts along
 with the branch it holds, and removed when the Conversation is aborted — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
+A reopened Conversation keeps the one it has; where the directory has gone, one
+is checked out again on the branch that was worked, which is the only time a
+Worktree is made without a branch being made with it.
 Named for the Repo and the branch, and it lives in the Data Directory rather
 than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
 things.
@@ -89,9 +92,12 @@ above the Brief.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
-The editable markdown document a Conversation starts from, and its first
-Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
-rather than editing the frozen one.
+The editable markdown document a round of a Conversation starts from, and the
+first Timeline Event. Freezes when its round's grilling starts; a reopened round
+adds a new Brief rather than editing the frozen one, so a Conversation has one
+Brief per round and the newest is the one being written. What is *not* the
+human's again on a reopened round is the branch and the base commit: the branch
+has been worked, and the second round carries on from what is on it.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:

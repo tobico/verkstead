@@ -318,7 +318,20 @@ markdown: string,
 /**
  * The same, as HTML — rendered and sanitized by the server on the way out.
  */
-html: string, };
+html: string, 
+/**
+ * Whether this Brief is done being written: the round it belongs to has
+ * been grilled, so it is the record of what that round was built from
+ * rather than a document to edit.
+ *
+ * The server's rule rather than something the page works out from the
+ * Conversation around it, as `ready_to_grill` is — and it is a fact about
+ * one Brief rather than about the Conversation, because a reopened one has
+ * a frozen Brief and an open one on the same Timeline. An adopting
+ * Conversation's first Brief is frozen from the start: it is the stage
+ * brief, and nobody here writes it.
+ */
+frozen: boolean, };
 
 /**
  * What became of an edit to a Brief.
@@ -446,6 +459,15 @@ working: boolean,
  * the whole of what a draft has to say.
  */
 waiting: boolean, };
+
+/**
+ * What became of reopening a finished one with a new round.
+ *
+ * Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
+ * press that gives a Conversation somewhere to work, and what stops one is
+ * something different for the human to go and do each time.
+ */
+export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled

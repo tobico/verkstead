@@ -29,12 +29,12 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
-    RepoEntry, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
-    Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    ConversationEntry, ConversationReopened, ConversationView, Cursor, GrillingStarted, HandedBack,
+    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder,
+    PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice,
+    RemedySettled, RepoEntry, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -118,6 +118,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
+        // And the press that opens a second round on one Verkstead has finished
+        // with. Beside aborting rather than in the menu with it: reopening throws
+        // nothing away, and what it is is the next thing to do about a finished
+        // piece of work — so it belongs at the end of the Timeline, where the
+        // grilling start is.
+        .route("/api/ui/conversations/{id}/reopen", post(reopen))
         // And the one press that ends a Hold. Per Conversation rather than per
         // Event, because a Conversation has one keyboard: which of its sessions
         // the human took is the Conversation's own answer, and a route that made
@@ -659,9 +665,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     };
 
     // The Brief decides whether the Conversation is ready to grill, so it is
-    // read off the Timeline before the Timeline is spent building the view.
+    // read off the Timeline before the Timeline is spent building the view. The
+    // newest of them: a reopened Conversation has a frozen Brief and an open one,
+    // and what a grilling would start from is the round nobody has grilled yet.
     let brief = timeline
         .iter()
+        .rev()
         .find_map(|event| match &event.event {
             store::Event::Brief(markdown) => Some(markdown.as_str()),
             _ => None,
@@ -675,13 +684,34 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
-    // And what this Conversation is adopting, where it is adopting anything:
-    // the roadmap named and the stage the Adopt press would start, read off the
-    // Repo at the base commit rather than out of any row. Only the roadmap's
-    // name is stored — see [`crate::stages::adopting`].
+    // Which Brief is still being written, where one is. A Brief freezes when its
+    // round's grilling starts, so the one open is the newest — and only while the
+    // Conversation is drafting. An adopting Conversation's first Brief is nobody
+    // here's to write at all: it is the stage brief, and it arrives when the stage
+    // is adopted.
+    let briefs: Vec<i64> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::Brief(_) => Some(event.id),
+            _ => None,
+        })
+        .collect();
+
+    let open_brief = (conversation.state == store::Lifecycle::Draft)
+        .then(|| briefs.last().copied())
+        .flatten()
+        .filter(|open| !(conversation.adopting.is_some() && briefs.first() == Some(open)));
+
+    // And what this Conversation is adopting, where it is adopting anything and
+    // has not adopted it yet: the roadmap named and the stage the Adopt press
+    // would start, read off the Repo at the base commit rather than out of any
+    // row. Only the roadmap's name is stored — see [`crate::stages::adopting`].
+    //
+    // A worktree is what says the adoption has happened, adoption being what
+    // makes one. What follows it is the stage's work and, if the human reopens it
+    // when that work is done, a Brief of their own — never the stage brief again.
     let adopting = match conversation.adopting.clone() {
-        None => None,
-        Some(roadmap) => Some(
+        Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
@@ -689,6 +719,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             )
             .await,
         ),
+        _ => None,
     };
 
     // What the work has stopped on, read off the Timeline for the reason the
@@ -764,9 +795,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 Some(match event.event {
                     // Rendered on the way out where there is markdown to render —
                     // see [`verkstead_render`]. A move has none: it is one state.
-                    store::Event::Brief(markdown) => {
-                        verkstead_render::brief_event(event.id, event.at, markdown)
-                    }
+                    store::Event::Brief(markdown) => verkstead_render::brief_event(
+                        event.id,
+                        event.at,
+                        markdown,
+                        Some(event.id) != open_brief,
+                    ),
                     store::Event::Moved(state) => {
                         verkstead_render::moved_event(event.id, event.at, lifecycle(state))
                     }
@@ -1381,6 +1415,26 @@ async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
             unavailable("the conversation could not be aborted")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/reopen` — a second round on a finished one:
+/// a new Brief to write, on the branch the first round was built on.
+///
+/// Nothing in the body, as the grilling start takes nothing: which Conversation
+/// is in the path, and everything this is refused for the server decides itself
+/// when the button is pressed.
+async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationReopened::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::reopen(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reopening a Conversation failed");
+            unavailable("the conversation could not be reopened")
         }
     }
 }

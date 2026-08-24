@@ -19,7 +19,9 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! One of them lives there — `Start grilling` under the Brief it will freeze.
+//! Two of them live there — `Start grilling` under the Brief it will freeze,
+//! and, on a conversation Verkstead has finished with, the press that opens a
+//! second round with a Brief of its own.
 //! Aborting is in neither place and not in the list: it is not a step
 //! in the work but a way of ending it, so it hangs off the header behind a menu,
 //! where a destructive action is not one stray click away.
@@ -35,6 +37,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import {
   abortConversation,
   listProfiles,
+  reopenConversation,
   saveBrief,
   startGrilling,
   startManualTask,
@@ -45,6 +48,7 @@ import type {
   BriefSaved,
   CommitEvent,
   ConversationAborted,
+  ConversationReopened,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -113,6 +117,16 @@ export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
     "The worktree could not be removed, so nothing was changed. The server log says why.",
 };
 
+/// And each way of being refused a second round.
+export const REOPEN_REFUSAL: Record<ConversationReopened, string> = {
+  Reopened: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDone:
+    "Only a finished conversation can be reopened, and this one is not finished.",
+  WorktreeRefused:
+    "The worktree is gone and git would not check the branch out again. The server log says why.",
+};
+
 /// And each way of being refused a manual task.
 ///
 /// `AlreadyRunning` is the one worth reading twice: the composer is drawn
@@ -148,8 +162,11 @@ function opensAPane(conversation: ConversationView, event: number): boolean {
 }
 
 /// What a move reads as. The state moved *to*, said as something that happened.
+/// `Draft` is the round boundary of a reopened conversation and nothing else:
+/// nothing moves *to* drafting except reopening, so what it names is where one
+/// round ends and the next begins.
 const MOVED: Record<Lifecycle, string> = {
-  Draft: "Went back to drafting",
+  Draft: "Reopened — a new round starts here",
   Grilling: "Started grilling",
   Implementing: "Started implementing",
   Wrapping: "Moved to wrapping up",
@@ -317,13 +334,20 @@ export function Timeline(props: {
       </ol>
 
       {/* After everything that has happened, because it is what happens next.
-          Drawn outside the list: neither is an event, and either would be an
-          event that moved every time one landed. Only one of them is ever drawn
-          — each is for a different state — so they read as the one thing there
-          is to do from here. */}
+          Drawn outside the list: none of them is an event, and any of them would
+          be an event that moved every time one landed. Only one is ever drawn —
+          each is for a different state — so they read as the one thing there is
+          to do from here. Adopting a stage is one state's, and the other two are
+          the two ends of the ladder: starting a draft grilling, and opening a
+          second round on a conversation that is finished. */}
       <Show
         when={props.conversation.adopting}
-        fallback={<StartGrilling conversation={props.conversation} />}
+        fallback={
+          <>
+            <StartGrilling conversation={props.conversation} />
+            <Reopen conversation={props.conversation} />
+          </>
+        }
       >
         {(adopting) => (
           <Adoption conversation={props.conversation} adopting={adopting()} />
@@ -343,16 +367,17 @@ export function Timeline(props: {
 /// The way to move a conversation by hand: an instruction, a profile to run it
 /// under, and a submit.
 ///
-/// Drawn whenever there is a worktree to run in, the conversation is neither
-/// drafting nor aborted, and no session is registered for it. That is the
-/// literal rule and it is deliberate: the gaps between an unattended run's
-/// steps, a wrapping lull, a grilling waiting on a pick, a finished
-/// conversation and a run stopped on an interruption all show it, because the
-/// point of it is to get a stuck conversation moving. After a server restart
-/// nothing is running anywhere, so it shows everywhere, and that is wanted too.
+/// Drawn whenever there is a worktree to run in and no session is registered for
+/// it. That is the literal rule and it is deliberate: the gaps between an
+/// unattended run's steps, a wrapping lull, a grilling waiting on a pick, a
+/// finished conversation, a reopened one being written a second brief, and a run
+/// stopped on an interruption all show it, because the point of it is to get a
+/// stuck conversation moving. After a server restart nothing is running anywhere,
+/// so it shows everywhere, and that is wanted too.
 ///
-/// Drafting and aborted are the two states with no worktree, so those are the
-/// two it is never offered in — there is nowhere for a session to run.
+/// A conversation that has never been grilled and one that was aborted have no
+/// worktree, so neither is ever offered it — there is nowhere for a session to
+/// run.
 ///
 /// The profile starts on the conversation's implementation one and picking
 /// another is one-off: it is what this task runs under, and it never becomes the
@@ -385,10 +410,7 @@ function ManualTaskComposer(props: {
 
   /// Whether the composer belongs on this conversation at all.
   const offered = () =>
-    props.conversation.worktree !== null &&
-    props.conversation.state !== "Draft" &&
-    props.conversation.state !== "Aborted" &&
-    !props.conversation.working;
+    props.conversation.worktree !== null && !props.conversation.working;
 
   const submit = useMutation(() => ({
     mutationFn: (profileId: number) =>
@@ -1020,6 +1042,68 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
+/// The button that opens a second round on a conversation Verkstead has finished
+/// with.
+///
+/// Drawn on `Done` and nowhere else. Aborted is off the ladder and stays there,
+/// and every other state is somewhere the work has got to — there is nothing to
+/// reopen about work that is still going on.
+///
+/// Where `Start grilling` sits, and for the same reason: it is the next thing to
+/// do about this conversation, and the end of everything that has happened is
+/// where the next thing belongs. What it leaves is a brief with nothing in it and
+/// a conversation drafting again, so the button pressed after this one is that
+/// one.
+function Reopen(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<ConversationReopened | null>(null);
+
+  const reopen = useMutation(() => ({
+    mutationFn: () => reopenConversation(props.conversation.id),
+    onSuccess: (outcome: ConversationReopened) => {
+      if (outcome !== "Reopened") {
+        setRefused(outcome);
+        // Refused against a picture of the world this page read a moment ago:
+        // reading it again is both the correction and the explanation.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <Show when={props.conversation.state === "Done"}>
+      <div class="reopen">
+        <button
+          type="button"
+          class="reopen-conversation"
+          disabled={reopen.isPending}
+          onClick={() => reopen.mutate()}
+        >
+          {reopen.isPending ? "Reopening…" : "Reopen with a new brief"}
+        </button>
+        <p class="note">
+          A second round on the same branch. The brief above stays where it is —
+          this adds one to write, and the worktree comes back if it has gone.
+        </p>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{REOPEN_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={reopen.isError}>
+          <p class="error">
+            The conversation could not be reopened: {reopen.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
+  );
+}
 /// What can be done to the conversation as a whole, rather than to any one
 /// event: a menu on the header, holding abort.
 ///
@@ -1100,9 +1184,10 @@ function Brief(props: {
   id: number;
   brief: BriefEvent;
 
-  /// Whether this conversation is adopting a roadmap, in which case the brief
-  /// is nobody here to write: it is the stage brief, and it arrives when the
-  /// stage is adopted. So there is no editor, and nothing to open one on.
+  /// Whether this conversation is still waiting to be adopted, in which case the
+  /// brief is nobody here to write: it is the stage brief, and it arrives when
+  /// the stage is adopted. Only what the empty brief says turns on this — whether
+  /// there is an editor at all is the brief's own `frozen`.
   adopting: boolean;
 }): JSX.Element {
   const queries = useQueryClient();
@@ -1149,7 +1234,11 @@ function Brief(props: {
     <article class="brief">
       <div class="event-head">
         <h2>Brief</h2>
-        <Show when={!editing() && !props.adopting}>
+        {/* A frozen brief has no editor: its round has been grilled, and it is
+            the record of what that round was built from. A conversation reopened
+            for a second round has one of each on its timeline — the frozen one
+            above the round boundary, and the one being written below it. */}
+        <Show when={!editing() && !props.brief.frozen}>
           <button type="button" class="edit-brief" onClick={write}>
             Edit
           </button>

@@ -23,6 +23,7 @@ import type {
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
+  ConversationReopened,
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
@@ -63,6 +64,7 @@ import building from "./fixtures/conversation-building.json" with { type: "json"
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
 import paused from "./fixtures/conversation-paused.json" with { type: "json" };
+import reopened from "./fixtures/conversation-reopened.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
@@ -1704,7 +1706,7 @@ function theHeld(running: boolean, ...answers: Parameters<typeof serving>) {
 /// holds — a refusal from the server, a worktree that has gone.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
-  ...answers: Array<() => Promise<Response>>
+  ...answers: Parameters<typeof serving>
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -2576,6 +2578,154 @@ describe("aborting a conversation", () => {
     fireEvent.click(await drawn(container, ".conversation-actions .abort"));
 
     await waitFor(() => screen.getByText(/could not be removed/));
+  });
+});
+
+/// A conversation Verkstead has finished with, opened again for a second brief
+/// round: the frozen brief above the round boundary, and the one being written
+/// under it.
+describe("reopening a conversation", () => {
+  const REOPENED = reopened as ConversationView;
+
+  /// The workbench with the reopened conversation opened instead of the drafting
+  /// one.
+  function theReopened(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${REOPENED.id}`, json(REOPENED)),
+      ...answers,
+    );
+  }
+
+  /// Where `Start grilling` sits, and for the same reason: it is the next thing
+  /// to do about this conversation, and the end of everything that has happened
+  /// is where the next thing belongs.
+  it("offers the press under the timeline once the work is finished", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const press = await drawn(container, ".reopen .reopen-conversation");
+    expect(press.textContent).toContain("Reopen");
+
+    expect(
+      container.querySelector(".timeline")!.compareDocumentPosition(press) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// Done and nowhere else. Aborted is off the ladder and stays there, and every
+  /// other state is somewhere the work has got to.
+  it("is offered on done and on no other state", async () => {
+    for (const state of [
+      "Draft",
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "Aborted",
+    ] as const) {
+      theWorkbenchWith({ state });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+
+      await drawn(container, ".timeline");
+      expect(container.querySelector(".reopen")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("posts to the conversation's own reopen route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Done" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/reopen`,
+        json("Reopened" satisfies ConversationReopened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/reopen`),
+      ).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before pressing it: the frozen brief is not touched,
+  /// and the branch is the one the work is already on.
+  it("says the brief above it stays where it is", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const panel = await drawn(container, ".reopen");
+    expect(panel.textContent).toContain("second round on the same branch");
+    expect(panel.textContent).toContain("stays where it is");
+  });
+
+  it("says when the branch could not be checked out again", async () => {
+    theWorkbenchWith(
+      { state: "Done" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/reopen`,
+        json("WorktreeRefused" satisfies ConversationReopened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
+
+    await waitFor(() => screen.getByText(/would not check the branch out again/));
+  });
+
+  /// One round's brief is a record and the next one's is a document. Both are on
+  /// the timeline, and only one of them opens a field.
+  it("draws the frozen brief beside the one being written", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    await drawn(container, ".brief");
+    const briefs = [...container.querySelectorAll(".brief")];
+
+    expect(briefs).toHaveLength(2);
+    expect(briefs[0]!.querySelector(".edit-brief")).toBeNull();
+    expect(briefs[1]!.querySelector(".edit-brief")).toBeTruthy();
+  });
+
+  /// A reader has to be able to tell which brief the work under it was built
+  /// from, which is the whole of what the boundary is for.
+  it("says where the round boundary falls", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    const boundary = await drawn(container, ".timeline-event > .moved.draft");
+    expect(boundary.textContent).toBe("Reopened — a new round starts here");
+
+    // And it is drawn between the two briefs, which is where the rounds part.
+    const briefs = [...container.querySelectorAll(".brief")];
+    expect(
+      briefs[0]!.compareDocumentPosition(boundary) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      briefs[1]!.compareDocumentPosition(boundary) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+
+    // What the boundary looks like is the stylesheet's, and jsdom lays nothing
+    // out.
+    expect(stylesheet).toContain(".timeline-event > .moved.draft {");
+  });
+
+  /// The second round runs the ordinary pipeline from grilling onward, so what
+  /// stands under the new brief is the press every first round starts with.
+  it("offers the ordinary start grilling under the new brief", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    const start = await drawn(container, ".start-grilling .start");
+    expect(start.textContent).toContain("Start grilling");
+    expect(container.querySelector(".reopen")).toBeNull();
   });
 });
 

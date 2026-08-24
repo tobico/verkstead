@@ -65,6 +65,7 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>One session per task</h1>\n<p>The backlog is worked one task at a time, each in a session of its\nown.</p>\n",
         "id": 17,
         "markdown": "# One session per task\n\nThe backlog is worked one task at a time, each in a session of its\nown.\n"

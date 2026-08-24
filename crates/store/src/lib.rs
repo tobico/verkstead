@@ -48,12 +48,12 @@ pub use captures::{Summary, append_capture, capture, start_capture, summarise_ca
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
-    Implementing, Lifecycle, SetOnTimeline, Staged, TimelineEvent, abort_conversation, adopting,
-    ask, asked_from, conversations, load_conversation, note, pick_direction, record_handoff,
-    record_manual_task, rename_branch, review_asked, save_brief, set_asked_from, set_base_commit,
-    set_grilling_profile, set_implementation_profile, set_state, stacks_on, start_adoption,
-    start_conversation, start_grilling, start_implementing, start_stage, timeline,
-    unanswered_set_since,
+    Implementing, Lifecycle, Reopening, SetOnTimeline, Staged, TimelineEvent, abort_conversation,
+    adopting, ask, asked_from, conversations, load_conversation, note, pick_direction,
+    record_handoff, record_manual_task, rename_branch, reopen_conversation, review_asked,
+    save_brief, set_asked_from, set_base_commit, set_grilling_profile, set_implementation_profile,
+    set_state, stacks_on, start_adoption, start_conversation, start_grilling, start_implementing,
+    start_stage, timeline, unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use interruptions::{
