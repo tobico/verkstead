@@ -121,6 +121,16 @@ Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
+**Commit Summary**:
+The agent-written account a code commit carries as its message body — a delta
+Diagram first, prose after — kept by the sweep with its trailers stripped,
+rendered above the diff in the commit's details pane, and clamped to a prose
+snippet on its Timeline card. Written for commits that deliver work; pure
+bookkeeping commits carry none, and a commit without one draws as it always
+did.
+_Avoid_: commit message (the summary is its body, not the whole), description,
+gate summary (the gate is gone), changelog entry
+
 **Notice**:
 The one kind of Event Verkstead writes on its own account: which Stage it
 started and where that Stage's branch went, or that a roadmap has no Stage left
@@ -520,14 +530,16 @@ _Avoid_: margin, sidebar, left rail
 
 **Guide**:
 The agent-facing usage instructions shipped inside the CLI and printed by
-it, so an agent needs nothing beyond the binary to learn how to ask. Split
-into a core that every ask needs and Topics fetched when their task arises.
+it, so an agent needs nothing beyond the binary to learn how to ask. A core
+that every ask needs, plus any Topics fetched when their task arises — since
+the gates Topic was retired the core is the whole of it.
 _Avoid_: help, manual, docs
 
 **Topic**:
-A task-scoped section of the Guide (e.g. gates), split out so an agent pays
-its reading cost only when the task is at hand — at which point it is
-required reading, never optional.
+A task-scoped section of the Guide, split out so an agent pays its reading
+cost only when the task is at hand — at which point it is required reading,
+never optional. There are none at present: the gates Topic was the only one,
+and it went when the last gate did.
 _Avoid_: section, chapter
 
 **Archive**:

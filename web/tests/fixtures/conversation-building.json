@@ -112,6 +112,7 @@
         "id": 13,
         "insertions": 74,
         "sha": "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93",
+        "snippet": null,
         "subject": "chore: plan the usage-limit pause"
       }
     },
@@ -123,6 +124,7 @@
         "id": 14,
         "insertions": 213,
         "sha": "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d",
+        "snippet": "The relay reads the account's own limit error off stderr and hands the session's runner a time to wake at, instead of the fixed backoff it used to guess.",
         "subject": "feat: read the account's own limit error"
       }
     }

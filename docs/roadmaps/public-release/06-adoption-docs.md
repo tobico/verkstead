@@ -47,7 +47,9 @@ real.
    matches the landed stages (verb, asset names, env var).
 3. **Example skills** — `examples/` gains the grilling and acceptance-gate
    skills; README quotes them. Accepts: each skill usable by pasting into an
-   agent's instructions; the gate example follows the Guide's gates topic.
+   agent's instructions; the gate example is self-contained — an adopter can
+   run the gate it describes from the example alone, without reading anything
+   else.
 4. **Cleanup and tag** — audit-flagged staleness fixed, v0.1.0 tagged, the
    release verified end to end (curl install, nix run, Update Notice sees
    the release).

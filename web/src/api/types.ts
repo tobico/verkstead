@@ -374,31 +374,12 @@ export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 export type Capture = { text: string, };
 
 /**
- * One commit's diff, as the details pane receives it.
- *
- * Its own request rather than a field on the Conversation, for the reason a
- * Capture is: a Timeline is read every time an open page hears the world
- * moved, and a diff is read when somebody opens the one Event it belongs to.
- *
- * Rendered with the folds and the highlighting an attached Diff already gets,
- * because it is the same renderer on the same kind of input — see
- * [`crate::diff`].
- */
-export type CommitDiff = { 
-/**
- * `null` where the commit changed nothing a diff can show, which is a merge
- * or an empty commit. A commit the repository no longer has is not this: it
- * is a 404, because there is nothing there to draw a pane about.
- */
-diff: DiffView | null, };
-
-/**
  * A commit as the Timeline shows it: what it was called, and how much of the
  * repository it moved.
  *
- * The summary and not the diff. A commit's diff is what the details pane
- * fetches, from the repository the commit is in — see [`CommitDiff`] — and the
- * Timeline is re-read every time an open page hears the world moved.
+ * The line and not what is behind it. A commit's summary and its diff are what
+ * the details pane fetches — see [`CommitPane`] — and the Timeline is re-read
+ * every time an open page hears the world moved.
  *
  * There is no state here and no action on it. Commits are viewable and nothing
  * else: the design gives them no per-commit review, because feedback about the
@@ -424,7 +405,62 @@ sha: string,
  * arrives headerless, which is what lets it be rendered by the same
  * renderer an attached Diff is.
  */
-subject: string, files: number, insertions: number, deletions: number, };
+subject: string, files: number, insertions: number, deletions: number, 
+/**
+ * What the commit said about itself, as prose alone: its Commit Summary
+ * flattened to a line with the Diagram left out, for the card to clamp —
+ * see [`crate::markdown::to_prose`].
+ *
+ * The prose and not the rendering, unlike every other document on a card.
+ * A commit's card is a button, rendered markdown cannot live inside one,
+ * and the summary is on the card to be read rather than to be read *at*:
+ * what it looks like whole is the pane's, and the card says what it says.
+ *
+ * `None` where the commit carried no summary — which is every bookkeeping
+ * commit and every commit recorded before summaries were kept — and where
+ * what it carried was a Diagram and nothing else. Both draw the card that
+ * has always been drawn.
+ */
+snippet: string | null, };
+
+/**
+ * One commit, as the details pane receives it: what it said about itself, and
+ * what it changed.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * Capture is: a Timeline is read every time an open page hears the world
+ * moved, and a commit is read whole when somebody opens the one Event it
+ * belongs to.
+ *
+ * The diff is rendered with the folds and the highlighting an attached Diff
+ * already gets, because it is the same renderer on the same kind of input — see
+ * [`crate::diff`].
+ */
+export type CommitPane = { 
+/**
+ * The Commit Summary, rendered and sanitized like every other document an
+ * agent wrote — `null` where the commit carried none, which is every
+ * bookkeeping commit and every commit recorded before summaries were kept.
+ */
+summary: string | null, 
+/**
+ * Whether that summary came out holding a Diagram, and so whether the pane
+ * carries the client-side renderer at all.
+ *
+ * Answered here, off the HTML above, exactly as a Set's own flag is — see
+ * [`crate::SetView::diagrams`]. It travels with the pane because it is a
+ * fact about this commit's own account of itself, and because mermaid is
+ * megabytes: the pane that asks for the bundle is the one with something to
+ * draw with it. `false` where there is no summary, there being nothing
+ * there to hold a Diagram.
+ */
+diagrams: boolean, 
+/**
+ * `null` where the commit changed nothing a diff can show, which is a merge
+ * or an empty commit. A commit the repository no longer has is not this: it
+ * is a 404, because there is nothing there to draw a pane about.
+ */
+diff: DiffView | null, };
 
 /**
  * What became of aborting one.
