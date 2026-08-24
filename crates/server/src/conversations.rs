@@ -180,9 +180,9 @@ async fn usable(
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has recorded the pick. What a session that could not be picked up
-/// leaves behind is something to see in the log, and no more than that. An
-/// Interruption is raised about a session that ran and went wrong — see
-/// [`crate::interruptions`] — and this is not one.
+/// leaves behind is something to see in the log, and no more than that. A halt
+/// is written about a run that stopped — see [`crate::halts`] — and this is not
+/// one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -252,8 +252,7 @@ pub(crate) async fn settle_a_proposal(
     if !write_the_artifact(state, conversation_id, picked).await {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
-        // there is nothing here to raise an Interruption about — no session ran
-        // and went wrong.
+        // there is nothing here to halt over — no session ran and went wrong.
         tracing::error!(
             conversation_id,
             ?picked,
@@ -281,11 +280,8 @@ pub(crate) async fn settle_a_proposal(
 ///
 /// Whether a watcher was armed. `false` is a Conversation with no session
 /// running, which has nothing to arm one *on*: the pick is recorded, so the
-/// human's answer stands, and what to make of nobody writing what it asked for
-/// is said by whoever asked. The two callers mean different things by it — a
-/// pick just answered with no session is a Conversation grilling with nothing
-/// grilling it, and a pick a restart found is a session this restart killed — so
-/// neither is said here.
+/// human's answer stands, and what to make of a pick with nothing grilling it is
+/// said by the caller rather than here.
 async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> bool {
     let Some(session) = state.sessions.following(id) else {
         return false;
@@ -309,88 +305,6 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
     );
 
     true
-}
-
-/// Arm the watcher again for every Conversation left grilling on a pick.
-///
-/// What a restarting server does, and the counterpart to
-/// [`crate::wrapping::resume`] one rung down the ladder. A pick is a row and
-/// survives the restart; the grilling session that would have written the
-/// artifact was a process and did not, so a server that came back up and armed
-/// nothing would leave a Conversation grilling for ever with nobody watching and
-/// nothing having said so.
-///
-/// It goes through the same arming every pick does rather than a path of its own,
-/// which is what makes the recovery honest: the watcher is armed from the stored
-/// latest pick, and finds what is actually running. In practice that is nothing —
-/// a restarted server has no sessions at all — and *here* that is a run which has
-/// stopped rather than something to note and carry on from, because a session
-/// really was writing the artifact until this restart killed it. So what this
-/// leaves on each Timeline is an Interruption naming the tail the Conversation
-/// was waiting on, which the human can retry into a fresh session or take over —
-/// see [`crate::runner::nobody_writing`].
-///
-/// Raising one twice is not raising two: the store keeps one open Interruption
-/// per Conversation, so a server restarted again over the same Conversation
-/// leaves the first standing.
-///
-/// The task is handed back rather than let go, for the reason
-/// [`crate::wrapping::resume`]'s is: the stall sweep calls a grilling with no
-/// session undriven, and every one of these is exactly that until this has said
-/// what it has to say about it. A sweep that looked first would raise its own
-/// Interruption over the top of the better one. See [`crate::stalls::sweeping`].
-#[must_use = "the sweep waits for the grillings to be looked over before it \
-              judges whether anything is driving them"]
-pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
-            Ok(conversations) => conversations,
-            Err(error) => {
-                tracing::error!(error = ?error, "listing the Conversations to resume watching failed");
-                return;
-            }
-        };
-
-        for id in conversations
-            .into_iter()
-            .filter(|conversation| conversation.state == store::Lifecycle::Grilling)
-            .map(|conversation| conversation.id)
-        {
-            // The row a sidebar is drawn from says which state a Conversation is
-            // in and not what it picked, so the pick is read back per grilling.
-            // A question asked once per Conversation actually grilling, which is
-            // a handful at the very most.
-            let picked = match store::load_conversation(&state.pool, id).await {
-                Ok(Some(conversation)) => conversation.direction,
-                Ok(None) => continue,
-                Err(error) => {
-                    tracing::error!(error = ?error, conversation_id = id, "reading what a grilling was picked on failed");
-                    continue;
-                }
-            };
-
-            let Some(direction) = picked else {
-                // A grilling that has not been picked on yet is waiting on the
-                // human, not on an artifact. There is nothing to watch for.
-                continue;
-            };
-
-            tracing::info!(
-                conversation_id = id,
-                ?direction,
-                "a Conversation was left grilling on a pick, so its watcher is armed again",
-            );
-
-            // Which in practice is every one of them: a restarted server has no
-            // sessions at all, so what this arming does is find that out and say
-            // so where the human is looking.
-            if !write_the_artifact(&state, id, direction).await {
-                crate::runner::nobody_writing(&state, id, direction).await;
-            }
-        }
-    })
 }
 
 /// Record that the grilling is over and the work is being built.
@@ -585,9 +499,10 @@ pub(crate) async fn set_base_branch(
 /// would be an agent nobody could see or stop. It is also the one part of this
 /// that failing does not refuse — the branch is made, the Brief is frozen, and a
 /// session that would not start is logged, leaving a Conversation that is
-/// grilling with a Timeline that says so and no session on it. Not an
-/// Interruption either: a grilling is attended, and those are for the unattended
-/// runs a human is not watching.
+/// grilling with a Timeline that says so and no session on it. Not a halt
+/// either: the human is at the button they have just pressed, and what a halt is
+/// for is telling them about a run that stopped while nobody was watching. The
+/// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
@@ -668,6 +583,16 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
     }
+
+    // From here the Conversation says it is being grilled, and the thing that
+    // will say so is a session that does not exist yet. So a registration stands
+    // in for it across the launch, which is the slowest part of this: a sweep
+    // that looked in between would find a Conversation grilling with nothing
+    // grilling it, and halt a press the human is still standing at. Held to the
+    // end of this rather than handed on — what drives a grilling from there is
+    // its session — and what it leaves behind where the launch fails is a stall
+    // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
+    let _driving = state.drivers.driving(id);
 
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and

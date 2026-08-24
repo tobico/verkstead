@@ -1,10 +1,9 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
 //! The kinds of Event so far — the Brief, a move, what a session printed, a
-//! Question Set, the handoff, and the commits a
-//! session lands on the branch — drawn as a list of Events rather than as a
-//! Brief with a list under it. The stages after this one put interruptions on
-//! the same list.
+//! Question Set, the handoff, the Notices Verkstead writes on its own account,
+//! and the commits a session lands on the branch — drawn as a list of Events
+//! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
 //! now, the stage list and the PR as those stages arrive. They are not on the
@@ -27,9 +26,10 @@
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
 //! One of them lives there — `Start grilling` under the Brief it will freeze.
-//! Aborting is in neither place and not in the list: it is not a step
-//! in the work but a way of ending it, so it hangs off the header behind a menu,
-//! where a destructive action is not one stray click away.
+//! Stopping the work is in neither place and not in the list: none of the three
+//! ways of doing it — stop after this task, stop now, abort the conversation —
+//! is a step in the work, so all three hang off the header behind a menu, where
+//! what cannot be undone is not one stray click away.
 //!
 //! Nothing here ends the grilling, and nothing here chooses a direction. That is
 //! the agent's own closing move — a Question Set carrying a proposal, with the
@@ -50,10 +50,13 @@ import {
 
 import {
   abortConversation,
+  forceStopConversation,
   listProfiles,
+  resume,
   saveBrief,
   startGrilling,
   startManualTask,
+  stopConversation,
 } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -61,6 +64,7 @@ import type {
   BriefSaved,
   CommitEvent,
   ConversationAborted,
+  ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -72,6 +76,7 @@ import type {
   PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
+  Resumed,
   StageListEvent,
   TaskListEvent,
   TimelineEvent,
@@ -81,7 +86,6 @@ import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
-import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
 import { keeping } from "./settling";
@@ -125,6 +129,22 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
 
+/// And each way of being refused a stop, whichever of the two was pressed.
+///
+/// The two that are not refusals map to nothing: a conversation that has
+/// stopped says so by the badge and the notice the read after the press brings
+/// back, and one that is still finishing its task says so in its own words
+/// beside the button rather than as an error.
+export const STOP_REFUSAL: Record<ConversationStopped, string> = {
+  Stopped: "",
+  Stopping: "",
+  AlreadyHalted:
+    "This conversation has already stopped. Resume is what gets it going again.",
+  NotDriven:
+    "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
+  NoSuchConversation: "This conversation is gone.",
+};
+
 /// And each way of being refused an abort.
 export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
   Aborted: "",
@@ -153,6 +173,33 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
   NoSuchModel: "That profile no longer lists that model.",
   NotStarted:
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
+};
+
+/// And each way of being refused a resume.
+///
+/// Every one of them is the button doing the one thing it is for: saying what
+/// there is to do about a conversation nothing is driving. A press that quietly
+/// found nothing to start would leave the human exactly as stuck as they were,
+/// which is why the server names these rather than logging them.
+export const RESUME_REFUSAL: Record<Resumed, string> = {
+  Resumed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDriven:
+    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
+  AlreadyDriven:
+    "Something is already driving this conversation. Have a look at what it is doing.",
+  NowhereToWork:
+    "This conversation has no worktree to work in, so there is nowhere to start.",
+  WorktreeRefused:
+    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
+  NoDirection:
+    "Nothing on the record says how this work is being built, so there is no run to pick up.",
+  NothingToWork:
+    "There is no backlog left to work — nothing was written, or it is finished with. Set the next thing going by hand.",
+  NoGrillingPairing:
+    "Choose a grilling profile and model first, on the brief.",
+  NoImplementationPairing:
+    "Choose an implementation profile and model first, on the brief.",
 };
 
 /// The state a move came *from*: the state the move before it went to, and
@@ -416,18 +463,6 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
-                <Match when={"Interruption" in event && event.Interruption}>
-                  {(stopped) => (
-                    <Interruption
-                      stopped={stopped()}
-                      selected={props.selected === stopped().id}
-                      open={() => {
-                        props.select(stopped().id);
-                        props.details();
-                      }}
-                    />
-                  )}
-                </Match>
               </Switch>
             </li>
           )}
@@ -447,14 +482,79 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      {/* And under that, the way to move the conversation by hand. It is not
-          one of the two above — neither is it for one state, nor is it the one
-          thing there is to do from here. It is what is offered *whenever
-          nothing is running*, which is a quiet moment between steps as much as
-          it is a run that has stopped, so it sits below whichever of the two is
-          drawn rather than instead of it. */}
+      {/* And under that, the two ways to get a conversation moving again. Both
+          are offered *whenever nothing is running*, which is a quiet moment
+          between steps as much as it is a run that has stopped, so they sit
+          below whichever of the two above is drawn rather than instead of it.
+
+          Resume first, because it is the one that carries on what Verkstead was
+          already doing: the other is for the thing it was never going to do. */}
+      <Resume conversation={props.conversation} />
       <ManualTaskComposer conversation={props.conversation} />
     </>
+  );
+}
+
+/// The one standing way to get Verkstead driving again: a button, and what it
+/// refuses with when there is nothing to drive.
+///
+/// Drawn exactly where the server says it is worth drawing — see
+/// `ready_to_resume`, which is the state being one something ought to be driving
+/// and nothing driving it. The page cannot work that out for itself: what drives
+/// a conversation is a register of running tasks, and a register lives in the
+/// server.
+///
+/// It carries nothing. What to start is recomputed from the conversation's state
+/// and its branch at the moment of the press, which is the whole point of one
+/// button rather than one per way of stopping — steering the work is what the
+/// manual task below is for.
+function Resume(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<Resumed | null>(null);
+
+  const press = useMutation(() => ({
+    mutationFn: () => resume(props.conversation.id),
+    onSuccess: (outcome: Resumed) => {
+      setRefused(outcome === "Resumed" ? null : outcome);
+
+      // Either way the page it was pressed on is out of date: driving has
+      // started, or the world had moved under the button. Reading it again is
+      // both the correction and the explanation.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <Show when={props.conversation.ready_to_resume}>
+      <div class="resume">
+        <h2>Nothing is driving this</h2>
+
+        <button
+          type="button"
+          class="resume-conversation"
+          disabled={press.isPending}
+          onClick={() => press.mutate()}
+        >
+          {press.isPending ? "Resuming…" : "Resume"}
+        </button>
+
+        <p class="note">
+          Verkstead works out what should be running from where the work now
+          stands, and starts it.
+        </p>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{RESUME_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={press.isError}>
+          <p class="error">
+            The conversation could not be resumed: {press.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
   );
 }
 
@@ -465,7 +565,7 @@ export function Timeline(props: {
 /// drafting nor aborted, and no session is registered for it. That is the
 /// literal rule and it is deliberate: the gaps between an unattended run's
 /// steps, a wrapping lull, a grilling waiting on a pick, a finished
-/// conversation and a run stopped on an interruption all show it, because the
+/// conversation and a conversation that has halted all show it, because the
 /// point of it is to get a stuck conversation moving. After a server restart
 /// nothing is running anywhere, so it shows everywhere, and that is wanted too.
 ///
@@ -546,8 +646,7 @@ function ManualTaskComposer(props: {
 
         <label for="manual-task">What should the agent do?</label>
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`, which the brief's field and an interruption's note use for
-            the same reason. */}
+            `.grow`, which the brief's field uses for the same reason. */}
         <div class="grow" data-value={instruction()}>
           <textarea
             id="manual-task"
@@ -1365,20 +1464,66 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 }
 
 /// What can be done to the conversation as a whole, rather than to any one
-/// event: a menu on the header, holding abort.
+/// event: a menu on the header, holding the three ways of ending what it is
+/// doing.
 ///
-/// A menu rather than a button, because aborting throws a worktree away and the
-/// header is somewhere the human's cursor passes on the way to everything else.
-/// The [`Menu`](../Menu.tsx) every dropdown here is, so it opens, closes and
-/// reaches the keyboard without any of that being this component's to get right.
+/// A menu rather than three buttons, because the last of them throws a worktree
+/// away and the header is somewhere the human's cursor passes on the way to
+/// everything else. The [`Menu`](../Menu.tsx) every dropdown here is, so it
+/// opens, closes and reaches the keyboard without any of that being this
+/// component's to get right.
+///
+/// In order of what each costs: stop, which waits for the task the run is on;
+/// force stop, which does not; and abort, which is not a stop at all but the end
+/// of the conversation. Each says what it does under it, because *stop* and
+/// *force stop* are two words apart and hours of work apart.
+///
+/// Each is drawn only where it applies. The two stops need something to stop —
+/// see `ready_to_stop`, which is the server's rule and not this page's — and
+/// force stop needs a session to end, which is what `working` says.
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
+  const [halting, setHalting] = createSignal<ConversationStopped | null>(null);
 
   // The menu's own way to shut, held here because what closes this one is the
-  // abort coming back rather than the press that sent it.
+  // press coming back rather than the press going out.
   let shut = (): void => {};
+
+  /// What every press here leaves behind: a page drawn against a conversation
+  /// that has moved. Reading it again is both the correction and, where the
+  /// press was refused, the explanation.
+  const reread = () => {
+    void queries.invalidateQueries({ queryKey: ["conversation"] });
+    void queries.invalidateQueries({ queryKey: ["conversations"] });
+  };
+
+  /// Both stops answer the same way, so both are pressed the same way: the
+  /// outcome is kept whatever it is — it is either what happened or why nothing
+  /// did — and the menu closes only on a conversation that has actually
+  /// stopped. A stop that is still waiting for a step to finish has something
+  /// left to say, and says it where it was pressed.
+  const pressing = (stopping: () => Promise<ConversationStopped>) => ({
+    mutationFn: stopping,
+    onSuccess: (outcome: ConversationStopped) => {
+      setHalting(outcome);
+
+      if (outcome === "Stopped") {
+        shut();
+      }
+
+      reread();
+    },
+  });
+
+  const stop = useMutation(() =>
+    pressing(() => stopConversation(props.conversation.id)),
+  );
+
+  const force = useMutation(() =>
+    pressing(() => forceStopConversation(props.conversation.id)),
+  );
 
   const abort = useMutation(() => ({
     mutationFn: () => abortConversation(props.conversation.id),
@@ -1391,8 +1536,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
       // Aborted or already aborted: what was asked for holds either way.
       setRefused(null);
       shut();
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      reread();
     },
   }));
 
@@ -1406,21 +1550,70 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     >
       {() => (
         <>
+          <Show when={props.conversation.ready_to_stop}>
+            <div class="action">
+              <button
+                type="button"
+                role="menuitem"
+                class="stop"
+                disabled={stop.isPending}
+                onClick={() => stop.mutate()}
+              >
+                {stop.isPending ? "Stopping…" : "Stop"}
+              </button>
+              <p class="note">Pause after the current task until you resume.</p>
+              <Show when={halting() === "Stopping"}>
+                <p class="note waiting">
+                  The session running now finishes its task first. Nothing will
+                  be started after it.
+                </p>
+              </Show>
+            </div>
+
+            <Show when={props.conversation.working}>
+              <div class="action">
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="force-stop"
+                  disabled={force.isPending}
+                  onClick={() => force.mutate()}
+                >
+                  {force.isPending ? "Stopping…" : "Force stop"}
+                </button>
+                <p class="note">Halt any running tasks and stop immediately.</p>
+              </div>
+            </Show>
+          </Show>
+
           <Show
             when={props.conversation.state !== "Aborted"}
             fallback={<p class="note">This conversation has been aborted.</p>}
           >
-            <button
-              type="button"
-              role="menuitem"
-              class="abort"
-              disabled={abort.isPending}
-              onClick={() => abort.mutate()}
-            >
-              {abort.isPending ? "Aborting…" : "Abort conversation"}
-            </button>
-            <p class="note">
-              Removes the worktree. The branch stays where it is.
+            <div class="action">
+              <button
+                type="button"
+                role="menuitem"
+                class="abort"
+                disabled={abort.isPending}
+                onClick={() => abort.mutate()}
+              >
+                {abort.isPending ? "Aborting…" : "Abort conversation"}
+              </button>
+              <p class="note">
+                Permanently end the conversation and delete the worktree. The
+                branch stays where it is.
+              </p>
+            </div>
+          </Show>
+
+          <Show when={halting() && STOP_REFUSAL[halting()!]}>
+            <p class="error">{STOP_REFUSAL[halting()!]}</p>
+          </Show>
+          <Show when={stop.isError || force.isError}>
+            <p class="error">
+              The conversation could not be stopped:{" "}
+              {stop.error?.message ?? force.error?.message}
             </p>
           </Show>
 

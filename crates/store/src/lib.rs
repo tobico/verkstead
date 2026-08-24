@@ -27,7 +27,8 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod captures;
 mod commits;
 mod conversations;
-mod interruptions;
+mod halts;
+mod migrations;
 mod pairings;
 mod profiles;
 mod pull_requests;
@@ -49,10 +50,7 @@ pub use conversations::{
     start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
-pub use interruptions::{
-    Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
-    record_interruption, settle_interruption,
-};
+pub use halts::{Halt, Halted, ask_to_stop, asked_to_stop, clear_halt, forget_stop, halt, halted};
 pub use pairings::{RepoPairings, remembered_pairings};
 pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -564,10 +562,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // per Conversation a rule the database keeps.
     commits::apply_schema(pool).await?;
 
-    // And where a run stopped, which hangs off the Timelines for the same reason
-    // again — and off the Conversations too, which is what makes *one open
-    // Interruption per Conversation* a rule the database keeps.
-    interruptions::apply_schema(pool).await?;
+    // And that driving has stopped, which hangs off the Conversations alone: a
+    // halt is how things are rather than something that happened, and what did
+    // happen is the Notice it points at.
+    halts::apply_schema(pool).await?;
 
     // And what the work ended up on, which hangs off the Timelines the same way
     // — and off the Conversations, which is what makes *one pull request per
@@ -578,6 +576,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // off the Conversations alone: none of it is something that happened, so
     // none of it is an Event.
     wrap_up::apply_schema(pool).await?;
+
+    // And last of all, whatever a database written by an older Verkstead
+    // still needs done to it. After every table above, because what a rewrite
+    // moves rows into is one of them — see [`migrations`], where each rewrite
+    // says for itself how it knows whether it has already run.
+    migrations::apply(pool).await?;
 
     Ok(())
 }
