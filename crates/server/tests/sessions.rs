@@ -6650,6 +6650,164 @@ async fn handing_back_before_the_interval_tells_nobody() {
     );
 }
 
+/// A halt Verkstead decided on reaches the human's devices, once.
+///
+/// The reason a stop is pushed at all: nobody is at the terminal, the run will
+/// not start again until Resume is pressed, and a stop nobody is told about is
+/// one found days late. So the phone gets what the Notice opens with — which
+/// step stopped, on which branch, in which Repo — and tapping it opens the
+/// Conversation the Notice is on.
+///
+/// Then a restart, which sweeps every Conversation as it comes up: what it
+/// finds here is one that has already stopped, and it leaves it alone. That is
+/// the second half of this — a Conversation halts once, and one push is what
+/// one halt is worth however many times something notices it standing still.
+#[tokio::test]
+async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'half a limiter\n' > limiter.md
+            printf 'error: unresolved import crate::window\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    let laptop = Device::new(&service, "laptop");
+    fixture.subscribe(&phone).await;
+    fixture.subscribe(&laptop).await;
+
+    let before = fixture.view().await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.halted().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "Verkstead pulled the brake, which is the kind of stop worth a phone",
+    );
+
+    // Four: the proposal Set arriving is a push of its own to each device, and
+    // the halt is what follows it, so the halt's is the second of each pair.
+    let pushed = pushes(&taken, 4).await;
+
+    for device in [&phone, &laptop] {
+        let push = pushed
+            .iter()
+            .filter(|push| push.device == device.name)
+            .next_back()
+            .unwrap_or_else(|| panic!("{} was not told the run had stopped", device.name));
+
+        // Decrypted with the device's own keys, which is what says it was
+        // encrypted for that device rather than merely addressed to it.
+        let notice = device.read(push);
+
+        assert_eq!(
+            notice["path"],
+            format!("/conversations/{}", fixture.id),
+            "a halt's push has to open the Conversation that stopped",
+        );
+        assert_eq!(
+            notice["title"],
+            format!("Implementing the work inline stopped on {}", before.branch),
+            "and say what stopped and which piece of work it stopped in — the \
+             words the Notice opens with",
+        );
+        assert_eq!(notice["project"], before.repo.name);
+    }
+
+    assert!(
+        stopped.html.contains("Implementing the work inline"),
+        "the Notice and the push name the same stop: {:?}",
+        stopped.html,
+    );
+
+    // A server coming back sweeps every Conversation before it does anything
+    // else, and this one has already stopped.
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    // Long enough for that sweep to have looked, and to have said something if
+    // it were going to.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        1,
+        "the first Notice is the one that explains the stop",
+    );
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        4,
+        "the two the Set was worth and the two the halt was: one push per device \
+         per halt, and a Conversation halts once",
+    );
+}
+
+/// And a stop nobody chose tells nobody.
+///
+/// A stall is a driver that went away rather than a decision anybody took, so a
+/// Verkstead coming back is free to start the work again unasked — and waking a
+/// phone about a run that is about to carry on by itself is a notification that
+/// asks for nothing. The Notice is still written, because the Timeline is the
+/// record either way.
+///
+/// The devices go on the list before the restart, which is what makes them the
+/// same devices: a subscription is a row in the database, and the server that
+/// comes back reads the same one.
+#[tokio::test]
+async fn a_stop_nobody_chose_tells_nobody() {
+    let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+    fixture.quiet().await;
+
+    let (service, taken) = push_service().await;
+    fixture.subscribe(&Device::new(&service, "phone")).await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "the server it started on sweeps too slowly to have looked, which is what \
+         makes the restart the thing being tested",
+    );
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    fixture.halted().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Circumstance,
+        "nobody decided this run should stop, which is the whole reason it is \
+         not worth a phone",
+    );
+
+    // Long enough for the push to have gone out if a stop nobody chose were one
+    // to send.
+    tokio::time::sleep(BRISKLY.holding * 3).await;
+
+    assert!(
+        taken.lock().unwrap().is_empty(),
+        "a run a restart will pick up unasked is not one to wake anybody about",
+    );
+}
+
 /// One push, as the push service received it.
 #[derive(Debug, Clone)]
 struct Push {

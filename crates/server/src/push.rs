@@ -1,7 +1,8 @@
 //! Telling the devices that something is waiting for the human.
 //!
-//! Two things are: a Question Set has arrived, or a Hold has stood a while with
-//! nobody coming back to it. One push per subscribed device either way,
+//! Three things are: a Question Set has arrived, a Hold has stood a while with
+//! nobody coming back to it, or driving has halted on something Verkstead
+//! decided to stop for. One push per subscribed device whichever it is,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
 //! service worker to draw the notification and to know which page to open, and
@@ -17,6 +18,14 @@
 //! A Hold's push is a reminder and nothing more. It ends no Hold — only the
 //! hand-back does that — and it leaves nothing on the Timeline, which records
 //! the work rather than the watching.
+//!
+//! A halt's push is the opposite: the run has stopped and will not start again
+//! until the human presses Resume, so a silent stop is one they find days late.
+//! Only the halts Verkstead decided on are worth a phone, though — a stop
+//! nobody chose is one a restart picks up unasked, and telling somebody about a
+//! run that is about to carry on by itself is a notification that asks for
+//! nothing. The Notice on the Timeline is what says it in full either way; this
+//! is only what reaches a pocket.
 //!
 //! A push service is also the only thing that can tell us a device has gone —
 //! the app was uninstalled, the subscription expired — and it says so with a
@@ -194,6 +203,63 @@ async fn remind(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     let notice = serde_json::to_vec(&notice).context("building the push notice")?;
 
     notify(pool, &format!("the Hold on {conversation_id}"), &notice).await
+}
+
+/// Tell the devices that driving has stopped, without making the halt wait for
+/// it.
+///
+/// Returns as soon as the work is handed to the runtime, for the reason a Set's
+/// [`announce`] does: what the caller is doing is writing down that a run
+/// stopped, and a push service having a bad day must not be able to delay that
+/// or to fail it.
+///
+/// One push per halt, because a Conversation halts once — see
+/// [`verkstead_store::halt`], which is what refuses the second — so this is
+/// only ever reached by the halt that was actually written. A sweep looking
+/// again a minute later at a Conversation standing just as still sends nothing.
+///
+/// `stopped` is what ought to have been happening, with its first letter up:
+/// the same words the Notice opens with, so that the phone and the Timeline say
+/// the same thing about the same stop.
+pub(crate) fn halted(state: &AppState, conversation_id: i64, stopped: &str) {
+    let pool = state.pool.clone();
+    let stopped = stopped.to_owned();
+
+    tokio::spawn(async move {
+        if let Err(error) = tell(&pool, conversation_id, &stopped).await {
+            tracing::error!(
+                conversation_id,
+                error = ?error,
+                "telling the devices about a halt failed",
+            );
+        }
+    });
+}
+
+/// The notice one halt is worth, sent.
+///
+/// Named the way a Hold's reminder is — the branch, with the Repo underneath —
+/// so that a lock screen says which piece of work has stopped as well as what
+/// stopped in it.
+async fn tell(pool: &SqlitePool, conversation_id: i64, stopped: &str) -> Result<()> {
+    let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
+    else {
+        // Aborted and gone between the halt and this. Nothing is stopped any
+        // more that there is anything to say about.
+        return Ok(());
+    };
+
+    let title = format!("{stopped} stopped on {}", conversation.branch);
+
+    let notice = Notice {
+        path: format!("/conversations/{conversation_id}"),
+        title: &title,
+        project: Some(&conversation.repo.name),
+    };
+
+    let notice = serde_json::to_vec(&notice).context("building the push notice")?;
+
+    notify(pool, &format!("the halt on {conversation_id}"), &notice).await
 }
 
 /// Send the notice to every device, and prune the ones the push services have

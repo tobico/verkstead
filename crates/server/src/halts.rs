@@ -14,6 +14,13 @@
 //! reads on a phone, and what a stop needs to say is a paragraph and two blocks
 //! of terminal text.
 //!
+//! **A halt Verkstead decided on also reaches a phone.** The Notice is what
+//! says it in full, and it says it to somebody who is looking; a run that
+//! stopped is a run that stays stopped until Resume is pressed, so a stop
+//! nobody is told about is one found days late. A stop nobody chose sends
+//! nothing, a restart being free to pick that one up unasked — see
+//! [`crate::push::halted`].
+//!
 //! Nothing here reverts, resets or stashes anything, and nothing here starts
 //! anything either. The repository is left exactly as the session left it, and
 //! getting going again is Resume's — one press, recomputed from the state the
@@ -107,6 +114,11 @@ pub(crate) const TAIL_LINES: usize = 40;
 /// already stopped, and the first Notice is the one that explains it — the
 /// sweep looking again a minute later finds the same Conversation standing just
 /// as still. A Conversation that has gone has nobody left to tell.
+///
+/// A halt that was written and that Verkstead decided on is also pushed to the
+/// human's devices. The `None` above is what keeps that to one push per stop:
+/// the sweep that finds the same Conversation standing still writes nothing, so
+/// there is nothing here to tell anybody about twice.
 pub(crate) async fn halt(
     state: &AppState,
     conversation_id: i64,
@@ -139,6 +151,15 @@ pub(crate) async fn halt(
             state.nudges.announce(Nudge::Conversation {
                 conversation: conversation_id,
             });
+
+            // And a phone, where Verkstead decided to stop. Behind the Nudge
+            // rather than in front of it, both being handed to the runtime
+            // either way: the page somebody is looking at should not wait on a
+            // push service to redraw. See [`crate::push`] for why a stop nobody
+            // chose sends nothing.
+            if halt == store::Halt::Deliberate {
+                crate::push::halted(state, conversation_id, &opening(what));
+            }
         }
         None => tracing::info!(
             conversation_id,

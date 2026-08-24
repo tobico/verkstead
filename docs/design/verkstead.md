@@ -333,9 +333,12 @@ Timeline events:
   Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
-- **Push notifications** for needs-you (blocking question sets, interruptions,
-  usage-limit pauses) **and milestones** (PR opened, stage complete,
-  conversation done).
+- **Push notifications** for needs-you — a blocking question set, a Hold nobody
+  came back to, a halt Verkstead decided on, a usage-limit pause — **and
+  milestones** (PR opened, stage complete, conversation done). A stop nobody
+  chose sends nothing: a restart picks that one up unasked, so waking a phone
+  about it would be asking for something that is already happening (*settled
+  2026-08-24, building halt-and-resume*).
 - Question sets are answerable in the workbench and on the phone alike.
 - **Everything the human configures is one page**, `/settings`, the one
   place the sidebar leads out to (*settled 2026-08-23, building
