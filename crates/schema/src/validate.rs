@@ -270,6 +270,11 @@ fn check_proposal(set: &QuestionSet, violations: &mut Vec<Violation>) {
 /// finding has to say something to the session that would fix it. `what` is the
 /// only thing that session gets, so an empty one is a fix session dispatched
 /// with nothing to go on.
+///
+/// A finding that offers a split is held to all of it a second time, for the
+/// Option that means *split it out as a task*, and to the one rule only a split
+/// has: it cannot be the Option the finding is fixed by, because one Answer
+/// cannot mean both.
 fn check_review(set: &QuestionSet, violations: &mut Vec<Violation>) {
     let Some(review) = &set.review else {
         return;
@@ -282,9 +287,9 @@ fn check_review(set: &QuestionSet, violations: &mut Vec<Violation>) {
         ));
     }
 
-    // Two findings on one Option would be one Answer dispatching two fix
-    // sessions, which is one of them nobody agreed to.
-    let mut fixed_by: HashSet<&str> = HashSet::new();
+    // Two findings turning on one Option would be one Answer dispatching two
+    // pieces of work, which is one of them nobody agreed to.
+    let mut turned_on: HashSet<(&str, u32)> = HashSet::new();
 
     for finding in &review.findings {
         if finding.what.trim().is_empty() {
@@ -295,7 +300,7 @@ fn check_review(set: &QuestionSet, violations: &mut Vec<Violation>) {
             )));
         }
 
-        let Some((name, n)) = finding.fixing() else {
+        let Some(fixing) = finding.fixing() else {
             violations.push(Violation::set(format!(
                 "a finding names the Option that means fix it, as `Q1.1`; {:?} is not \
                  an Option's number",
@@ -304,43 +309,116 @@ fn check_review(set: &QuestionSet, violations: &mut Vec<Violation>) {
             continue;
         };
 
-        if !fixed_by.insert(finding.fix.trim()) {
-            violations.push(Violation::at(
-                name,
-                format!(
-                    "two findings are fixed by Option {n} of this question; one Answer \
-                     cannot mean two different pieces of work"
-                ),
-            ));
+        if !claims(fixing, &mut turned_on, violations) {
             continue;
         }
 
-        let Some(options) = offered(set, name) else {
+        offers(
+            set,
+            fixing,
+            "a finding is fixed by",
+            &finding.fix,
+            violations,
+        );
+
+        let Some(split) = finding.split.as_deref() else {
+            continue;
+        };
+
+        let Some(splitting) = finding.splitting() else {
             violations.push(Violation::set(format!(
-                "a finding is fixed by {:?}, but this Set asks no question called {name:?}",
+                "the finding fixed by {:?} names the Option that means split it out, as \
+                 `Q1.3`; {split:?} is not an Option's number",
                 finding.fix
             )));
             continue;
         };
 
-        if !options.iter().any(|option| option.n == n) {
-            let offered: Vec<String> = options.iter().map(|option| option.n.to_string()).collect();
-            violations.push(Violation::at(
-                name,
-                match offered.is_empty() {
-                    true => format!(
-                        "a finding is fixed by Option {n} of this question, which offers \
-                         no Options at all"
-                    ),
-                    false => format!(
-                        "a finding is fixed by Option {n} of this question, which offers \
-                         only {}",
-                        offered.join(", ")
-                    ),
-                },
-            ));
+        if splitting == fixing {
+            violations.push(Violation::set(format!(
+                "the finding fixed by {:?} is split out by that same Option; one Answer \
+                 cannot mean both fixing it here and splitting it out",
+                finding.fix
+            )));
+            continue;
         }
+
+        if !claims(splitting, &mut turned_on, violations) {
+            continue;
+        }
+
+        offers(
+            set,
+            splitting,
+            &format!("the finding fixed by {:?} is split out by", finding.fix),
+            split,
+            violations,
+        );
     }
+}
+
+/// Claim an Option for the finding that turns on it, or say it is already taken.
+///
+/// `false` is the claim refused, and the finding it was claimed for is done with:
+/// what is wrong with it is the Option, and every further word about that Option
+/// would be about the same wrongness.
+fn claims<'a>(
+    option: (&'a str, u32),
+    turned_on: &mut HashSet<(&'a str, u32)>,
+    violations: &mut Vec<Violation>,
+) -> bool {
+    if turned_on.insert(option) {
+        return true;
+    }
+
+    let (name, n) = option;
+
+    violations.push(Violation::at(
+        name,
+        format!(
+            "two findings turn on Option {n} of this question; one Answer cannot mean \
+             two different pieces of work"
+        ),
+    ));
+
+    false
+}
+
+/// Whether the Set offers the Option a finding turns on, said the way the
+/// finding turns on it: `saying` leads each message, and `label` is the notation
+/// the finding wrote.
+fn offers(
+    set: &QuestionSet,
+    option: (&str, u32),
+    saying: &str,
+    label: &str,
+    violations: &mut Vec<Violation>,
+) {
+    let (name, n) = option;
+
+    let Some(options) = offered(set, name) else {
+        violations.push(Violation::set(format!(
+            "{saying} {label:?}, but this Set asks no question called {name:?}"
+        )));
+        return;
+    };
+
+    if options.iter().any(|option| option.n == n) {
+        return;
+    }
+
+    let offered: Vec<String> = options.iter().map(|option| option.n.to_string()).collect();
+
+    violations.push(Violation::at(
+        name,
+        match offered.is_empty() {
+            true => format!("{saying} Option {n} of this question, which offers no Options at all"),
+            false => format!(
+                "{saying} Option {n} of this question, which offers only {}",
+                offered.join(", ")
+            ),
+        },
+    ));
 }
 
 /// The Options a Set's question offers, by the name it answers to — `Q7` for a

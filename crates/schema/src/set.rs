@@ -142,6 +142,17 @@ pub struct Finding {
     /// and every other way of answering dispatches nothing at all.
     pub fix: String,
 
+    /// The Option that means *split this out as a task of its own*, in the same
+    /// notation, where the review offers that beside fixing it here.
+    ///
+    /// The escape hatch for a finding too big to fix in the sitting it was found
+    /// in, and it is a second named Option for the reason `fix` is the first: the
+    /// human picks between the two, and which they picked has to be readable off
+    /// the Response rather than off the wording. Absent on the ordinary finding,
+    /// which offers the one way of accepting it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<String>,
+
     /// The finding as the fix session is told it, as markdown.
     ///
     /// Written for an agent that has not read the diff and will never speak to
@@ -157,22 +168,47 @@ impl Finding {
         option_named(&self.fix)
     }
 
-    /// Whether this Response says to fix it.
-    ///
-    /// Read exactly as a proposal's acceptance is, and for the same reason: only
-    /// the named Option being selected is a yes. Free text *beside* it is the
-    /// qualification the Guide says it is, and it travels to the fix session
-    /// with the finding; free text *instead* of it is an answer of the human's
-    /// own, which wins over the Options offered. An Unanswered question is never
-    /// acceptance.
-    pub fn accepted(&self, response: &crate::response::Response) -> bool {
-        let Some((name, n)) = self.fixing() else {
-            return false;
-        };
+    /// The Option this finding is split out by, or `None` where it offers no
+    /// split — or where what it offers is not in the notation at all.
+    pub fn splitting(&self) -> Option<(&str, u32)> {
+        option_named(self.split.as_deref()?)
+    }
 
-        response.answers.iter().any(|answer| {
-            answer.label.trim() == name && !answer.unanswered && answer.selected == Some(n)
-        })
+    /// Whether this Response says to fix it here.
+    ///
+    /// [`Finding::decided`]'s fixing outcome, under the name every reader of a
+    /// review asks it by: only the named Option being selected is a yes. Free
+    /// text *beside* it is the qualification the Guide says it is, and it travels
+    /// to the fix session with the finding; free text *instead* of it is an answer
+    /// of the human's own, which wins over the Options offered. An Unanswered
+    /// question is never acceptance, and neither is a split.
+    pub fn accepted(&self, response: &crate::response::Response) -> bool {
+        matches!(self.decided(response), Decided::Fix)
+    }
+
+    /// What this Response says to do with this finding: fix it here, split it
+    /// out, or neither.
+    ///
+    /// Read off the named Options and off nothing else, exactly as acceptance
+    /// always was: the Option the finding is fixed by means fix it here, the one
+    /// it is split out by means work it as a task of its own, and every other way
+    /// of answering — another Option, words of their own instead of a pick, a
+    /// question left open — is the human declining it. Free text *beside* a pick
+    /// is the qualification the Guide says it is, and it travels with the finding
+    /// either way; see [`Finding::said`].
+    ///
+    /// Fixing wins where a finding somehow names one Option for both, which
+    /// [`crate::QuestionSet::validate`] refuses before a Set is ever stored.
+    pub fn decided(&self, response: &crate::response::Response) -> Decided {
+        if picked(response, self.fixing()) {
+            return Decided::Fix;
+        }
+
+        if picked(response, self.splitting()) {
+            return Decided::Split;
+        }
+
+        Decided::Declined
     }
 
     /// What the human wrote alongside their Answer to this finding, trimmed.
@@ -180,7 +216,12 @@ impl Finding {
     /// Empty where they wrote nothing, which is the ordinary way of agreeing
     /// with a recommendation.
     pub fn said<'a>(&self, response: &'a crate::response::Response) -> &'a str {
-        let Some((name, _)) = self.fixing() else {
+        let asked = match self.decided(response) {
+            Decided::Split => self.splitting(),
+            Decided::Fix | Decided::Declined => self.fixing(),
+        };
+
+        let Some((name, _)) = asked else {
             return "";
         };
 
@@ -192,6 +233,39 @@ impl Finding {
             .unwrap_or_default()
             .trim()
     }
+}
+
+/// What a Response says to do with one finding.
+///
+/// The whole of what a review's Set can be answered into, per finding, and there
+/// is no fourth outcome: a finding that offers no split can only be fixed here or
+/// declined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decided {
+    /// Fix it here, in the session the human answered.
+    Fix,
+
+    /// Split it out as a task of its own, for a backlog to work.
+    Split,
+
+    /// Neither: another Option, an answer in their own words, or a question left
+    /// open.
+    Declined,
+}
+
+/// Whether this Response picked the named Option, where one was named at all.
+///
+/// A finding that named nothing readable is picked by nothing, which is the safe
+/// way round: what an agent wrote badly enough to be unreadable is never read as
+/// the human agreeing to something.
+fn picked(response: &crate::response::Response, option: Option<(&str, u32)>) -> bool {
+    let Some((name, n)) = option else {
+        return false;
+    };
+
+    response.answers.iter().any(|answer| {
+        answer.label.trim() == name && !answer.unanswered && answer.selected == Some(n)
+    })
 }
 
 /// One of the three ways the work can be built.
