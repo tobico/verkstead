@@ -1302,7 +1302,7 @@ direction?: Direction | null, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

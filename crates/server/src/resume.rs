@@ -93,12 +93,41 @@ pub(crate) async fn resume(state: &AppState, conversation_id: i64) -> anyhow::Re
     // leaving it to the `?` and the early returns does.
     let driving = state.drivers.driving(conversation_id);
 
-    // Every state past drafting has a Worktree, so one missing is a record that
-    // cannot be true or a directory that has gone from under Verkstead. Either
-    // way there is nowhere for a session to run.
+    // Every state past drafting has a Worktree, so one missing from the record
+    // is a record that cannot be true. There is nowhere for a session to run and
+    // nothing to make a worktree from either — the path is Verkstead's own to
+    // have chosen, and nothing here knows which one it chose.
     let Some(worktree) = conversation.worktree.clone() else {
         return Ok(Resumed::NowhereToWork);
     };
+
+    // What the record names, though, may be nowhere: a directory deleted,
+    // hollowed out, or dropped from the repository's list of worktrees. Which is
+    // a Conversation stuck for good under a button whose whole job is to unstick
+    // one, so Resume makes it again from the branch rather than refusing on it.
+    // Nothing is lost by that — a worktree is derived state — and nothing
+    // healthy is touched, uncommitted changes and all. See
+    // [`crate::worktrees::healthy`].
+    //
+    // Off the runtime's threads: a checkout of a large repository is not a quick
+    // call, and every part of this blocks. Under the registration taken above,
+    // because a Conversation being rebuilt is a Conversation being driven — a
+    // sweep that found it undriven meanwhile would halt it all over again.
+    let usable = tokio::task::spawn_blocking({
+        let repo = conversation.repo.path.clone();
+        let branch = conversation.branch.clone();
+        let worktree = worktree.clone();
+
+        move || {
+            crate::worktrees::healthy(&repo, &worktree, &branch)
+                || crate::worktrees::rebuild(&repo, &worktree, &branch)
+        }
+    })
+    .await?;
+
+    if !usable {
+        return Ok(Resumed::WorktreeRefused);
+    }
 
     match conversation.state {
         // A fresh grilling on the Brief and the digest of what has already been

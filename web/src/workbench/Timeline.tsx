@@ -177,6 +177,8 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Something is already driving this conversation. Have a look at what it is doing.",
   NowhereToWork:
     "This conversation has no worktree to work in, so there is nowhere to start.",
+  WorktreeRefused:
+    "This conversation's worktree is broken and git would not make it again from the branch. The server log says why.",
   NoDirection:
     "Nothing on the record says how this work is being built, so there is no run to pick up.",
   NothingToWork:

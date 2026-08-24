@@ -1674,10 +1674,16 @@ pub enum Resumed {
     /// again, and starting a second driver would be two agents in one Worktree.
     AlreadyDriven,
 
-    /// There is no Worktree to work in. A Conversation past drafting is
-    /// supposed to have one, so this is a record that cannot be true — or a
-    /// directory that has gone from under Verkstead.
+    /// There is no Worktree on the record to work in. A Conversation past
+    /// drafting is supposed to have one, so this is a record that cannot be
+    /// true.
     NowhereToWork,
+
+    /// There is one on the record, the directory it names is not a worktree any
+    /// more, and it could not be made again from the branch. The one refusal
+    /// here with nothing for the human to correct: the reason is in the
+    /// server's log, as a worktree git refused at grill time is.
+    WorktreeRefused,
 
     /// It says it is implementing and nothing says how the work is being built,
     /// which is another record that cannot be true: a Conversation implements

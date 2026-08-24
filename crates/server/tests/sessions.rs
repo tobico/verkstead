@@ -8002,6 +8002,176 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 
+/// A grilling that says one thing and goes, and stays the second time it is
+/// run — the stall, and then the session Resume starts.
+///
+/// Which time it is is remembered outside the worktree, because these are the
+/// tests that take the worktree away between the two.
+fn once_then_staying(remembered: &Path) -> String {
+    format!(
+        r#"
+if [ ! -f {remembered} ]; then
+    printf 'once\n' > {remembered}
+    printf 'the grilling has nothing to say\n'
+else
+    printf 'the grilling is running again\n'
+    sleep 300
+fi
+"#,
+        remembered = quoted(remembered),
+    )
+}
+
+/// Resume on a Conversation whose worktree has gone makes it again from the
+/// branch, and drives on.
+///
+/// The Conversation this whole feature was written for: a worktree deleted,
+/// hollowed out or dropped from the repository's list of worktrees is a
+/// Conversation stuck for good — every session launched into it fails the same
+/// way, and the button that is supposed to unstick it would only be pressing
+/// that same failure again. So Resume checks before it recomputes, and a
+/// worktree that is not one any more is derived state to make again: the branch
+/// holds everything that was committed.
+#[tokio::test]
+async fn resuming_a_conversation_whose_worktree_has_gone_makes_it_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let remembered = spill.path().join("tried");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &once_then_staying(&remembered),
+        PULL_REQUEST,
+        SWEEPING,
+    )
+    .await;
+
+    fixture.halted().await;
+
+    let view = fixture.view().await;
+    let branch = view.branch.clone();
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+
+    // The registration in the repository outlives the directory, which is what
+    // leaves git refusing to check the branch out anywhere — and what nothing
+    // before this knew to clear.
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::Resumed,
+        "a worktree that has gone is one to make again, not a reason to refuse",
+    );
+
+    assert!(
+        worktree.join("README.md").exists(),
+        "it is back, with everything the branch was holding",
+    );
+    assert_eq!(
+        git(&worktree, &["symbolic-ref", "HEAD"]).trim(),
+        format!("refs/heads/{branch}"),
+        "checked out on the Conversation's own branch",
+    );
+
+    // And the point of all of it: a session running in it. Which is the reading
+    // that would fail if the worktree were merely there — a sandbox is given the
+    // git directory the checkout points back into.
+    fixture.until(|view| view.working.then_some(())).await;
+}
+
+/// A worktree git can still answer about is left exactly as it stands,
+/// uncommitted changes and all.
+///
+/// Validation is there to find the worktrees that have stopped being ones, and
+/// a session that died mid-edit has not stopped being anything: what it had
+/// written is in the directory and nowhere else, and a rebuild would be Resume
+/// throwing away the only copy of it.
+#[tokio::test]
+async fn resuming_leaves_a_worktree_that_is_still_one_alone() {
+    let spill = tempfile::tempdir().unwrap();
+    let remembered = spill.path().join("tried");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &once_then_staying(&remembered),
+        PULL_REQUEST,
+        SWEEPING,
+    )
+    .await;
+
+    fixture.halted().await;
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+    let half_written = worktree.join("half-written.rs");
+
+    std::fs::write(&half_written, "// as far as the session got\n").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    assert_eq!(
+        std::fs::read_to_string(&half_written).unwrap(),
+        "// as far as the session got\n",
+        "the work in progress is still there, because nothing was rebuilt",
+    );
+
+    fixture.until(|view| view.working.then_some(())).await;
+}
+
+/// And a worktree that could not be made again refuses by name.
+///
+/// The one refusal here with nothing for the human to correct on the workbench,
+/// so what it has to do is be a sentence rather than a line in a log: a press
+/// that halted silently on this is exactly the failure the whole feature
+/// replaces.
+///
+/// Something that is not a directory at all sitting where the worktree goes is
+/// the plainest way to have one — it cannot be removed as a worktree, it is not
+/// a directory to take away, and git will not check a branch out over it.
+#[tokio::test]
+async fn a_worktree_that_cannot_be_made_again_refuses_by_name() {
+    let spill = tempfile::tempdir().unwrap();
+    let remembered = spill.path().join("tried");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &once_then_staying(&remembered),
+        PULL_REQUEST,
+        SWEEPING,
+    )
+    .await;
+
+    let halted = fixture.halted().await;
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    std::fs::remove_dir_all(&worktree).unwrap();
+    std::fs::write(&worktree, "not a worktree\n").unwrap();
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::WorktreeRefused,
+        "there is nowhere to work and no making one, and the human is told so",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on,
+        Some(halted.id),
+        "the halt stands: a refusal changes nothing",
+    );
+    assert!(
+        view.ready_to_resume,
+        "and the button is still there, because nothing is driving it yet",
+    );
+    assert_eq!(
+        outputs(&view).len(),
+        before,
+        "and nothing was launched into a worktree that is not there",
+    );
+}
+
 /// A Resume with nothing to start refuses by name, and leaves the Conversation
 /// exactly as it found it.
 ///
