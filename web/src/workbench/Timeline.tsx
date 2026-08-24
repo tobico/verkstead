@@ -84,7 +84,7 @@ import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
-import { SETTLE } from "./settling";
+import { keeping } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -1493,6 +1493,13 @@ function Brief(props: {
   /// is to save.
   const unsaved = () => text() !== recorded();
 
+  /// Whether a refusal has come back, which stops the field for good: both of
+  /// them are permanent — a Brief that has frozen does not thaw, and a
+  /// Conversation that is gone does not come back. Trying again every time the
+  /// typing paused would be a request a second for as long as the human went on
+  /// writing, and the answer would be the one already on the card.
+  const settled = () => refused() !== null;
+
   const save = useMutation(() => ({
     mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
     onSuccess: (outcome: BriefSaved, markdown: string) => {
@@ -1510,39 +1517,17 @@ function Brief(props: {
       // The readiness verdict under this card is a fact about the Brief, so it
       // is read again every time the Brief moves.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
-
-      // Typed into while that was in flight, so the record is behind again.
-      if (unsaved()) keep();
     },
+    // Whatever became of it, the field may have been typed into while it was in
+    // flight — so the moment one save is done the next is considered.
+    onSettled: () => keeper.done(),
   }));
 
-  // The pause: one timer, restarted by every keystroke and cancelled by
-  // whatever saves before it comes round.
-  let pause: ReturnType<typeof setTimeout> | undefined;
-
-  const settle = () => {
-    clearTimeout(pause);
-    pause = setTimeout(keep, SETTLE);
-  };
-
-  /// Keep what is in the field, if the record does not have it already.
-  ///
-  /// One save at a time: another started while one is in flight could land in
-  /// either order, and the loser would be the record. What was typed meanwhile
-  /// is saved when the one in flight comes back.
-  ///
-  /// A refusal stops it for good, because both of them are permanent — a Brief
-  /// that has frozen does not thaw, and a Conversation that is gone does not
-  /// come back. Trying again every time the typing paused would be a request a
-  /// second for as long as the human went on writing, and the answer would be
-  /// the same one already on the card.
-  const keep = () => {
-    clearTimeout(pause);
-    if (refused() || !unsaved() || save.isPending) return;
-    save.mutate(text());
-  };
-
-  onCleanup(() => clearTimeout(pause));
+  const keeper = keeping({
+    unsaved,
+    settled,
+    save: () => save.mutate(text()),
+  });
 
   return (
     <Openable
@@ -1596,9 +1581,9 @@ function Brief(props: {
             value={text()}
             onInput={(ev) => {
               setTyped(ev.currentTarget.value);
-              settle();
+              keeper.settle();
             }}
-            onBlur={() => keep()}
+            onBlur={() => keeper.keep()}
           />
         </div>
       </Show>

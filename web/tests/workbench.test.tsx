@@ -189,16 +189,21 @@ async function repoRows(container: ParentNode): Promise<HTMLButtonElement[]> {
 ///
 /// By the request rather than by being the last thing sent: writing anything
 /// here is followed by reading the Conversation back, so the last call is
-/// ordinarily the read.
+/// ordinarily the read. `which` picks between them where a field saved more
+/// than once and the test is about the later save.
 function sent(
   fetching: ReturnType<typeof serving>,
   path: string,
+  which = 0,
 ): unknown {
-  const written = fetching.mock.calls.find(
+  const written = fetching.mock.calls.filter(
     ([asked, init]) => String(asked) === path && init?.method === "POST",
   );
-  expect(written, `expected the page to have written to ${path}`).toBeTruthy();
-  return JSON.parse(String(written![1]?.body));
+  expect(
+    written[which],
+    `expected the page to have written to ${path} ${which + 1} time(s)`,
+  ).toBeTruthy();
+  return JSON.parse(String(written[which]![1]?.body));
 }
 
 /// How many times the page wrote to `path`, for the tests about *when* a save
@@ -207,6 +212,23 @@ function writes(fetching: ReturnType<typeof serving>, path: string): number {
   return fetching.mock.calls.filter(
     ([asked, init]) => String(asked) === path && init?.method === "POST",
   ).length;
+}
+
+/// An answer the test lands itself, rather than one the fetch resolves with
+/// straight away.
+///
+/// For the fields that keep themselves: what one of them does with a keystroke
+/// arriving while a save is in the air is only askable while a save is actually
+/// in the air, and one that answered at once never is.
+function holding(answer: () => Promise<Response>): {
+  held: () => Promise<Response>;
+  land: () => void;
+} {
+  let land!: () => void;
+  const waited = new Promise<void>((resolve) => {
+    land = resolve;
+  });
+  return { held: () => waited.then(answer), land: () => land() };
 }
 
 describe("the workbench", () => {
@@ -1181,6 +1203,36 @@ describe("writing the brief", () => {
     expect(sent(fetching, WRITING)).toEqual({ markdown: "# Half a thought" });
   });
 
+  /// A save is a round trip, and the human goes on typing across it. What was
+  /// typed while it was in the air is only in the field, so the field has to
+  /// send it the moment the save it was waiting on is over — one save at a
+  /// time, but never one save and then silence.
+  it("saves what was typed while a save was in the air", async () => {
+    const answering = holding(json("Saved"));
+    const fetching = theWorkbench(whenever(WRITING, answering.held, "POST"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    fireEvent.input(field(), { target: { value: "# Half a" } });
+    fireEvent.blur(field());
+    await waitFor(() => expect(writes(fetching, WRITING)).toBe(1));
+
+    // Typed into and left again while that first save is still unanswered: one
+    // save at a time, so nothing more goes out yet.
+    fireEvent.input(field(), { target: { value: "# Half a thought" } });
+    fireEvent.blur(field());
+    expect(writes(fetching, WRITING)).toBe(1);
+
+    answering.land();
+
+    // And the rest of it goes out on the back of the answer, without waiting
+    // for another keystroke.
+    await waitFor(() => expect(writes(fetching, WRITING)).toBe(2));
+    expect(sent(fetching, WRITING, 1)).toEqual({
+      markdown: "# Half a thought",
+    });
+  });
+
   /// The card said Saving… / Not saved yet / Saved beside the heading, and now
   /// says nothing at all: a field that keeps itself needs no running commentary,
   /// and the line changed often enough to pull the eye off what was being typed.
@@ -1403,6 +1455,33 @@ describe("a conversation's setup", () => {
     // One save, of the whole of what was typed.
     expect(writes(fetching, naming)).toBe(1);
     expect(sent(fetching, naming)).toEqual({ branch: "counter-in-redis" });
+  });
+
+  /// The same as the brief above it, because it is the same keeping: what was
+  /// typed across a save in flight goes out when that save is over.
+  it("saves a name typed while a save was in the air", async () => {
+    const naming = `/api/ui/conversations/${OPEN.id}/branch`;
+    const answering = holding(json("Renamed"));
+    const fetching = theWorkbench(whenever(naming, answering.held, "POST"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+
+    fireEvent.input(screen.getByLabelText("Branch"), {
+      target: { value: "counter-in" },
+    });
+    fireEvent.blur(screen.getByLabelText("Branch"));
+    await waitFor(() => expect(writes(fetching, naming)).toBe(1));
+
+    fireEvent.input(screen.getByLabelText("Branch"), {
+      target: { value: "counter-in-redis" },
+    });
+    fireEvent.blur(screen.getByLabelText("Branch"));
+    expect(writes(fetching, naming)).toBe(1);
+
+    answering.land();
+
+    await waitFor(() => expect(writes(fetching, naming)).toBe(2));
+    expect(sent(fetching, naming, 1)).toEqual({ branch: "counter-in-redis" });
   });
 
   /// Whether a name is one git would take is the server's to say, so a pause in

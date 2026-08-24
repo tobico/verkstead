@@ -24,7 +24,6 @@ import {
   Show,
   Switch,
   createSignal,
-  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -49,7 +48,7 @@ import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
-import { SETTLE } from "./settling";
+import { keeping } from "./settling";
 
 /// What each way of being refused a branch name says.
 export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
@@ -308,6 +307,19 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   /// what there is to save.
   const unsaved = () => branch() !== recorded();
 
+  /// Whether what came back is worth not asking about again.
+  ///
+  /// A refusal only stops the field where the refusal is permanent.
+  /// `NotABranchName` is not: the name is validated server-side alone, so a
+  /// pause in the middle of typing one is refused for what is not there yet,
+  /// and the keystroke after it may well be what fixes it. What stops that
+  /// becoming a request a second is that the same string is never asked about
+  /// twice.
+  const settled = () => {
+    const outcome = refused();
+    return outcome === "NoSuchConversation" || outcome === "NotDrafting";
+  };
+
   const rename = useMutation(() => ({
     mutationFn: (branch: string) => renameBranch(props.conversation.id, branch),
     onSuccess: (outcome: BranchRenamed) => {
@@ -320,58 +332,20 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       void queries.invalidateQueries({ queryKey: ["conversation"] });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
-    // Whatever became of it, the field may have been typed into while it was
-    // in flight — so the moment one save is done the next is considered.
-    onSettled: () => {
-      saving = false;
-      keep();
-    },
+    // Whatever became of it, the field may have been typed into while it was in
+    // flight — so the moment one save is done the next is considered.
+    onSettled: () => keeper.done(),
   }));
 
-  /// Whether a save is in the air.
-  ///
-  /// Tracked here rather than read off the mutation, because the callbacks that
-  /// decide what to do next run before it has been told the save is over — and
-  /// what they are for is deciding whether to start another.
-  let saving = false;
-
-  // The pause: one timer, restarted by every keystroke and cancelled by
-  // whatever saves before it comes round.
-  let pause: ReturnType<typeof setTimeout> | undefined;
-
-  const settle = () => {
-    clearTimeout(pause);
-    pause = setTimeout(keep, SETTLE);
-  };
-
-  /// Keep what is in the field, if the record does not have it already.
-  ///
-  /// One save at a time, and what was typed meanwhile saved when the one in
-  /// flight comes back — two in the air could land in either order, and the
-  /// loser would be the record.
-  ///
-  /// A refusal only stops it where the refusal is permanent. `NotABranchName`
-  /// is not: the name is validated server-side alone, so a pause in the middle
-  /// of typing one is refused for what is not there yet, and the keystroke
-  /// after it may well be what fixes it. What stops that becoming a request a
-  /// second is that the same string is never asked about twice.
-  const keep = () => {
-    clearTimeout(pause);
-    if (settled() || !unsaved() || saving) return;
-
-    const name = branch();
-    saving = true;
-    setAsked(name);
-    rename.mutate(name);
-  };
-
-  /// Whether what came back is worth not asking about again.
-  const settled = () => {
-    const outcome = refused();
-    return outcome === "NoSuchConversation" || outcome === "NotDrafting";
-  };
-
-  onCleanup(() => clearTimeout(pause));
+  const keeper = keeping({
+    unsaved,
+    settled,
+    save: () => {
+      const name = branch();
+      setAsked(name);
+      rename.mutate(name);
+    },
+  });
 
   return (
     <form
@@ -380,7 +354,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
         // Nothing to press, so this is Enter in the field: the same save the
         // pause was about to make, made now.
         ev.preventDefault();
-        keep();
+        keeper.keep();
       }}
     >
       <label for="branch">Branch</label>
@@ -394,9 +368,9 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           value={branch()}
           onInput={(ev) => {
             setNamed(ev.currentTarget.value);
-            settle();
+            keeper.settle();
           }}
-          onBlur={() => keep()}
+          onBlur={() => keeper.keep()}
         />
       </div>
       {/* A refusal stands until the next save answers, rather than clearing on
