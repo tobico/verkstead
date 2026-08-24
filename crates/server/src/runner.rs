@@ -551,15 +551,6 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
             return;
         }
 
-        // Asked before anything is launched, because that is what *the run does
-        // not advance past a halt* means: the halts table makes a second stop
-        // impossible, and this makes the session behind the first one impossible.
-        // A run whose step landed while the Conversation was already halted would
-        // otherwise carry on past a stop nobody has started it again from.
-        if crate::halts::stopped(&state, conversation_id).await {
-            return;
-        }
-
         tracing::info!(conversation_id, step = ?step, "a fresh session is starting on the next step");
 
         let Some(started) = launch_in_turn(&state, conversation_id, Prompt::NextTask).await else {
@@ -1398,15 +1389,20 @@ enum Prompt {
 /// the whole of what it is protecting: once a session is registered, everything
 /// else that might start one can see it there.
 ///
-/// And a Stop the human pressed lands here, which is why it is asked after the
-/// wait rather than before: *nothing new starts* has to be true of the moment a
-/// session would be started, and the wait is however long the session in front
-/// of this one took. Every launch a run makes goes through here, so this is the
-/// one place that can say it of all of them — see [`crate::stops::asked`].
+/// And a stop lands here, which is why it is asked after the wait rather than
+/// before: *nothing new starts* has to be true of the moment a session would be
+/// started, and the wait is however long the session in front of this one took.
+/// Every launch a run makes goes through here, so this is the one place that can
+/// say it of all of them — which is why what it asks is
+/// [`crate::halts::stopped`] and not [`crate::stops::asked`] alone. A press that
+/// is still waiting is only one of the two ways a run stops: a Force stop writes
+/// its halt outright, and so does a Stop pressed in one of the quiet moments
+/// between sessions. A launch that looked for the waiting press alone would walk
+/// straight past both of them.
 async fn launch_in_turn(state: &AppState, conversation_id: i64, inside: Prompt) -> Option<Session> {
     let _turn = state.sessions.turn(conversation_id).await;
 
-    if crate::stops::asked(state, conversation_id).await {
+    if crate::halts::stopped(state, conversation_id).await {
         return None;
     }
 

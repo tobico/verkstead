@@ -5274,6 +5274,99 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
         .await;
 }
 
+/// Force stop pressed as an inline grilling lands its handoff: the run stops
+/// there, and nothing is started on the far side of the pick.
+///
+/// The moment a stop has the least to hold on to. A step that landed is landed,
+/// so the driver seeing the grilling out asks the worktree once more before it
+/// reads the ending — finds the handoff sitting there, takes it, and carries on
+/// to what the pick asked for, which is a fresh session under the implementation
+/// Profile. That launch is the only thing left between the press and an agent
+/// being spent, and the press left nothing waiting behind it to be found: a Force
+/// stop writes its halt outright. So the launch is what has to ask about the
+/// halt, and not about the press.
+///
+/// The stub keeps talking after it writes the handoff, which is what makes the
+/// press land in that moment rather than beside it: handoff plus quiet is what
+/// would ordinarily end the grilling, so a session that never goes quiet leaves
+/// the document on disk and unclaimed until the press ends it.
+#[tokio::test]
+async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            while true; do printf 'still talking\n'; sleep 0.05; done
+            ;;
+        *)
+            printf 'model=%s\n' "$1"
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    // The handoff on disk with the session still talking, which is the state the
+    // press has to arrive in: the driver is watching for it and has not taken it.
+    let written = handoff_directory(&fixture).join("handoff.md");
+    let deadline = Instant::now() + PATIENCE;
+    while !written.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "the grilling never wrote the handoff its pick asked for",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+
+    let stopped = fixture.halted().await;
+
+    assert!(
+        stopped.html.contains("you pressed Force stop"),
+        "the run stopped because of the press: {:?}",
+        stopped.html,
+    );
+    assert_eq!(fixture.chosen().await, Halt::Deliberate);
+
+    // Long enough for the driver to have read the ending, taken the handoff and
+    // reached the launch on the other side of it.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        handoff(&view).is_some(),
+        "the driver did get past the ending — the handoff was there and it took \
+         it, which is the whole reason there was a launch left to stop",
+    );
+    assert_eq!(
+        outputs(&view).len(),
+        1,
+        "and then nothing: the grilling is the only session this Conversation \
+         ever ran, and no implementation account was spent behind the halt",
+    );
+    assert_eq!(notices(&view).len(), 1, "one press, one halt, one Notice",);
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "and the Conversation is waiting on the human to start it again",
+    );
+}
+
 /// Stop pressed with nothing running: there is nothing to see out, so it halts
 /// where it stands.
 ///

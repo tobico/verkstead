@@ -79,10 +79,10 @@ impl Decided {
 
 /// Whether driving has already stopped, which is what nothing may advance past.
 ///
-/// Asked wherever a session is about to be launched — the runner between steps,
-/// and each of the wrap-up's watchers before it dispatches — so that a
-/// Conversation the human has to press Resume on does not quietly get another
-/// agent spent on it. The one halt per Conversation makes a second stop
+/// Asked wherever a session is about to be launched — the runner's one launch
+/// in turn, which every step of a run goes through, and each of the wrap-up's
+/// watchers before it dispatches — so that a Conversation the human has to press
+/// Resume on does not quietly get another agent spent on it. The one halt per Conversation makes a second stop
 /// impossible; this makes a session behind the first one impossible too.
 ///
 /// A Stop the human pressed while a session was running lands here: this is the
