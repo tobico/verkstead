@@ -42,11 +42,11 @@ pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
     Implementing, Lifecycle, Role, SetOnTimeline, Staged, TimelineEvent, abort_conversation,
-    adopting, ask, asked_from, conversations, load_conversation, note, pick_direction,
-    record_handoff, record_manual_task, rename_branch, review_asked, save_brief, set_asked_from,
-    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
-    unanswered_set_since, unlanded_fixes,
+    adopting, ask, asked_from, conversations, last_proposal, load_conversation, note,
+    pick_direction, record_handoff, record_manual_task, rename_branch, review_asked, save_brief,
+    set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state,
+    stacks_on, start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
+    timeline, unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
@@ -67,8 +67,8 @@ pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_fix_attempts, record_addressed_comments, record_fix_attempt, settle_wrap_up,
-    unsettle_wrap_up, wrap_up_settled,
+    forget_addressed_comments, forget_fix_attempts, record_addressed_comments, record_fix_attempt,
+    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: the agent's Set plus the identity the server

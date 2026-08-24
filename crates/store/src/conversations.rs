@@ -1514,16 +1514,33 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
 /// Whether this Conversation's self-review has put its findings to the human,
 /// and which Set they are on.
 ///
-/// Read off the Sets themselves rather than written down when one is asked: a Set
-/// carrying a `review` block *is* the review's, which is the whole reason the
-/// block is a field being there rather than a convention. A second record saying
-/// which Set was the review's would be a second thing to keep true, and the one
-/// that could disagree.
-///
-/// The first one, where a Conversation somehow has two. Nothing should ask twice
-/// — the skill says the block goes on one Set and no others — and if something
-/// does, the review is the one that arrived first.
+/// Read off the Sets themselves rather than written down when one is asked — see
+/// [`proposals`]. The **first** of them is the review's: it is the session a
+/// wrap-up starts with, and the batch sessions that propose the same way about
+/// what was said on the pull request are all dispatched after it has settled.
 pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    Ok(proposals(pool, conversation_id).await?.first().copied())
+}
+
+/// And the newest of them, which is whatever was last put to the human: the
+/// review's own Set until a batch of comments is answered after it, and that
+/// batch's from then on.
+///
+/// The newest rather than the batch's own, because nothing on the record says
+/// which session asked one and nothing has to. One Worktree holds one agent and
+/// nothing advances past an open Interruption, so the proposal a batch session
+/// made is the last one there is for as long as anything is asking about it.
+pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    Ok(proposals(pool, conversation_id).await?.last().copied())
+}
+
+/// Every Set of this Conversation's carrying a `review` block, oldest first.
+///
+/// A Set carrying the block *is* a proposal to fix things, which is the whole
+/// reason the block is a field being there rather than a convention. A second
+/// record saying which Sets were which would be a second thing to keep true, and
+/// the one that could disagree.
+async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT q.id, q.body
          FROM question_sets q
@@ -1535,18 +1552,20 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
     .bind(conversation_id)
     .fetch_all(pool)
     .await
-    .with_context(|| format!("looking for Conversation {conversation_id}'s review"))?;
+    .with_context(|| format!("looking for Conversation {conversation_id}'s proposals"))?;
+
+    let mut proposing = Vec::new();
 
     for (set_id, body) in rows {
         let set: QuestionSet = serde_json::from_str(&body)
             .with_context(|| format!("reading stored Question Set {set_id}"))?;
 
         if set.review.is_some() {
-            return Ok(Some(set_id));
+            proposing.push(set_id);
         }
     }
 
-    Ok(None)
+    Ok(proposing)
 }
 
 /// One finding the human said to fix, as the session that will fix it is told
@@ -1587,6 +1606,28 @@ pub async fn unlanded_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<V
         return Ok(Vec::new());
     };
 
+    unlanded_on(pool, conversation_id, set_id).await
+}
+
+/// The same question of the newest proposal instead: what a batch session was
+/// told to fix and nothing has landed.
+///
+/// Which is the review's own Set until a batch has been answered, and that
+/// batch's from then on — see [`last_proposal`]. Asking it before any batch has
+/// asked anything is safe rather than wrong: the review settles only once
+/// nothing it was told to fix is owed, and no batch session is dispatched until
+/// it has.
+pub async fn unlanded_batch_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = last_proposal(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    unlanded_on(pool, conversation_id, set_id).await
+}
+
+/// What is owed on one proposal, which is the whole of what either of the two
+/// above is.
+async fn unlanded_on(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Result<Vec<Fixing>> {
     let Some(stored) = super::load_set(pool, set_id).await? else {
         return Ok(Vec::new());
     };

@@ -207,7 +207,7 @@ async fn land(state: AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
 
     // Asked on the other side of the wait, for the reason the review asks twice:
     // a Conversation aborted while this queued has nowhere left to work.
-    if !wrapping(&state, conversation_id).await {
+    if !crate::wrapping::still_going(&state, conversation_id).await {
         tracing::info!(
             conversation_id,
             "the Conversation stopped wrapping up, so the fixes it owed were not dispatched"
@@ -309,7 +309,7 @@ async fn unlanded(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> 
 /// the one thing this decides: on the other side of it is an agent being let
 /// loose in a Worktree.
 async fn wanted(state: &AppState, conversation_id: i64) -> bool {
-    if !wrapping(state, conversation_id).await {
+    if !crate::wrapping::still_going(state, conversation_id).await {
         return false;
     }
 
@@ -356,22 +356,6 @@ async fn wanted(state: &AppState, conversation_id: i64) -> bool {
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            false
-        }
-    }
-}
-
-/// Whether the Conversation is still wrapping up, which is the only state a
-/// review belongs to.
-async fn wrapping(state: &AppState, conversation_id: i64) -> bool {
-    match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.state == store::Lifecycle::Wrapping,
-        Ok(None) => {
-            tracing::error!(conversation_id, "there is no Conversation left to review");
-            false
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading the Conversation to review failed");
             false
         }
     }
@@ -494,7 +478,10 @@ fn owing(owed: &[store::Fixing], how: Option<&str>) -> String {
 
 /// One finding on one line: whitespace collapsed, and clamped to what a card
 /// holds.
-fn in_a_line(what: &str) -> String {
+///
+/// Shared with the batch sessions' Interruption, which says what it is owed the
+/// same way and on the same card — see [`crate::responding`].
+pub(crate) fn in_a_line(what: &str) -> String {
     let said = what.split_whitespace().collect::<Vec<&str>>().join(" ");
 
     match said.char_indices().nth(OWED_WIDTH) {

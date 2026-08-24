@@ -74,6 +74,18 @@ pub enum Step {
     /// session as fresh as the first one was.
     Review,
 
+    /// Answering a batch of comments left on a wrapping Conversation's pull
+    /// request.
+    ///
+    /// Not a step of a backlog either, and the review's twin one turn later: a
+    /// batch session proposes what it would do about what was said and lands
+    /// what the human accepted, so this is raised for one that did not finish,
+    /// or that went with accepted work never landed. A retry is whichever half
+    /// is left — the fixes alone where they were decided and never done, and
+    /// nothing but the watching where the batch is settled and the wrap-up
+    /// simply carries on.
+    Comments,
+
     /// A Manual Task: the instruction the human typed at the end of the
     /// Timeline, run outside the pipeline altogether.
     ///
@@ -109,6 +121,7 @@ impl Step {
             Self::Stage => "stage",
             Self::Checks => "checks",
             Self::Review => "review",
+            Self::Comments => "comments",
             Self::Manual => "manual",
             Self::Stalled => "stalled",
         }
@@ -127,6 +140,7 @@ impl Step {
             "stage" => Self::Stage,
             "checks" => Self::Checks,
             "review" => Self::Review,
+            "comments" => Self::Comments,
             "manual" => Self::Manual,
             "stalled" => Self::Stalled,
             other => bail!("an Interruption names the unknown step {other:?}"),

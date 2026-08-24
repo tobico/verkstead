@@ -28,11 +28,12 @@
 //! the ungated half of this all over again. What lands afterwards is the batch's
 //! again, once the review has settled and the Worktree is free.
 //!
-//! Comments said after that dispatch an **addressing session**: a fresh session
-//! under the Conversation's implementation Profile, inside the bundled addressing
-//! skill, given what was said as its feedback. It commits and pushes as that
-//! skill says, with no gate in front of either, and the branch watcher puts what
-//! it committed on the Timeline.
+//! Comments said after that dispatch a **batch session**: a fresh session under
+//! the Conversation's implementation Profile, inside the bundled responding
+//! skill, given what was said and nothing about what to do with it. It proposes
+//! what it would do as one small Set, waits, and lands what the human accepted —
+//! the review's shape one turn later, and for the review's reason. What becomes
+//! of it is [`crate::responding`]'s.
 //!
 //! **One session per batch rather than one per comment.** A human writing three
 //! replies in a minute is making one point, and three sessions racing each other
@@ -48,10 +49,10 @@
 //! it: Verkstead does not know what has been said, and *nobody said anything* is
 //! not a thing to conclude from not knowing.
 //!
-//! Nothing here ever asks the human. A comment is the human already talking, and
-//! stopping the run to ask them about their own comment would be the one
-//! Interruption with nothing behind it — where a check that will not go green is
-//! the machine running out of things to try, this is not.
+//! Nothing here ever asks the human itself. What asks is the session dispatched
+//! about a batch, which puts what it would do to them rather than what they
+//! said: their own words back at them would be the one question with nothing
+//! behind it.
 
 use std::path::Path;
 
@@ -326,6 +327,11 @@ pub(crate) async fn for_the_review(state: &AppState, conversation_id: i64) -> Op
 /// accepted, both of which take as long as they take. Nothing is lost by coming
 /// back — the comments are still there, and a batch that grew while this waited
 /// is one session about more of what was said, which is what a batch is for.
+///
+/// Once taken, the Turn is held for as long as the session lives, the wait on
+/// the human included — the review's shape again, and the reason the watcher
+/// takes no further look while one runs. A comment said in the meantime is the
+/// next batch's, once this one is over.
 async fn dispatch(state: &AppState, conversation_id: i64, fresh: &[Comment]) -> Watching {
     let Some(_turn) = state.sessions.try_turn(conversation_id) else {
         tracing::debug!(
@@ -352,7 +358,7 @@ async fn dispatch(state: &AppState, conversation_id: i64, fresh: &[Comment]) -> 
         "the pull request has been commented on, so a session is starting on it",
     );
 
-    crate::runner::address(state, conversation_id, &feedback(fresh)).await;
+    crate::responding::run(state, conversation_id, &said_by(fresh), &which).await;
 
     Watching::Again
 }
@@ -368,10 +374,11 @@ async fn dispatch(state: &AppState, conversation_id: i64, fresh: &[Comment]) -> 
 /// half of what it means. "This is the wrong way round" is an instruction with
 /// them and a riddle without.
 ///
-/// Two sessions read this and they read it differently — a batch session is told
-/// to do what it asks and the review is told to propose about it — so what the
-/// comments *are* is here and what to do about them is at each of the two call
-/// sites.
+/// Two sessions read this and both read it the same way: the review is given
+/// what was standing when it started and a batch session is given what was said
+/// after, and each of them proposes about it rather than acting on it. So this
+/// is the whole of what either is told about the words — what to do with them is
+/// the skill each is running inside.
 fn said_by(fresh: &[Comment]) -> String {
     fresh
         .iter()
@@ -390,28 +397,6 @@ fn said_by(fresh: &[Comment]) -> String {
         })
         .collect::<Vec<String>>()
         .join("\n\n---\n\n")
-}
-
-/// And what a batch session is told about them: do what they ask, and push it.
-///
-/// The review is told something else entirely about the same words — propose
-/// before you touch anything — which is why the two are separate from
-/// [`said_by`].
-fn feedback(fresh: &[Comment]) -> String {
-    let said = said_by(fresh);
-
-    format!(
-        "{} on the pull request this branch is on. Work out what {} asking for, do it, and \
-         push it so the pull request has it.\n\n{said}\n",
-        match fresh.len() {
-            1 => "This has been said",
-            _ => "These have been said",
-        },
-        match fresh.len() {
-            1 => "it is",
-            _ => "they are",
-        },
-    )
 }
 
 /// Record that nothing is left unaddressed, so wrap-up has one less thing to
@@ -456,19 +441,15 @@ mod tests {
         }
     }
 
-    /// What the session is told about one comment: who said it and what they
-    /// wrote, whole, plus that the fix has to reach the pull request.
+    /// What either session is told about one comment: who said it and what they
+    /// wrote, whole.
     #[test]
-    fn a_session_is_told_what_was_said_and_that_it_has_to_reach_the_pull_request() {
-        let told = feedback(&[comment("tobico", "Rename the `window` field.")]);
+    fn a_session_is_told_who_said_it_and_what_they_wrote() {
+        let said = said_by(&[comment("tobico", "Rename the `window` field.")]);
 
         assert!(
-            told.contains("tobico") && told.contains("Rename the `window` field."),
-            "who said it and what they wrote: {told}",
-        );
-        assert!(
-            told.contains("push"),
-            "and that it has to reach the pull request: {told}",
+            said.contains("tobico") && said.contains("Rename the `window` field."),
+            "who said it and what they wrote: {said}",
         );
     }
 
@@ -476,18 +457,18 @@ mod tests {
     /// session — three replies in a minute are one point being made.
     #[test]
     fn every_comment_in_the_batch_reaches_the_one_session() {
-        let told = feedback(&[
+        let said = said_by(&[
             comment("tobico", "Rename the `window` field."),
             comment("tobico", "And the test that pins it."),
         ]);
 
         assert!(
-            told.contains("Rename the `window` field.") && told.contains("And the test that pins"),
-            "both of them: {told}",
+            said.contains("Rename the `window` field.") && said.contains("And the test that pins"),
+            "both of them: {said}",
         );
         assert!(
-            told.find("Rename the `window`") < told.find("And the test that pins"),
-            "in the order they were said in: {told}",
+            said.find("Rename the `window`") < said.find("And the test that pins"),
+            "in the order they were said in: {said}",
         );
     }
 
@@ -496,18 +477,18 @@ mod tests {
     /// with the file and the line and a riddle without them.
     #[test]
     fn a_comment_left_on_the_diff_carries_where_it_was_left() {
-        let told = feedback(&[on_a_line(
+        let said = said_by(&[on_a_line(
             "`src/window.rs` line 12",
             "This is the wrong way round.",
         )]);
 
         assert!(
-            told.contains("on `src/window.rs` line 12"),
-            "the file and the line: {told}",
+            said.contains("on `src/window.rs` line 12"),
+            "the file and the line: {said}",
         );
         assert!(
-            told.contains("This is the wrong way round."),
-            "and what they said about it: {told}",
+            said.contains("This is the wrong way round."),
+            "and what they said about it: {said}",
         );
     }
 
@@ -515,29 +496,29 @@ mod tests {
     /// rather than trailing an empty *on*.
     #[test]
     fn a_comment_about_the_whole_pull_request_names_no_place() {
-        let told = feedback(&[comment("tobico", "Rename the `window` field.")]);
+        let said = said_by(&[comment("tobico", "Rename the `window` field.")]);
 
-        assert!(told.contains("**tobico** said:"), "{told}");
+        assert!(said.contains("**tobico** said:"), "{said}");
     }
 
     /// A comment left by an account that has since gone is still a comment to
-    /// act on, and it reads as somebody rather than as nobody.
+    /// answer, and it reads as somebody rather than as nobody.
     #[test]
-    fn a_comment_with_no_author_left_is_still_something_to_do() {
-        let told = feedback(&[comment("", "Rename the `window` field.")]);
+    fn a_comment_with_no_author_left_is_still_something_to_answer() {
+        let said = said_by(&[comment("", "Rename the `window` field.")]);
 
         assert!(
-            told.contains("Somebody said") && told.contains("Rename the `window` field."),
-            "{told}",
+            said.contains("Somebody said") && said.contains("Rename the `window` field."),
+            "{said}",
         );
     }
 
-    /// The review is given the same comments and none of the instruction that
-    /// goes with them: it proposes about what was said rather than doing it, and
-    /// a prompt telling it to push would be the ungated half arriving by the
-    /// other door.
+    /// Neither session is given any instruction along with the words: both of
+    /// them propose about what was said rather than doing it, and a prompt
+    /// telling either to push would be the ungated half arriving by the other
+    /// door.
     #[test]
-    fn what_the_review_is_given_is_what_was_said_and_not_what_to_do_about_it() {
+    fn what_a_session_is_given_is_what_was_said_and_not_what_to_do_about_it() {
         let said = said_by(&[
             comment("tobico", "Rename the `window` field."),
             on_a_line("`src/window.rs` line 12", "This is the wrong way round."),

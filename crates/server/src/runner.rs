@@ -514,6 +514,11 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
         // first — which is [`crate::review`]'s to launch, because it is the one
         // thing that knows what to do with what the review comes back with.
         store::Step::Review => return crate::review::retried(state, conversation_id).await,
+        // Nor this one, which is the same thing one turn later: what a retried
+        // batch runs is the fixes it was answered with where they never landed,
+        // and the batch over again where it never got as far as asking. See
+        // [`crate::responding`].
+        store::Step::Comments => return crate::responding::retried(state, conversation_id).await,
         // And nor is this one, which is not the pipeline's at all: what a
         // retried Manual Task runs is the instruction the human typed, read
         // back off the Timeline because a bare step word has no room for it —
@@ -1097,16 +1102,18 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     Some(event_id)
 }
 
-/// What a review session left behind.
+/// What a session that proposes and then fixes left behind — the wrap-up's one
+/// review, and each batch of comments answered after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reviewed {
-    /// It saw itself out: it read the branch, put what it found to the human,
-    /// landed what they accepted, and ended. A review that found nothing worth
-    /// raising ends the same way, having said so as the last thing it printed.
+    /// It saw itself out: it read what it was sent to read, put what it would do
+    /// to the human, landed what they accepted, and ended. One that found
+    /// nothing worth raising ends the same way, having said so as the last thing
+    /// it printed.
     Done,
 
-    /// It ended, and not well. Which is not a review with nothing left to do —
-    /// this is a review that did not finish.
+    /// It ended, and not well. Which is not a session with nothing left to do —
+    /// this is one that did not finish.
     Stopped {
         /// How it ended, in the words an Interruption records.
         how: String,
@@ -1122,20 +1129,6 @@ pub(crate) enum Reviewed {
 
 /// Run the one review session a wrap-up gets, and wait until it is over.
 ///
-/// **Ended by itself**, which is the one session here that is. Every other
-/// reports through the repository and is ended on what landed plus quiet; this
-/// one puts its findings to the human in the middle of its work and has the rest
-/// of that work to do afterwards, so what says it is finished is it finishing.
-/// `verkstead ask` blocks for as long as they take to answer, and a session
-/// waiting on that is one working rather than one stuck — so nothing here reads
-/// the wait as an ending, and the Turn the caller is holding keeps the Worktree
-/// this session's across the whole of it.
-///
-/// How it ended is read exactly as an inline run's is: cleanly means it did what
-/// it was sent to do, and anything else means it did not. Nothing is refused for
-/// and no Interruption is raised here — what to do about either of those is
-/// [`crate::review`]'s.
-///
 /// `said` is what was written on the pull request before this started, which the
 /// caller reads inside the Turn it is holding and records as addressed — so this
 /// session is the one that proposes about it, and nothing else is sent to.
@@ -1144,8 +1137,52 @@ pub(crate) async fn review(
     conversation_id: i64,
     said: Option<String>,
 ) -> Reviewed {
-    let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing(said), "").await
-    else {
+    proposing(state, conversation_id, Prompt::Reviewing(said), "review").await
+}
+
+/// Run one batch session, and wait until it is over.
+///
+/// The review's shape exactly — it proposes about what was said, waits on the
+/// human, and lands what they accepted — about a batch of comments rather than
+/// about the branch. `said` is that batch, which the caller reads and records as
+/// addressed inside the Turn it is holding.
+pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) -> Reviewed {
+    proposing(
+        state,
+        conversation_id,
+        Prompt::Responding(said.to_owned()),
+        "batch session",
+    )
+    .await
+}
+
+/// Run one session that proposes and then fixes, and wait until it is over.
+///
+/// **Ended by itself**, which these are the only sessions here that are. Every
+/// other reports through the repository and is ended on what landed plus quiet;
+/// one of these puts what it would do to the human in the middle of its work and
+/// has the rest of that work to do afterwards, so what says it is finished is it
+/// finishing. `verkstead ask` blocks for as long as they take to answer, and a
+/// session waiting on that is one working rather than one stuck — so nothing here
+/// reads the wait as an ending, and the Turn the caller is holding keeps the
+/// Worktree this session's across the whole of it.
+///
+/// How it ended is read exactly as an inline run's is: cleanly means it did what
+/// it was sent to do, and anything else means it did not. Nothing is refused for
+/// and no Interruption is raised here — what to do about either of those is the
+/// caller's, and both callers ask the same further question first: whether
+/// anything the human accepted was left unlanded. See [`crate::review`] and
+/// [`crate::responding`].
+///
+/// `what` names the session in the log, which is the one place the two differ
+/// here.
+async fn proposing(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    what: &'static str,
+) -> Reviewed {
+    let Some(mut session) = launch(state, conversation_id, inside, "").await else {
         return Reviewed::Nothing;
     };
 
@@ -1153,8 +1190,7 @@ pub(crate) async fn review(
     let ended = session.ended().await;
 
     // The session is over — and if the human has its keyboard, that is all that
-    // has happened. What the review left is judged once they hand back, not
-    // before.
+    // has happened. What it left is judged once they hand back, not before.
     state.sessions.until_handed_back(conversation_id).await;
 
     // Verkstead ended it, which here means the human aborted the Conversation out
@@ -1164,7 +1200,8 @@ pub(crate) async fn review(
         tracing::info!(
             conversation_id,
             event_id,
-            "the review was stopped from outside, so nothing is asked about it"
+            what,
+            "the session was stopped from outside, so nothing is asked about it"
         );
         return Reviewed::Nothing;
     }
@@ -1586,6 +1623,10 @@ enum Prompt {
     /// inside — carrying whatever was said on the pull request before it started,
     /// which is the other half of what it has to propose about.
     Reviewing(Option<String>),
+
+    /// The responding skill, which a session answering a batch of comments runs
+    /// inside — carrying the batch, which is the whole of what it is about.
+    Responding(String),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -1675,6 +1716,7 @@ async fn launch(
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
                 Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
+                Prompt::Responding(said) => skills::responding(&brief, handoff, said),
             };
 
             skills::retrying(&prompt, note)

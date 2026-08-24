@@ -181,6 +181,30 @@ where
     });
 }
 
+/// Whether the Conversation is still wrapping up, which is the only state
+/// anything a wrap-up dispatches belongs to.
+///
+/// Asked on the far side of every wait for the Worktree: a Conversation aborted
+/// while something queued has nowhere left to work, and a queue is where most of
+/// a wrap-up's waiting happens.
+///
+/// A store that will not answer reads as *no*, which is the right way round for
+/// the one thing this decides: on the other side of it is an agent being let
+/// loose in a Worktree.
+pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state == store::Lifecycle::Wrapping,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left wrapping up");
+            false
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation was wrapping up failed");
+            false
+        }
+    }
+}
+
 /// Start watching every Conversation that was already wrapping up, and say when
 /// it is done.
 ///

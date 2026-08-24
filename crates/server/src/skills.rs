@@ -76,6 +76,11 @@ const ADDRESSING: &str = "~/.claude/skills/addressing/SKILL.md";
 /// wrote it ever saw.
 const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
 
+/// And the responding skill's, which a batch of comments left on the pull
+/// request after the review is answered inside: the review's propose-then-fix
+/// shape again, about what somebody has just said rather than about the branch.
+const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
+
 /// And the manual-task skill's, which the one-off session a human sets going by
 /// hand runs inside — the one skill nothing in the pipeline ever launches.
 const MANUAL_TASK: &str = "~/.claude/skills/manual-task/SKILL.md";
@@ -348,15 +353,45 @@ pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) 
     }
 }
 
+/// What a batch session is started on: the comments it is about, under the two
+/// documents and the line that sends the agent into the responding skill.
+///
+/// The same three pieces the review gets, in the same order and for the same
+/// reasons — the documents say what the work is, and what was said goes last
+/// because it is the newest and least general thing. What differs is which
+/// comments and how many: the review is given everything standing on the pull
+/// request when it starts, and this is given one batch of what was said after
+/// it.
+///
+/// `said` is never empty here, unlike the review's. A batch session exists
+/// because something was said, so there is no version of this prompt with
+/// nothing under the heading.
+pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> String {
+    let prompt = on_the_documents(
+        &format!(
+            "Read {RESPONDING} and answer what has just been said on this branch's pull \
+             request, the way it says. The work described below is what it was meant to be."
+        ),
+        brief,
+        handoff,
+    );
+
+    format!(
+        "{prompt}\n# What has just been said on the pull request\n\n{}\n",
+        said.trim()
+    )
+}
+
 /// What a fix session is started on: the feedback to address, under the two
 /// documents the work was built from and the line that sends the agent into the
 /// addressing skill.
 ///
-/// One function for all three callers — a failed check, a review finding, an
-/// unaddressed pull request comment — because they are one job: somebody has
-/// said that work already pushed is not right yet, and what differs is the
-/// feedback rather than anything about how to take it. Three prompts saying the
-/// same thing in three places is three things to keep true.
+/// One function for all three callers — a failed check, and the fixes either
+/// proposal was answered with where the session that proposed them never landed
+/// them — because they are one job: somebody has said that work already pushed
+/// is not right yet, and what differs is the feedback rather than anything about
+/// how to take it. Three prompts saying the same thing in three places is three
+/// things to keep true.
 ///
 /// The feedback goes *last*, under the documents rather than over them, for the
 /// reason a retry note does: it is the newest thing said and the least general.
@@ -1454,6 +1489,116 @@ mod tests {
         );
     }
 
+    /// What the responding skill has to be: the review's shape about a batch of
+    /// comments, which is the whole of what stops one being acted on ungated.
+    #[test]
+    fn the_responding_skill_proposes_before_it_changes_anything() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("You propose, and then you fix what was agreed to"),
+            "nothing anybody wrote is acted on before the human has said so, and \
+             everything they accepted is done here: {responding}"
+        );
+        assert!(
+            responding.contains("Change nothing yet"),
+            "which means the session that reads the batch changes nothing until the \
+             answers arrive: {responding}"
+        );
+        assert!(
+            responding.contains("still a proposal until they have said yes"),
+            "a comment is not an instruction, however plainly it is written: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("git commit") && responding.contains("git push"),
+            "and then it lands its own work, which is why nothing else is \
+             dispatched: {responding}"
+        );
+    }
+
+    /// The half the human decides: one Set for the batch, a Question per comment
+    /// worth doing something about, and the block that says which Answer means
+    /// do it.
+    #[test]
+    fn the_responding_skill_says_how_a_comment_becomes_work() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("review:") && responding.contains("findings:"),
+            "the Set is marked by the block it carries, so the skill has to name it: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("fix: Q1.1"),
+            "and name the Option that means do it, in the Guide's own notation: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("verkstead guide") && responding.contains("verkstead ask"),
+            "put through the CLI like every other Set: {responding}"
+        );
+        assert!(
+            responding.contains("The answers are yours to wait for"),
+            "and nothing ends this session on the ask, as nothing ends the review's: \
+             {responding}"
+        );
+    }
+
+    /// A batch that asks for nothing asks nothing, and says so where the human is
+    /// already looking: the last line a session prints is what its Timeline row
+    /// shows.
+    #[test]
+    fn the_responding_skill_says_what_to_do_with_a_batch_that_asks_for_nothing() {
+        let responding = skill("responding/SKILL.md");
+
+        assert!(
+            responding.contains("Ask nothing"),
+            "a Set with nothing in it is a row for the human to dismiss: \
+             {responding}"
+        );
+        assert!(
+            responding.contains("last thing you print"),
+            "and what was said is answered where the Timeline will show it: \
+             {responding}"
+        );
+    }
+
+    /// A batch session is put inside the skill the same way every other is, and
+    /// primed with the two documents *and* the comments it is about.
+    #[test]
+    fn a_batch_session_is_started_on_the_documents_with_the_comments_last() {
+        let prompt = responding(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            "**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round.",
+        );
+
+        assert!(
+            prompt.contains(RESPONDING),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("This is the wrong way round.")
+                && prompt.contains("`src/window.rs` line 12"),
+            "and so does what was said, with where it was said: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
+            "under the documents: they say what the work is and this says what \
+             somebody has just said about it — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(ADDRESSING) && !prompt.contains(REVIEWING),
+            "and no other skill is named: a batch is neither a fix nor a review — \
+             {prompt:?}"
+        );
+    }
+
     /// A session is put inside the skill by its prompt, and primed with the two
     /// documents the work is described by.
     #[test]
@@ -1649,8 +1794,8 @@ mod tests {
 
     /// The workbench shows a commit's message body beside its diff, and nothing
     /// else tells a session to write one — so every skill that commits work has
-    /// to say it. One wording across the five, because five wordings would be
-    /// five things to keep true and the human reads them as one convention.
+    /// to say it. One wording across the six, because six wordings would be
+    /// six things to keep true and the human reads them as one convention.
     #[test]
     fn every_skill_that_commits_work_asks_for_the_commits_summary() {
         let block = summary_block("next-task/SKILL.md");
@@ -1660,6 +1805,7 @@ mod tests {
             "manual-task/SKILL.md",
             "addressing/SKILL.md",
             "reviewing/SKILL.md",
+            "responding/SKILL.md",
         ] {
             assert_eq!(
                 summary_block(name),

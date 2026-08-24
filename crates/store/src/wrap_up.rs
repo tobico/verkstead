@@ -345,6 +345,49 @@ pub async fn record_addressed_comments(
     Ok(())
 }
 
+/// Forget that a session was dispatched about these comments, so the next poll
+/// dispatches another one.
+///
+/// The other half of [`record_addressed_comments`], and what a batch session
+/// that did not finish leaves behind: the comments were recorded as addressed as
+/// it was dispatched, and a session that fell over before it put anything to the
+/// human addressed none of them. Forgetting them is what makes the retry the
+/// batch over again, in a session as fresh as the first.
+///
+/// Only ever called for a batch nothing is left running about — the session is
+/// gone and the run is stopped at the Interruption saying so — so there is
+/// nothing racing this to dispatch about them in the meantime.
+pub async fn forget_addressed_comments(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    comments: &[String],
+) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("forgetting which comments have been dispatched for")?;
+
+    for comment in comments {
+        sqlx::query("DELETE FROM addressed_comments WHERE conversation_id = ? AND comment_id = ?")
+            .bind(conversation_id)
+            .bind(comment)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "forgetting that {comment:?} was dispatched for on Conversation \
+                     {conversation_id}"
+                )
+            })?;
+    }
+
+    tx.commit()
+        .await
+        .context("forgetting which comments have been dispatched for")?;
+
+    Ok(())
+}
+
 /// Move the Conversation to Done, where its wrap-up has settled everything it
 /// waits on.
 ///

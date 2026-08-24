@@ -12,11 +12,12 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn, addressed_comments,
-    ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation, load_response,
-    load_set, open_database, pick_direction, record_addressed_comments, record_commit,
-    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
-    settle_wrap_up, start_conversation, start_grilling, submit_response, timeline, unlanded_fixes,
-    unsettle_wrap_up, wrap_up_settled,
+    ask, finish_wrap_up, fix_attempts, forget_addressed_comments, forget_fix_attempts,
+    last_proposal, load_conversation, load_response, load_set, open_database, pick_direction,
+    record_addressed_comments, record_commit, record_fix_attempt, record_pull_request,
+    register_repo, review_asked, save_brief, settle_wrap_up, start_conversation, start_grilling,
+    submit_response, timeline, unlanded_batch_fixes, unlanded_fixes, unsettle_wrap_up,
+    wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -617,4 +618,150 @@ async fn a_review_that_was_declined_outright_owes_nothing() {
     .unwrap();
 
     assert_eq!(unlanded_fixes(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// The Set a batch session asked with, which is the review's shape about what
+/// somebody said rather than about the branch.
+fn answering_the_comments() -> verkstead_schema::QuestionSet {
+    verkstead_schema::QuestionSet::from_yaml(
+        r#"
+title: What was said on the rate limiter's pull request
+questions:
+  - label: Q1
+    text: You said the reset is the wrong way round. It is.
+    options:
+      - n: 1
+        text: Do it
+        recommended: true
+      - n: 2
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      what: Move the reset above the comparison.
+"#,
+    )
+    .unwrap()
+}
+
+/// What a batch session was answered with and never landed is asked of the
+/// newest proposal, so that the review's own answers are not mistaken for it.
+///
+/// Two proposals stand on a wrap-up that has been commented on: the review's,
+/// which settled long before, and the batch's. Which one is owed anything is the
+/// question this decides, and asking the first would owe the review's findings
+/// for ever.
+#[tokio::test]
+async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "a wrap-up nobody has proposed anything on has no proposal to find",
+    );
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and owes nothing",
+    );
+
+    // The review, answered and acted on, which is where every batch starts from.
+    let reviewed = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    answer_the_review(&pool, reviewed.id).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    record_commit(&pool, id, &fixed("a1b2c3d")).await.unwrap();
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(reviewed.id),
+        "the review's is the newest proposal until a batch asks",
+    );
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and it owes nothing, because it settled by landing what it was told to",
+    );
+
+    let batch = ask(&pool, id, &answering_the_comments())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(reviewed.id),
+        "the review is still the first proposal, whatever has been asked since",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(batch.id),
+        "and the batch's is the newest",
+    );
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        batch.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 1\n    free_text: Leave the name alone.\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Move the reset above the comparison.".to_owned(),
+            said: "Leave the name alone.".to_owned(),
+        }],
+        "what the batch was answered with is owed until something lands after it",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and the review, which landed its own, is owed nothing by the same record",
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
+
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and a commit after the answers is the batch's fixes landing",
+    );
+}
+
+/// A batch nobody answered is one the comments are forgotten for, so that the
+/// session a retry starts is about the same words rather than about nothing.
+#[tokio::test]
+async fn comments_forgotten_are_dispatched_for_again() {
+    let (dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    record_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+        .await
+        .unwrap();
+
+    forget_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    // A second reader over the same file, as a restarted server has: forgetting
+    // is a fact about the database rather than about the process.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        addressed_comments(&pool, id).await.unwrap(),
+        Vec::<String>::new(),
+        "nothing has been dispatched about, so the next poll dispatches again",
+    );
 }

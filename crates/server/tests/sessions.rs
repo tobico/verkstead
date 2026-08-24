@@ -3756,18 +3756,62 @@ review:
 
 /// The shortest whole backlog, plus the sessions a wrap-up runs.
 ///
-/// The review writes down the prompt it was given and then does whatever
-/// `review` says; a fix session writes its prompt down and commits, which is what
-/// one reports through. Told apart by the skill their prompts name, because that
-/// is the fact under it — all of them run under the same implementation Profile
-/// and differ only in what they were sent to do.
+/// A batch of comments is answered by a session that finds nothing in them,
+/// which is the quietest of the three things one can do — see
+/// [`a_backlog_then_answers_comments`] for the tests that are about the other
+/// two.
 fn a_backlog_then_wraps_up(reviews: &Path, dispatched: &Path, review: &str) -> String {
+    wrapping_up(
+        reviews,
+        dispatched,
+        dispatched,
+        review,
+        RESPOND_AND_FIND_NOTHING,
+    )
+}
+
+/// The same, with the batch sessions' prompts spilled somewhere of their own and
+/// doing whatever `responding` says.
+fn a_backlog_then_answers_comments(
+    reviews: &Path,
+    dispatched: &Path,
+    batches: &Path,
+    responding: &str,
+) -> String {
+    wrapping_up(
+        reviews,
+        dispatched,
+        batches,
+        REVIEW_AND_FIND_NOTHING,
+        responding,
+    )
+}
+
+/// What all of them are made of.
+///
+/// The review writes down the prompt it was given and then does whatever
+/// `review` says; a batch session does the same with `responding`; a fix session
+/// writes its prompt down and commits, which is what one reports through. Told
+/// apart by the skill their prompts name, because that is the fact under it —
+/// all of them run under the same implementation Profile and differ only in what
+/// they were sent to do.
+fn wrapping_up(
+    reviews: &Path,
+    dispatched: &Path,
+    batches: &Path,
+    review: &str,
+    responding: &str,
+) -> String {
     format!(
         r#"
 case "$2" in
 *reviewing/SKILL.md*)
     printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
 {review}
+    ;;
+*responding/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {batches}
+{responding}
     ;;
 *addressing/SKILL.md*)
     printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {dispatched}
@@ -3783,6 +3827,7 @@ case "$2" in
 esac
 "#,
         reviews = quoted(reviews),
+        batches = quoted(batches),
         dispatched = quoted(dispatched),
     )
 }
@@ -3812,7 +3857,61 @@ const REVIEW_THEN_VANISH: &str = "    printf 'reading the branch\\n'\n    \
 
 /// One that finds nothing, says so as the last thing it prints, and stops.
 const REVIEW_AND_FIND_NOTHING: &str =
-    "    printf 'I read the whole branch and found nothing worth raising\\n'";
+    "    printf 'I read the whole branch and found nothing worth raising\n'";
+
+/// A batch session that finds nothing in what was said needing a change, says so
+/// as the last thing it prints, and stops.
+const RESPOND_AND_FIND_NOTHING: &str =
+    "    printf 'I read what was said and none of it needs a change\n'";
+
+/// One that proposes, waits for the answers and then does what was accepted,
+/// which is the whole of what a batch session is for.
+///
+/// The marker file stands in for the Response arriving, as the review's does: a
+/// stub cannot idle on a blocking ask and then wake up.
+const RESPOND_THEN_FIX: &str = "    printf 'reading what was said\n'\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'a fix\n' >> fixes.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: move the reset above the comparison'\n    \
+     printf 'did what was accepted and left the rest\n'";
+
+/// And one that waits for the answers and then goes without landing any of them.
+const RESPOND_THEN_VANISH: &str = "    printf 'reading what was said\n'\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'that is what I would have done\n'";
+
+/// What a batch session puts to the human, as the bundled responding skill
+/// writes it: a Question per comment it would do something about, and the
+/// `review` block that says which Answer to each means *do it*.
+const ANSWERING_THE_COMMENTS: &str = r#"
+title: What was said on the rate limiter's pull request
+preface: |
+  Two things you asked for, as I read them.
+questions:
+  - label: Q1
+    text: You said the reset is the wrong way round. It is.
+    options:
+      - n: 1
+        text: Do it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: You asked about the test that pins the old name.
+    options:
+      - n: 1
+        text: Do it
+      - n: 2
+        text: Leave it
+        recommended: true
+review:
+  findings:
+    - fix: Q1.1
+      what: Move the reset above the comparison.
+    - fix: Q2.1
+      what: Rename the test that pins the old field.
+"#;
 
 /// Whether Verkstead has recorded this Conversation's review as done with.
 async fn review_settled(fixture: &Grilling) -> bool {
@@ -4640,8 +4739,8 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
         "one session between the five, rather than one each: {told}",
     );
     assert!(
-        told.contains("addressing/SKILL.md"),
-        "inside the bundled addressing skill: {told}",
+        told.contains("responding/SKILL.md"),
+        "inside the bundled responding skill: {told}",
     );
     assert!(
         told.contains("Rename the window field.")
@@ -4657,6 +4756,302 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
     assert!(
         told.contains("`src/window.rs` line 12"),
         "with where it was said, which is half of what it means: {told}",
+    );
+}
+
+/// A batch of comments is proposed about before anything is changed, and fixed
+/// by the same session on approval.
+///
+/// The whole of what stops a comment being acted on ungated once the review is
+/// over. What somebody wrote on a pull request says what they think is wrong, not
+/// what to do about it — so the session reads the batch, puts what it would do to
+/// the human as one small Set, changes nothing while it waits, and lands what
+/// they accepted itself.
+///
+/// The checks cannot be asked about, which keeps the Conversation wrapping up
+/// long enough to watch the whole of it.
+#[tokio::test]
+async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_session() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    // Nothing has been said until the review session has written its prompt down:
+    // everything standing on the pull request when it starts is the review's own
+    // to propose about.
+    let gh = gh_about_once(
+        CHECKS_UNANSWERABLE,
+        &reviews,
+        THREE_COMMENTS,
+        TWO_ON_THE_DIFF,
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_FIX),
+        &gh,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&batches).await;
+
+    assert_eq!(prompts(&told).len(), 1, "one session for the batch: {told}");
+    assert!(
+        told.contains("responding/SKILL.md"),
+        "inside the bundled responding skill: {told}",
+    );
+    assert!(
+        told.contains("model=claude-implementation-5"),
+        "under the implementation Profile, as every session about the code is: {told}",
+    );
+    assert!(
+        told.contains("Rename the window field.") && told.contains("`src/window.rs` line 12"),
+        "given what was said and where, whole: {told}",
+    );
+
+    // Long enough for a session told to do what it was given to have done it.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        fixes(&fixture.view().await),
+        0,
+        "and nothing is changed before the human has answered",
+    );
+
+    // What the batch session does through the CLI, played by the test.
+    let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session that asked is the one that fixes, so nothing ends it on the ask: {:?}",
+        outputs(&view).last(),
+    );
+
+    // The human answers from the workbench: do the first, leave the second.
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture.until(|view| (fixes(view) == 1).then_some(())).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the batch landed its fix and what was said never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing stopped: {:?}",
+        interruptions(&view),
+    );
+    assert!(
+        !dispatched.exists(),
+        "and nothing was dispatched to fix anything: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// A batch with nothing in it worth doing asks nothing at all.
+///
+/// A question the commits since have answered, or somebody saying this reads
+/// well: a Set about that would be a row for the human to dismiss, and the point
+/// of asking is to spend their attention only where there is a decision. So the
+/// session says what it made of the batch where they are already looking — the
+/// last line a session prints is what its Timeline row shows — and the batch
+/// settles as addressed.
+#[tokio::test]
+async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_AND_FIND_NOTHING),
+        &gh,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the batch was answered and never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        sets(&view).len(),
+        1,
+        "the only Set on the Timeline is the proposal that ended the grilling",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "nothing is waiting on the human, which is the whole of finding nothing",
+    );
+    assert!(
+        outputs(&view)
+            .last()
+            .is_some_and(|output| output.latest.contains("none of it needs a change")),
+        "and the Timeline says what the session made of what was said: {:?}",
+        outputs(&view).last(),
+    );
+    assert_eq!(fixes(&view), 0, "with nothing changed about the branch");
+    assert!(
+        interruptions(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        interruptions(&view),
+    );
+}
+
+/// A batch that was answered and never acted on does not go quietly either.
+///
+/// The review's net, one turn later and for the same reason: the session that
+/// asked is the session that fixes, so one that dies between the Response and its
+/// push takes the approved work with it. The record is what says otherwise, and
+/// the run stops at an Interruption saying what is owed.
+///
+/// The retry is that doing and nothing else — one fix session, handed every
+/// accepted proposal at once with what the human said beside it. Nothing is asked
+/// again, because nothing is left to decide.
+#[tokio::test]
+async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on_a_retry() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_VANISH),
+        &gh,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
+    // What it would do goes up, the human decides, and the session goes without
+    // landing a thing.
+    let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("landing the fixes"),
+        "the step is named as the half that failed: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("Move the reset above the comparison"),
+        "and what is owed is said in the words the session wrote: {stopped:?}",
+    );
+    assert!(
+        !stopped.how.contains("Rename the test that pins"),
+        "the one they declined is owed by nobody: {stopped:?}",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human",
+    );
+
+    assert_eq!(
+        fixture.settle(stopped.id, "Retry", "").await,
+        RemedySettled::Settled,
+    );
+
+    let told = until_written(&dispatched).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one session for the lot of them, rather than one per proposal: {told}",
+    );
+    assert!(
+        told.contains("addressing/SKILL.md"),
+        "inside the bundled addressing skill: {told}",
+    );
+    assert!(
+        told.contains("Move the reset above the comparison")
+            && told.contains("Keep the signature."),
+        "handed the accepted proposal and what they said beside it: {told}",
+    );
+    assert!(
+        !told.contains("Rename the test that pins"),
+        "and not the one they declined: {told}",
+    );
+
+    fixture.until(|view| (fixes(view) == 1).then_some(())).await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        comments_settled(&fixture).await,
+        "and what was said is settled: the batch was addressed as it was dispatched",
+    );
+
+    assert_eq!(
+        fixes(&view),
+        1,
+        "the fix the retry ran is the only one on the branch",
+    );
+    assert_eq!(
+        sets(&view).len(),
+        2,
+        "the grilling's proposal and the batch's, and nothing asked a second time",
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&batches).unwrap()).len(),
+        1,
+        "and nothing read the comments again: the decisions were already made",
     );
 }
 
