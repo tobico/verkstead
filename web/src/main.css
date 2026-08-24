@@ -473,11 +473,9 @@ textarea::placeholder {
 
 /* Agent profiles: the account a session runs under. One form does both saving
    and rewriting — a profile is four fields with nothing built from them yet, so
-   editing one is filling the same form in with what it already says. */
-.edit-profile {
-  margin-bottom: 1.5rem;
-}
-
+   editing one is filling the same form in with what it already says — and it is
+   drawn over the page as a modal, so the box around it is the card the modal
+   already draws. */
 .edit-profile h3 {
   margin: 0 0 0.75rem;
   font-size: 1rem;
@@ -574,8 +572,8 @@ textarea::placeholder {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Which one the form above is about, said in the accent border — the same mark
-   the open conversation carries. */
+/* Which one the modal over the page is about, said in the accent border — the
+   same mark the open conversation carries. */
 .profile-row.editing {
   border-color: var(--accent);
 }
@@ -596,7 +594,11 @@ textarea::placeholder {
   gap: 0.5rem;
 }
 
-.profile-actions button {
+/* The button on the heading that opens the modal empty is painted with them: it
+   is the same size of act as theirs — this one adds a profile where those two
+   change one or take it away. */
+.profile-actions button,
+.profiles > .section-head > button {
   padding: 0.35rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;
@@ -740,8 +742,8 @@ textarea::placeholder {
   margin-bottom: 1.5rem;
 }
 
-.profiles > h2,
-.repos > h2 {
+.profiles h2,
+.repos h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
@@ -967,6 +969,50 @@ main:has(.workbench) {
    other page's "← Pending" sits in. */
 .pane-back {
   flex-basis: 100%;
+}
+
+/* The one modal in the UI, which is one component — see `Modal.tsx`. A native
+   `dialog` opened with `showModal`, so the top layer, the backdrop, Escape and
+   the focus are the platform's; what is here is where the card sits and what it
+   is painted with.
+
+   The dialog is the frame and carries no padding of its own. A press on the
+   backdrop is reported as a press on the dialog, so padding there would make a
+   press on the card's own margin read as a press away from the card — which is
+   why the card underneath is what has the padding. */
+.modal {
+  width: min(28rem, calc(100% - 2rem));
+  padding: 0;
+  /* Rising from the bottom edge, which is where a thumb is. */
+  margin: auto auto 1rem;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+/* Drawn as a card of the page is, because that is what it is: the same paper,
+   the same edge, a rounder corner for being the one thing in front. It scrolls
+   rather than the page behind it, and it stops short of the window so that what
+   is under it is still visibly there. */
+.modal-card {
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+}
+
+/* Wider than a phone: the card sits in the middle rather than rising from the
+   bottom edge, where a thumb would have put it. */
+@media (min-width: 30rem) {
+  .modal {
+    margin: auto;
+  }
 }
 
 /* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
@@ -4847,33 +4893,14 @@ div.meta .error {
   color: var(--ink-soft);
 }
 
-/* The warning before a Response goes out with questions left open. It covers
-   the page because it is the one thing to decide at that moment; it never
-   refuses, so both ways out are buttons of equal weight. */
+/* The two confirm sheets — the warning before a Response goes out with
+   questions left open, and the one before a Set is archived. Both are drawn
+   through the same `.modal` the settings page's form is, so what is left here
+   is their own words. Each covers the page because it is the one thing to decide
+   at that moment; neither refuses, so both ways out are buttons of equal
+   weight. */
 
-.confirm-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding: 1rem;
-  background: rgb(0 0 0 / 45%);
-}
-
-.confirm {
-  width: 100%;
-  max-width: 28rem;
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 1.25rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.8rem;
-}
-
-.confirm > p:first-child {
+.confirm .modal-card > p:first-child {
   margin-top: 0;
   font-weight: 600;
 }
@@ -4912,14 +4939,6 @@ div.meta .error {
   color: var(--ink);
   background: transparent;
   border-color: var(--edge);
-}
-
-/* Wider than a phone: the dialog sits in the middle rather than rising from
-   the bottom edge, where a thumb would have put it. */
-@media (min-width: 30rem) {
-  .confirm-backdrop {
-    align-items: center;
-  }
 }
 
 /* The Gutter: the width every section of a Set page reserves down its left once

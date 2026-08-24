@@ -546,8 +546,8 @@ describe("submitting a Response", () => {
     fireEvent.click(option(page, "Q1", 1));
     press(page, "Submit");
 
-    const warning = page.querySelector(".confirm")!;
-    expect(warning.getAttribute("role")).toBe("dialog");
+    const warning = page.querySelector("dialog.confirm")!;
+    expect((warning as HTMLDialogElement).open, "opened as a modal").toBe(true);
     expect(
       texts(warning, ".unanswered li"),
       "Q2b and Q3 offered nothing, so skipping them is not warned about",

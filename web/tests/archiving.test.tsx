@@ -111,8 +111,8 @@ describe("the offer to close a Set unanswered", () => {
 
     reachForArchive(page);
 
-    const asking = page.querySelector(".confirm")!;
-    expect(asking.getAttribute("role")).toBe("dialog");
+    const asking = page.querySelector("dialog.confirm")!;
+    expect((asking as HTMLDialogElement).open, "opened as a modal").toBe(true);
     // The one irreversible act in the UI has to be asked about as one — and it
     // has to say where the Set stays, because it is not being deleted.
     expect(asking.querySelector(".note")!.textContent).toContain(

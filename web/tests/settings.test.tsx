@@ -462,7 +462,7 @@ describe("the settings page", () => {
   /// that saves a Profile are on the page, with the rows underneath them. What
   /// each does with what is typed is `repos.test.tsx`'s and
   /// `profiles.test.tsx`'s.
-  it("keeps both lists' forms and rows", async () => {
+  it("keeps both lists' rows, and the way into each list's form", async () => {
     const { container } = thePage();
 
     await waitFor(() => screen.getByText(REPOS[0]!.name));
@@ -471,7 +471,12 @@ describe("the settings page", () => {
     expect(container.querySelectorAll(".repos .repo-row")).toHaveLength(
       REPOS.length,
     );
-    expect(container.querySelector(".profiles .edit-profile")).not.toBeNull();
+    // The Profiles' form is a modal now, so what the page carries is the button
+    // that opens it — and nothing of the form until it is pressed.
+    expect(
+      container.querySelector(".profiles .section-head button"),
+    ).not.toBeNull();
+    expect(container.querySelector(".profiles .edit-profile")).toBeNull();
     expect(container.querySelectorAll(".profiles .profile-row")).toHaveLength(
       PROFILES.length,
     );

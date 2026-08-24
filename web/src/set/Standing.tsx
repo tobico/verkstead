@@ -13,6 +13,7 @@ import type { JSX } from "solid-js";
 import { Show, createMemo, createSignal } from "solid-js";
 
 import { Menu } from "../Menu";
+import { Modal } from "../Modal";
 import { archiveSet } from "../api/client";
 import type { Archived, Liveness } from "../api/types";
 import { clearDraft } from "./sheet";
@@ -42,7 +43,10 @@ export const ARCHIVE_WARNING =
 /// stylesheet puts it at the far end of.
 ///
 /// The menu itself is the [`Menu`](../Menu.tsx) every dropdown here is: the
-/// badge is what it drops from, and archiving is the whole of what it drops.
+/// badge is what it drops from, and archiving is the whole of what it drops. The
+/// confirmation is the [`Modal`](../Modal.tsx) every sheet drawn over the page
+/// is, which is what gives it Escape and a press away from it as ways of saying
+/// no.
 export function Standing(props: {
   id: number;
   liveness: Liveness;
@@ -123,32 +127,30 @@ export function Standing(props: {
       <Show when={failed()}>{(said) => <span class="error">{said()}</span>}</Show>
       {/* The one irreversible thing on the page, so it is asked about in as many
           words — including that it cannot be undone, which is what tells this
-          dialog apart from the one before a submit. */}
-      <Show when={confirming()}>
-        <div class="confirm-backdrop">
-          <div
-            class="confirm"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="archive-title"
+          dialog apart from the one before a submit. Every way out of it that is
+          not the one button leaves the Set pending, which is the safe way round
+          for the only act here that cannot be taken back. */}
+      <Modal
+        class="confirm"
+        open={confirming()}
+        close={() => setConfirming(false)}
+        labelledBy="archive-title"
+      >
+        <p id="archive-title">Archive this Set unanswered?</p>
+        <p class="note">{ARCHIVE_WARNING}</p>
+        <div class="confirm-actions">
+          <button
+            type="button"
+            class="secondary"
+            onClick={() => setConfirming(false)}
           >
-            <p id="archive-title">Archive this Set unanswered?</p>
-            <p class="note">{ARCHIVE_WARNING}</p>
-            <div class="confirm-actions">
-              <button
-                type="button"
-                class="secondary"
-                onClick={() => setConfirming(false)}
-              >
-                Keep it pending
-              </button>
-              <button type="button" onClick={close}>
-                Archive unanswered
-              </button>
-            </div>
-          </div>
+            Keep it pending
+          </button>
+          <button type="button" onClick={close}>
+            Archive unanswered
+          </button>
         </div>
-      </Show>
+      </Modal>
     </>
   );
 }

@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 
+import { Modal } from "../Modal";
 import { submitResponse } from "../api/client";
 import type {
   AskView,
@@ -285,36 +286,30 @@ export function Answering(props: {
           never blocks: leaving the whole Set open with only a comment is a
           counter-question, not a mistake, and it comes through here like any
           other. */}
-      <Show when={confirming()}>
-        {(open) => (
-          <div class="confirm-backdrop">
-            <div
-              class="confirm"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="confirm-title"
-            >
-              <p id="confirm-title">Going back unanswered:</p>
-              <ul class="unanswered">
-                <For each={open()}>{(name) => <li>{name}</li>}</For>
-              </ul>
-              <p class="note">The agent will be told these are still open.</p>
-              <div class="confirm-actions">
-                <button
-                  type="button"
-                  class="secondary"
-                  onClick={() => setConfirming(null)}
-                >
-                  Keep answering
-                </button>
-                <button type="button" onClick={sendAnyway}>
-                  Send anyway
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </Show>
+      <Modal
+        class="confirm"
+        open={confirming() !== null}
+        close={() => setConfirming(null)}
+        labelledBy="confirm-title"
+      >
+        <p id="confirm-title">Going back unanswered:</p>
+        <ul class="unanswered">
+          <For each={confirming() ?? []}>{(name) => <li>{name}</li>}</For>
+        </ul>
+        <p class="note">The agent will be told these are still open.</p>
+        <div class="confirm-actions">
+          <button
+            type="button"
+            class="secondary"
+            onClick={() => setConfirming(null)}
+          >
+            Keep answering
+          </button>
+          <button type="button" onClick={sendAnyway}>
+            Send anyway
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }
