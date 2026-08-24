@@ -6938,6 +6938,16 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
 /// caller varies, because that is the half that decides whether the wait ends by
 /// itself. Each task session commits its task and exits, so the run reaches the
 /// point of launching the next one, which is the moment a Pause has to stop.
+///
+/// **The banner is redrawn, with the glyph in front of it turning**, which is
+/// what a display does for as long as the wait lasts. The line is therefore a
+/// different string every frame, and every frame of it has to come to one Pause:
+/// what Verkstead keeps is the line as it was drawn, decoration and all, so a
+/// build that told one banner from the next by comparing those strings would
+/// read every repaint as a fresh limit: the store refuses the second Pause, so
+/// what it costs is the reading behind it — a parse, a question to the machine
+/// about its offset, and a transaction, twice a second for as long as the wait
+/// lasts.
 fn out_of_window(sentence: &str) -> String {
     format!(
         r#"
@@ -6959,14 +6969,17 @@ fn out_of_window(sentence: &str) -> String {
             next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
             if [ -n "$next" ]; then
                 if [ "$next" = 01-count.md ]; then
-                    printf '{sentence}\r\n'
                     # The wait itself, in miniature: the account runs out, the
-                    # agent holds, and it goes on when the window comes back. A
-                    # second is more than the half a second Verkstead writes
-                    # down what a session printed on, which is what makes this a
-                    # limit noticed while the session is still running rather
-                    # than one found in its last words.
-                    sleep 1
+                    # agent holds with its banner up, and it goes on when the
+                    # window comes back. Redrawn eight times over a second —
+                    # more than the half a second Verkstead writes down what a
+                    # session printed on, so the banner is looked at more than
+                    # once — with the spinner turning in front of it, which is
+                    # what makes each repaint a different line.
+                    for turning in '*' '+' 'x' 'X'; do
+                        printf '%s {sentence}\r\n' "$turning"
+                        sleep 0.125
+                    done
                 fi
                 printf 'working %s\n' "$next"
                 number=${{next%%-*}}
@@ -7073,7 +7086,8 @@ async fn an_account_out_of_window_pauses_the_run_and_tells_the_devices() {
     assert_eq!(
         pauses(&fixture.view().await).len(),
         1,
-        "and the banner redrawing does not pause it twice over the same wait",
+        "and the banner redrawing — eight repaints, a different line each time as \
+         the spinner turns — does not pause it twice over the same wait",
     );
     assert!(
         notices(&fixture.view().await).is_empty(),

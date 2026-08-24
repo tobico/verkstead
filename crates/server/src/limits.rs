@@ -310,15 +310,30 @@ pub(crate) struct Watch {
     /// strange one.
     printed: String,
 
-    /// The sentence the last Pause was raised on, or `None` while none has been.
+    /// Whether the banner on screen now has already been paused on.
     ///
-    /// A latch rather than a flag, because the display redraws its banner for as
-    /// long as the wait lasts, and a Pause attempted twice a second for five
-    /// hours would be a transaction twice a second for five hours. A sentence
-    /// that has *changed* is worth another attempt — an account that ran out
-    /// again after the agent continued says so in different words — and the
-    /// store refuses it where the Pause it would raise is already open.
-    raised: Option<String>,
+    /// A latch, because the display redraws its banner for as long as the wait
+    /// lasts and this is looked at twice a second: without one, five hours of
+    /// waiting would be five hours of reading the reset time — a parse, a
+    /// question to the machine about its offset, a transaction and a log line,
+    /// all to be told the run is already paused.
+    ///
+    /// Latched on *whether* rather than on the sentence, because the sentence is
+    /// not stable: what is kept is the line as the terminal drew it, decoration
+    /// and all, and a display that animates the glyph in front of its banner
+    /// writes a different string every frame.
+    ///
+    /// Let go when the session prints something that is *not* the banner, which
+    /// is it having moved on: an account that runs out again after that is a new
+    /// wait and gets a Pause of its own. Not when a look finds nothing, which is
+    /// a look landing between two repaints.
+    ///
+    /// And never on the wait ending, which is the case that decides the shape of
+    /// this. The human saying *go on without waiting* leaves the agent seeing
+    /// its own limit out with the banner still up — that is what a Pause never
+    /// ends — so a latch let go there would read the next repaint as a fresh
+    /// limit and stop the run again a half-second after they started it.
+    raised: bool,
 }
 
 impl Watch {
@@ -329,7 +344,7 @@ impl Watch {
             event_id,
             profile,
             printed: String::new(),
-            raised: None,
+            raised: false,
         }
     }
 
@@ -349,6 +364,14 @@ impl Watch {
     /// beside the terminal rather than instead of it: a backend that says so in
     /// its log and not on its display would otherwise go unnoticed.
     pub(crate) async fn look(&mut self, pool: &SqlitePool, nudges: &Nudges, said: Option<&str>) {
+        // Whether the terminal said anything at all since the last look, which is
+        // what tells a session going on from a session standing still — see
+        // [`Watch::raised`], which is let go on the first of those and never on
+        // the second. The terminal alone: the log's last line is the same last
+        // line between repaints, so a look that read it as news would read news
+        // twice a second for ever.
+        let printed_something = !self.printed.is_empty();
+
         let found = exhausted(&self.printed).or_else(|| exhausted(said.unwrap_or_default()));
 
         // Everything up to the last newline has been looked at now. What is kept
@@ -375,14 +398,22 @@ impl Watch {
         }
 
         let Some(found) = found else {
+            // The session printed something that was not the banner, so it has
+            // moved on and whatever it says next about its account is a new
+            // wait. A look that read nothing is a look landing between two
+            // repaints — the banner is still up, and the latch holds.
+            if printed_something {
+                self.raised = false;
+            }
+
             return;
         };
 
-        if self.raised.as_deref() == Some(found.said.as_str()) {
+        if self.raised {
             return;
         }
 
-        self.raised = Some(found.said.clone());
+        self.raised = true;
 
         pause(
             pool,
