@@ -1,15 +1,21 @@
-//! One commit, opened: its diff, in the details pane.
+//! One commit, opened: what it said about itself and its diff, in the details
+//! pane.
 //!
 //! Fetched here rather than carried by the Conversation, for the reason a
-//! Capture is: a diff is worth reading when somebody opens the one event it
-//! belongs to, and the timeline is read again every time the page hears the
+//! Capture is: a commit is worth reading whole when somebody opens the one event
+//! it belongs to, and the timeline is read again every time the page hears the
 //! world moved.
 //!
-//! It arrives as HTML the server already rendered — parsed per file,
+//! The diff arrives as HTML the server already rendered — parsed per file,
 //! highlighted, and folded — which is the same diff renderer the question sets'
 //! attached diff goes through. So there is nothing here to render, no diff
 //! parser in the browser, and one place where a diff is decided to look the way
 //! it does.
+//!
+//! The summary above it is the agent's own account of the commit: its message
+//! body, with git's trailers off it, rendered and sanitized on the server like
+//! every other document on a timeline. So there is no markdown parser here
+//! either — and a commit that carried none draws the pane as it always did.
 //!
 //! The file list down its margin is the Set page's own table of contents, drawn
 //! from the paths that travel beside the rendered markup: the same entries, the
@@ -23,7 +29,7 @@
 import { Match, Show, Switch, createMemo, createSignal, type JSX } from "solid-js";
 
 import { Switch as Toggle } from "../Switch";
-import { loadCommitDiff } from "../api/client";
+import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
@@ -43,13 +49,13 @@ export function Commit(props: {
   back: () => void;
   close: () => void;
 }): JSX.Element {
-  const diff = useReading(() => ({
+  const opened = useReading(() => ({
     // The event is in the key, so opening another commit is another query
-    // rather than the same one showing the wrong diff for a moment.
+    // rather than the same one showing the wrong commit for a moment.
     queryKey: ["commit", props.conversation.id, props.commit.id],
-    queryFn: () => loadCommitDiff(props.conversation.id, props.commit.id),
+    queryFn: () => loadCommitPane(props.conversation.id, props.commit.id),
 
-    // A commit's diff cannot change, so it is read once and never again.
+    // A commit cannot change, so it is read once and never again.
     // "static" and not a finite time: a Nudge invalidates every active query,
     // and invalidation beats any staleTime that is not this one. A re-read
     // would reassign the `innerHTML` below whether or not a byte changed —
@@ -74,7 +80,7 @@ export function Commit(props: {
   // page's own, off the same paths and pointing at the same renderer-stamped
   // anchors.
   const sections = createMemo((): Section[] => {
-    const view = diff.data?.diff;
+    const view = opened.data?.diff;
     return view === null || view === undefined
       ? []
       : [{ anchor: DIFF, name: "Diff", entries: files(view) }];
@@ -98,7 +104,7 @@ export function Commit(props: {
         </button>
       </div>
 
-      <div class="commit-summary">
+      <div class="commit-header">
         <p class="subject">{props.commit.subject}</p>
         <p class="changed">
           <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
@@ -110,23 +116,33 @@ export function Commit(props: {
         </p>
       </div>
 
-      {/* After the summary and before the diff, which is the order it is read
-          in: what the commit is, then the way around what it changed. The
-          stylesheet takes it out of the flow and puts it in the pane's margin
-          where there is one. A commit that changed no files has no folds to
-          list, and gets none. */}
+      {/* Between the header and the diff, which is the order it is read in:
+          what the commit says about itself, then what it changed. A commit that
+          said nothing — a bookkeeping one, or any commit recorded before
+          summaries were kept — has nothing here at all. */}
+      <Show when={opened.data?.summary}>
+        {(summary) => (
+          <section class="commit-summary document markdown" innerHTML={summary()} />
+        )}
+      </Show>
+
+      {/* After the summary and before the diff. The stylesheet takes it out of
+          the flow and puts it in the pane's margin where there is one. A commit
+          that changed no files has no folds to list, and gets none. */}
       <Show when={sections().length > 0}>
         <Contents sections={sections()} watched={watched()} nav={nav} paned />
       </Show>
 
       <Switch>
-        <Match when={diff.isPending}>
+        <Match when={opened.isPending}>
           <p class="empty">Loading…</p>
         </Match>
-        <Match when={diff.isError}>
-          <p class="error">Could not read this commit: {diff.error?.message}</p>
+        <Match when={opened.isError}>
+          <p class="error">
+            Could not read this commit: {opened.error?.message}
+          </p>
         </Match>
-        <Match when={diff.data}>
+        <Match when={opened.data}>
           {(read) => (
             <Show
               when={read().diff}

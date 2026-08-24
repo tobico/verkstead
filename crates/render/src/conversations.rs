@@ -693,9 +693,9 @@ pub struct PullRequestComment {
 /// A commit as the Timeline shows it: what it was called, and how much of the
 /// repository it moved.
 ///
-/// The summary and not the diff. A commit's diff is what the details pane
-/// fetches, from the repository the commit is in — see [`CommitDiff`] — and the
-/// Timeline is re-read every time an open page hears the world moved.
+/// The line and not what is behind it. A commit's summary and its diff are what
+/// the details pane fetches — see [`CommitPane`] — and the Timeline is re-read
+/// every time an open page hears the world moved.
 ///
 /// There is no state here and no action on it. Commits are viewable and nothing
 /// else: the design gives them no per-commit review, because feedback about the
@@ -727,18 +727,25 @@ pub struct CommitEvent {
     pub deletions: i64,
 }
 
-/// One commit's diff, as the details pane receives it.
+/// One commit, as the details pane receives it: what it said about itself, and
+/// what it changed.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is read when somebody opens the one Event it belongs to.
+/// moved, and a commit is read whole when somebody opens the one Event it
+/// belongs to.
 ///
-/// Rendered with the folds and the highlighting an attached Diff already gets,
-/// because it is the same renderer on the same kind of input — see
+/// The diff is rendered with the folds and the highlighting an attached Diff
+/// already gets, because it is the same renderer on the same kind of input — see
 /// [`crate::diff`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct CommitDiff {
+pub struct CommitPane {
+    /// The Commit Summary, rendered and sanitized like every other document an
+    /// agent wrote — `null` where the commit carried none, which is every
+    /// bookkeeping commit and every commit recorded before summaries were kept.
+    pub summary: Option<String>,
+
     /// `null` where the commit changed nothing a diff can show, which is a merge
     /// or an empty commit. A commit the repository no longer has is not this: it
     /// is a 404, because there is nothing there to draw a pane about.
@@ -1275,14 +1282,18 @@ pub struct CommitSummary {
     pub deletions: i64,
 }
 
-/// One commit's diff as the details pane receives it, rendered on the way.
+/// One commit as the details pane receives it, rendered on the way.
 ///
 /// Here rather than in the server for the reason the Brief's rendering is: this
-/// is the crate with the diff parser and the highlighter in it. A patch with
-/// nothing in it comes back as nothing to show, exactly as an empty attached
-/// Diff does.
-pub fn commit_diff(patch: &str) -> CommitDiff {
-    CommitDiff {
+/// is the crate with the markdown, the diff parser and the highlighter in it. A
+/// patch with nothing in it comes back as nothing to show, exactly as an empty
+/// attached Diff does — and so does a summary of nothing but whitespace, which
+/// the pane would otherwise draw as a gap above the diff.
+pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
+    CommitPane {
+        summary: summary
+            .map(crate::markdown::to_html)
+            .filter(|html| !html.trim().is_empty()),
         diff: crate::diff::to_html(patch),
     }
 }

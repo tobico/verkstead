@@ -21,7 +21,7 @@ import type {
   AgentOutputEvent,
   BriefEvent,
   Capture,
-  CommitDiff,
+  CommitPane,
   ConversationAborted,
   ConversationEntry,
   ConversationView,
@@ -3762,20 +3762,24 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
   "Commit" in event ? [event.Commit] : [],
 );
 
-/// One commit's diff, as the details pane fetches it.
+/// One commit, as the details pane fetches it: no summary, which is the
+/// bookkeeping commit and every commit recorded before summaries were kept.
 ///
-/// The payload is built from the answering set's own attached diff rather than
+/// The diff is built from the answering set's own attached diff rather than
 /// written by hand: it is the same `DiffView`, rendered by the same server-side
 /// renderer that a commit's diff goes through — which is the whole reason a
 /// commit needs no diff machinery of its own.
-const COMMIT_DIFF: CommitDiff = { diff: (answeringSet as SetView).diff };
+const COMMIT_PANE: CommitPane = {
+  summary: null,
+  diff: (answeringSet as SetView).diff,
+};
 
 /// Where the details pane fetches it from.
 const DIFF_OF_IT = `/api/ui/conversations/${BUILDING.id}/commit/${COMMITS[0]!.id}`;
 
-/// The workbench with that conversation open and its commits' diffs to hand.
+/// The workbench with that conversation open and its commits to hand.
 function theCommits(...answers: Parameters<typeof serving>) {
-  return theBuilding({}, whenever(DIFF_OF_IT, json(COMMIT_DIFF)), ...answers);
+  return theBuilding({}, whenever(DIFF_OF_IT, json(COMMIT_PANE)), ...answers);
 }
 
 describe("a commit on the timeline", () => {
@@ -3860,7 +3864,7 @@ describe("a commit on the timeline", () => {
 
     expect(folds.map((fold) => fold.id)).toEqual(["diff-1", "diff-2"]);
     expect(folds[0]!.querySelector(".diff-path")!.textContent).toBe(
-      COMMIT_DIFF.diff!.paths[0],
+      COMMIT_PANE.diff!.paths[0],
     );
     expect(diff.querySelector(".diff-line.add")).toBeTruthy();
     expect(diff.querySelector(".tok-storage")).toBeTruthy();
@@ -3875,10 +3879,54 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
+    const header = await drawn(container, ".details-pane .commit-header");
+
+    expect(header.textContent).toContain(COMMITS[0]!.subject);
+    expect(header.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
+  });
+
+  /// What the commit said about itself, between the header and the diff — the
+  /// server rendered and sanitized it, so the pane only has to put it in the
+  /// page.
+  it("shows the commit's summary above the diff", async () => {
+    theBuilding(
+      {},
+      whenever(
+        DIFF_OF_IT,
+        json({
+          ...COMMIT_PANE,
+          summary: "<p>A bucket per account.</p>",
+        } satisfies CommitPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
     const summary = await drawn(container, ".details-pane .commit-summary");
 
-    expect(summary.textContent).toContain(COMMITS[0]!.subject);
-    expect(summary.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
+    expect(summary.innerHTML).toBe("<p>A bucket per account.</p>");
+
+    // Read in the order it is written in: what the commit says about itself,
+    // then what it changed.
+    const diff = await drawn(container, ".details-pane .diff");
+
+    expect(
+      summary.compareDocumentPosition(diff) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// The ordinary commit, and every commit recorded before summaries were kept:
+  /// the pane is the header and the diff, exactly as it always was.
+  it("draws nothing where the commit carried no summary", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    await drawn(container, ".details-pane .diff-files");
+
+    expect(container.querySelector(".details-pane .commit-summary")).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -4050,7 +4098,7 @@ describe("the contents of a details pane", () => {
       [...nav.querySelectorAll(".contents-entry a")].map((line) =>
         line.getAttribute("title"),
       ),
-    ).toEqual(COMMIT_DIFF.diff!.paths);
+    ).toEqual(COMMIT_PANE.diff!.paths);
   });
 
   it("jumps into a fold of the commit, unfolding it first", async () => {

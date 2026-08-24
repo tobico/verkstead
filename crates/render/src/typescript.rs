@@ -18,7 +18,7 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
+    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted,
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
     ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
@@ -125,7 +125,7 @@ fn the_viewers_types_are_written_from_these() {
     // And what a session committed. The summary rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
-    CommitDiff::export_all(&config).unwrap();
+    CommitPane::export_all(&config).unwrap();
 
     // And what the finish step opened. The PR itself rides on the Conversation
     // as a pinned Event — a number, a title and a URL; what is *on* it is its

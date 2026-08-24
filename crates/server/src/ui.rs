@@ -86,11 +86,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/screen/{event}/attach",
             get(crate::screen::attach),
         )
-        // And one commit's diff, fetched the same way and for the same reason —
-        // see [`commit_diff`].
+        // And one commit — its summary and its diff — fetched the same way and
+        // for the same reason; see [`commit_pane`].
         .route(
             "/api/ui/conversations/{id}/commit/{event}",
-            get(commit_diff),
+            get(commit_pane),
         )
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
@@ -953,19 +953,21 @@ async fn screen(
     }
 }
 
-/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
-/// rendered.
+/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's summary and
+/// its diff, rendered.
 ///
 /// Its own request rather than a field on the Conversation, exactly as a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is worth reading when somebody opens the one Event it
-/// belongs to.
+/// moved, and a commit is worth reading whole when somebody opens the one Event
+/// it belongs to.
 ///
-/// Read out of the repository rather than out of the store. The commit is in git
-/// — that is what a commit *is* — and keeping a second copy of every patch would
-/// be a database growing with the work rather than with the record of it. What
-/// the store holds is the line the Timeline draws.
-async fn commit_diff(
+/// The diff is read out of the repository rather than out of the store. The
+/// commit is in git — that is what a commit *is* — and keeping a second copy of
+/// every patch would be a database growing with the work rather than with the
+/// record of it. The summary is the other way about: the sweep kept it when it
+/// recorded the commit, so it comes off the Event beside the line the Timeline
+/// draws.
+async fn commit_pane(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
 ) -> HttpResponse {
@@ -996,8 +998,8 @@ async fn commit_diff(
         }
     };
 
-    let patch = match tokio::task::spawn_blocking(move || crate::commits::patch(&repo, &commit.sha))
-        .await
+    let sha = commit.sha.clone();
+    let patch = match tokio::task::spawn_blocking(move || crate::commits::patch(&repo, &sha)).await
     {
         Ok(patch) => patch,
         Err(error) => {
@@ -1013,7 +1015,11 @@ async fn commit_diff(
         return no_such_commit();
     };
 
-    Json(verkstead_render::commit_diff(&patch)).into_response()
+    Json(verkstead_render::commit_pane(
+        commit.summary.as_deref(),
+        &patch,
+    ))
+    .into_response()
 }
 
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
