@@ -11,13 +11,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn, addressed_comments,
-    ask, finish_wrap_up, fix_attempts, forget_addressed_comments, forget_fix_attempts,
-    implement_again, last_proposal, load_conversation, load_response, load_set, open_database,
-    pick_direction, record_addressed_comments, record_commit, record_fix_attempt,
-    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up, split_out,
-    start_conversation, start_grilling, submit_response, timeline, unlanded_batch_fixes,
-    unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
+    Archiving, Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn,
+    addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
+    forget_fix_attempts, implement_again, last_proposal, load_conversation, load_response,
+    load_set, open_database, pick_direction, record_addressed_comments, record_commit,
+    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
+    settle_wrap_up, split_out, start_conversation, start_grilling, submit_response, timeline,
+    unlanded_batch_fixes, unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -474,6 +474,54 @@ async fn the_review_is_found_by_the_block_it_carries() {
     let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
 
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
+}
+
+/// A proposal closed unanswered is one nothing is left to act on, so it stops
+/// counting as this wrap's review.
+///
+/// Which is what lets a review be run again after the session that asked has
+/// gone: Verkstead closes the Set nobody is behind, and the branch is read afresh
+/// by a session whose findings are then the review's. A closed Set left counting
+/// would make that second reading a review nothing recognised — and the first,
+/// which nobody will ever answer, the one every later question was asked of.
+#[tokio::test]
+async fn a_proposal_closed_unanswered_stops_being_the_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let settlements = Settlements::new(8);
+    let id = wrapping(&pool).await;
+
+    let abandoned = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(review_asked(&pool, id).await.unwrap(), Some(abandoned.id));
+
+    assert!(
+        matches!(
+            archive_set(&pool, &settlements, abandoned.id)
+                .await
+                .unwrap(),
+            Archiving::Archived(_),
+        ),
+        "the Set nobody is behind is closed unanswered",
+    );
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "so this wrap reads as one nobody has reviewed",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "and as one nothing has been proposed about",
+    );
+
+    let read_again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(read_again.id),
+        "and the findings of the session that read the branch again are the review's",
+    );
 }
 
 /// A fix as it lands: a commit on the branch, which is what the sweep records.

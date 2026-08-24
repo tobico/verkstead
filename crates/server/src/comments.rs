@@ -44,6 +44,13 @@
 //! and read every comment as new would dispatch a session about feedback that
 //! was addressed yesterday.
 //!
+//! Written down as a session is dispatched rather than as it finishes, which
+//! buys that at a price: a batch whose session is gone leaves a record saying
+//! somebody dealt with what was said and nobody who did. So nothing is settled
+//! here until that has been asked about — see
+//! [`crate::responding::unattended`], which is where a proposal nobody is left
+//! behind is picked up.
+//!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it does
 //! not unsettle, and it dispatches nothing. That is the only honest reading of
 //! it: Verkstead does not know what has been said, and *nobody said anything* is
@@ -124,6 +131,21 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
             tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
             return Watching::Again;
         }
+    }
+
+    // Before anything is read of GitHub or settled here: a batch session that
+    // asked and is no longer running has left the human a question with nobody
+    // behind it, and the comments it was dispatched about written down as dealt
+    // with. Settling over that would take the Conversation to Done with the Set
+    // still open — see [`crate::responding::unattended`], which sees to whatever
+    // is outstanding and says whether it found anything.
+    //
+    // Asked only once the review is over, because until then the newest proposal
+    // is the review's own Set and seeing to that is [`crate::review`]'s.
+    if reviewed(state, conversation_id).await
+        && crate::responding::unattended(state, conversation_id).await
+    {
+        return Watching::Again;
     }
 
     let opened = match store::pull_request(&state.pool, conversation_id).await {

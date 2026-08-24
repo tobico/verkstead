@@ -75,6 +75,27 @@
 //! an Interruption like every other, and retrying it is the review over again in
 //! a session as fresh as the first.
 //!
+//! **And nothing the human was asked is allowed to go quietly either.** The
+//! propose-then-fix shape has one session hold the whole of a review, its ask
+//! included, so a session that goes between the asking and the answering leaves a
+//! Set on the Timeline with nobody behind it: nothing is coming to read what the
+//! human says, and no other session is ever handed somebody else's ask. Two
+//! things arrive there — a session that fell over mid-ask, and a server that came
+//! back up over a wrap-up whose review was still waiting — and both are the same
+//! fact, because a session lives and dies with the process that started it.
+//!
+//! So the review is asked about every time anything starts a wrap-up's watchers,
+//! rather than only where nobody has read the branch. A review that asked and has
+//! no session is picked up by what the record says about its Set. **Answered**,
+//! and the deciding is done: what is left is the doing, dispatched exactly as a
+//! retry of the owed-fixes Interruption dispatches it, with nobody asked for
+//! anything. **Unanswered**, and there is nothing to carry out and nobody to
+//! carry it out — so the Set is closed unanswered, saying on the Timeline that
+//! the question is off, and the run stops at an Interruption whose retry is the
+//! branch read again. Closing it is also what makes that retry work: a Set left
+//! standing would still be this wrap's review, and the fresh reading would be a
+//! second review nothing recognised.
+//!
 //! **One agent in one Worktree**, which is what the turns are for. The checks are
 //! being watched at the same time as this runs, and a fix session dispatched
 //! mid-review would end the review where it stood — starting a session for a
@@ -98,18 +119,24 @@ use crate::AppState;
 use crate::runner::Reviewed;
 use crate::store;
 
-/// Review `conversation_id`'s branch, where it has not been reviewed already.
+/// See to `conversation_id`'s review: read the branch where nobody has, and pick
+/// up what a review whose session is gone left behind.
 ///
-/// Returns as soon as there is nothing to do — a review that has already asked or
-/// already settled, a Conversation that has stopped wrapping up, or a run that is
-/// blocked on the human. None of those is a failure: this is spawned by
-/// everything that might have left a wrap-up without a review, and most of the
-/// time one of them has already seen to it.
+/// Both, because this is spawned by everything that might have left a wrap-up
+/// with no review running — the finish step, a server coming back up, either
+/// wrap-up Interruption being retried — and *no review running* is two different
+/// situations. One is a branch nobody has read. The other is a review that asked
+/// and whose session is no longer there to act on the answers, which no amount
+/// of waiting resolves by itself.
+///
+/// Returns as soon as there is neither — a review already settled, a Conversation
+/// that has stopped wrapping up, or a run blocked on the human. None of those is
+/// a failure: most of the time something else has already seen to it.
 ///
 /// Nothing is refused for. This runs unattended with nobody watching, and what it
 /// has to say it says on the Timeline or in the log.
 pub(crate) async fn run(state: AppState, conversation_id: i64) {
-    if !wanted(&state, conversation_id).await {
+    if matches!(wanted(&state, conversation_id).await, Wanted::Nothing) {
         return;
     }
 
@@ -118,16 +145,25 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     // than a reason to give up. It may be a long wait — and once taken, it is
     // held for as long as the review session lives, which is across the human's
     // answering too. That is the shape of one agent in one Worktree.
+    //
+    // It is also what tells a review whose session is gone from one whose session
+    // is sitting on its ask: a live review holds this, so anything that gets it
+    // is looking at a Worktree with no agent in it.
     let _turn = state.sessions.turn(conversation_id).await;
 
     // Asked again on the other side of the wait, because everything it asked
     // about moves while it waits: the fix session that held the Worktree may have
-    // been the last of its attempts, and the Conversation may have been aborted
-    // out from under this altogether.
-    if !wanted(&state, conversation_id).await {
-        return;
+    // been the last of its attempts, the review may have finished under it, and
+    // the Conversation may have been aborted out from under this altogether.
+    match wanted(&state, conversation_id).await {
+        Wanted::Nothing => {}
+        Wanted::Review => reading(&state, conversation_id).await,
+        Wanted::Unattended(set_id) => unattended(&state, conversation_id, set_id).await,
     }
+}
 
+/// Run the one review session a wrap-up gets, and see out whatever it leaves.
+async fn reading(state: &AppState, conversation_id: i64) {
     tracing::info!(
         conversation_id,
         "the work is on a pull request nobody has read, so a review session is starting"
@@ -138,15 +174,61 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     // while this holds the Worktree, and one that lands from here on is the next
     // batch session's. Recorded as addressed as this session is dispatched, so
     // nothing is later sent to do ungated what the Set is about to propose.
-    let said = crate::comments::for_the_review(&state, conversation_id).await;
+    let said = crate::comments::for_the_review(state, conversation_id).await;
 
-    match crate::runner::review(&state, conversation_id, said).await {
-        Reviewed::Done => over(&state, conversation_id, None).await,
+    match crate::runner::review(state, conversation_id, said).await {
+        Reviewed::Done => over(state, conversation_id, None).await,
         Reviewed::Stopped { how, writing } => {
-            over(&state, conversation_id, Some((how, writing))).await
+            over(state, conversation_id, Some((how, writing))).await
         }
         Reviewed::Nothing => {}
     }
+}
+
+/// Pick up a review that put its findings to the human and whose session is no
+/// longer there to act on the answers.
+///
+/// The Worktree is this task's — see [`run`] — so there is no agent left in it,
+/// and the Set on `set_id` is a proposal with nobody behind it. What that is owed
+/// is a fact about whether the human got to it first.
+///
+/// **Answered**, and the deciding is done: what is left is the doing, which is
+/// the same session a retried [`dropped`] runs and is dispatched here without
+/// anybody being asked for anything. A Response with nothing owed against it is a
+/// review that got everything done and lost only its own last breath, so it
+/// settles.
+///
+/// **Unanswered**, and there is nothing here that can be carried out: the
+/// decisions were never made, and the session that would have read them is gone.
+/// That stops the run — see [`abandoned`].
+async fn unattended(state: &AppState, conversation_id: i64, set_id: i64) {
+    if unanswered(state, set_id).await {
+        return abandoned(state, conversation_id, set_id, None).await;
+    }
+
+    let owed = owing_now(state, conversation_id).await;
+
+    if owed.nothing() {
+        tracing::info!(
+            conversation_id,
+            set_id,
+            "the review's findings were answered and nothing is owed on them, so the \
+             wrap-up carries on without the session that asked"
+        );
+
+        return carried_out(state, conversation_id).await;
+    }
+
+    tracing::info!(
+        conversation_id,
+        set_id,
+        fixes = owed.fixes.len(),
+        splits = owed.splits.len(),
+        "the review was answered and the session that would have acted on it is gone, \
+         so a session is starting on the doing alone"
+    );
+
+    land(state, conversation_id, owed).await
 }
 
 /// The review session is over: settle the review, send the work back to be
@@ -171,6 +253,17 @@ async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(Strin
         };
 
         return dropped(state, conversation_id, &owed, how, writing).await;
+    }
+
+    // Owed nothing, which is two very different things: everything decided was
+    // carried out, or nothing was ever decided. A session that put its findings
+    // up and then went — cleanly or otherwise — is owed nothing because the
+    // human never got to answer, and settling there would leave their Set on the
+    // Timeline with nobody to read what they said.
+    if let Some(set_id) = asked(state, conversation_id).await {
+        if unanswered(state, set_id).await {
+            return abandoned(state, conversation_id, set_id, ended_badly).await;
+        }
     }
 
     if let Some((how, writing)) = ended_badly {
@@ -271,36 +364,27 @@ async fn built_instead(state: &AppState, conversation_id: i64) {
 /// Review it again because the human asked for it — or land what it was answered
 /// and never landed, which is the other thing a retry here can mean.
 ///
-/// Which of the two is a fact about the record rather than something to choose:
-/// findings the human decided about with nothing to show for it are a run that
-/// stopped between the deciding and the doing, and what a retry owes there is the
-/// doing alone — the fixes committed, the split-out findings written as a
-/// backlog, or both. Everything else is the review over again, in a session as
-/// fresh as the first.
+/// Which of the two is a fact about the record rather than something to choose,
+/// and it is not chosen here: putting the wrap-up back under watch is the whole
+/// of a retry, because [`run`] asks that question every time it starts and is
+/// the one place that answers it. Findings the human decided about with nothing
+/// to show for them are the doing alone — the fixes committed, the split-out
+/// findings written as a backlog, or both. Everything else is the review over
+/// again, in a session as fresh as the first: the Set an abandoned review left
+/// behind was closed as the Interruption was raised, so there is nothing left
+/// standing for a fresh reading of the branch to be mistaken for.
 ///
-/// The wrap-up's other half goes back under watch either way. The checks stopped
+/// The wrap-up's other half goes back under watch with it. The checks stopped
 /// being watched when this Interruption was raised — nothing advances past an
 /// open one — so a retry that started only the review would leave the pull
 /// request's checks unwatched for the rest of the wrap-up.
 pub(crate) async fn retried(state: AppState, conversation_id: i64) {
-    crate::wrapping::watching(&state, conversation_id);
-
-    let owed = owing_now(&state, conversation_id).await;
-
-    if owed.nothing() {
-        tracing::info!(conversation_id, "the review is being run again");
-        return;
-    }
-
     tracing::info!(
         conversation_id,
-        fixes = owed.fixes.len(),
-        splits = owed.splits.len(),
-        "the review was answered and never acted on, so a session is starting on the \
-         doing alone"
+        "a wrap-up's review was retried, so the whole of it goes back under watch"
     );
 
-    land(state, conversation_id, owed).await
+    crate::wrapping::watching(&state, conversation_id);
 }
 
 /// Do what the review was answered and never did, in one session that does
@@ -317,31 +401,21 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
 /// matters here: everything the human decided about, carried out on one branch by
 /// one agent, once.
 ///
-/// The Worktree is taken for it like any other session's, so a red check going
-/// red mid-fix queues behind this rather than ending it.
+/// The caller is holding the Conversation's Turn, so a red check going red
+/// mid-fix queues behind this rather than ending it — and the Conversation was
+/// read as still wrapping up on the far side of that wait, which is what says
+/// there is anywhere to work at all.
 ///
 /// Asked of the record again afterwards, exactly as it was the first time: a fix
 /// session that landed nothing has left the same work owed, and letting that one
 /// through would be the failure this whole path exists to close.
-async fn land(state: AppState, conversation_id: i64, owed: Owing) {
-    let _turn = state.sessions.turn(conversation_id).await;
+async fn land(state: &AppState, conversation_id: i64, owed: Owing) {
+    let writing = crate::runner::address(state, conversation_id, &feedback(&owed)).await;
 
-    // Asked on the other side of the wait, for the reason the review asks twice:
-    // a Conversation aborted while this queued has nowhere left to work.
-    if !crate::wrapping::still_going(&state, conversation_id).await {
-        tracing::info!(
-            conversation_id,
-            "the Conversation stopped wrapping up, so what it owed was not dispatched"
-        );
-        return;
-    }
-
-    let writing = crate::runner::address(&state, conversation_id, &feedback(&owed)).await;
-
-    let owed = owing_now(&state, conversation_id).await;
+    let owed = owing_now(state, conversation_id).await;
 
     if !owed.nothing() {
-        return dropped(&state, conversation_id, &owed, None, writing).await;
+        return dropped(state, conversation_id, &owed, None, writing).await;
     }
 
     tracing::info!(
@@ -349,7 +423,7 @@ async fn land(state: AppState, conversation_id: i64, owed: Owing) {
         "what the review was owed has landed, so the wrap-up carries on"
     );
 
-    carried_out(&state, conversation_id).await
+    carried_out(state, conversation_id).await
 }
 
 /// What the fix session is told: every finding the human decided about, in the
@@ -541,35 +615,38 @@ async fn backlog(state: &AppState, conversation_id: i64) -> bool {
     }
 }
 
-/// Whether there is a review to run at all.
-///
-/// Four ways there is not, and none of them is a failure: the Conversation has
-/// stopped wrapping up, the review has already asked, the review has already
-/// settled, or the run is blocked on the human — the same rule the runner and the
-/// checks watcher keep, that nothing is launched while an Interruption is open.
-///
-/// A store that will not answer reads as *no*, which is the right way round for
-/// the one thing this decides: on the other side of it is an agent being let
-/// loose in a Worktree.
-async fn wanted(state: &AppState, conversation_id: i64) -> bool {
-    if !crate::wrapping::still_going(state, conversation_id).await {
-        return false;
-    }
+/// What [`run`] has to do about this Conversation's review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wanted {
+    /// Nothing at all, which is the ordinary answer and never a failure: the
+    /// Conversation has stopped wrapping up, the review has already settled, or
+    /// the run is blocked on the human — the same rule the runner and the checks
+    /// watcher keep, that nothing is launched while an Interruption is open.
+    Nothing,
 
-    match store::review_asked(&state.pool, conversation_id).await {
-        Ok(None) => {}
-        Ok(Some(set_id)) => {
-            tracing::debug!(
-                conversation_id,
-                set_id,
-                "the review has already put its findings to the human"
-            );
-            return false;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether the review had asked failed");
-            return false;
-        }
+    /// Nobody has read the branch, so a review session reads it.
+    Review,
+
+    /// The review put its findings up on this Set and nothing is running for it.
+    /// Whether that is work to dispatch or a run to stop is [`unattended`]'s to
+    /// say.
+    Unattended(i64),
+}
+
+/// Which of the three there is, asked of the record.
+///
+/// The order matters and is the order the questions rule each other out in: a
+/// Conversation that is not wrapping up has no wrap-up to see to, a review that
+/// has settled is over whatever Sets are on the Timeline, and an open
+/// Interruption stops everything below it. Only then is the Set worth looking
+/// for, because only then does its being there mean anything.
+///
+/// A store that will not answer reads as *nothing*, which is the right way round
+/// for the one thing this decides: on the other side of it is an agent being let
+/// loose in a Worktree.
+async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
+    if !crate::wrapping::still_going(state, conversation_id).await {
+        return Wanted::Nothing;
     }
 
     match store::wrap_up_settled(&state.pool, conversation_id).await {
@@ -578,28 +655,150 @@ async fn wanted(state: &AppState, conversation_id: i64) -> bool {
                 conversation_id,
                 "this Conversation has been reviewed already"
             );
-            return false;
+            return Wanted::Nothing;
         }
         Ok(_) => {}
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what a wrap-up had settled failed");
-            return false;
+            return Wanted::Nothing;
         }
     }
 
     match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(None) => true,
+        Ok(None) => {}
         Ok(Some(event_id)) => {
             tracing::info!(
                 conversation_id,
                 event_id,
-                "the run is blocked on the human, so no review was started"
+                "the run is blocked on the human, so nothing was started for the review"
             );
-            false
+            return Wanted::Nothing;
         }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            false
+            return Wanted::Nothing;
+        }
+    }
+
+    match asked(state, conversation_id).await {
+        Some(set_id) => Wanted::Unattended(set_id),
+        None => Wanted::Review,
+    }
+}
+
+/// Which Set this Conversation's review put its findings on, where it has put
+/// them anywhere.
+///
+/// A store that will not answer reads as *it never asked*, which is the same way
+/// round the rest of this module reads one: everything on the other side of a
+/// `None` here waits on the Worktree and asks the record again.
+async fn asked(state: &AppState, conversation_id: i64) -> Option<i64> {
+    match store::review_asked(&state.pool, conversation_id).await {
+        Ok(asked) => asked,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether the review had asked failed");
+            None
+        }
+    }
+}
+
+/// Whether a Set is still waiting on the human — neither answered nor closed.
+///
+/// A store that will not answer reads as *unanswered*, which is the right way
+/// round for what hangs on it: an unanswered Set stops the run and an answered
+/// one lets a wrap-up settle, and a database that will not say which is not
+/// grounds for the second.
+///
+/// Shared with the batch half, which asks it of its own proposals — see
+/// [`crate::responding`].
+pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
+    match store::settlement(&state.pool, set_id).await {
+        Ok(settled) => settled.is_none(),
+        Err(error) => {
+            tracing::error!(error = ?error, set_id, "reading whether a Set had been answered failed");
+            true
+        }
+    }
+}
+
+/// Stop the run: the review's findings are up and the session that would have
+/// acted on them is gone.
+///
+/// **The Set is closed as this is raised**, which is the deliberate half of it. A
+/// Set left standing would be a question whose answer nothing would ever read —
+/// the session that asked it is not there to be woken, and no other session is
+/// ever handed somebody else's ask. Closing it is Verkstead reaching for the
+/// archive on the human's behalf because it knows something they cannot see,
+/// exactly as a relaunched grilling closes what its dead session left open — see
+/// [`crate::grillings`]. And it is what makes the retry mean something: with
+/// nothing left standing, a fresh reading of the branch is recognised as this
+/// wrap's review rather than mistaken for a second one.
+///
+/// `ended_badly` is how the session went where this is being raised as one ends
+/// and it did not end well, with the Timeline Event it was printing into — which
+/// is where a review that fell over mid-ask says why. Absent where the session
+/// was already gone before anybody looked, which is what a restarted server
+/// finds.
+///
+/// The three remedies all mean something. Retry is the branch read again in a
+/// session as fresh as the first, take over is the human doing it, and abort ends
+/// the run with the branch exactly as it stands.
+async fn abandoned(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    ended_badly: Option<(String, i64)>,
+) {
+    closed(state, conversation_id, set_id).await;
+
+    let left = "the review put its findings to you and the session that was to act on \
+                them is gone, so its questions have been closed unanswered. Retrying \
+                reads the branch again.";
+
+    let (how, writing) = match ended_badly {
+        Some((how, writing)) => (format!("{how}, and {left}"), Some(writing)),
+        None => (left.to_owned(), None),
+    };
+
+    if let Err(error) = crate::interruptions::raise(
+        state,
+        conversation_id,
+        store::Step::Review,
+        "acting on the answers to what the review found",
+        &how,
+        writing,
+    )
+    .await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "a review's findings were left with nobody to act on them and the \
+             Interruption saying so could not be raised"
+        );
+    }
+}
+
+/// Close a proposal nobody is left to act on, so that nothing waits on it and
+/// nothing counts it.
+///
+/// Shared with the batch half, which closes its own the same way and for the same
+/// reason — see [`crate::responding`].
+pub(crate) async fn closed(state: &AppState, conversation_id: i64, set_id: i64) {
+    match store::archive_set(&state.pool, &state.settlements, set_id).await {
+        Ok(store::Archiving::Archived(_)) => tracing::info!(
+            conversation_id,
+            set_id,
+            "the session that asked is gone, so its questions are closed unanswered"
+        ),
+        Ok(other) => tracing::info!(
+            conversation_id,
+            set_id,
+            outcome = ?other,
+            "a proposal nobody was left to act on was not closed"
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, set_id, "closing a proposal nobody was left to act on failed");
         }
     }
 }

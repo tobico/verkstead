@@ -692,6 +692,18 @@ fn green_until(landed: &Path) -> String {
     )
 }
 
+/// One whose suite is still running until `started` is there and green once it
+/// is, which is how a test keeps the checks out of the way until the thing it is
+/// about has begun — and then lets them settle, so that what stops the wrap-up
+/// finishing is the thing being asked about and nothing else.
+fn green_after(started: &Path) -> String {
+    format!(
+        r#"    if [ -s {started} ]; then status=COMPLETED; how=SUCCESS; else status=IN_PROGRESS; how=; fi
+    printf '{{"statusCheckRollup":[{{"__typename":"CheckRun","name":"Rust","status":"%s","conclusion":"%s","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}}]}}' "$status" "$how""#,
+        started = quoted(started),
+    )
+}
+
 /// And one that cannot be asked about the checks at all, which is how a test
 /// keeps a wrap-up from settling while it watches what the comments do.
 const CHECKS_UNANSWERABLE: &str = r#"    printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
@@ -3898,6 +3910,10 @@ const RESPOND_THEN_VANISH: &str = "    printf 'reading what was said\n'\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'that is what I would have done\n'";
 
+/// One that reads what was said and then waits on the human, which is what a
+/// batch session blocked on `verkstead ask` looks like from outside.
+const RESPOND_THEN_WAIT: &str = "    printf 'reading what was said\n'\n    sleep 300";
+
 /// What a batch session puts to the human, as the bundled responding skill
 /// writes it: a Question per comment it would do something about, and the
 /// `review` block that says which Answer to each means *do it*.
@@ -4321,6 +4337,267 @@ async fn a_review_session_that_dies_stops_the_run_and_is_run_again_on_a_retry() 
         prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
         2,
         "the review that failed, and the one the retry ran",
+    );
+}
+
+/// A review session that dies **after** putting its findings up leaves a Set
+/// nobody is behind, and that is not something to wait out.
+///
+/// The propose-then-fix shape has one session hold the whole of a review, its ask
+/// included, so a session that goes between the asking and the answering takes
+/// the only reader of that Set with it. Nothing is coming to read what the human
+/// writes there, and no other session is ever handed somebody else's ask — so the
+/// questions are closed as the run stops, which says on the Timeline that they
+/// are off, and the retry is the branch read again rather than a wrap-up sitting
+/// on a review that can never finish.
+#[tokio::test]
+async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_branch_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let asked = spill.path().join("asked");
+    let mended = spill.path().join("mended");
+
+    // Puts its findings up and then falls over on its own ask — and once whatever
+    // the human went off and did about it is done, reads the branch and finds
+    // nothing.
+    let review = format!(
+        "    if [ -e {mended} ]; then\n        \
+             printf 'I read the whole branch and found nothing worth raising\n'\n    \
+         else\n        \
+             printf 'reading the branch\n'\n        \
+             while [ ! -e {asked} ]; do sleep 0.1; done\n        \
+             printf 'gh: the connection dropped\n'\n        \
+             exit 1\n    \
+         fi",
+        asked = quoted(&asked),
+        mended = quoted(&mended),
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The findings go up, and the session that would have read the answers dies
+    // where it stood.
+    let set = fixture.ask(REVIEW).await;
+    std::fs::write(&asked, "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.how.contains("closed unanswered"),
+        "the card says the questions are off: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("exited with status 1"),
+        "beside how the session went: {stopped:?}",
+    );
+    assert!(
+        stopped.tail.contains("the connection dropped"),
+        "with the tail of what it last said, which is where it says why: {stopped:?}",
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and a review nobody answered settles nothing",
+    );
+
+    let standing = sets(&fixture.view().await)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the dead session left open is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        "with nothing left for the human to answer into: {standing:?}",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human",
+    );
+
+    std::fs::write(&mended, "").unwrap();
+
+    assert_eq!(
+        fixture.settle(stopped.id, "Retry", "").await,
+        RemedySettled::Settled,
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the retry never reviewed anything, so the wrap-up never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        2,
+        "the review that died on its ask, and the one the retry ran",
+    );
+    assert!(
+        !dispatched.exists(),
+        "with nothing dispatched to fix findings nobody ever decided about: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// A server that comes back up over a review still sitting on its ask does not
+/// leave it there.
+///
+/// A session lives and dies with the process that started it, so a restart is the
+/// same fact a crash is: the findings are up and nothing is behind them. Nothing
+/// notices that by itself — the checks, the comments and the settling watcher are
+/// all registered as driving the Conversation, so the stall sweep sees a wrap-up
+/// being driven and the review's own entry point used to read *already asked* as
+/// *nothing to do*. So the restart is what asks, and what it finds unanswered it
+/// closes and stops the run over.
+#[tokio::test]
+async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_leaving_it() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    // Green all the way through, so that the only thing between this wrap-up and
+    // Done is the review — which is what makes leaving it unattended a
+    // Conversation that finishes with the human's questions still open.
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT);
+    let gh = gh_about(GREEN, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    // A second server over the same database, which is what a restart is: the
+    // session idling on that ask does not exist as far as it is concerned.
+    let _restarted = fixture.restarted(&stub, &gh).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("the review"),
+        "the step is named as the half that failed: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("closed unanswered"),
+        "and the card says the questions are off: {stopped:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "the Conversation did not reach Done over a Set nobody answered",
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "and nothing settled the review it never finished",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the gone session left open is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        "with nothing left for the human to answer into: {standing:?}",
+    );
+}
+
+/// And one that comes back up over a review whose findings *were* answered picks
+/// the doing up itself, without asking anybody anything.
+///
+/// The decisions are made and on the record — the findings the human accepted are
+/// on the Set and their words are on the Response — so what the lost session took
+/// with it is only the carrying out. That is the same one-session-for-the-lot the
+/// review would have done and the same one a retried Interruption runs, and there
+/// is nothing here to stop the run over.
+#[tokio::test]
+async fn a_restart_over_an_answered_review_lands_the_fixes_without_asking_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_WAIT);
+
+    let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    // And the process that was going to read those answers goes away.
+    let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
+
+    let told = until_written(&dispatched).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one session for the lot of them, rather than one per finding: {told}",
+    );
+    assert!(
+        told.contains("Reset the counter as the window rolls")
+            && told.contains("Keep the signature."),
+        "handed the accepted finding and what they said beside it: {told}",
+    );
+    assert!(
+        !told.contains("Collapse the two clocks"),
+        "and not the one they declined: {told}",
+    );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the fixes landed and the review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        interruptions(&view).is_empty(),
+        "nothing was asked about work the human had already decided: {:?}",
+        interruptions(&view),
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        1,
+        "and nothing read the branch a second time: the deciding was over",
     );
 }
 
@@ -5486,6 +5763,96 @@ async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
     );
 }
 
+/// What a server that comes back up owes a batch's proposal nobody is behind: the
+/// same thing it owes the review's.
+///
+/// This is the bug the addressing-as-dispatched trade opens. The comments are
+/// written down as dealt with the moment a batch session is dispatched, so that a
+/// restart does not dispatch about them twice — which means a batch session lost
+/// to a restart leaves a record saying somebody saw to what was said and a Set
+/// nobody is behind. Left alone, the watcher finds nothing new, settles the
+/// comments, and the wrap-up reaches Done with the human's questions still open.
+///
+/// So it is asked about instead: the questions are closed, because nothing is
+/// coming to read an answer to them, what was said goes back to being unread so
+/// that the human's feedback outlives the session that lost it, and the run stops
+/// where they can see it.
+#[tokio::test]
+async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_was_said_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    // Green all the way through, so that the only thing between this wrap-up and
+    // Done is what was said — which is what makes an unattended batch a
+    // Conversation that finishes with the questions still open.
+    let stub = a_backlog_then_answers_comments(&reviews, &dispatched, &batches, RESPOND_THEN_WAIT);
+    let gh = gh_about_once(&green_after(&batches), &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
+    let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
+
+    // A second server over the same database, which is what a restart is: the
+    // session idling on that ask does not exist as far as it is concerned.
+    let _restarted = fixture.restarted(&stub, &gh).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("the pull request's comments"),
+        "the step is named as the half that failed: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("closed unanswered"),
+        "and the card says the questions are off: {stopped:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Wrapping,
+        "the Conversation did not reach Done over a Set nobody answered",
+    );
+    assert!(
+        !comments_settled(&fixture).await,
+        "and nothing settled what was said, because nobody dealt with it",
+    );
+
+    let standing = sets(&view)
+        .into_iter()
+        .find(|asked| asked.set_id == set)
+        .expect("the Set the gone session left open is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        "with nothing left for the human to answer into: {standing:?}",
+    );
+    assert!(
+        addressed(&fixture).await.is_empty(),
+        "and what was said is unread again, so a retry is a session about the same \
+         words rather than one about nothing",
+    );
+}
+
+/// Which of a pull request's comments Verkstead has recorded as dealt with.
+async fn addressed(fixture: &Grilling) -> Vec<String> {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let addressed = verkstead_server::store::addressed_comments(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    addressed
+}
+
 /// A batch that was answered and never acted on does not go quietly either.
 ///
 /// The review's net, one turn later and for the same reason: the session that
@@ -5582,12 +5949,20 @@ async fn a_batchs_accepted_fixes_that_never_landed_stop_the_run_and_are_fixed_on
 
     fixture.until(|view| (fixes(view) == 1).then_some(())).await;
 
-    let view = fixture.view().await;
+    // What was said goes back to settled once the fixes are on the branch: a
+    // batch with work owed on it is a wrap-up with something left unaddressed,
+    // whatever the record of dispatched-for comments says, and nothing re-reads
+    // them to get there.
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the fixes landed and what was said never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 
-    assert!(
-        comments_settled(&fixture).await,
-        "and what was said is settled: the batch was addressed as it was dispatched",
-    );
+    let view = fixture.view().await;
 
     assert_eq!(
         fixes(&view),

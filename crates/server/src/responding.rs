@@ -37,6 +37,29 @@
 //! forgotten again as it is raised, so a retry is the batch over again in a
 //! session as fresh as the first.
 //!
+//! **And nothing the human was asked goes quietly either**, which is the review's
+//! net once more and the failure the addressing-as-dispatched trade opens. The
+//! comments are written down as dealt with before the session that deals with
+//! them has done anything, so a batch session that goes between the asking and
+//! the answering leaves a record saying somebody saw to what was said and a Set
+//! nobody is behind. Left alone, the watcher finds nothing new, settles the
+//! comments, and the wrap-up reaches Done with the human's questions still open.
+//!
+//! A restart is where that happens, because a session lives and dies with the
+//! process that started it. What it owes an open batch proposal is what the
+//! review owes its own: **answered**, and the fixes are landed by a fresh session
+//! with nobody asked for anything; **unanswered**, and there is nothing to carry
+//! out and nobody to carry it out, so the Set is closed unanswered and the run
+//! stops at an Interruption.
+//!
+//! What was said goes back to being unread as that is raised. The record cannot
+//! say which comments the dead session was dealing with and which the review
+//! folded in before it, so every one of them is read again — a comment read twice
+//! costs a session's work, and one dropped costs the human theirs. Which is safe
+//! because of what a batch session is: it reads the code as it now stands, and
+//! a question the commits since have answered is one it says so about and asks
+//! nothing more of.
+//!
 //! **One agent in one Worktree.** The caller holds the Conversation's Turn
 //! across the whole of a batch session, the wait on the human included, exactly
 //! as the review's caller does — see [`crate::comments::dispatch`].
@@ -90,6 +113,17 @@ async fn over(
         return dropped(state, conversation_id, &owed, how, writing).await;
     }
 
+    // Owed nothing, which is two very different things: everything the human
+    // accepted was done, or they were never asked to accept anything. A session
+    // that put its proposal up and then went — cleanly or otherwise — is owed
+    // nothing because nothing was decided, and leaving it there would settle the
+    // comments over a Set nobody is behind.
+    if let Some(set_id) = proposed(state, conversation_id).await {
+        if crate::review::unanswered(state, set_id).await {
+            return abandoned(state, conversation_id, set_id, Some(which), ended_badly).await;
+        }
+    }
+
     if let Some((how, writing)) = ended_badly {
         return stopped(state, conversation_id, which, &how, writing).await;
     }
@@ -108,38 +142,219 @@ async fn over(
 /// Answer the batch again because the human asked for it — or land what it was
 /// answered and never landed, which is the other thing a retry here can mean.
 ///
-/// Which of the two is a fact about the record rather than something to choose:
-/// proposals the human accepted with nothing committed since are a run that
-/// stopped between the deciding and the doing, and what a retry owes there is the
-/// doing alone. Everything else is the batch over again — the comments were
-/// forgotten as the Interruption was raised, so the watcher this puts back on
-/// dispatches a fresh session about the same words.
+/// Which of the two is a fact about the record rather than something to choose,
+/// and it is not chosen here: putting the wrap-up back under watch is the whole
+/// of a retry, because the comments watcher asks that question on every poll and
+/// is the one place that answers it — see [`unattended`]. Proposals the human
+/// accepted with nothing committed since are the doing alone. Everything else is
+/// the batch over again: the comments were forgotten as the Interruption was
+/// raised, so the watcher this puts back on dispatches a fresh session about the
+/// same words.
 ///
-/// The wrap-up's other halves go back under watch either way. Nothing advances
-/// past an open Interruption, so the checks stopped being watched when this one
-/// was raised, and a retry that started only the fixes would leave the pull
-/// request's checks unwatched for the rest of the wrap-up.
+/// The wrap-up's other halves go back under watch with it. Nothing advances past
+/// an open Interruption, so the checks stopped being watched when this one was
+/// raised, and a retry that started only the fixes would leave the pull request's
+/// checks unwatched for the rest of the wrap-up.
 pub(crate) async fn retried(state: AppState, conversation_id: i64) {
-    crate::wrapping::watching(&state, conversation_id);
-
-    let owed = unlanded(&state, conversation_id).await;
-
-    if owed.is_empty() {
-        tracing::info!(
-            conversation_id,
-            "what was said on the pull request is being answered again"
-        );
-        return;
-    }
-
     tracing::info!(
         conversation_id,
-        fixes = owed.len(),
-        "what was said was answered and never acted on, so a session is starting on the \
-         fixes alone"
+        "what was said on the pull request was retried, so the whole wrap-up goes back \
+         under watch"
     );
 
-    land(state, conversation_id, owed).await
+    crate::wrapping::watching(&state, conversation_id);
+}
+
+/// See to whatever a batch session that is no longer running left behind, and say
+/// whether it left anything.
+///
+/// `true` means *there is something outstanding here*, which is the comments
+/// watcher's answer to two questions at once: settle nothing, and dispatch
+/// nothing about anything new until this is dealt with. `false` is the ordinary
+/// answer and the cheap one — two reads of the record and no Worktree taken.
+///
+/// Asked of the newest proposal, which is only a batch's once the review is over:
+/// until then it is the review's own Set and seeing to that is
+/// [`crate::review`]'s. The caller keeps that rule — see
+/// [`crate::comments::once`].
+///
+/// **The Worktree is what says the session is gone.** A batch session holds the
+/// Conversation's Turn across the whole of its own life, the wait on the human
+/// included, so a Turn that cannot be taken is a session still working and
+/// nothing here to do but come back. Tried rather than waited for, because this
+/// is a poll: waiting would hold a watcher for however long the session takes.
+pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
+    let Some(set_id) = proposed(state, conversation_id).await else {
+        return false;
+    };
+
+    if unlanded(state, conversation_id).await.is_empty()
+        && !crate::review::unanswered(state, set_id).await
+    {
+        return false;
+    }
+
+    let Some(_turn) = state.sessions.try_turn(conversation_id) else {
+        tracing::debug!(
+            conversation_id,
+            set_id,
+            "a batch session is still working, so what it has asked is left to it",
+        );
+        return true;
+    };
+
+    // Said before anything else, because what wrap-up waits on is nothing said on
+    // the pull request being left unaddressed — and a batch whose session is gone
+    // is exactly that, whatever the record of dispatched-for comments says.
+    unsettle(state, conversation_id).await;
+
+    // Asked with the Worktree in hand, for the reason the review asks twice: a
+    // Conversation aborted while this looked has nowhere left to work.
+    if !crate::wrapping::still_going(state, conversation_id).await {
+        return false;
+    }
+
+    let owed = unlanded(state, conversation_id).await;
+
+    if !owed.is_empty() {
+        tracing::info!(
+            conversation_id,
+            set_id,
+            fixes = owed.len(),
+            "what was said was answered and the session that would have acted on it is \
+             gone, so a session is starting on the fixes alone"
+        );
+
+        land(state, conversation_id, owed).await;
+        return true;
+    }
+
+    abandoned(state, conversation_id, set_id, None, None).await;
+
+    true
+}
+
+/// Which Set the newest proposal on this Conversation's Timeline is, where there
+/// is one.
+///
+/// A store that will not answer reads as *nothing has been proposed*, which is
+/// the right way round for what this decides: on the other side of it is a run
+/// being stopped and an agent being let loose in a Worktree.
+async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
+    match store::last_proposal(&state.pool, conversation_id).await {
+        Ok(proposed) => proposed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what was last put to the human failed");
+            None
+        }
+    }
+}
+
+/// Stop the run: a batch session's proposal is up and nobody is left to act on
+/// it.
+///
+/// The Set is closed as this is raised, for the reason the review closes its own
+/// — a question whose answer nothing would read is one to take off the Timeline
+/// rather than leave standing. And what was said goes back to being unread with
+/// it, so that the human's feedback outlives the session that lost it and a retry
+/// is a fresh session about the same words.
+///
+/// `which` is the batch, where the caller is the driver that dispatched it and
+/// therefore knows. `None` is a caller that cannot know — a server that came back
+/// up over somebody else's batch — and every comment on the pull request is read
+/// again there, because the record does not say which of them were this batch's
+/// and which the review folded in before it. A comment read twice costs a
+/// session's work and one dropped costs the human theirs, and a batch session
+/// reads the code as it now stands: a question the commits since have answered is
+/// one it says so about and asks nothing more of.
+///
+/// Forgotten before the Interruption is raised, exactly as [`stopped`] forgets
+/// them, so that a forgetting that fails leaves the run stopped rather than
+/// quietly going round again.
+///
+/// `ended_badly` is how the session went where this is being raised as one ends
+/// and it did not end well, with the Timeline Event it was printing into.
+///
+/// The three remedies all mean something: answer what was said again, read the
+/// comments yourself, or end the run.
+async fn abandoned(
+    state: &AppState,
+    conversation_id: i64,
+    set_id: i64,
+    which: Option<&[String]>,
+    ended_badly: Option<(String, i64)>,
+) {
+    crate::review::closed(state, conversation_id, set_id).await;
+
+    forget(state, conversation_id, which).await;
+    unsettle(state, conversation_id).await;
+
+    let left = "a session read what was said on the pull request and put what it would \
+                do to you, and it is gone, so its questions have been closed unanswered. \
+                Retrying reads what was said again.";
+
+    let (how, writing) = match ended_badly {
+        Some((how, writing)) => (format!("{how}, and {left}"), Some(writing)),
+        None => (left.to_owned(), None),
+    };
+
+    if let Err(error) = crate::interruptions::raise(
+        state,
+        conversation_id,
+        store::Step::Comments,
+        "acting on the answers to what was proposed about the pull request's comments",
+        &how,
+        writing,
+    )
+    .await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            "a batch session's proposal was left with nobody to act on it and the \
+             Interruption saying so could not be raised"
+        );
+    }
+}
+
+/// Put comments back to being unread: the batch's own, or every one of them where
+/// the caller cannot say which those were.
+async fn forget(state: &AppState, conversation_id: i64, which: Option<&[String]>) {
+    let all;
+
+    let which = match which {
+        Some(which) => which,
+        None => match store::addressed_comments(&state.pool, conversation_id).await {
+            Ok(read) => {
+                all = read;
+                &all
+            }
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, "reading which comments had been dispatched for failed");
+                return;
+            }
+        },
+    };
+
+    if let Err(error) = store::forget_addressed_comments(&state.pool, conversation_id, which).await
+    {
+        tracing::error!(error = ?error, conversation_id, "forgetting what a gone session was reading failed");
+    }
+}
+
+/// And record that something said on the pull request is left unaddressed, which
+/// is what a proposal nobody is behind amounts to.
+///
+/// Said before the fixes are dispatched as well as before the run is stopped:
+/// wrap-up's rule is decided by a loop of its own, and a Conversation whose
+/// checks went green mid-fix would otherwise reach Done while the session was
+/// still working.
+async fn unsettle(state: &AppState, conversation_id: i64) {
+    if let Err(error) =
+        store::unsettle_wrap_up(&state.pool, conversation_id, store::WaitingOn::Comments).await
+    {
+        tracing::error!(error = ?error, conversation_id, "putting the comments back to waiting failed");
+    }
 }
 
 /// Land the fixes the human accepted, in one session that does nothing else.
@@ -148,35 +363,31 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
 /// have done: the decisions were made, so there is nothing to propose and nothing
 /// to read the comments for a second time.
 ///
-/// The Worktree is taken for it like any other session's, so a red check going
-/// red mid-fix queues behind this rather than ending it.
+/// The caller is holding the Conversation's Turn, so a red check going red
+/// mid-fix queues behind this rather than ending it — and the Conversation was
+/// read as still wrapping up on the far side of taking it, which is what says
+/// there is anywhere to work at all.
 ///
 /// Asked of the record again afterwards, exactly as it was the first time: a fix
 /// session that landed nothing has left the same work owed, and letting that one
 /// through would be the failure this whole path exists to close.
-async fn land(state: AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
-    let _turn = state.sessions.turn(conversation_id).await;
+async fn land(state: &AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
+    let writing = crate::runner::address(state, conversation_id, &feedback(&owed)).await;
 
-    if !crate::wrapping::still_going(&state, conversation_id).await {
-        tracing::info!(
-            conversation_id,
-            "the Conversation stopped wrapping up, so the fixes it owed were not dispatched"
-        );
-        return;
-    }
-
-    let writing = crate::runner::address(&state, conversation_id, &feedback(&owed)).await;
-
-    let owed = unlanded(&state, conversation_id).await;
+    let owed = unlanded(state, conversation_id).await;
 
     if !owed.is_empty() {
-        return dropped(&state, conversation_id, &owed, None, writing).await;
+        return dropped(state, conversation_id, &owed, None, writing).await;
     }
 
     tracing::info!(
         conversation_id,
         "the fixes the batch was owed have landed, so the wrap-up carries on"
     );
+
+    // Left to the watcher's next poll rather than settled here: what says the
+    // comments are settled is nothing being unaddressed, which is GitHub's
+    // question and not this one's.
 }
 
 /// What the fix session is told: every proposal the human accepted, in the words

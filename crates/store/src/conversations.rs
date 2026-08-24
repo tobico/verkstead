@@ -1569,13 +1569,22 @@ pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Op
 /// review it found asking was last month's. So the window opens at the newest
 /// move into Wrapping — and where there has been no such move, at the start of
 /// the Timeline, which is every Conversation that has not got that far.
+///
+/// **And only the ones still standing.** A Set archived unanswered is one nobody
+/// is ever going to answer, which is what Verkstead closes a proposal whose
+/// session is gone as — see [`super::archive_set`]. Counting one would be the
+/// same mistake the other way about: the review it found asking is a question
+/// nothing is left to act on, so no fresh reading of the branch could ever be
+/// recognised as the review of this wrap.
 async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT q.id, q.body
          FROM question_sets q
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
+         LEFT JOIN archivings a ON a.set_id = q.id
          WHERE e.conversation_id = ?
+           AND a.set_id IS NULL
            AND e.id > COALESCE(
                    (SELECT MAX(w.id) FROM timeline_events w
                     WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),
