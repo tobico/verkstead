@@ -589,6 +589,17 @@ impl Sessions {
             .collect()
     }
 
+    /// Whether this server can launch an agent at all.
+    ///
+    /// The served router always can — see [`crate::router_with_ui`] — so this
+    /// is only ever false for a router built without [`Agents`], which is every
+    /// test about something other than sessions. What such a server cannot do
+    /// is take a Conversation up: nothing is driving one, nothing ever will,
+    /// and there is no session for a Remedy to start.
+    pub(crate) fn runs_sessions(&self) -> bool {
+        self.agents.is_some()
+    }
+
     /// The pace the runner works a backlog at — see [`Agents::pace`].
     ///
     /// [`Pace::default`] where this server runs no sessions at all, which is a

@@ -1309,6 +1309,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
+    // And the Commit Summaries, for the same arithmetic. The commit itself is
+    // joined into the query above; what the agent wrote under its subject is one
+    // more read, and a Timeline of bookkeeping commits answers it with nothing.
+    let mut summaries_of_commits =
+        super::commits::summaries_on_timeline(pool, conversation_id).await?;
+
     rows.into_iter()
         .map(|row| {
             let (
@@ -1336,6 +1342,9 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         files,
                         insertions,
                         deletions,
+                        // Absent for most commits, which is what a commit that
+                        // said nothing about itself looks like.
+                        summary: summaries_of_commits.remove(&id),
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be

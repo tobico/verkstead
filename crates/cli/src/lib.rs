@@ -61,11 +61,11 @@ enum Command {
     /// Print the Guide: everything an agent needs in order to ask well.
     ///
     /// Markdown on stdout, exit 0. With no topic, the core Guide — the same
-    /// one bare `verkstead` prints, which names the Topics and when each is
-    /// required.
+    /// one bare `verkstead` prints. The Guide has no Topics at present, so
+    /// that is the whole of it.
     Guide {
         /// A Topic of the Guide, required reading when its task is at hand.
-        /// Omit for the core Guide, which names them.
+        /// Omit for the core Guide.
         topic: Option<String>,
     },
 }

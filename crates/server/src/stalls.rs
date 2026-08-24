@@ -33,6 +33,10 @@
 //! nothing is driving until something takes it up again. The paths that do take
 //! them up run first — see [`sweeping`] — so what is left over when the sweep
 //! looks is what genuinely has nobody.
+//!
+//! And never, on a server that runs no sessions: there, nobody is what every
+//! Conversation mid-run has and always will have, so the sweep has nothing to
+//! tell the human. See [`sweeping`].
 
 use std::time::Duration;
 
@@ -62,6 +66,21 @@ pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
 /// as it takes to take it up again, and a sweep that got there first would call
 /// every healthy one of them stalled.
 pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
+    // Nothing to sweep for on a server that runs no sessions — see
+    // [`crate::sessions::Sessions::runs_sessions`]. A stall is a Conversation
+    // *nothing is driving*, and a server with no agents drives nothing by
+    // construction: every Conversation mid-run is one, forever, and Retry has
+    // no session to start. So the sweep would be a minute-by-minute
+    // Interruption on each of them saying so.
+    //
+    // Only the tests' routers are ever built that way, and what it costs them
+    // is what it would cost a server: `router()` over a store held still is
+    // exactly how the viewer's fixtures are written, and a sweep landing
+    // mid-write puts a stall on the Timeline being serialised.
+    if !state.sessions.runs_sessions() {
+        return;
+    }
+
     let state = state.clone();
 
     tokio::spawn(async move {

@@ -37,7 +37,9 @@ async fn conversation(pool: &SqlitePool) -> i64 {
         .expect("the Repo was just registered")
 }
 
-/// A commit as git would have described it.
+/// A commit as git would have described it, saying nothing about itself — which
+/// is what a bookkeeping commit is, and what every commit recorded before
+/// summaries were kept looks like.
 fn landed(sha: &str, subject: &str) -> Commit {
     Commit {
         sha: sha.to_owned(),
@@ -45,6 +47,15 @@ fn landed(sha: &str, subject: &str) -> Commit {
         files: 2,
         insertions: 31,
         deletions: 4,
+        summary: None,
+    }
+}
+
+/// The same, with the account the agent wrote under its subject.
+fn summarised(sha: &str, subject: &str, summary: &str) -> Commit {
+    Commit {
+        summary: Some(summary.to_owned()),
+        ..landed(sha, subject)
     }
 }
 
@@ -81,6 +92,83 @@ async fn a_commit_lands_on_the_timeline_as_what_it_changed() {
         commit(&pool, id, event).await.unwrap(),
         Some(landed("a1b2c3d", "feat: rate limiting")),
         "and the Event is what the details pane fetches the commit by",
+    );
+}
+
+/// What the agent wrote under the subject is kept beside the commit, and comes
+/// back with it — both to the details pane, which renders it above the diff, and
+/// to the Timeline the pane was opened from.
+#[tokio::test]
+async fn a_commit_carries_the_summary_it_was_recorded_with() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let written = "```mermaid\nflowchart LR\n  in --> out\n```\n\nA bucket per account.";
+
+    let event = record_commit(
+        &pool,
+        id,
+        &summarised("a1b2c3d", "feat: rate limiting", written),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        commit(&pool, id, event).await.unwrap().unwrap().summary,
+        Some(written.to_owned()),
+        "the pane fetches the summary by the Event, unrendered",
+    );
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await,
+        vec![summarised("a1b2c3d", "feat: rate limiting", written)],
+        "and the Timeline has it too, beside the line it draws",
+    );
+}
+
+/// A commit that said nothing about itself, which is the ordinary one: the row
+/// beside it is simply absent, and that is also what every commit recorded
+/// before summaries were kept looks like.
+#[tokio::test]
+async fn a_commit_with_no_summary_has_none() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let event = record_commit(&pool, id, &landed("a1b2c3d", "chore: plan the tasks"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        commit(&pool, id, event).await.unwrap().unwrap().summary,
+        None
+    );
+    assert_eq!(on_the_timeline(&pool, id).await[0].summary, None);
+}
+
+/// One summary per commit, because the summary is written in the commit's own
+/// transaction: a second sweep of the same commit is a sweep with nothing to do,
+/// and cannot land a second row against the Event.
+#[tokio::test]
+async fn a_summary_is_recorded_once_with_its_commit() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let written = summarised("a1b2c3d", "feat: rate limiting", "A bucket per account.");
+
+    let event = record_commit(&pool, id, &written).await.unwrap().unwrap();
+
+    assert_eq!(
+        record_commit(&pool, id, &written).await.unwrap(),
+        None,
+        "the second sweep finds nothing left to do",
+    );
+
+    assert_eq!(
+        commit(&pool, id, event).await.unwrap(),
+        Some(written),
+        "and the summary is the one it was recorded with",
     );
 }
 

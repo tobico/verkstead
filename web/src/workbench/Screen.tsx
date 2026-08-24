@@ -68,6 +68,12 @@
 //! terminal that silently swallows typing reads as broken rather than as
 //! read-only.
 //!
+//! **And a Screen with nothing on it yet says that.** An empty black rectangle
+//! is exactly what a terminal that has failed looks like, so until the first
+//! repaint has landed the pane says it is waiting for one — which is the
+//! difference between a Screen that is slow to arrive and a Screen that is not
+//! coming.
+//!
 //! The grid and nothing above it: no scrollback here either, matching the server
 //! that decided the repaint. A reader who wants everything the session printed
 //! wants the Transcript beside this, or the Capture underneath it.
@@ -208,6 +214,15 @@ export function Screen(props: {
   /// watching is a thing to say in words.
   const [lost, setLost] = createSignal(false);
 
+  /// Whether a grid has been painted here yet.
+  ///
+  /// Nothing arrives instantly and a terminal with nothing on it is a black
+  /// rectangle, which is indistinguishable from one that is broken. So the pane
+  /// says which it is until the first repaint lands — and a Screen that takes a
+  /// noticeable while to arrive is then a Screen that was visibly on its way,
+  /// rather than a pane that looked like it had failed.
+  const [shown, setShown] = createSignal(false);
+
   /// Paint a whole grid, making the terminal if there is not one yet.
   ///
   /// Made on the first repaint rather than up front, because a terminal has to
@@ -273,6 +288,7 @@ export function Screen(props: {
     // showing through wherever this one has nothing to say.
     terminal.reset();
     terminal.write(painted.repaint);
+    setShown(true);
   };
 
   // The session that has ended: the grid it left, fetched.
@@ -424,9 +440,11 @@ export function Screen(props: {
                 when={lost()}
                 fallback={
                   <p class="note read-only">
-                    {live()
-                      ? "Watching. Type to take the keyboard — Verkstead stops until you hand it back."
-                      : "Read-only: this is what the session's terminal is showing."}
+                    {!shown()
+                      ? "Waiting for this session's screen…"
+                      : live()
+                        ? "Watching. Type to take the keyboard — Verkstead stops until you hand it back."
+                        : "Read-only: this is what the session's terminal is showing."}
                   </p>
                 }
               >

@@ -693,9 +693,9 @@ pub struct PullRequestComment {
 /// A commit as the Timeline shows it: what it was called, and how much of the
 /// repository it moved.
 ///
-/// The summary and not the diff. A commit's diff is what the details pane
-/// fetches, from the repository the commit is in — see [`CommitDiff`] — and the
-/// Timeline is re-read every time an open page hears the world moved.
+/// The line and not what is behind it. A commit's summary and its diff are what
+/// the details pane fetches — see [`CommitPane`] — and the Timeline is re-read
+/// every time an open page hears the world moved.
 ///
 /// There is no state here and no action on it. Commits are viewable and nothing
 /// else: the design gives them no per-commit review, because feedback about the
@@ -725,20 +725,53 @@ pub struct CommitEvent {
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// What the commit said about itself, as prose alone: its Commit Summary
+    /// flattened to a line with the Diagram left out, for the card to clamp —
+    /// see [`crate::markdown::to_prose`].
+    ///
+    /// The prose and not the rendering, unlike every other document on a card.
+    /// A commit's card is a button, rendered markdown cannot live inside one,
+    /// and the summary is on the card to be read rather than to be read *at*:
+    /// what it looks like whole is the pane's, and the card says what it says.
+    ///
+    /// `None` where the commit carried no summary — which is every bookkeeping
+    /// commit and every commit recorded before summaries were kept — and where
+    /// what it carried was a Diagram and nothing else. Both draw the card that
+    /// has always been drawn.
+    pub snippet: Option<String>,
 }
 
-/// One commit's diff, as the details pane receives it.
+/// One commit, as the details pane receives it: what it said about itself, and
+/// what it changed.
 ///
 /// Its own request rather than a field on the Conversation, for the reason a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is read when somebody opens the one Event it belongs to.
+/// moved, and a commit is read whole when somebody opens the one Event it
+/// belongs to.
 ///
-/// Rendered with the folds and the highlighting an attached Diff already gets,
-/// because it is the same renderer on the same kind of input — see
+/// The diff is rendered with the folds and the highlighting an attached Diff
+/// already gets, because it is the same renderer on the same kind of input — see
 /// [`crate::diff`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct CommitDiff {
+pub struct CommitPane {
+    /// The Commit Summary, rendered and sanitized like every other document an
+    /// agent wrote — `null` where the commit carried none, which is every
+    /// bookkeeping commit and every commit recorded before summaries were kept.
+    pub summary: Option<String>,
+
+    /// Whether that summary came out holding a Diagram, and so whether the pane
+    /// carries the client-side renderer at all.
+    ///
+    /// Answered here, off the HTML above, exactly as a Set's own flag is — see
+    /// [`crate::SetView::diagrams`]. It travels with the pane because it is a
+    /// fact about this commit's own account of itself, and because mermaid is
+    /// megabytes: the pane that asks for the bundle is the one with something to
+    /// draw with it. `false` where there is no summary, there being nothing
+    /// there to hold a Diagram.
+    pub diagrams: bool,
+
     /// `null` where the commit changed nothing a diff can show, which is a merge
     /// or an empty commit. A commit the repository no longer has is not this: it
     /// is a 404, because there is nothing there to draw a pane about.
@@ -1245,10 +1278,14 @@ pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
     })
 }
 
-/// A commit as an Event. Nothing to render — the summary is five facts git
-/// counted — and here beside the move for the reason that one is: one place
-/// knows how a Timeline is made.
-pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent {
+/// A commit as an Event: five facts git counted, and the snippet of what the
+/// commit said about itself that its card clamps.
+///
+/// Here beside the move for the reason that one is: one place knows how a
+/// Timeline is made. The snippet is rendered on the way through, which is the
+/// one thing here there is anything to render — a summary of nothing but a
+/// Diagram comes out empty, and a card with nothing to say says nothing.
+pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent {
     TimelineEvent::Commit(CommitEvent {
         id,
         at,
@@ -1257,6 +1294,11 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
         files: commit.files,
         insertions: commit.insertions,
         deletions: commit.deletions,
+        snippet: commit
+            .summary
+            .as_deref()
+            .map(crate::markdown::to_prose)
+            .filter(|prose| !prose.is_empty()),
     })
 }
 
@@ -1264,25 +1306,43 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
 /// holds it.
 ///
 /// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than six parameters, because five of them are numbers
-/// and a subject, and a call with those in the wrong order would compile.
+/// the store — and rather than seven parameters, because five of them are
+/// numbers and a subject, and a call with those in the wrong order would
+/// compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitSummary {
+pub struct CommitRecord {
     pub sha: String,
     pub subject: String,
     pub files: i64,
     pub insertions: i64,
     pub deletions: i64,
+
+    /// The Commit Summary as the agent wrote it, or `None` where the commit
+    /// carried none. Markdown, as everything an agent writes is.
+    pub summary: Option<String>,
 }
 
-/// One commit's diff as the details pane receives it, rendered on the way.
+/// One commit as the details pane receives it, rendered on the way.
 ///
 /// Here rather than in the server for the reason the Brief's rendering is: this
-/// is the crate with the diff parser and the highlighter in it. A patch with
-/// nothing in it comes back as nothing to show, exactly as an empty attached
-/// Diff does.
-pub fn commit_diff(patch: &str) -> CommitDiff {
-    CommitDiff {
+/// is the crate with the markdown, the diff parser and the highlighter in it. A
+/// patch with nothing in it comes back as nothing to show, exactly as an empty
+/// attached Diff does — and so does a summary of nothing but whitespace, which
+/// the pane would otherwise draw as a gap above the diff.
+pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
+    let summary = summary
+        .map(crate::markdown::to_html)
+        .filter(|html| !html.trim().is_empty());
+
+    CommitPane {
+        // Asked of the rendered summary rather than of the message it came from,
+        // for the reason a Set's own flag is: the rendering is where a fence
+        // either became a Diagram or did not, and the renderer in the page reads
+        // that same answer out of that same markup.
+        diagrams: summary
+            .as_deref()
+            .is_some_and(crate::markdown::holds_diagram),
+        summary,
         diff: crate::diff::to_html(patch),
     }
 }

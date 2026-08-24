@@ -14,7 +14,7 @@ import type {
   BranchRenamed,
   BriefSaved,
   Capture,
-  CommitDiff,
+  CommitPane,
   ConversationAborted,
   ConversationEntry,
   ConversationView,
@@ -224,16 +224,17 @@ export function screenSocket(id: number, event: number): string {
   return at.href;
 }
 
-/// One commit's diff, rendered.
+/// One commit, rendered: what it said about itself, and its diff.
 ///
-/// Fetched by the pane that shows it for the Capture's reason, and read out
-/// of the repository by the server rather than out of its database: the commit
-/// is in git, which is what a commit is.
-export function loadCommitDiff(
+/// Fetched by the pane that shows it for the Capture's reason. The diff is read
+/// out of the repository by the server rather than out of its database — the
+/// commit is in git, which is what a commit is — where the summary was kept by
+/// the sweep that recorded the commit.
+export function loadCommitPane(
   id: number,
   event: number,
-): Promise<CommitDiff> {
-  return get<CommitDiff>(`/api/ui/conversations/${id}/commit/${event}`);
+): Promise<CommitPane> {
+  return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
 /// What is on the pull request the finish step opened: its commit list and its

@@ -91,11 +91,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/screen/{event}/attach",
             get(crate::screen::attach),
         )
-        // And one commit's diff, fetched the same way and for the same reason —
-        // see [`commit_diff`].
+        // And one commit — its summary and its diff — fetched the same way and
+        // for the same reason; see [`commit_pane`].
         .route(
             "/api/ui/conversations/{id}/commit/{event}",
-            get(commit_diff),
+            get(commit_pane),
         )
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
@@ -794,17 +794,22 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
-                    // The counts and the subject, and not the diff: the diff is in
-                    // the repository, and what fetches it is the pane that shows it.
+                    // The counts, the subject and what the commit said about
+                    // itself, and not the diff: the diff is in the repository,
+                    // and what fetches it is the pane that shows it. The summary
+                    // goes over whole and comes out as the snippet the card
+                    // clamps — the renderer's, so that the cutting of a commit's
+                    // own words happens where every other rendering of them does.
                     store::Event::Commit(commit) => verkstead_render::commit_event(
                         event.id,
                         event.at,
-                        verkstead_render::CommitSummary {
+                        verkstead_render::CommitRecord {
                             sha: commit.sha,
                             subject: commit.subject,
                             files: commit.files,
                             insertions: commit.insertions,
                             deletions: commit.deletions,
+                            summary: commit.summary,
                         },
                     ),
                     // Whole, evidence and all, unlike the three above it. The
@@ -995,19 +1000,21 @@ async fn screen(
     }
 }
 
-/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's diff,
-/// rendered.
+/// `GET /api/ui/conversations/{id}/commit/{event}` — one commit's summary and
+/// its diff, rendered.
 ///
 /// Its own request rather than a field on the Conversation, exactly as a
 /// Capture is: a Timeline is read every time an open page hears the world
-/// moved, and a diff is worth reading when somebody opens the one Event it
-/// belongs to.
+/// moved, and a commit is worth reading whole when somebody opens the one Event
+/// it belongs to.
 ///
-/// Read out of the repository rather than out of the store. The commit is in git
-/// — that is what a commit *is* — and keeping a second copy of every patch would
-/// be a database growing with the work rather than with the record of it. What
-/// the store holds is the line the Timeline draws.
-async fn commit_diff(
+/// The diff is read out of the repository rather than out of the store. The
+/// commit is in git — that is what a commit *is* — and keeping a second copy of
+/// every patch would be a database growing with the work rather than with the
+/// record of it. The summary is the other way about: the sweep kept it when it
+/// recorded the commit, so it comes off the Event beside the line the Timeline
+/// draws.
+async fn commit_pane(
     State(state): State<AppState>,
     Path((id, event)): Path<(String, String)>,
 ) -> HttpResponse {
@@ -1045,7 +1052,7 @@ async fn commit_diff(
     let rendered = tokio::task::spawn_blocking(move || {
         crate::commits::patch(&repo, &commit.sha)
             .as_deref()
-            .map(verkstead_render::commit_diff)
+            .map(|patch| verkstead_render::commit_pane(commit.summary.as_deref(), patch))
     })
     .await;
 

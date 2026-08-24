@@ -44,7 +44,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
+    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationAborted,
     ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
     ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Remedy,
     RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
@@ -260,8 +260,8 @@ impl Grilling {
         )
     }
 
-    /// And one commit's diff, as the same pane fetches that.
-    async fn commit_diff(&self, event: i64) -> CommitDiff {
+    /// And one commit — its summary and its diff — as the same pane fetches it.
+    async fn commit_pane(&self, event: i64) -> CommitPane {
         get(
             &self.app,
             &format!("/api/ui/conversations/{}/commit/{event}", self.id),
@@ -4541,7 +4541,16 @@ async fn what_a_session_commits_lands_on_the_timeline() {
         r#"
         printf 'a limiter\n' > limiter.md
         git add limiter.md
-        git commit --quiet -m 'feat: rate limiting'
+        git commit --quiet -m 'feat: rate limiting
+
+```mermaid
+flowchart LR
+  in --> limiter --> out
+```
+
+A bucket per account.
+
+Co-Authored-By: Claude <noreply@anthropic.com>'
 
         printf 'why\nand how\n' > NOTES.md
         git add NOTES.md
@@ -4576,11 +4585,18 @@ async fn what_a_session_commits_lands_on_the_timeline() {
 
     // The details pane's half: the commit's own diff, rendered by the same
     // renderer an attached Diff goes through — folds, highlighting and all.
-    let diff = fixture
-        .commit_diff(notes.id)
-        .await
-        .diff
-        .expect("a commit that added a file has a diff");
+    let pane = fixture.commit_pane(notes.id).await;
+
+    assert_eq!(
+        pane.summary, None,
+        "that commit's message was a subject and nothing else",
+    );
+    assert!(
+        !pane.diagrams,
+        "and a pane with no summary has nothing to draw, so it loads no mermaid",
+    );
+
+    let diff = pane.diff.expect("a commit that added a file has a diff");
 
     assert_eq!(diff.paths, vec!["NOTES.md".to_owned()]);
     assert!(
@@ -4593,6 +4609,33 @@ async fn what_a_session_commits_lands_on_the_timeline() {
         !diff.html.contains("docs: say what it does"),
         "the message is the Event's to say — the diff arrives headerless: {}",
         diff.html
+    );
+
+    // And the other half of what the pane draws: what the commit said about
+    // itself, rendered above the diff — the Diagram held for the client-side
+    // renderer, the prose as prose, and none of the bookkeeping git keeps under
+    // it.
+    let drawn = fixture.commit_pane(landed[0].id).await;
+
+    assert!(
+        drawn.diagrams,
+        "a summary with a Diagram in it is what the pane loads the renderer for",
+    );
+
+    let summary = drawn.summary.expect("that commit's message had a body");
+
+    assert!(
+        summary.contains("<pre class=\"mermaid\">"),
+        "the Diagram is held for the renderer in the page: {summary}",
+    );
+    assert!(summary.contains("limiter"), "{summary}");
+    assert!(
+        summary.contains("<p>A bucket per account.</p>"),
+        "and the prose is rendered markdown: {summary}",
+    );
+    assert!(
+        !summary.contains("Co-Authored-By"),
+        "the trailers are not what the agent had to say: {summary}",
     );
 
     // Long enough for several more sweeps of a branch that has not moved.
