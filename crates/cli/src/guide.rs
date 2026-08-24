@@ -7,47 +7,30 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, bail};
 
-/// The core Guide: everything any ask needs.
+/// The core Guide, and since the gates Topic was retired the whole of it:
+/// nothing in the pipeline gates a commit any more, so there is no task left
+/// whose reading is worth deferring.
 const CORE: &str = include_str!("../guide/core.md");
 
-/// The Topics, each under the name `verkstead guide <topic>` takes. Order is
-/// the order they are listed back in, so it stays the order the core Guide
-/// names them in.
-const TOPICS: &[(&str, &str)] = &[("gates", include_str!("../guide/gates.md"))];
-
-/// Print the core Guide, or one of its Topics, on stdout.
+/// Print the Guide on stdout.
 ///
-/// A Topic that does not exist is an error rather than a fallback to the core:
-/// the agent asked for required reading, and quietly handing it something else
-/// would have it write the very thing the Topic exists to get right.
+/// A Topic is still what `verkstead guide <topic>` asks for, and there are
+/// none: an agent asking for one is carrying an instruction from before the
+/// gates Topic went, so it is told the reading is gone rather than handed the
+/// core Guide as though it were the Topic it asked for.
 pub fn guide(topic: Option<&str>) -> Result<()> {
-    let text = match topic {
-        None => CORE,
-        Some(name) => *TOPICS
-            .iter()
-            .find_map(|(topic, text)| (*topic == name).then_some(text))
-            .ok_or_else(|| {
-                anyhow!(
-                    "no Guide topic named {name:?}. The Topics are: {}",
-                    topics()
-                )
-            })?,
-    };
+    if let Some(name) = topic {
+        bail!(
+            "no Guide topic named {name:?}. The Guide has no Topics: \
+             `verkstead guide` prints the whole of it"
+        );
+    }
 
     let mut stdout = std::io::stdout().lock();
     stdout
-        .write_all(text.as_bytes())
+        .write_all(CORE.as_bytes())
         .and_then(|()| stdout.flush())
         .context("writing the Guide to stdout")
-}
-
-/// The Topic names, for telling an agent what it could have asked for.
-fn topics() -> String {
-    TOPICS
-        .iter()
-        .map(|(topic, _)| *topic)
-        .collect::<Vec<_>>()
-        .join(", ")
 }

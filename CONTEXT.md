@@ -530,14 +530,16 @@ _Avoid_: margin, sidebar, left rail
 
 **Guide**:
 The agent-facing usage instructions shipped inside the CLI and printed by
-it, so an agent needs nothing beyond the binary to learn how to ask. Split
-into a core that every ask needs and Topics fetched when their task arises.
+it, so an agent needs nothing beyond the binary to learn how to ask. A core
+that every ask needs, plus any Topics fetched when their task arises — since
+the gates Topic was retired the core is the whole of it.
 _Avoid_: help, manual, docs
 
 **Topic**:
-A task-scoped section of the Guide (e.g. gates), split out so an agent pays
-its reading cost only when the task is at hand — at which point it is
-required reading, never optional.
+A task-scoped section of the Guide, split out so an agent pays its reading
+cost only when the task is at hand — at which point it is required reading,
+never optional. There are none at present: the gates Topic was the only one,
+and it went when the last gate did.
 _Avoid_: section, chapter
 
 **Archive**:

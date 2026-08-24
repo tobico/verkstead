@@ -14,4 +14,4 @@ gates Topic's diagram convention lives on there.
 - [x] 02: Diagram drawn in the pane — [details](02-diagram-drawn-in-the-pane.md)
 - [x] 03: Card grows the snippet — [details](03-card-grows-the-snippet.md)
 - [x] 04: Skills ask for the summary — [details](04-skills-ask-for-the-summary.md)
-- [ ] 05: Retire the gates topic — [details](05-retire-the-gates-topic.md)
+- [x] 05: Retire the gates topic — [details](05-retire-the-gates-topic.md)

@@ -6,22 +6,7 @@ terminal, so a wait of hours is the tool working rather than the tool failing.
 
 This Guide is everything the binary knows about asking well, and it ships
 inside the binary: `verkstead guide` — or `verkstead` with no arguments — is
-where an agent starts, and the Topics named below are the rest of it. Nothing
-else has to be found.
-
-## Required topic guides
-
-The Guide is this core plus its Topics, each printed by
-`verkstead guide <topic>`. A Topic is part of the Guide rather than an extra.
-It is split out only so its reading cost falls when the task that needs it
-arrives, instead of before every ask.
-
-- **`gates`** — before authoring a confirmation gate, meaning any Set that asks
-  the human for approval to proceed, to commit or to ship, the agent **MUST**
-  run `verkstead guide gates` first and write the Set the way it says. A gate is
-  written differently from an ordinary Set and its Response is read far more
-  strictly; that strictness is the Topic's whole subject, and getting it wrong
-  lands work nobody approved.
+where an agent starts, and it is the whole of it. Nothing else has to be found.
 
 ## Question labels
 
@@ -137,11 +122,6 @@ Response shape — `answers[].{label, selected, free_text, unanswered}` plus a
 set-level `comment`.
 
 ## Authoring the Set
-
-**If the Set asks for approval to proceed — to commit, to land, to ship — stop
-and run `verkstead guide gates` first.** A gate is written differently from
-everything below and its Response is read far more strictly, and the Topic is
-where both of those live.
 
 One Set is one round, budgeted as above. Because the round trip is expensive,
 sweep ahead: carry the Questions that would otherwise wait for the next round or
