@@ -2005,6 +2005,116 @@ function theWorkbenchWith(
 }
 
 
+/// The sidebar's other draft, which is the opened fixture again under its id
+/// and with a Brief of its own.
+///
+/// A second Conversation of the same kind on purpose: two drafts, each of them
+/// a card that is a field, so that anything the middle pane was holding for one
+/// of them shows up in the other's card rather than being covered over by a
+/// different card altogether.
+const SECOND_BRIEF = "# Outbound retries\n\nDecide where the backoff lives.\n";
+
+const SECOND: ConversationView = {
+  ...OPEN,
+  id: 2,
+  timeline: OPEN.timeline.map((event) =>
+    "Brief" in event
+      ? { Brief: { ...event.Brief, markdown: SECOND_BRIEF } }
+      : event,
+  ),
+};
+
+/// The workbench with three Conversations there to be read: the draft the
+/// fixtures open, the sidebar's other draft, and the one being grilled.
+function theThree(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever("/api/ui/abandoned-roadmaps", json([])),
+    whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
+    whenever(`/api/ui/conversations/${SECOND.id}`, json(SECOND)),
+    whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
+/// Switching from one Conversation to another, which used to be dropped: the
+/// URL moved and the page did not, and only a reload got the human out of it.
+///
+/// It went wrong where a switch costs nothing — a Conversation already read
+/// once, answered out of the cache. With nothing to wait for there is no moment
+/// of loading to tear the page down at, so the second Conversation was merged
+/// into the object the first one was drawn from, and everything the middle pane
+/// was holding went on standing over it. What settles it is that the whole of
+/// the reading half of the page is keyed on the id now, so a switch builds it
+/// again from nothing whether or not anything had to be fetched.
+describe("switching between conversations", () => {
+  /// The field a drafting card is, which is how these tests say which draft is
+  /// on screen.
+  const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
+
+  it("draws the conversation the URL moved to", async () => {
+    theThree();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(field().value).toBe(BRIEF.markdown));
+
+    history.set({ value: `/conversations/${GRILLING.id}` });
+
+    // The grilled Conversation's own record, which a draft has nothing like —
+    // and no field, because its Brief froze when the grilling started.
+    await drawn(container, ".timeline-event .agent-output");
+    expect(screen.queryByLabelText("Brief")).toBeNull();
+  });
+
+  it("draws one it has read before", async () => {
+    theThree();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(field().value).toBe(BRIEF.markdown));
+
+    history.set({ value: `/conversations/${GRILLING.id}` });
+    await drawn(container, ".timeline-event .agent-output");
+
+    history.set({ value: `/conversations/${OPEN.id}` });
+    await waitFor(() => expect(field().value).toBe(BRIEF.markdown));
+
+    // And on again, with both of them in the cache by now: nothing is fetched
+    // for this one, so nothing but the change of id can move the page.
+    history.set({ value: `/conversations/${GRILLING.id}` });
+    await drawn(container, ".timeline-event .agent-output");
+  });
+
+  /// Everything the middle pane is holding belongs to the Conversation it is
+  /// holding it for. A half-written Brief above all: it is the only copy of
+  /// itself there is, and carried into another draft's card it would be one
+  /// Conversation's words offered as another's — and saved as them, on the next
+  /// pause in the typing.
+  it("keeps nothing of the conversation it left", async () => {
+    theThree(json("Saved"));
+    const { history } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => expect(field().value).toBe(BRIEF.markdown));
+
+    // Both of them read once, so that the switch this is really about has
+    // nothing to fetch and no moment of loading to hide behind.
+    history.set({ value: `/conversations/${SECOND.id}` });
+    await waitFor(() => expect(field().value).toBe(SECOND_BRIEF));
+
+    history.set({ value: `/conversations/${OPEN.id}` });
+    await waitFor(() => expect(field().value).toBe(BRIEF.markdown));
+
+    fireEvent.input(field(), { target: { value: "# Half a thought\n" } });
+    expect(field().value).toBe("# Half a thought\n");
+
+    history.set({ value: `/conversations/${SECOND.id}` });
+
+    await waitFor(() => expect(field().value).toBe(SECOND_BRIEF));
+  });
+});
+
+
 describe("starting the grilling", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {
     theWorkbench();
