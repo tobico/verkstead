@@ -181,19 +181,29 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
         () = quiet_and_nothing_asked(&state, conversation_id, event_id, &quiet, grace) => None,
     };
 
-    let Some(ended) = ended else {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "a manual session has gone quiet with nothing of its own open, so it is \
-             being ended",
-        );
+    let ended = match ended {
+        Some(ended) => ended,
+        None => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "a manual session has gone quiet with nothing of its own open, so it is \
+                 being ended",
+            );
 
-        state.sessions.end(conversation_id).await;
-        drop(turn);
+            state.sessions.end(conversation_id).await;
 
-        crate::stalls::sweep(&state).await;
-        return;
+            // And then asked how it ended, rather than taken to have ended the
+            // way this branch meant it to. The grace runs out on a session that
+            // fell over a moment ago as readily as on one sitting there
+            // thinking: a session's last word reaches its driver behind a final
+            // sweep of the branch, and a slow one is a session that has gone
+            // with nobody told yet. Ending it settles the question — the relay
+            // is finished by the time that returns, so how it ended is there to
+            // read, and a session Verkstead ended is
+            // [`crate::sessions::Ended::Stopped`] either way.
+            session.ended().await
+        }
     };
 
     // Nothing is read off the Worktree to decide this, unlike every step of a

@@ -3222,19 +3222,23 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
 
     worked_to_empty(&fixture).await;
 
-    let opened = fixture
+    // Kept as it was read rather than read again afterwards: what is being
+    // asked about is the moment the work starts wrapping, and a wrap-up with
+    // nothing outstanding settles itself without waiting for anybody — so a
+    // second read is as likely to be of a Conversation that has already
+    // finished.
+    let view = fixture
         .until(|view| {
-            (view.state == Lifecycle::Wrapping)
-                .then(|| pull_request(view).cloned())
-                .flatten()
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
         })
         .await;
+
+    let opened = pull_request(&view).expect("the wrap-up has its pull request pinned");
 
     assert_eq!(opened.number, 41);
     assert_eq!(opened.title, "Rate limiting");
     assert_eq!(opened.url, "https://github.com/tobico/verkstead/pull/41");
-
-    let view = fixture.view().await;
 
     // The move is on the record like every other, and it is the last thing to
     // have happened.
@@ -8331,7 +8335,23 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
 /// answering into nothing.
 #[tokio::test]
 async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_settled() {
-    let fixture = grilling_swept(r#"printf 'prompt was: %s\n' "$2""#).await;
+    let fixture = grilling_swept(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+
+        # The first session dies where it stands, which is the stall there is to
+        # resume from. The one Resume starts stays up, the way a grilling that is
+        # really grilling does — a second session that exited would be a second
+        # stall, and the sweep looking every tenth of a second here would find it
+        # while the assertions were still being read.
+        if [ -f GRILLED ]; then
+            sleep 300
+        else
+            printf 'once\n' > GRILLED
+        fi
+        "#,
+    )
+    .await;
 
     fixture.quiet().await;
 

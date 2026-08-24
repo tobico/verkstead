@@ -497,6 +497,16 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::Grilling::Started => {}
     }
 
+    // From here the Conversation says it is being grilled, and the thing that
+    // will say so is a session that does not exist yet. So a registration stands
+    // in for it across the launch, which is the slowest part of this: a sweep
+    // that looked in between would find a Conversation grilling with nothing
+    // grilling it, and halt a press the human is still standing at. Held to the
+    // end of this rather than handed on — what drives a grilling from there is
+    // its session — and what it leaves behind where the launch fails is a stall
+    // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
+    let _driving = state.drivers.driving(id);
+
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
     // all, and the one thing that must not be guessed at is where an agent is

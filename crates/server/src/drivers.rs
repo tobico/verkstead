@@ -29,6 +29,12 @@
 //! asked with the sessions register in hand rather than answering out of this
 //! one alone.
 //!
+//! The launch itself is the exception, and for the reason every other launch
+//! here holds one: the Conversation says it is grilling from before the session
+//! exists, and the gap in between is exactly the slow part. So the press holds a
+//! registration across it and lets go once there is a session — or once there is
+//! not, which is a stall the next sweep should find.
+//!
 //! A pick changes that: what it arms is a watcher of Verkstead's own, which
 //! follows the same session to the artifact it asked for and goes on holding the
 //! Conversation through the move that follows — see
