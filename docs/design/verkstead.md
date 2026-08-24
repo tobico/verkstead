@@ -139,9 +139,20 @@ flowchart LR
 - **Wrap-up phase, per PR.** After a PR opens: the agent re-reviews the PR in
   a fresh context and raises a question set for any issues it finds;
   meanwhile Verkstead monitors the CI run and dispatches fix sessions on
-  failure — **two fix attempts, then a blocking ask**. New PR comments (from
-  the human or others) are detected by polling and auto-dispatch an
-  addressing session. Commit feedback consolidates here: there are **no
+  failure — **two fix attempts, then a blocking ask**. A check that goes
+  red while the review holds the Worktree folds into that session instead
+  (*refined 2026-08-24, building propose-then-fix wrap-up*): the woken review
+  reads the PR's check state with the answers and fixes what is failing beside
+  the findings, spending none of the check's two attempts, because an attempt
+  is what a dispatched session costs. New PR comments (from
+  the human or others) are detected by polling and dispatch a batch session
+  that **proposes before it fixes** (*refined 2026-08-24, building
+  propose-then-fix wrap-up*): comments standing when the review starts go into
+  the review's own set, and a batch said after it gets one session inside the
+  bundled responding skill, which puts what it would do as its own small set
+  and lands what the human accepts. A comment is the human saying what is
+  wrong, not an instruction to a session. Commit feedback consolidates here:
+  there are **no
   per-commit review states**; commits are viewable events, and the wrap-up
   phase is where problems get raised. The next stage starts only after
   wrap-up completes.

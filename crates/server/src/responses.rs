@@ -55,10 +55,6 @@ pub(crate) async fn submit_response(
         Ok(Submission::Accepted(taken)) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
 
-            if let Some(reviewed) = taken.reviewed {
-                crate::review::answered(&state, reviewed);
-            }
-
             // The acceptance and nothing about the move: what a waiting agent
             // came for is that its Set is answered, and the Conversation moving
             // on is the Timeline's business rather than the agent contract's.

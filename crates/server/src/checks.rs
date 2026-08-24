@@ -23,6 +23,19 @@
 //! is kept in the store, so a restarted server does not start the counting
 //! again.
 //!
+//! **A check that goes red while the review holds the Worktree is the review's
+//! to fix**, not a session of its own. The review session takes the Worktree
+//! before it asks and keeps it until it ends — which is across the human's
+//! answering — so a fix session dispatched at a red check would find nothing to
+//! take and queue behind hours of waiting. It does not queue: the reviewing
+//! skill sends the woken session to read the pull request's own check state once
+//! the answers arrive and fix whatever is failing beside the findings they
+//! accepted, before its push. That spends none of the check's [`ATTEMPTS`],
+//! because nothing here dispatched it: the count is what stops an unattended
+//! loop, and this fix rides work the human just approved. Whatever is still red
+//! after that push is red in front of a free Worktree, and the flow below is
+//! the flow it meets.
+//!
 //! A `gh` that cannot answer changes nothing at all — it does not settle, it
 //! does not unsettle, and it dispatches nothing. That is the only honest reading
 //! of it: Verkstead does not know how the checks are, and neither *green* nor
@@ -246,6 +259,11 @@ async fn fix(
     // fix session queued behind one would be dispatched about a suite nobody has
     // looked at since. Looking again in half a minute costs nothing and asks
     // GitHub afresh.
+    //
+    // Which is also why nothing is counted for a check the review ends up fixing
+    // itself: an attempt is spent where a session is dispatched, and none is
+    // here. The turn being taken is the whole of what folds this check into the
+    // woken session, and the two attempts are still there for it afterwards.
     let Some(_turn) = state.sessions.try_turn(conversation_id) else {
         tracing::debug!(
             conversation_id,

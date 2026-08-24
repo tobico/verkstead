@@ -11,12 +11,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON, WaitingOn,
-    addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation,
-    open_database, pick_direction, record_addressed_comments, record_fix_attempt,
-    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
-    start_conversation, start_grilling, submit_response, timeline, unsettle_wrap_up,
-    wrap_up_settled,
+    Archiving, Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn,
+    addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
+    forget_fix_attempts, implement_again, last_proposal, load_conversation, load_response,
+    load_set, open_database, pick_direction, record_addressed_comments, record_commit,
+    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
+    settle_wrap_up, split_out, start_conversation, start_grilling, submit_response, timeline,
+    unlanded_batch_fixes, unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -373,13 +374,19 @@ review:
     .unwrap()
 }
 
-/// Answering the review is what settles it, and what the human accepted is
-/// handed back as work to dispatch.
+/// Answering the review moves nothing at all.
 ///
-/// The findings come back in the order the review raised them rather than the
-/// order they were answered in: that is the order it thought about them.
+/// The session that raised the findings is still running, waiting on exactly
+/// this Response: it fixes what was accepted and pushes, and its ending cleanly
+/// is what settles the review. A store that settled it here would call the
+/// review over at the moment the decisions were made rather than the moment they
+/// were carried out.
+///
+/// What the Answers *are* is left where they can be read again — on the Set,
+/// beside the findings they answer — because that is what a wrap-up whose
+/// session died before its push has to be re-dispatched from.
 #[tokio::test]
-async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
+async fn answering_the_review_settles_nothing_and_leaves_the_answers_on_the_set() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
@@ -402,107 +409,40 @@ async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
     .await
     .unwrap();
 
-    let Submission::Accepted(taken) = taken else {
+    let Submission::Accepted(_) = taken else {
         panic!("the Response resolves the Set, so it should be taken: {taken:?}");
     };
 
-    assert_eq!(
-        taken.reviewed,
-        Some(Reviewed::Answered {
-            conversation_id: id,
-            fixing: vec![Fixing {
-                what: "Reset the counter as the window rolls.".to_owned(),
-                said: "Keep the signature.".to_owned(),
-            }],
-        }),
-        "the accepted finding is work, with what they said alongside it; the declined \
-         one is nothing at all",
-    );
-
     assert!(
-        wrap_up_settled(&pool, id)
+        !wrap_up_settled(&pool, id)
             .await
             .unwrap()
             .contains(&WaitingOn::Review),
-        "and the review has stopped being something wrap-up waits on",
+        "the review is still what wrap-up is waiting on: its session has the answers \
+         and the fixing to do",
     );
-}
 
-/// A review the human declined every finding of is an answered review, not an
-/// unanswered one: they read it and decided, which is the whole of what wrap-up
-/// was waiting for.
-#[tokio::test]
-async fn a_review_answered_with_nothing_to_fix_is_still_answered() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = wrapping(&pool).await;
+    // And the two halves a safety net would need, on the Set and its Response.
+    let set = load_set(&pool, asked.id).await.unwrap().unwrap().set;
+    let response = load_response(&pool, asked.id)
+        .await
+        .unwrap()
+        .expect("the Response was just stored")
+        .response;
+    let findings = &set
+        .review
+        .expect("the block the review asked with")
+        .findings;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
-
-    let taken = submit_response(
-        &pool,
-        &Settlements::new(8),
-        asked.id,
-        &verkstead_schema::Response::from_yaml(
-            "answers:\n  - label: Q1\n    selected: 2\n  - label: Q2\n    unanswered: true\n",
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let Submission::Accepted(taken) = taken else {
-        panic!("the Response resolves the Set: {taken:?}");
-    };
-
-    assert_eq!(
-        taken.reviewed,
-        Some(Reviewed::Answered {
-            conversation_id: id,
-            fixing: Vec::new(),
-        }),
-        "nothing to dispatch",
-    );
     assert!(
-        wrap_up_settled(&pool, id)
-            .await
-            .unwrap()
-            .contains(&WaitingOn::Review),
-        "and the review is over either way",
+        findings[0].accepted(&response) && !findings[1].accepted(&response),
+        "which finding they said to fix is readable off the Set afterwards",
     );
-}
-
-/// An ordinary Set is not the review's, however it is answered — otherwise every
-/// question an agent asked during a wrap-up would settle it.
-#[tokio::test]
-async fn answering_an_ordinary_set_settles_no_review() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = wrapping(&pool).await;
-
-    let ordinary = verkstead_schema::QuestionSet {
-        review: None,
-        ..reviewing()
-    };
-
-    let asked = ask(&pool, id, &ordinary).await.unwrap().unwrap();
-
-    let taken = submit_response(
-        &pool,
-        &Settlements::new(8),
-        asked.id,
-        &verkstead_schema::Response::from_yaml(
-            "answers:\n  - label: Q1\n    selected: 1\n  - label: Q2\n    selected: 1\n",
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let Submission::Accepted(taken) = taken else {
-        panic!("the Response resolves the Set: {taken:?}");
-    };
-
-    assert_eq!(taken.reviewed, None);
-    assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
+    assert_eq!(
+        findings[0].said(&response),
+        "Keep the signature.",
+        "and so is what they said when they said it",
+    );
 }
 
 /// Which Set the review is on is read off the Sets themselves, so that nothing
@@ -534,4 +474,613 @@ async fn the_review_is_found_by_the_block_it_carries() {
     let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
 
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
+}
+
+/// A proposal closed unanswered is one nothing is left to act on, so it stops
+/// counting as this wrap's review.
+///
+/// Which is what lets a review be run again after the session that asked has
+/// gone: Verkstead closes the Set nobody is behind, and the branch is read afresh
+/// by a session whose findings are then the review's. A closed Set left counting
+/// would make that second reading a review nothing recognised — and the first,
+/// which nobody will ever answer, the one every later question was asked of.
+#[tokio::test]
+async fn a_proposal_closed_unanswered_stops_being_the_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let settlements = Settlements::new(8);
+    let id = wrapping(&pool).await;
+
+    let abandoned = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(review_asked(&pool, id).await.unwrap(), Some(abandoned.id));
+
+    assert!(
+        matches!(
+            archive_set(&pool, &settlements, abandoned.id)
+                .await
+                .unwrap(),
+            Archiving::Archived(_),
+        ),
+        "the Set nobody is behind is closed unanswered",
+    );
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "so this wrap reads as one nobody has reviewed",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "and as one nothing has been proposed about",
+    );
+
+    let read_again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(read_again.id),
+        "and the findings of the session that read the branch again are the review's",
+    );
+}
+
+/// A fix as it lands: a commit on the branch, which is what the sweep records.
+fn fixed(sha: &str) -> verkstead_store::Commit {
+    verkstead_store::Commit {
+        sha: sha.to_owned(),
+        subject: "fix: reset the counter as the window rolls".to_owned(),
+        files: 2,
+        insertions: 31,
+        deletions: 4,
+        summary: None,
+    }
+}
+
+/// Answer the review, saying to fix the first finding and to leave the second.
+async fn answer_the_review(pool: &SqlitePool, set_id: i64) {
+    let taken = submit_response(
+        pool,
+        &Settlements::new(8),
+        set_id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  \
+             - label: Q1\n    selected: 1\n    free_text: Keep the signature.\n  \
+             - label: Q2\n    selected: 2\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(_) = taken else {
+        panic!("the Response resolves the Set, so it should be taken: {taken:?}");
+    };
+}
+
+/// What a review that was answered and never acted on leaves owed: the findings
+/// the human accepted, in the words the review wrote for whoever would fix them,
+/// and whatever they said beside their Answer.
+///
+/// The failure this closes is a session that dies between the Answers and its
+/// push, which would otherwise reach Done with approved fixes quietly gone. So
+/// the question has to be answerable off the record alone: everything the fix
+/// needs is on the Set and its Response, and nothing about it was in the session
+/// that went.
+#[tokio::test]
+async fn a_review_answered_and_never_acted_on_owes_the_findings_that_were_accepted() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "a wrap-up nobody has reviewed owes nothing",
+    );
+
+    let asked = ask(&pool, id, &reviewing())
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and neither does a review still waiting on the human: nothing has been \
+         accepted yet",
+    );
+
+    answer_the_review(&pool, asked.id).await;
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Reset the counter as the window rolls.".to_owned(),
+            said: "Keep the signature.".to_owned(),
+        }],
+        "the finding they accepted is owed and the one they declined is not, each \
+         carrying what they said beside it",
+    );
+}
+
+/// And a commit after the Answers is those fixes landing.
+///
+/// Coarse on purpose: what the fixes are is prose the review wrote, and no
+/// reading of a branch can say which commit was which finding. A session that
+/// committed after the Answers is one that was doing the work rather than one
+/// that fell over before it started, and the review is left to settle by ending.
+#[tokio::test]
+async fn a_commit_after_the_answers_is_the_fixes_landing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    // Before the Answers, which is the review session forbidden to touch
+    // anything: a commit here is the work the branch already carried.
+    record_commit(&pool, id, &fixed("a1b2c3d")).await.unwrap();
+
+    answer_the_review(&pool, asked.id).await;
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap().len(),
+        1,
+        "what the branch carried before the decisions is not the decisions being \
+         carried out",
+    );
+
+    // Both stamps are milliseconds of this database's own `now`, and what is
+    // asked is *after*: two statements inside one of them would be the same
+    // instant.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and a commit after them is nothing left owed",
+    );
+}
+
+/// The review's Set where one finding is too big to fix in the sitting: it names
+/// a second Option beside the one that means fix it, and picking that one means
+/// work it as a task of its own.
+fn reviewing_with_a_split() -> verkstead_schema::QuestionSet {
+    verkstead_schema::QuestionSet::from_yaml(
+        r#"
+title: Review of the rate limiter branch
+questions:
+  - label: Q1
+    text: The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: The clock abstraction wants rebuilding rather than patching.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 2
+        text: Split it out as its own work
+        recommended: true
+      - n: 3
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset the counter as the window rolls.
+    - fix: Q2.1
+      split: Q2.2
+      what: Collapse the three clocks onto one, injected at construction.
+"#,
+    )
+    .unwrap()
+}
+
+/// A split pick is not a fix to make here, and it is not the human declining
+/// either: it is work for a backlog, and what says it has been carried out is a
+/// backlog on the branch rather than anything on the record.
+///
+/// So the two readings are separate. What was accepted to fix here is
+/// [`unlanded_fixes`] and nothing else, and a session that fixed only that is a
+/// session that has done half of what it was answered.
+#[tokio::test]
+async fn a_finding_split_out_is_owed_a_backlog_rather_than_a_fix() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "a wrap-up nobody has reviewed has split nothing out",
+    );
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and neither has a review still waiting on the human",
+    );
+
+    let taken = submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  \
+             - label: Q1\n    selected: 1\n  \
+             - label: Q2\n    selected: 2\n    free_text: Yes, but keep the public signature.\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(_) = taken else {
+        panic!("the Response resolves the Set, so it should be taken: {taken:?}");
+    };
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Reset the counter as the window rolls.".to_owned(),
+            said: String::new(),
+        }],
+        "the finding they said to fix here is a fix and the split one is not",
+    );
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Collapse the three clocks onto one, injected at construction.".to_owned(),
+            said: "Yes, but keep the public signature.".to_owned(),
+        }],
+        "and the split one is work for a backlog, carrying what they said beside the pick",
+    );
+}
+
+/// And a commit is not a backlog. What lands a fix says nothing about whether
+/// the tasks were written, so the split reading is not filtered by one: what
+/// answers that is the branch, which the store cannot see.
+#[tokio::test]
+async fn a_commit_after_the_answers_does_not_land_what_was_split_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .unwrap();
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 1\n  - label: Q2\n    selected: 2\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "the fix landed",
+    );
+    assert_eq!(
+        split_out(&pool, id).await.unwrap().len(),
+        1,
+        "and what was split out is still what was split out: whether it was written \
+         is a question about `.tasks/` rather than about the commits",
+    );
+}
+
+/// A finding whose split Option was not the one they picked is not split out.
+/// Fixing it here and leaving it alone are the other two answers, and neither is
+/// work for a backlog.
+#[tokio::test]
+async fn only_the_option_named_as_the_split_splits_anything_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .unwrap();
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 2\n  - label: Q2\n    selected: 1\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "they said to fix it here, which is not splitting it out",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap().len(),
+        1,
+        "and it is owed as the fix it is",
+    );
+}
+
+/// A review that offered no split at all splits nothing out, which is the
+/// ordinary Set: the escape hatch is offered where the work is too big and
+/// nowhere else.
+#[tokio::test]
+async fn a_review_that_offered_no_split_splits_nothing_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    answer_the_review(&pool, asked.id).await;
+
+    assert_eq!(split_out(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// A review whose every finding was declined owes nothing, which is the ordinary
+/// end to one: there was nothing to commit, and committing nothing is right.
+#[tokio::test]
+async fn a_review_that_was_declined_outright_owes_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  \
+             - label: Q1\n    selected: 2\n  \
+             - label: Q2\n    selected: 2\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(unlanded_fixes(&pool, id).await.unwrap(), Vec::new());
+}
+
+/// The Set a batch session asked with, which is the review's shape about what
+/// somebody said rather than about the branch.
+fn answering_the_comments() -> verkstead_schema::QuestionSet {
+    verkstead_schema::QuestionSet::from_yaml(
+        r#"
+title: What was said on the rate limiter's pull request
+questions:
+  - label: Q1
+    text: You said the reset is the wrong way round. It is.
+    options:
+      - n: 1
+        text: Do it
+        recommended: true
+      - n: 2
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      what: Move the reset above the comparison.
+"#,
+    )
+    .unwrap()
+}
+
+/// What a batch session was answered with and never landed is asked of the
+/// newest proposal, so that the review's own answers are not mistaken for it.
+///
+/// Two proposals stand on a wrap-up that has been commented on: the review's,
+/// which settled long before, and the batch's. Which one is owed anything is the
+/// question this decides, and asking the first would owe the review's findings
+/// for ever.
+#[tokio::test]
+async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_review() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "a wrap-up nobody has proposed anything on has no proposal to find",
+    );
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and owes nothing",
+    );
+
+    // The review, answered and acted on, which is where every batch starts from.
+    let reviewed = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    answer_the_review(&pool, reviewed.id).await;
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    record_commit(&pool, id, &fixed("a1b2c3d")).await.unwrap();
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(reviewed.id),
+        "the review's is the newest proposal until a batch asks",
+    );
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and it owes nothing, because it settled by landing what it was told to",
+    );
+
+    let batch = ask(&pool, id, &answering_the_comments())
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(reviewed.id),
+        "the review is still the first proposal, whatever has been asked since",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(batch.id),
+        "and the batch's is the newest",
+    );
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        batch.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 1\n    free_text: Leave the name alone.\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Move the reset above the comparison.".to_owned(),
+            said: "Leave the name alone.".to_owned(),
+        }],
+        "what the batch was answered with is owed until something lands after it",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and the review, which landed its own, is owed nothing by the same record",
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
+
+    assert_eq!(
+        unlanded_batch_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and a commit after the answers is the batch's fixes landing",
+    );
+}
+
+/// A batch nobody answered is one the comments are forgotten for, so that the
+/// session a retry starts is about the same words rather than about nothing.
+#[tokio::test]
+async fn comments_forgotten_are_dispatched_for_again() {
+    let (dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    record_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+        .await
+        .unwrap();
+
+    forget_addressed_comments(&pool, id, &["IC_1".to_owned(), "IC_2".to_owned()])
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    // A second reader over the same file, as a restarted server has: forgetting
+    // is a fact about the database rather than about the process.
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        addressed_comments(&pool, id).await.unwrap(),
+        Vec::<String>::new(),
+        "nothing has been dispatched about, so the next poll dispatches again",
+    );
+}
+
+/// *Settled once and stays settled* is a rule about one wrap. A review that
+/// split its findings out into a backlog sends the work back to be built, and
+/// what comes back is a branch nobody has read — so leaving Wrapping takes the
+/// review's settle with it.
+///
+/// The checks it leaves alone: they are asked of GitHub on every poll, so a
+/// second wrap settles them from the answers it gets rather than from what the
+/// first one wrote down.
+#[tokio::test]
+async fn leaving_wrapping_puts_the_review_back_to_waiting_and_nothing_else() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+    settle_wrap_up(&pool, id, WaitingOn::Checks).await.unwrap();
+
+    implement_again(&pool, id).await.unwrap();
+
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap(),
+        vec![WaitingOn::Checks],
+        "the review is waiting again and the checks are left where they were",
+    );
+}
+
+/// And the first wrap's proposals are not the second's. The review Set it asked
+/// was answered and acted on, and a second wrap that counted it would be one
+/// that never reviewed anything: what it found asking was the wrap before.
+#[tokio::test]
+async fn the_first_wraps_review_is_not_the_second_wraps() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
+
+    implement_again(&pool, id).await.unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        &verkstead_store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "the second wrap has been reviewed by nobody, so a review runs over the branch",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "and nothing of the first wrap's is what a batch session would be measured against",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "nor is anything it was told to fix still owed",
+    );
+
+    let again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(again.id),
+        "the second wrap's own review is the one it finds",
+    );
 }

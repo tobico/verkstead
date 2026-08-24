@@ -19,6 +19,7 @@ pub use liveness::Liveness;
 pub use nudge::Nudge;
 pub use response::{Answer, Response};
 pub use set::{
-    Direction, Finding, Proposal, Question, QuestionOption, QuestionSet, Review, Subquestion,
+    Decided, Direction, Finding, Proposal, Question, QuestionOption, QuestionSet, Review,
+    Subquestion,
 };
 pub use validate::{ValidationError, Violation};

@@ -523,6 +523,38 @@ async fn work(
     carry_on(state, conversation_id, driving).await
 }
 
+/// Work the backlog a wrap-up's review split its findings out into, from its
+/// first task to the pull request the branch already has.
+///
+/// The one entry into a run that is not a direction being followed. What
+/// launched it is a review the human answered by splitting work out — see
+/// [`crate::review`] — and the Conversation has just been sent back down the
+/// ladder to Implementing to build it. So which direction was picked for it in
+/// the first place is beside the point: what is next is `.tasks/`, exactly as it
+/// is for every other turn of a run, and the finish that follows the last task
+/// wraps the Conversation up a second time.
+///
+/// The registration is taken here rather than by the caller, because the caller
+/// is the review's own task and is about to end: a gap between the two would be
+/// a Conversation the stall sweep found with nothing driving it.
+pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
+    let driving = state.drivers.driving(conversation_id);
+    let state = state.clone();
+
+    tokio::spawn(async move { carry_on(state, conversation_id, driving).await });
+}
+
+/// Whether `worktree` holds a backlog, committed as it stands.
+///
+/// What says the work a review split out has landed, asked by exactly the rule a
+/// breakdown's own step is judged by — the list being there and git having
+/// nothing pending for it. A `TODO.md` written and not committed is a session
+/// still mid-write, and a wrap-up that read that as done would send the
+/// Conversation back to build a backlog that is about to be swept away.
+pub(crate) async fn backlog_landed(worktree: &Path) -> bool {
+    check(worktree, &Landing::Arrived(todo())).await
+}
+
 /// Work whatever the backlog has left, one fresh session per step, until it is
 /// empty.
 ///
@@ -839,20 +871,18 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     Some(event_id)
 }
 
-/// What a review session left behind.
+/// What a session that proposes and then fixes left behind — the wrap-up's one
+/// review, and each batch of comments answered after it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reviewed {
-    /// It put its findings to the human. The Set is on the Timeline, and what
-    /// becomes of each finding is theirs to say.
-    Asked,
+    /// It saw itself out: it read what it was sent to read, put what it would do
+    /// to the human, landed what they accepted, and ended. One that found
+    /// nothing worth raising ends the same way, having said so as the last thing
+    /// it printed.
+    Done,
 
-    /// It ended, cleanly, having asked nothing at all: the review found nothing
-    /// worth raising. What it thought is the last thing it printed, which is on
-    /// the Timeline as its own Event.
-    FoundNothing,
-
-    /// It ended without asking anything, and not well. Which is not a review
-    /// that found nothing — this is a review that did not happen.
+    /// It ended, and not well. Which is not a session with nothing left to do —
+    /// this is one that did not finish.
     Stopped {
         /// How it ended, in the words the Notice records.
         how: String,
@@ -868,52 +898,69 @@ pub(crate) enum Reviewed {
 
 /// Run the one review session a wrap-up gets, and wait until it is over.
 ///
-/// Ended on **asked**, where a fix session is ended on committed: a review
-/// reports by putting its findings to the human, and the ask is the one report it
-/// cannot half make. There is no grace period after it, unlike every other
-/// session here — `verkstead ask` blocks until the human answers, so a review
-/// that has asked is a session doing nothing but wait, and what it is waiting for
-/// is not its to act on.
+/// `said` is what was written on the pull request before this started, which the
+/// caller reads inside the Turn it is holding and records as addressed — so this
+/// session is the one that proposes about it, and nothing else is sent to.
+pub(crate) async fn review(
+    state: &AppState,
+    conversation_id: i64,
+    said: Option<String>,
+) -> Reviewed {
+    proposing(state, conversation_id, Prompt::Reviewing(said), "review").await
+}
+
+/// Run one batch session, and wait until it is over.
 ///
-/// A session that ends without asking is read off how it ended, exactly as an
-/// inline run is: cleanly means it found nothing, and anything else means the
-/// review did not happen. Nothing is refused for and nothing halts here — what
-/// to do about each of those is [`crate::review`]'s.
-pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
-    let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing).await else {
+/// The review's shape exactly — it proposes about what was said, waits on the
+/// human, and lands what they accepted — about a batch of comments rather than
+/// about the branch. `said` is that batch, which the caller reads and records as
+/// addressed inside the Turn it is holding.
+pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) -> Reviewed {
+    proposing(
+        state,
+        conversation_id,
+        Prompt::Responding(said.to_owned()),
+        "batch session",
+    )
+    .await
+}
+
+/// Run one session that proposes and then fixes, and wait until it is over.
+///
+/// **Ended by itself**, which these are the only sessions here that are. Every
+/// other reports through the repository and is ended on what landed plus quiet;
+/// one of these puts what it would do to the human in the middle of its work and
+/// has the rest of that work to do afterwards, so what says it is finished is it
+/// finishing. `verkstead ask` blocks for as long as they take to answer, and a
+/// session waiting on that is one working rather than one stuck — so nothing here
+/// reads the wait as an ending, and the Turn the caller is holding keeps the
+/// Worktree this session's across the whole of it.
+///
+/// How it ended is read exactly as an inline run's is: cleanly means it did what
+/// it was sent to do, and anything else means it did not. Nothing is refused for
+/// and nothing halts here — what to do about either of those is the
+/// caller's, and both callers ask the same further question first: whether
+/// anything the human accepted was left unlanded. See [`crate::review`] and
+/// [`crate::responding`].
+///
+/// `what` names the session in the log, which is the one place the two differ
+/// here.
+async fn proposing(
+    state: &AppState,
+    conversation_id: i64,
+    inside: Prompt,
+    what: &'static str,
+) -> Reviewed {
+    let Some(mut session) = launch(state, conversation_id, inside).await else {
         return Reviewed::Nothing;
     };
 
     let event_id = session.event_id;
-    let pace = state.sessions.pace();
-
-    let ended = tokio::select! {
-        ended = session.ended() => Some(ended),
-        _ = asked(state, conversation_id, pace) => None,
-    };
-
-    let Some(ended) = ended else {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "the review has put its findings to the human, so its session is being ended",
-        );
-
-        state.sessions.end(conversation_id).await;
-        return Reviewed::Asked;
-    };
+    let ended = session.ended().await;
 
     // The session is over — and if the human has its keyboard, that is all that
-    // has happened. What the review left is judged once they hand back, not
-    // before.
+    // has happened. What it left is judged once they hand back, not before.
     state.sessions.until_handed_back(conversation_id).await;
-
-    // Asking may have been its last act — the CLI is a process of its own, and a
-    // Set can land as the session around it goes — so the Timeline is asked once
-    // more before this is read as a review that raised nothing.
-    if asked_already(state, conversation_id).await {
-        return Reviewed::Asked;
-    }
 
     // Verkstead ended it, which here means the human aborted the Conversation out
     // from under the wrap-up. There is nothing to ask them about: they have just
@@ -922,7 +969,8 @@ pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
         tracing::info!(
             conversation_id,
             event_id,
-            "the review was stopped from outside, so nothing is asked about it"
+            what,
+            "the session was stopped from outside, so nothing is asked about it"
         );
         return Reviewed::Nothing;
     }
@@ -932,46 +980,7 @@ pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
             how,
             writing: event_id,
         },
-        None => Reviewed::FoundNothing,
-    }
-}
-
-/// Wait until the review's Set is on the Timeline.
-///
-/// The store rather than anything of the session's, for the reason a fix
-/// session's commits are read there: the Set arrives through Verkstead itself,
-/// and a Set carrying findings *is* the review's — see
-/// [`store::review_asked`].
-async fn asked(state: &AppState, conversation_id: i64, pace: Pace) {
-    loop {
-        tokio::time::sleep(pace.poll).await;
-
-        if !asked_already(state, conversation_id).await {
-            continue;
-        }
-
-        // And nobody at its keyboard, which is the gate a backlog step's ending
-        // asks in the same place — see [`landed_and_quiet`]. A review session
-        // the human is typing into is one Verkstead ends nothing of, findings
-        // put or not.
-        if state.sessions.holding(conversation_id).is_none() {
-            return;
-        }
-
-        state.sessions.until_handed_back(conversation_id).await;
-    }
-}
-
-/// Whether it has. A store that will not answer reads as *not yet*, which is the
-/// right way round for the one thing this decides: a session is ended on the
-/// strength of it.
-async fn asked_already(state: &AppState, conversation_id: i64) -> bool {
-    match store::review_asked(&state.pool, conversation_id).await {
-        Ok(asked) => asked.is_some(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether the review had asked failed");
-            false
-        }
+        None => Reviewed::Done,
     }
 }
 
@@ -1367,8 +1376,13 @@ enum Prompt {
     Addressing(String),
 
     /// The reviewing skill, which the one session a wrap-up starts with runs
-    /// inside.
-    Reviewing,
+    /// inside — carrying whatever was said on the pull request before it started,
+    /// which is the other half of what it has to propose about.
+    Reviewing(Option<String>),
+
+    /// The responding skill, which a session answering a batch of comments runs
+    /// inside — carrying the batch, which is the whole of what it is about.
+    Responding(String),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -1458,7 +1472,8 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
-                Prompt::Reviewing => skills::reviewing(&brief, handoff),
+                Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
+                Prompt::Responding(said) => skills::responding(&brief, handoff, said),
             }
         }
         Err(error) => {

@@ -44,6 +44,7 @@ mod profiles;
 mod push;
 mod reply;
 mod repos;
+mod responding;
 mod responses;
 /// Starting to drive a Conversation again, from wherever it now stands.
 mod resume;

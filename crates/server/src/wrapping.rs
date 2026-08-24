@@ -146,9 +146,19 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// the rest too, since nothing advances past an open one.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
-/// them twice is not starting two of anything: a review that has already asked
-/// returns, a second settling watcher finds the move already made, and a
-/// Conversation that has stopped wrapping up stops every one of them.
+/// them twice is not starting two of anything: a review that has already settled
+/// returns, a second of anything queues on the Worktree behind the first and
+/// finds the work done, and a Conversation that has stopped wrapping up stops
+/// every one of them.
+///
+/// Which is also why a restart and a Resume both come through here rather than
+/// picking their own step. What either of them is looking at is a wrap-up with
+/// nothing running, and that is one situation with several possible causes: a
+/// branch nobody has read, a review whose session went between its ask and the
+/// answers, a batch's proposal in the same state, fixes the human approved and
+/// nobody landed. Each of the four asks the record what it is looking at rather
+/// than being told — see [`crate::review::run`] and
+/// [`crate::responding::unattended`].
 pub(crate) fn watching(state: &AppState, conversation_id: i64) {
     driving(state, conversation_id, crate::checks::watch);
     driving(state, conversation_id, crate::comments::watch);
@@ -180,6 +190,30 @@ where
 
         watching.await;
     });
+}
+
+/// Whether the Conversation is still wrapping up, which is the only state
+/// anything a wrap-up dispatches belongs to.
+///
+/// Asked on the far side of every wait for the Worktree: a Conversation aborted
+/// while something queued has nowhere left to work, and a queue is where most of
+/// a wrap-up's waiting happens.
+///
+/// A store that will not answer reads as *no*, which is the right way round for
+/// the one thing this decides: on the other side of it is an agent being let
+/// loose in a Worktree.
+pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool {
+    match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state == store::Lifecycle::Wrapping,
+        Ok(None) => {
+            tracing::error!(conversation_id, "there is no Conversation left wrapping up");
+            false
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a Conversation was wrapping up failed");
+            false
+        }
+    }
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.

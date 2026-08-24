@@ -42,13 +42,14 @@ mod wrap_up;
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
-    Implementing, Lifecycle, Role, SetOnTimeline, Staged, TimelineEvent, abort_conversation,
-    adopting, ask, asked_from, conversations, load_conversation, note, pick_direction,
-    record_handoff, record_manual_task, rename_branch, review_asked, save_brief, set_asked_from,
-    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
-    unanswered_set_since,
+    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
+    Implementing, Lifecycle, Rebuilding, Role, SetOnTimeline, Staged, TimelineEvent,
+    abort_conversation, adopting, ask, asked_from, conversations, implement_again, last_proposal,
+    load_conversation, note, pick_direction, record_handoff, record_manual_task, rename_branch,
+    review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
+    set_implementation_pairing, set_state, split_out, stacks_on, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_stage, timeline,
+    unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use halts::{Halt, Halted, ask_to_stop, asked_to_stop, clear_halt, forget_stop, halt, halted};
 pub use pairings::{RepoPairings, remembered_pairings};
@@ -67,8 +68,8 @@ pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
     Finished, WAITED_ON, WaitingOn, addressed_comments, finish_wrap_up, fix_attempts,
-    forget_fix_attempts, record_addressed_comments, record_fix_attempt, settle_wrap_up,
-    unsettle_wrap_up, wrap_up_settled,
+    forget_addressed_comments, forget_fix_attempts, record_addressed_comments, record_fix_attempt,
+    settle_wrap_up, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Set as the store holds it: the agent's Set plus the identity the server
@@ -167,49 +168,6 @@ pub struct Taken {
     /// What became of the wrap-up proposal this Set carried, or `None` where it
     /// carried none — which is every ordinary Set.
     pub proposed: Option<Proposed>,
-
-    /// And what became of the self-review it carried, the same way.
-    pub reviewed: Option<Reviewed>,
-}
-
-/// What became of a self-review the human has just answered.
-///
-/// Answering it is the whole of it: the review stops being one of the things
-/// wrap-up waits on whether they accepted every finding or none. What they
-/// accepted is work to dispatch, and the store hands it back rather than doing
-/// anything about it — launching sessions is the server's.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Reviewed {
-    /// Answered, and these are the findings to fix — in the order the review
-    /// raised them.
-    ///
-    /// Empty where the human declined every one of them, which is an answered
-    /// review with nothing to do about it rather than an unanswered one.
-    Answered {
-        conversation_id: i64,
-        fixing: Vec<Fixing>,
-    },
-
-    /// The Set is on no Timeline, so there is no wrap-up to settle and nowhere
-    /// to dispatch anything.
-    ///
-    /// Cannot happen for a stored Set — [`ask`] writes the Set, its Event and
-    /// the row joining them in one transaction — so it is a broken record rather
-    /// than a review of nothing.
-    NoSuchConversation,
-}
-
-/// One finding the human said to fix, as the session that will fix it is told
-/// about it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fixing {
-    /// The finding as the review wrote it for whoever fixes it.
-    pub what: String,
-
-    /// And whatever the human wrote alongside their Answer, or empty where they
-    /// wrote nothing — which is the ordinary way of agreeing with the
-    /// recommendation.
-    pub said: String,
 }
 
 /// What became of a wrap-up proposal the human has just answered.
@@ -315,61 +273,14 @@ pub async fn submit_response(
         (None, _) => None,
     };
 
-    // And, on the one Set a wrap-up's review asks, the same again for what it
-    // found. Settled here rather than in either endpoint for the reason the
-    // proposal's move is: the browser and `curl` must not be able to leave a
-    // Conversation's wrap-up in different states for the same Answer.
-    let reviewed = match &stored.set.review {
-        Some(review) => Some(answer_review(pool, set_id, review, response).await?),
-        None => None,
-    };
-
+    // A review's Set carries its findings and now its Answers too, and answering
+    // it moves nothing at all. What wrap-up waits on is the review session, which
+    // is still running: the Response goes back to it, it fixes what was accepted,
+    // and its ending cleanly is what settles the review — see [`review_asked`],
+    // which is how the Set is found again afterwards.
     settlements.announce(settled_set(pool, set_id).await?);
 
-    Ok(Submission::Accepted(Taken {
-        accepted,
-        proposed,
-        reviewed,
-    }))
-}
-
-/// Settle the review of the Conversation this Set was asked from, and pick out
-/// the findings the human said to fix.
-///
-/// Settled whatever they answered. What wrap-up was waiting on is *the review
-/// being answered*, and a human who declined every finding has answered it — the
-/// review is over either way, and the difference between the two is only how
-/// much work it left behind.
-///
-/// The order is the review's own rather than the Response's: the findings were
-/// raised in the order the review thought about them, and that is the order they
-/// are worth fixing in.
-async fn answer_review(
-    pool: &SqlitePool,
-    set_id: i64,
-    review: &verkstead_schema::Review,
-    response: &Response,
-) -> Result<Reviewed> {
-    let Some(conversation_id) = asked_from(pool, set_id).await? else {
-        return Ok(Reviewed::NoSuchConversation);
-    };
-
-    settle_wrap_up(pool, conversation_id, WaitingOn::Review).await?;
-
-    let fixing = review
-        .findings
-        .iter()
-        .filter(|finding| finding.accepted(response))
-        .map(|finding| Fixing {
-            what: finding.what.trim().to_owned(),
-            said: finding.said(response).to_owned(),
-        })
-        .collect();
-
-    Ok(Reviewed::Answered {
-        conversation_id,
-        fixing,
-    })
+    Ok(Submission::Accepted(Taken { accepted, proposed }))
 }
 
 /// Act on the direction picked on an accepted proposal, for the Conversation the

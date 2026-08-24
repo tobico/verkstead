@@ -306,10 +306,6 @@ async fn submit_response(
         store::Submission::Accepted(taken) => {
             crate::conversations::settle_a_proposal(&state, id, taken.proposed).await;
 
-            if let Some(reviewed) = taken.reviewed {
-                crate::review::answered(&state, reviewed);
-            }
-
             Submitted::Accepted
         }
         store::Submission::AlreadyAnswered => Submitted::AlreadyAnswered,

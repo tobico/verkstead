@@ -1,7 +1,7 @@
 //! The Question Set as it arrives from an agent: what YAML parses into, and
 //! which shapes the question grammar refuses.
 
-use verkstead_schema::{Direction, QuestionSet, Response};
+use verkstead_schema::{Decided, Direction, QuestionSet, Response};
 
 /// A Set exercising every part of the wire format at once.
 const FULL_SET: &str = r#"
@@ -972,5 +972,265 @@ fn only_the_named_option_accepts_a_finding() {
         finding.said(&Response::from_yaml("answers:\n  - label: Q1\n    selected: 1\n").unwrap()),
         "",
         "agreeing without a word said is the ordinary way of agreeing",
+    );
+}
+
+/// A review that judged one finding too big to fix in the sitting it was found
+/// in: the same block, with a second Option named beside the first.
+const SPLITTING: &str = r#"
+title: Review of the rate limiter branch
+questions:
+  - label: Q1
+    text: |
+      The window counter is never reset between windows, and unpicking it
+      touches every caller.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 2
+        text: Leave it
+      - n: 3
+        text: Split it out as a task
+        recommended: true
+  - label: Q2
+    text: |
+      Two clocks now, and the tests pin both.
+    options:
+      - n: 1
+        text: Fix it here
+        recommended: true
+      - n: 2
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      split: Q1.3
+      what: |
+        `window.rs` — `Window::count` is never reset as the window rolls, so a
+        client that exceeds the limit is refused for ever.
+    - fix: Q2.1
+      what: |
+        `limits.rs` and `window.rs` each hold their own notion of now. Collapse
+        them onto one clock.
+"#;
+
+#[test]
+fn a_finding_can_offer_a_split_option_beside_its_fix() {
+    let set = QuestionSet::from_yaml(SPLITTING).expect("the review Set should parse");
+
+    set.validate()
+        .expect("a split naming an Option the Set offers, distinct from the fix, is legal");
+
+    let review = set.review.as_ref().expect("this Set carries a review");
+
+    assert_eq!(review.findings[0].splitting(), Some(("Q1", 3)));
+    assert_eq!(
+        review.findings[1].splitting(),
+        None,
+        "a finding without a split is exactly the finding it always was",
+    );
+
+    let yaml = set.to_yaml().expect("a Set should serialise");
+    assert_eq!(
+        QuestionSet::from_yaml(&yaml).expect("our own YAML should parse"),
+        set,
+        "the split survives the round trip",
+    );
+}
+
+#[test]
+fn an_ordinary_finding_offers_no_split_at_all() {
+    let set = QuestionSet::from_yaml(REVIEWING).expect("the review Set should parse");
+    let review = set.review.expect("this Set carries a review");
+
+    assert!(
+        review
+            .findings
+            .iter()
+            .all(|finding| finding.split.is_none()),
+        "a review that judged nothing too big says nothing about splitting",
+    );
+}
+
+/// The split is held to what the fix is held to — an Option the human can
+/// actually pick — and to the two only a split has: it cannot be the finding's
+/// own fix, and it cannot be an Option another finding already turns on.
+#[test]
+fn a_split_nobody_can_act_on_is_refused() {
+    for (how, naming, set) in [
+        (
+            "a split that is not the notation",
+            "Q1.1",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 3
+        text: Split it out
+review:
+  findings:
+    - fix: Q1.1
+      split: split it out
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a split on a question the Set does not ask",
+            "Q1.1",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 3
+        text: Split it out
+review:
+  findings:
+    - fix: Q1.1
+      split: Q9.3
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a split on an Option the question does not offer",
+            "Q1.1",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 3
+        text: Split it out
+review:
+  findings:
+    - fix: Q1.1
+      split: Q1.4
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a split that is the finding's own fix, which is one Answer meaning both",
+            "Q1.1",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 3
+        text: Split it out
+review:
+  findings:
+    - fix: Q1.1
+      split: Q1.1
+      what: Reset it as the window rolls.
+",
+        ),
+        (
+            "a split another finding is fixed by, which is one Answer meaning two things",
+            "two findings",
+            "
+title: Review
+questions:
+  - label: Q1
+    text: The counter is never reset.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 3
+        text: Split it out
+review:
+  findings:
+    - fix: Q1.1
+      split: Q1.3
+      what: Reset it as the window rolls.
+    - fix: Q1.3
+      what: And collapse the two clocks.
+",
+        ),
+    ] {
+        let refused = QuestionSet::from_yaml(set)
+            .unwrap()
+            .validate()
+            .expect_err(&format!("{how} should be refused, and was not"));
+
+        assert!(
+            refused.to_string().contains(naming),
+            "{how} should be refused naming the finding at fault, got: {refused}",
+        );
+    }
+}
+
+/// The three outcomes a Response holds for one finding, told apart by which
+/// named Option it picked and by nothing else.
+#[test]
+fn a_response_tells_fixing_here_from_splitting_out_from_declining() {
+    let set = QuestionSet::from_yaml(SPLITTING).unwrap();
+    let review = set.review.as_ref().expect("this Set carries a review");
+    let finding = &review.findings[0];
+
+    let decided = |yaml: &str| finding.decided(&Response::from_yaml(yaml).unwrap());
+
+    assert_eq!(
+        decided("answers:\n  - label: Q1\n    selected: 1\n"),
+        Decided::Fix,
+        "picking the Option the finding is fixed by is fixing it here",
+    );
+    assert_eq!(
+        decided("answers:\n  - label: Q1\n    selected: 3\n"),
+        Decided::Split,
+        "picking the Option the finding is split out by is work for a backlog",
+    );
+    assert_eq!(
+        decided("answers:\n  - label: Q1\n    selected: 2\n"),
+        Decided::Declined,
+        "any other Option is the human declining the finding",
+    );
+    assert_eq!(
+        decided("answers:\n  - label: Q1\n    unanswered: true\n"),
+        Decided::Declined,
+        "a question left open never dispatches anything",
+    );
+    assert_eq!(
+        decided("answers:\n  - label: Q1\n    free_text: Not worth it yet.\n"),
+        Decided::Declined,
+        "an answer in their own words wins over the Options, so it is neither",
+    );
+
+    let picked = |yaml: &str| Response::from_yaml(yaml).unwrap();
+
+    assert!(
+        !finding.accepted(&picked("answers:\n  - label: Q1\n    selected: 3\n")),
+        "a split pick is not the finding accepted to fix here",
+    );
+    assert!(
+        finding.accepted(&picked("answers:\n  - label: Q1\n    selected: 1\n")),
+        "and the fix pick still is",
+    );
+
+    assert_eq!(
+        finding.said(&picked(
+            "answers:\n  - label: Q1\n    selected: 3\n    free_text: Its own task, then.\n"
+        )),
+        "Its own task, then.",
+        "what they wrote beside a split goes with it to whoever works the task",
+    );
+
+    assert_eq!(
+        review.findings[1].decided(&picked("answers:\n  - label: Q2\n    selected: 2\n")),
+        Decided::Declined,
+        "a finding that offers no split can never be split out",
     );
 }
