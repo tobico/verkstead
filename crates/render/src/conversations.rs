@@ -746,6 +746,17 @@ pub struct CommitPane {
     /// bookkeeping commit and every commit recorded before summaries were kept.
     pub summary: Option<String>,
 
+    /// Whether that summary came out holding a Diagram, and so whether the pane
+    /// carries the client-side renderer at all.
+    ///
+    /// Answered here, off the HTML above, exactly as a Set's own flag is — see
+    /// [`crate::SetView::diagrams`]. It travels with the pane because it is a
+    /// fact about this commit's own account of itself, and because mermaid is
+    /// megabytes: the pane that asks for the bundle is the one with something to
+    /// draw with it. `false` where there is no summary, there being nothing
+    /// there to hold a Diagram.
+    pub diagrams: bool,
+
     /// `null` where the commit changed nothing a diff can show, which is a merge
     /// or an empty commit. A commit the repository no longer has is not this: it
     /// is a 404, because there is nothing there to draw a pane about.
@@ -1290,10 +1301,19 @@ pub struct CommitSummary {
 /// attached Diff does — and so does a summary of nothing but whitespace, which
 /// the pane would otherwise draw as a gap above the diff.
 pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
+    let summary = summary
+        .map(crate::markdown::to_html)
+        .filter(|html| !html.trim().is_empty());
+
     CommitPane {
-        summary: summary
-            .map(crate::markdown::to_html)
-            .filter(|html| !html.trim().is_empty()),
+        // Asked of the rendered summary rather than of the message it came from,
+        // for the reason a Set's own flag is: the rendering is where a fence
+        // either became a Diagram or did not, and the renderer in the page reads
+        // that same answer out of that same markup.
+        diagrams: summary
+            .as_deref()
+            .is_some_and(crate::markdown::holds_diagram),
+        summary,
         diff: crate::diff::to_html(patch),
     }
 }

@@ -17,6 +17,10 @@
 //! every other document on a timeline. So there is no markdown parser here
 //! either — and a commit that carried none draws the pane as it always did.
 //!
+//! The one thing that is drawn here is a Diagram in that summary, which is the
+//! Set page's own arrangement: the server leaves the source block, the client
+//! draws over it, and a pane whose summary holds none never asks for mermaid.
+//!
 //! The file list down its margin is the Set page's own table of contents, drawn
 //! from the paths that travel beside the rendered markup: the same entries, the
 //! same scroll-spy and the same jump into a folded file. Which shape it takes is
@@ -26,7 +30,16 @@
 //! The diff arrives headerless on purpose: the renderer splits on `diff --git`,
 //! so a commit header above the first file would be dropped rather than shown.
 
-import { Match, Show, Switch, createMemo, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  type JSX,
+} from "solid-js";
 
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
@@ -34,6 +47,7 @@ import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
 import { Contents, navigation } from "../set/Contents";
+import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
 import { files, spied } from "../set/outline";
 import { ABBREVIATED } from "./Timeline";
@@ -42,6 +56,44 @@ import { ABBREVIATED } from "./Timeline";
 /// own name rather than the Set page's `diff`, because a commit's pane and a
 /// Set's page can be open at once and an id names one element.
 const DIFF = "commit-diff";
+
+/// And what the summary above it is reached by, for the same reason.
+const SUMMARY = "commit-summary";
+
+/// What the commit said about itself, put in the page and — where it holds one
+/// — drawn.
+///
+/// Its own component so that the drawing is mounted with the summary rather than
+/// with the pane: the summary arrives with the fetch, and a pane that reached for
+/// the renderer on its own mount would be reaching before there was anything to
+/// draw over.
+///
+/// The renderer is turned loose on this block alone rather than on the document,
+/// because a Set's page can be open behind the workbench and its Diagrams are its
+/// own to draw.
+function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
+  let block!: HTMLElement;
+
+  // Once, on mount, as the Set page does it: whether there is a Diagram here is
+  // a fact about the summary this pane fetched, and a commit cannot change — so
+  // a second pass would find every source block already drawn over.
+  onMount(() => {
+    if (!props.diagrams) {
+      return;
+    }
+
+    onCleanup(drawDiagrams({ root: block }));
+  });
+
+  return (
+    <section
+      id={SUMMARY}
+      class="commit-summary document markdown"
+      ref={block}
+      innerHTML={props.html}
+    />
+  );
+}
 
 export function Commit(props: {
   conversation: ConversationView;
@@ -74,16 +126,28 @@ export function Commit(props: {
     setWrapping(on);
   };
 
-  // The one section this pane is made of, and every fold in it. A commit's diff
-  // is the whole of what is here, so the outline is that section and its files
-  // rather than anything worked out from a Set — but the entries are the Set
-  // page's own, off the same paths and pointing at the same renderer-stamped
-  // anchors.
+  // The sections this pane is made of, in the order it is read: what the commit
+  // said about itself, and then the diff with every fold in it. Worked out from
+  // the pane rather than from a Set — but the entries are the Set page's own,
+  // off the same paths and pointing at the same renderer-stamped anchors.
+  //
+  // A commit that said nothing has no Summary line, exactly as it has no summary
+  // to jump to; one that changed nothing has no Diff line either, and a pane with
+  // neither gets no nav at all.
   const sections = createMemo((): Section[] => {
-    const view = opened.data?.diff;
-    return view === null || view === undefined
-      ? []
-      : [{ anchor: DIFF, name: "Diff", entries: files(view) }];
+    const pane = opened.data;
+    const listed: Section[] = [];
+
+    if (pane?.summary) {
+      listed.push({ anchor: SUMMARY, name: "Summary", entries: [] });
+    }
+
+    const view = pane?.diff;
+    if (view !== null && view !== undefined) {
+      listed.push({ anchor: DIFF, name: "Diff", entries: files(view) });
+    }
+
+    return listed;
   });
 
   const watched = createMemo(() => spied(sections()));
@@ -122,7 +186,10 @@ export function Commit(props: {
           summaries were kept — has nothing here at all. */}
       <Show when={opened.data?.summary}>
         {(summary) => (
-          <section class="commit-summary document markdown" innerHTML={summary()} />
+          <Summary
+            html={summary()}
+            diagrams={opened.data?.diagrams ?? false}
+          />
         )}
       </Show>
 

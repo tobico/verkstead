@@ -428,6 +428,18 @@ export type CommitPane = {
  */
 summary: string | null, 
 /**
+ * Whether that summary came out holding a Diagram, and so whether the pane
+ * carries the client-side renderer at all.
+ *
+ * Answered here, off the HTML above, exactly as a Set's own flag is — see
+ * [`crate::SetView::diagrams`]. It travels with the pane because it is a
+ * fact about this commit's own account of itself, and because mermaid is
+ * megabytes: the pane that asks for the bundle is the one with something to
+ * draw with it. `false` where there is no summary, there being nothing
+ * there to hold a Diagram.
+ */
+diagrams: boolean, 
+/**
  * `null` where the commit changed nothing a diff can show, which is a merge
  * or an empty commit. A commit the repository no longer has is not this: it
  * is a 404, because there is nothing there to draw a pane about.

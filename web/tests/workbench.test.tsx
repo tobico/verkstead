@@ -72,9 +72,14 @@ import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 
-/// The renderer is a page's own doing and neither Set fixture has a Diagram;
-/// mocked so nothing here loads megabytes of mermaid.
-vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
+/// The renderer, which is each pane's own doing rather than this file's: what is
+/// asked here is whether a commit's pane reached for it at all, and never what it
+/// drew — that is `diagrams.test.ts`. Mocked either way, so that nothing here
+/// loads megabytes of mermaid.
+const drawing = vi.hoisted(() =>
+  vi.fn((_how?: { root?: ParentNode }) => () => {}),
+);
+vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
 
 /// How many columns fit in the pane, which is what the Screen of a live session
 /// sends up its socket.
@@ -121,6 +126,9 @@ const BRIEF = briefOf(OPEN);
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Counted per test: whether a pane reached for the renderer is a question
+  // about the one pane the test opened.
+  drawing.mockClear();
   // One test drives the brief field's typing pause on a clock of its own.
   vi.useRealTimers();
   // The state is the instance's own, over the one every other test reads off
@@ -3771,7 +3779,17 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
 /// commit needs no diff machinery of its own.
 const COMMIT_PANE: CommitPane = {
   summary: null,
+  diagrams: false,
   diff: (answeringSet as SetView).diff,
+};
+
+/// The same commit with something to say for itself: the summary as the server
+/// renders one — prose, and the source block a Diagram is held for.
+const SUMMARISED: CommitPane = {
+  ...COMMIT_PANE,
+  summary:
+    '<p>A bucket per account.</p>\n<div class="wide"><pre class="mermaid">flowchart LR\n  in --&gt; limiter --&gt; out\n</pre></div>',
+  diagrams: true,
 };
 
 /// Where the details pane fetches it from.
@@ -3915,6 +3933,50 @@ describe("a commit on the timeline", () => {
       summary.compareDocumentPosition(diff) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  /// A Diagram in the summary is the one thing the pane draws for itself, and it
+  /// draws it the Set page's way: over the source block the server left, once the
+  /// summary is in the page. What it drew is `diagrams.test.ts`'s subject; what
+  /// is asked here is that it was reached for, and over this block alone — a Set
+  /// page open behind the workbench draws its own.
+  it("draws the Diagram in a summary that holds one", async () => {
+    theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const summary = await drawn(container, ".details-pane .commit-summary");
+
+    // The source block the renderer draws over — and what the reader is left
+    // with if it never draws.
+    expect(summary.querySelector("pre.mermaid")!.textContent).toContain(
+      "flowchart LR",
+    );
+
+    await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
+    expect(drawing.mock.calls[0]![0]).toEqual({ root: summary });
+  });
+
+  /// Which is every other commit: mermaid is megabytes, and a pane with nothing
+  /// to draw pays none of them.
+  it("never reaches for the renderer where the summary holds no Diagram", async () => {
+    theBuilding(
+      {},
+      whenever(
+        DIFF_OF_IT,
+        json({
+          ...COMMIT_PANE,
+          summary: "<p>A bucket per account.</p>",
+        } satisfies CommitPane),
+      ),
+    );
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+    await drawn(container, ".details-pane .commit-summary");
+
+    expect(drawing).not.toHaveBeenCalled();
   });
 
   /// The ordinary commit, and every commit recorded before summaries were kept:
@@ -4099,6 +4161,36 @@ describe("the contents of a details pane", () => {
         line.getAttribute("title"),
       ),
     ).toEqual(COMMIT_PANE.diff!.paths);
+  });
+
+  /// And above them, what the commit said about itself — one nav over the whole
+  /// pane, in the order the pane is read in.
+  it("lists a commit's summary above its diff, and jumps to both", async () => {
+    theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    fireEvent.click(await drawn(container, ".timeline-event > .commit"));
+
+    const nav = await drawn(container, ".details-pane nav.contents");
+
+    expect(
+      [...nav.querySelectorAll("a.contents-link")].map((line) =>
+        line.getAttribute("href"),
+      ),
+    ).toEqual(["#commit-summary", "#commit-diff", "#diff-1", "#diff-2"]);
+
+    // And both lines land on something: the ids are the pane's own sections
+    // rather than names the nav made up.
+    for (const anchor of ["commit-summary", "commit-diff"]) {
+      const section = container.querySelector(`.details-pane #${anchor}`);
+      expect(section, `expected the pane to hold #${anchor}`).toBeTruthy();
+
+      const landed = vi.fn();
+      section!.scrollIntoView = landed;
+      nav.querySelector<HTMLAnchorElement>(`a[href="#${anchor}"]`)!.click();
+
+      expect(landed).toHaveBeenCalled();
+    }
   });
 
   it("jumps into a fold of the commit, unfolding it first", async () => {

@@ -4591,6 +4591,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>'
         pane.summary, None,
         "that commit's message was a subject and nothing else",
     );
+    assert!(
+        !pane.diagrams,
+        "and a pane with no summary has nothing to draw, so it loads no mermaid",
+    );
 
     let diff = pane.diff.expect("a commit that added a file has a diff");
 
@@ -4611,11 +4615,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>'
     // itself, rendered above the diff — the Diagram held for the client-side
     // renderer, the prose as prose, and none of the bookkeeping git keeps under
     // it.
-    let summary = fixture
-        .commit_pane(landed[0].id)
-        .await
-        .summary
-        .expect("that commit's message had a body");
+    let drawn = fixture.commit_pane(landed[0].id).await;
+
+    assert!(
+        drawn.diagrams,
+        "a summary with a Diagram in it is what the pane loads the renderer for",
+    );
+
+    let summary = drawn.summary.expect("that commit's message had a body");
 
     assert!(
         summary.contains("<pre class=\"mermaid\">"),
