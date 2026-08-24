@@ -91,7 +91,7 @@ describe("the Update Notice", () => {
     expect(
       pressable.filter(
         (found) =>
-          !found.closest(".settings") &&
+          !found.closest(".credentials") &&
           !found.closest(".profiles") &&
           !found.closest(".repos") &&
           !found.closest(".notifications"),
@@ -106,7 +106,7 @@ describe("the Update Notice", () => {
     await waitFor(() => expect(banner()).not.toBeNull());
 
     const page = container.querySelector(".list-page")!;
-    const configured = page.querySelector(".settings")!;
+    const configured = page.querySelector(".credentials")!;
     // Inside the page's column rather than beside it, and before everything the
     // page is for.
     expect(banner()!.parentElement).toBe(page);

@@ -62,18 +62,18 @@
 //! there would reach Done with approved fixes lost. So the record is asked
 //! afterwards rather than the session trusted: the findings they accepted are on
 //! the Set, their words are on the Response, and a branch with no commit since
-//! the answers is the doing never having happened. That stops the run at an
-//! Interruption saying what is owed, and a retry is the doing over again — one
-//! fix session handed every accepted finding at once, because the decisions were
+//! the answers is the doing never having happened. That halts the run with a
+//! Notice saying what is owed, and Resume is the doing over again — one fix
+//! session handed every accepted finding at once, because the decisions were
 //! made and only the carrying out failed. Nothing is asked again. A split pick
 //! is owed the same way and reads the same rule the other way round: what it is
 //! owed is the backlog, so the branch is asked whether one is on it rather than
 //! whether anything was committed.
 //!
 //! A review session that ends badly having been owed nothing is not a review that
-//! had nothing to do: it is a review that did not finish. That stops the run at
-//! an Interruption like every other, and retrying it is the review over again in
-//! a session as fresh as the first.
+//! had nothing to do: it is a review that did not finish. That halts the run like
+//! every other stop, and going again is the review over from the start, in a
+//! session as fresh as the first.
 //!
 //! **And nothing the human was asked is allowed to go quietly either.** The
 //! propose-then-fix shape has one session hold the whole of a review, its ask
@@ -87,14 +87,13 @@
 //! So the review is asked about every time anything starts a wrap-up's watchers,
 //! rather than only where nobody has read the branch. A review that asked and has
 //! no session is picked up by what the record says about its Set. **Answered**,
-//! and the deciding is done: what is left is the doing, dispatched exactly as a
-//! retry of the owed-fixes Interruption dispatches it, with nobody asked for
-//! anything. **Unanswered**, and there is nothing to carry out and nobody to
-//! carry it out — so the Set is closed unanswered, saying on the Timeline that
-//! the question is off, and the run stops at an Interruption whose retry is the
-//! branch read again. Closing it is also what makes that retry work: a Set left
-//! standing would still be this wrap's review, and the fresh reading would be a
-//! second review nothing recognised.
+//! and the deciding is done: what is left is the doing, dispatched exactly as an
+//! owed-fixes halt has it dispatched on Resume, with nobody asked for anything.
+//! **Unanswered**, and there is nothing to carry out and nobody to carry it out —
+//! so the Set is closed unanswered, saying on the Timeline that the question is
+//! off, and the run halts with Resume meaning the branch read again. Closing it
+//! is also what makes that work: a Set left standing would still be this wrap's
+//! review, and the fresh reading would be a second review nothing recognised.
 //!
 //! **One agent in one Worktree**, which is what the turns are for. The checks are
 //! being watched at the same time as this runs, and a fix session dispatched
@@ -123,14 +122,14 @@ use crate::store;
 /// up what a review whose session is gone left behind.
 ///
 /// Both, because this is spawned by everything that might have left a wrap-up
-/// with no review running — the finish step, a server coming back up, either
-/// wrap-up Interruption being retried — and *no review running* is two different
+/// with no review running — the finish step, a server coming back up, a Resume
+/// pressed on a halted wrap-up — and *no review running* is two different
 /// situations. One is a branch nobody has read. The other is a review that asked
 /// and whose session is no longer there to act on the answers, which no amount
 /// of waiting resolves by itself.
 ///
 /// Returns as soon as there is neither — a review already settled, a Conversation
-/// that has stopped wrapping up, or a run blocked on the human. None of those is
+/// that has stopped wrapping up, or driving that has stopped. None of those is
 /// a failure: most of the time something else has already seen to it.
 ///
 /// Nothing is refused for. This runs unattended with nobody watching, and what it
@@ -193,8 +192,8 @@ async fn reading(state: &AppState, conversation_id: i64) {
 /// is a fact about whether the human got to it first.
 ///
 /// **Answered**, and the deciding is done: what is left is the doing, which is
-/// the same session a retried [`dropped`] runs and is dispatched here without
-/// anybody being asked for anything. A Response with nothing owed against it is a
+/// the same session a Resume after [`dropped`] runs and is dispatched here
+/// without anybody being asked for anything. A Response with nothing owed against it is a
 /// review that got everything done and lost only its own last breath, so it
 /// settles.
 ///
@@ -242,7 +241,7 @@ async fn unattended(state: &AppState, conversation_id: i64, set_id: i64) {
 ///
 /// `ended_badly` is how it ended where it did not end well, and the Timeline
 /// Event it was printing into. A session owed nothing that ended badly is a
-/// review that did not finish, which is the other Interruption here.
+/// review that did not finish, which is the other stop here.
 async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(String, i64)>) {
     let owed = owing_now(state, conversation_id).await;
 
@@ -361,32 +360,6 @@ async fn built_instead(state: &AppState, conversation_id: i64) {
     crate::runner::build_the_split_out(state, conversation_id);
 }
 
-/// Review it again because the human asked for it — or land what it was answered
-/// and never landed, which is the other thing a retry here can mean.
-///
-/// Which of the two is a fact about the record rather than something to choose,
-/// and it is not chosen here: putting the wrap-up back under watch is the whole
-/// of a retry, because [`run`] asks that question every time it starts and is
-/// the one place that answers it. Findings the human decided about with nothing
-/// to show for them are the doing alone — the fixes committed, the split-out
-/// findings written as a backlog, or both. Everything else is the review over
-/// again, in a session as fresh as the first: the Set an abandoned review left
-/// behind was closed as the Interruption was raised, so there is nothing left
-/// standing for a fresh reading of the branch to be mistaken for.
-///
-/// The wrap-up's other half goes back under watch with it. The checks stopped
-/// being watched when this Interruption was raised — nothing advances past an
-/// open one — so a retry that started only the review would leave the pull
-/// request's checks unwatched for the rest of the wrap-up.
-pub(crate) async fn retried(state: AppState, conversation_id: i64) {
-    tracing::info!(
-        conversation_id,
-        "a wrap-up's review was retried, so the whole of it goes back under watch"
-    );
-
-    crate::wrapping::watching(&state, conversation_id);
-}
-
 /// Do what the review was answered and never did, in one session that does
 /// nothing else.
 ///
@@ -430,10 +403,10 @@ async fn land(state: &AppState, conversation_id: i64, owed: Owing) {
 /// words the review wrote for whoever would carry them out, and whatever they
 /// said beside each answer.
 ///
-/// Their words go under each finding rather than over it, for the reason a retry
-/// note goes under the documents: the finding says what is wrong, and this says
-/// what they thought about it. "Yes, but leave the public signature alone" is
-/// only worth writing if it reaches the session that can act on it.
+/// Their words go under each finding rather than over it: the finding says what
+/// is wrong, and this says what they thought about it. "Yes, but leave the
+/// public signature alone" is only worth writing if it reaches the session that
+/// can act on it.
 ///
 /// Two instructions where the human answered both ways, and they are different
 /// work: what was accepted is fixed on the branch, and what was split out is
@@ -591,7 +564,7 @@ async fn owing_now(state: &AppState, conversation_id: i64) -> Owing {
 /// A Conversation with no Worktree left has nowhere for one to be, and a store
 /// that will not answer has said nothing about whether it is there. Both read as
 /// *not written*, which is the right way round for what is on the other side of
-/// this: an Interruption the human can dismiss with a glance at the branch,
+/// this: a halt the human can clear with a glance at the branch,
 /// against a wrap-up that carried on as though work nobody had written was done.
 async fn backlog(state: &AppState, conversation_id: i64) -> bool {
     let worktree = match store::load_conversation(&state.pool, conversation_id).await {
@@ -620,8 +593,8 @@ async fn backlog(state: &AppState, conversation_id: i64) -> bool {
 enum Wanted {
     /// Nothing at all, which is the ordinary answer and never a failure: the
     /// Conversation has stopped wrapping up, the review has already settled, or
-    /// the run is blocked on the human — the same rule the runner and the checks
-    /// watcher keep, that nothing is launched while an Interruption is open.
+    /// driving has stopped — the same rule the runner and the checks watcher
+    /// keep, that nothing is launched behind a halt.
     Nothing,
 
     /// Nobody has read the branch, so a review session reads it.
@@ -637,8 +610,8 @@ enum Wanted {
 ///
 /// The order matters and is the order the questions rule each other out in: a
 /// Conversation that is not wrapping up has no wrap-up to see to, a review that
-/// has settled is over whatever Sets are on the Timeline, and an open
-/// Interruption stops everything below it. Only then is the Set worth looking
+/// has settled is over whatever Sets are on the Timeline, and a halt stops
+/// everything below it. Only then is the Set worth looking
 /// for, because only then does its being there mean anything.
 ///
 /// A store that will not answer reads as *nothing*, which is the right way round
@@ -664,20 +637,8 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
         }
     }
 
-    match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(None) => {}
-        Ok(Some(event_id)) => {
-            tracing::info!(
-                conversation_id,
-                event_id,
-                "the run is blocked on the human, so nothing was started for the review"
-            );
-            return Wanted::Nothing;
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            return Wanted::Nothing;
-        }
+    if crate::halts::stopped(state, conversation_id).await {
+        return Wanted::Nothing;
     }
 
     match asked(state, conversation_id).await {
@@ -730,7 +691,7 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 /// ever handed somebody else's ask. Closing it is Verkstead reaching for the
 /// archive on the human's behalf because it knows something they cannot see,
 /// exactly as a relaunched grilling closes what its dead session left open — see
-/// [`crate::grillings`]. And it is what makes the retry mean something: with
+/// [`crate::grillings`]. And it is what makes a Resume mean something: with
 /// nothing left standing, a fresh reading of the branch is recognised as this
 /// wrap's review rather than mistaken for a second one.
 ///
@@ -740,9 +701,9 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 /// was already gone before anybody looked, which is what a restarted server
 /// finds.
 ///
-/// The three remedies all mean something. Retry is the branch read again in a
-/// session as fresh as the first, take over is the human doing it, and abort ends
-/// the run with the branch exactly as it stands.
+/// [`store::Halt::Deliberate`]: what to do about it is Resume, which reads the
+/// branch again in a session as fresh as the first, or taking the branch over,
+/// or aborting the run with it exactly as it stands.
 async fn abandoned(
     state: &AppState,
     conversation_id: i64,
@@ -752,7 +713,7 @@ async fn abandoned(
     closed(state, conversation_id, set_id).await;
 
     let left = "the review put its findings to you and the session that was to act on \
-                them is gone, so its questions have been closed unanswered. Retrying \
+                them is gone, so its questions have been closed unanswered. Resuming \
                 reads the branch again.";
 
     let (how, writing) = match ended_badly {
@@ -760,10 +721,10 @@ async fn abandoned(
         None => (left.to_owned(), None),
     };
 
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Review,
+        crate::halts::Decided::Verkstead,
         "acting on the answers to what the review found",
         &how,
         writing,
@@ -773,8 +734,8 @@ async fn abandoned(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review's findings were left with nobody to act on them and the \
-             Interruption saying so could not be raised"
+            "a review's findings were left with nobody to act on them and the halt \
+             saying so could not be recorded"
         );
     }
 }
@@ -822,13 +783,18 @@ async fn settle(state: &AppState, conversation_id: i64) {
 /// human's.
 ///
 /// The evidence is the tail of what the session said, which is where a review
-/// that fell over says why — and the three remedies all mean something: run the
-/// review again, read the branch yourself, or end the run.
+/// that fell over says why — and what to do about it is Resume, read the branch
+/// themselves, or abort.
+///
+/// [`store::Halt::Deliberate`], because a wrap-up that goes on without its
+/// review is a branch nobody read: Verkstead stops rather than pass a session
+/// that crashed off as a clean bill of health, and going again is the human's
+/// press.
 async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Review,
+        crate::halts::Decided::Verkstead,
         "reviewing the branch the pull request is on",
         how,
         Some(writing),
@@ -838,7 +804,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review did not finish and the Interruption saying so could not be raised"
+            "a review did not finish and the halt saying so could not be recorded"
         );
     }
 }
@@ -846,11 +812,13 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 /// Stop the run: the human decided about findings that nothing came of, and only
 /// they can say what happens now.
 ///
-/// The Interruption names the doing rather than the reading, because that is the
-/// half that failed — and it says what is owed in the review's own words, so the
-/// choice is answerable without opening the Set again. Retrying it is the doing
-/// over again in one session; taking over is the human doing it; aborting ends
-/// the run with the branch exactly as the session left it.
+/// The Notice names the doing rather than the reading, because that is the half
+/// that failed — and it says what is owed in the review's own words, so what to
+/// do about it is answerable without opening the Set again.
+///
+/// [`store::Halt::Deliberate`]: what to do is Resume, which is the doing over
+/// again in one session, or the human doing it themselves, or aborting the run
+/// with the branch exactly as the session left it.
 ///
 /// `how` is how the session ended where it ended badly, and `writing` the Event
 /// it was printing into — both absent for a session that saw itself out and
@@ -862,10 +830,10 @@ async fn dropped(
     how: Option<&str>,
     writing: Option<i64>,
 ) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Review,
+        crate::halts::Decided::Verkstead,
         what_failed(owed),
         &owing(owed, how),
         writing,
@@ -875,8 +843,8 @@ async fn dropped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review's decided findings were never acted on and the Interruption saying \
-             so could not be raised"
+            "a review's decided findings were never acted on and the halt saying so \
+             could not be recorded"
         );
     }
 }
@@ -895,14 +863,14 @@ fn what_failed(owed: &Owing) -> &'static str {
     }
 }
 
-/// How much of a finding the Interruption carries.
+/// How much of a finding the Notice carries.
 ///
-/// This is one line on a card read on a phone, under the step it belongs to, so
+/// This is one line read on a phone, under the stop it belongs to, so
 /// what it is for is recognising which fix rather than reading it. The whole of
 /// each is on the Set the human answered, one row up the same Timeline.
 const OWED_WIDTH: usize = 100;
 
-/// What is owed, as the Interruption says it: how many of each, and the review's
+/// What is owed, as the Notice says it: how many of each, and the review's
 /// own words for every one of them.
 ///
 /// The review's words rather than Verkstead's, because the human decided against
@@ -948,7 +916,7 @@ fn owing(owed: &Owing, how: Option<&str>) -> String {
     }
 }
 
-/// A run of findings as one line of the Interruption's evidence.
+/// A run of findings as one line of the Notice's evidence.
 fn in_lines(findings: &[store::Fixing]) -> String {
     findings
         .iter()
@@ -957,11 +925,11 @@ fn in_lines(findings: &[store::Fixing]) -> String {
         .join("; ")
 }
 
-/// One finding on one line: whitespace collapsed, and clamped to what a card
+/// One finding on one line: whitespace collapsed, and clamped to what a line
 /// holds.
 ///
-/// Shared with the batch sessions' Interruption, which says what it is owed the
-/// same way and on the same card — see [`crate::responding`].
+/// Shared with the batch sessions' own halt, which says what it is owed the same
+/// way and in the same line — see [`crate::responding`].
 pub(crate) fn in_a_line(what: &str) -> String {
     let said = what.split_whitespace().collect::<Vec<&str>>().join(" ");
 
@@ -1098,9 +1066,9 @@ mod tests {
         );
     }
 
-    /// What the Interruption says: that the fixes never landed, and which ones.
+    /// What the Notice says: that the fixes never landed, and which ones.
     #[test]
-    fn the_interruption_says_what_is_unlanded_in_the_review_s_own_words() {
+    fn the_notice_says_what_is_unlanded_in_the_review_s_own_words() {
         let owed = fixing(vec![
             finding("Reset the counter as the window rolls.", ""),
             finding("Collapse the two clocks onto one.", ""),

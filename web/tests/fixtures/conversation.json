@@ -1,6 +1,6 @@
 {
   "adopting": null,
-  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "base_commit": "release-1.4",
   "blocked_on": null,
   "branch": "rate-limiting",
   "direction": null,
@@ -37,6 +37,8 @@
   },
   "pinned": [],
   "ready_to_grill": true,
+  "ready_to_resume": false,
+  "ready_to_stop": false,
   "repo": {
     "default_branch": "main",
     "id": 1,

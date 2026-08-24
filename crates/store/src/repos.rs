@@ -117,6 +117,31 @@ pub async fn registered_repos(pool: &SqlitePool) -> Result<Vec<Repo>> {
         .collect())
 }
 
+/// One registered Repo, by id.
+///
+/// For the reads that are about a Repo rather than about the list of them —
+/// which branches it has, say — where the id came off a row the page was
+/// already holding. `None` is a Repo that is not registered, which is a link
+/// followed after somebody took it away.
+pub async fn load_repo(pool: &SqlitePool, id: i64) -> Result<Option<Repo>> {
+    let row: Option<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, path, name, default_branch
+         FROM repos
+         WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("reading the Repo {id}"))?;
+
+    Ok(row.map(|(id, path, name, default_branch)| Repo {
+        id,
+        path: PathBuf::from(path),
+        name,
+        default_branch,
+    }))
+}
+
 /// A path as SQLite can hold it, which is UTF-8 or nothing.
 ///
 /// A path the filesystem holds as bytes that are not UTF-8 cannot be stored

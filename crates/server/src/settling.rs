@@ -64,8 +64,8 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                 return;
             }
             // Aborted out from under the watchers, or finished by something else
-            // — a retried Interruption starts the whole wrap-up again, so two of
-            // these can be running at once and the second finds the move made.
+            // — Resume starts the whole wrap-up watching again, so two of these
+            // can be running at once and the second finds the move made.
             Ok(store::Finished::NotWrapping) => {
                 tracing::debug!(
                     conversation_id,

@@ -299,7 +299,7 @@ const ABOUT_LIMIT: usize = 120;
 ///
 /// The prose alone — not its thinking, not the tools it called, not what was put
 /// to it. What this is for is the two places a session is quoted in miniature,
-/// its Timeline row and the evidence an Interruption carries, and both of those
+/// its Timeline row and the evidence a halt Notice carries, and both of those
 /// are asking what the session last *said*.
 ///
 /// Markdown as it stands rather than rendered, because neither of those two

@@ -116,6 +116,40 @@ pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
     }
 }
 
+/// Every branch of `repo` a Conversation could be based on: the local ones and
+/// the remote-tracking ones both, in the order git lists them — the locals
+/// first, then whatever the remotes are carrying.
+///
+/// Both, because both are things the human works from: a branch of their own
+/// they have not pushed, and one somebody else pushed that is not merged yet.
+/// A symbolic ref is not one of them and is left out — `origin/HEAD` is another
+/// name for a branch that is already in the list, and offering it twice would
+/// be offering a choice that is not one.
+///
+/// Empty for a repository git would not read, which is the same answer as a
+/// repository with no branches. Nothing is decided on the difference: what this
+/// list is for is a dropdown, and a dropdown offering nothing but the default
+/// rule is the honest reading of *there is nothing here to pick*.
+pub(crate) fn branches(repo: &Path) -> Vec<String> {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(symref)\t%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    );
+
+    listed
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(symref, _)| symref.is_empty())
+        .map(|(_, name)| name.to_owned())
+        .collect()
+}
+
 /// The commit `named` resolves to in `repo`, in full, or `None` if nothing there
 /// answers to it.
 ///
@@ -140,18 +174,31 @@ pub(crate) fn resolve(repo: &Path, named: &str) -> Option<String> {
     (!commit.is_empty()).then(|| commit.to_owned())
 }
 
+/// Make the directory a worktree goes under, and say whether it is there.
+///
+/// Git creates the worktree directory but not the `worktrees/` above it, which
+/// on a fresh install has never existed — and which the human may since have
+/// taken away along with everything under it.
+fn room(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return true;
+    };
+
+    if let Err(error) = std::fs::create_dir_all(parent) {
+        tracing::error!(error = ?error, path = %parent.display(), "making room for a worktree failed");
+        return false;
+    }
+
+    true
+}
+
 /// Make `branch` off `commit` in `repo`, checked out at `path`.
 ///
 /// One git call, because it is one thing: a worktree registered with the branch
 /// it holds. Doing it in two would leave a branch behind whenever the checkout
 /// failed.
 pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool {
-    // The parent has to be there — git creates the worktree directory but not
-    // the `worktrees/` above it, which on a fresh install has never existed.
-    if let Some(parent) = path.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        tracing::error!(error = ?error, path = %parent.display(), "making room for a worktree failed");
+    if !room(path) {
         return false;
     }
 
@@ -227,6 +274,106 @@ pub(crate) fn remove(repo: &Path, path: &Path) -> bool {
     }
 
     removed && !path.exists()
+}
+
+/// The branch checked out at `worktree`, or `None` where nothing is — a
+/// detached HEAD, or a directory git will not answer about at all.
+fn head(worktree: &Path) -> Option<String> {
+    let head = git(worktree, &["symbolic-ref", "--quiet", "HEAD"])?;
+
+    let head = head.trim();
+
+    (!head.is_empty()).then(|| head.to_owned())
+}
+
+/// Whether there is still a worktree at `path` to do `repo`'s work in, on
+/// `branch`.
+///
+/// Three things at once, and git answers all three: the directory is there, git
+/// answers inside it, and what answers is this repository with the branch
+/// checked out. A directory that has gone, one hollowed out, and one git no
+/// longer holds a registration for all fail the same reading, because in each
+/// of them the `.git` file no longer leads anywhere — and all three are a
+/// Conversation with nowhere to work.
+///
+/// Anything short of a clear no is a yes. The one unrecoverable mistake here is
+/// calling a worktree broken when it is not — what follows a no is a rebuild,
+/// and a rebuild takes the directory away — so a reading that failed for
+/// reasons of its own leaves the worktree alone. Which is why the repository
+/// half is asked as *does this say otherwise* rather than *does this agree*.
+pub(crate) fn healthy(repo: &Path, path: &Path, branch: &str) -> bool {
+    // Git answering inside the directory, and where its object database is.
+    let Some(inside) = common_git_dir(path) else {
+        return false;
+    };
+
+    // Which had better be this Repo's, a directory belonging to some other
+    // repository being no place to do this Conversation's work. Only where the
+    // Repo itself reads: git saying nothing about it is a repository Verkstead
+    // cannot see rather than a worktree that is wrong.
+    if common_git_dir(repo).is_some_and(|ours| ours != inside) {
+        return false;
+    }
+
+    head(path).is_some_and(|head| head == format!("refs/heads/{branch}"))
+}
+
+/// Make the worktree at `path` again, checked out on `branch`.
+///
+/// A worktree is derived state: the branch holds everything that was committed,
+/// so a rebuilt one has lost nothing git could still have reported. What is in
+/// the way goes first — git's own removal where git still knows the directory,
+/// and the directory itself where it does not, that being the only case in
+/// which nothing there can be reported on.
+///
+/// The prune is what clears a registration that outlived its directory, which
+/// is the state that leaves git refusing to check the branch out anywhere.
+pub(crate) fn rebuild(repo: &Path, path: &Path, branch: &str) -> bool {
+    if path.exists() && !remove(repo, path) {
+        // Git would not have it. Where git can still report on what is there,
+        // that is a worktree this has no business deleting by hand — and where
+        // it cannot, the directory is the whole of what is in the way.
+        if common_git_dir(path).is_some() {
+            tracing::error!(path = %path.display(), "git refused to remove a worktree, so it is not being rebuilt");
+            return false;
+        }
+
+        if let Err(error) = std::fs::remove_dir_all(path) {
+            tracing::error!(error = ?error, path = %path.display(), "clearing the way for a worktree failed");
+            return false;
+        }
+    }
+
+    // The registration outlives the directory, and git will not check a branch
+    // out that it believes is already checked out somewhere.
+    git(repo, &["worktree", "prune"]);
+
+    if !room(path) {
+        return false;
+    }
+
+    let made = git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--end-of-options",
+            &path.to_string_lossy(),
+            branch,
+        ],
+    )
+    .is_some();
+
+    match made {
+        true => {
+            tracing::info!(path = %path.display(), branch, "a broken worktree was rebuilt from its branch")
+        }
+        false => {
+            tracing::error!(path = %path.display(), branch, "a broken worktree could not be rebuilt")
+        }
+    }
+
+    made
 }
 
 #[cfg(test)]
@@ -333,6 +480,121 @@ mod tests {
             !branch_exists(nowhere.path(), "wrap-up"),
             "which is the whole difference between the two readings",
         );
+    }
+
+    /// A worktree git still answers about, on the branch it was made for, is
+    /// one to work in — and it stays one when there is uncommitted work in it.
+    ///
+    /// Which is the case validation exists to leave alone: a session that died
+    /// mid-edit leaves exactly this, and rebuilding it would throw away the only
+    /// copy of what it had written.
+    #[test]
+    fn a_worktree_git_answers_about_is_left_alone() {
+        let (dir, repo) = repository();
+        let path = dir.path().join("worktrees/verkstead-rate-limiting");
+
+        assert!(add(&repo, &path, "rate-limiting", "HEAD"));
+
+        std::fs::write(path.join("half-written.rs"), "// as far as it got\n").unwrap();
+
+        assert!(healthy(&repo, &path, "rate-limiting"));
+    }
+
+    /// The three ways a worktree stops being one, and the rebuild that answers
+    /// each: the directory deleted, the directory hollowed out, and the
+    /// registration dropped from the repository — which is the one that has a
+    /// Conversation stuck under a Resume that cannot work.
+    #[test]
+    fn a_worktree_that_is_no_longer_one_is_rebuilt_from_its_branch() {
+        for broken in ["deleted", "hollowed", "deregistered"] {
+            let (dir, repo) = repository();
+            let path = dir.path().join("worktrees/verkstead-rate-limiting");
+
+            assert!(add(&repo, &path, "rate-limiting", "HEAD"));
+
+            run(&path, &["config", "user.email", "test@verkstead.invalid"]);
+            run(&path, &["config", "user.name", "Verkstead Test"]);
+            std::fs::write(path.join("counter.rs"), "// the work so far\n").unwrap();
+            run(&path, &["add", "-A"]);
+            run(&path, &["commit", "-m", "feat: count the requests"]);
+
+            match broken {
+                "deleted" => std::fs::remove_dir_all(&path).unwrap(),
+                "hollowed" => std::fs::remove_file(path.join(".git")).unwrap(),
+                _ => std::fs::remove_dir_all(repo.join(".git/worktrees/verkstead-rate-limiting"))
+                    .unwrap(),
+            }
+
+            assert!(
+                !healthy(&repo, &path, "rate-limiting"),
+                "a {broken} worktree is nowhere to do the work",
+            );
+            assert!(
+                rebuild(&repo, &path, "rate-limiting"),
+                "so it is made again from the branch: {broken}",
+            );
+            assert!(
+                healthy(&repo, &path, "rate-limiting"),
+                "and now it is somewhere to do the work: {broken}",
+            );
+            assert!(
+                path.join("counter.rs").exists(),
+                "with everything the branch was holding: {broken}",
+            );
+        }
+    }
+
+    /// A directory belonging to some other repository is no place to do this
+    /// Conversation's work, whatever git says about it in its own terms.
+    #[test]
+    fn a_worktree_of_another_repository_is_not_this_one_to_work_in() {
+        let (dir, repo) = repository();
+        let (elsewhere, other) = repository();
+
+        let path = elsewhere.path().join("worktrees/verkstead-rate-limiting");
+
+        assert!(add(&other, &path, "rate-limiting", "HEAD"));
+
+        assert!(healthy(&other, &path, "rate-limiting"));
+        assert!(!healthy(&repo, &path, "rate-limiting"));
+
+        drop(dir);
+    }
+
+    /// And a rebuild that cannot happen says so rather than leaving the caller
+    /// believing there is a worktree there.
+    ///
+    /// Something that is not a directory at all sitting where the worktree goes
+    /// is the plainest way to have one: it cannot be removed as a worktree, it
+    /// is not a directory to take away, and git will not check a branch out over
+    /// it.
+    #[test]
+    fn a_rebuild_that_cannot_clear_the_way_refuses() {
+        let (dir, repo) = repository();
+        let path = dir.path().join("worktrees/verkstead-rate-limiting");
+
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not a worktree\n").unwrap();
+
+        assert!(!rebuild(&repo, &path, "rate-limiting"));
+    }
+
+    /// A repository with one commit on it and a branch to check out, and the
+    /// directory that keeps it alive.
+    fn repository() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+
+        std::fs::create_dir_all(&repo).unwrap();
+
+        run(&repo, &["init", "--initial-branch", "main"]);
+        run(&repo, &["config", "user.email", "test@verkstead.invalid"]);
+        run(&repo, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(repo.join("README.md"), "# a repository\n").unwrap();
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "chore: something to branch from"]);
+
+        (dir, repo)
     }
 
     fn run(dir: &Path, args: &[&str]) {

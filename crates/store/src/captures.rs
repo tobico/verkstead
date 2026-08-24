@@ -248,7 +248,7 @@ async fn write_summary(
 /// belongs to.
 ///
 /// Read on its own rather than joined into the Timeline's own query, for the
-/// reason an Interruption's is: that query is at the sixteen columns a tuple
+/// reason a pull request's is: that query is at the sixteen columns a tuple
 /// can be read back as, and a summary is now three of them. One read for the
 /// Timeline either way — what is not done here is a read per Event, which is
 /// the whole reason the summary is held rather than derived.

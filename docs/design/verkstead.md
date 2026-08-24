@@ -56,13 +56,17 @@ flowchart LR
   outside them. Repos are registered from within the watched paths.
 - A **conversation** is the core entity: attached to a repo and a base commit,
   starting from a **brief** (an editable markdown document). The base commit
-  defaults to the default branch's tip at grill start and is overridable per
-  conversation. Each conversation owns one branch and one worktree; the branch
-  name is prefilled randomly and customizable while the brief is drafted.
-  Worktrees live under Verkstead's own data directory and are kept until the
-  conversation is aborted — *corrected 2026-08-20, building stage 02*: this said
-  "archived", and there is no archive action on a conversation. Aborting is what
-  the teardown hangs off, and it leaves the branch alone.
+  defaults to the default branch's tip at grill start; overriding it is picking
+  another of the repo's branches out of a dropdown, local or remote-tracking,
+  which is stored by name and resolved at grill start the same way (*settled
+  2026-08-24, building ui-refinements*: it took a typed commit before, resolved
+  and pinned when it was typed). Each conversation owns one branch and one
+  worktree; the branch name is prefilled randomly and customizable while the
+  brief is drafted. Worktrees live under Verkstead's own data directory and
+  are kept until the conversation is aborted — *corrected 2026-08-20, building
+  stage 02*: this said "archived", and there is no archive action on a
+  conversation. Aborting is what the teardown hangs off, and it leaves the
+  branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
   Done. *Blocked on you* is a badge on any active state, not a state. A Done
   conversation can reopen with a new brief round. Aborting is possible from
@@ -85,7 +89,9 @@ flowchart LR
   costs a tap every time and the counts stay small. Both are fixed when
   grilling starts, alongside the branch, the base commit and the brief: what
   runs the work is settled before the work begins rather than swapped
-  underneath it.
+  underneath it. Each repo remembers the pair it was last grilled with, so the
+  next conversation on it arrives with both pickers filled — a prefill the
+  human may change, kept server-side so a phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —
@@ -163,10 +169,17 @@ flowchart LR
   building workbench-refit*): the field is always there, it grows with what is
   in it, and it keeps itself on a pause in the typing and on the way out of
   the field.
-- **Interruptions** (crash, hang) become timeline events offering retry /
-  take-over-manually / abort — roadrunner's remedies, GUI-native. The event is
-  a plain openable card and the three are answered in the details pane, like a
-  question set (*settled 2026-08-24, building workbench-refit*).
+- **Driving that stops halts** (*settled 2026-08-24, building
+  halt-and-resume*). Whatever stopped it — a session that fell over, checks
+  that would not go green, a driver a restart took away, a Stop the human
+  pressed — Verkstead records a halt on the conversation and writes a stop
+  notice on its timeline saying what stopped, why, and what the evidence was.
+  Nothing advances past a halt, and the badge points at the notice. Getting
+  going again is one standing **Resume** in the start-work menu, recomputed
+  from the lifecycle and the branch rather than replaying whatever failed;
+  steering the work is what a manual task is for, so Resume carries nothing.
+  What replaced roadrunner's three remedies: retry is Resume, take over
+  manually is the halt already standing, and abort is Abort.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
   conversation pauses and push-notifies; it resumes on the human's say-so or
   when the window resets.
@@ -293,17 +306,15 @@ Timeline events:
 | Task list | inline, pinned | — |
 | Stage list | inline, pinned | — |
 | PR | name + id, pinned | fetched commit list and comments |
-| Interruption | what stopped, badge or chosen remedy | evidence, then the remedies as a sheet |
 | Notice | inline, nothing to do about it | — |
 
-- **An interruption is answered like a question set** (*settled 2026-08-24,
-  building workbench-refit*): its card is a plain button carrying what stopped
-  and either the *blocked on you* badge or the remedy chosen, and pressing
-  anywhere on it opens the pane. The pane reads as an answer sheet — the
-  evidence above, the three remedies as option rows under it, one note field and
-  one submit — so nothing acts on a stray tap, which matters most for aborting
-  and is anyway how answering already works. A settled one reads back the same
-  way: the evidence, the remedy taken, and what was written alongside it.
+- **A stop is a notice and nothing to answer** (*settled 2026-08-24, building
+  halt-and-resume*): what stopped, why, and both blocks of evidence — the
+  worktree as git saw it, and the tail of what the last session said — written
+  as one markdown notice on the timeline. There is nothing on it to press,
+  because there is nothing to decide about it: what the conversation is waiting
+  on is the halt beside it, and Resume at the foot of the timeline is what
+  answers that.
 - **Pinning is the fixed set** (task list, stage list, PR) with a floating
   summary box at the top of the timeline; no manual pin/unpin. More than one
   pinned card is a carousel rather than a stack (*settled 2026-08-24, building
@@ -351,9 +362,12 @@ Timeline events:
   Repo as it opens.
 - **Sidebar is manually ordered**; conversations needing attention carry a
   marker icon and border.
-- **Push notifications** for needs-you (blocking question sets, interruptions,
-  usage-limit pauses) **and milestones** (PR opened, stage complete,
-  conversation done).
+- **Push notifications** for needs-you — a blocking question set, a Hold nobody
+  came back to, a halt Verkstead decided on, a usage-limit pause — **and
+  milestones** (PR opened, stage complete, conversation done). A stop nobody
+  chose sends nothing: a restart picks that one up unasked, so waking a phone
+  about it would be asking for something that is already happening (*settled
+  2026-08-24, building halt-and-resume*).
 - Question sets are answerable in the workbench and on the phone alike.
 - **Everything the human configures is one page**, `/settings`, the one
   place the sidebar leads out to (*settled 2026-08-23, building

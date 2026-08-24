@@ -18,21 +18,14 @@
 //! they can change while it is still drafting.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
-//! workbench has the root: the Repos and the Agent Profiles are a line at the
-//! bottom of it rather than a page of their own to find.
+//! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
+//! the head of the pane rather than a page of their own to find.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import {
-  For,
-  Match,
-  Show,
-  Switch,
-  createSignal,
-  onCleanup,
-  type JSX,
-} from "solid-js";
+import { For, Match, Show, Switch, type JSX } from "solid-js";
 
+import { Menu } from "../Menu";
 import {
   listAbandonedRoadmaps,
   listConversations,
@@ -76,6 +69,7 @@ export function Conversations(props: {
           <img src="/icons/verkstead.svg" alt="" />
           Verkstead
         </h1>
+        <WorkbenchActions />
       </div>
 
       <NewConversation open={props.open} />
@@ -108,18 +102,45 @@ export function Conversations(props: {
           )}
         </Match>
       </Switch>
-
-      {/* The rest of Verkstead, which is one page: the Repos and the Agent
-          Profiles a Conversation is settled against, and what Verkstead itself
-          has been told. What is waiting on the human is not there — a Question
-          Set is reached through the Conversation it was asked from, which is
-          the list above. */}
-      <nav class="elsewhere">
-        <A class="to-settings" href="/settings">
-          Settings →
-        </A>
-      </nav>
     </>
+  );
+}
+
+/// The rest of Verkstead, which is one page: the Repos and the Agent Profiles a
+/// Conversation is settled against, and what Verkstead itself has been told.
+/// What is waiting on the human is not there — a Question Set is reached
+/// through the Conversation it was asked from, which is the list this sits over.
+///
+/// A ⋯ at the head of the pane rather than the link that used to sit at its
+/// foot. That foot is under the conversations, and the conversations are the one
+/// part of the pane with no end: a long enough list and the way out to the
+/// settings was somewhere the human had to scroll to find. Up here it is where
+/// the ⋯ at the top of a Conversation is, drawn through the same component and
+/// painted by the same rule — and the two of them mean the same thing in their
+/// two places, which is *what there is about this pane that is not in it*.
+///
+/// A menu for one entry, because the entry is what is behind it rather than what
+/// it is: the next thing that is about the workbench as a whole goes in beside
+/// Settings rather than beside the wordmark.
+///
+/// A link rather than a button, and the only row of any menu that is one: the
+/// settings are a page of their own, so this is going somewhere in the way that
+/// opening a Conversation is not. Nothing here has to shut the menu — the
+/// navigation takes the whole sidebar with it.
+function WorkbenchActions(): JSX.Element {
+  return (
+    <Menu
+      class="workbench-actions"
+      label="Workbench actions"
+      name="Workbench actions"
+      trigger="⋯"
+    >
+      {() => (
+        <A role="menuitem" href="/settings">
+          Settings
+        </A>
+      )}
+    </Menu>
   );
 }
 
@@ -179,16 +200,13 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
     freshness: { reconcile: "repo_id" },
   }));
 
-  // `true` while the menu hangs open under the button.
-  const [open, setOpen] = createSignal(false);
-
-  // The button, so that the keyboard's way out puts the focus back where it
-  // came from rather than at the top of the page.
-  let trigger!: HTMLButtonElement;
-
   // `false` until the open menu has taken the focus, which it does once and on
   // the first repo there is.
   let taken = false;
+
+  // The menu's own way to shut, held here because what closes this one is a
+  // request coming back rather than the press that sent it.
+  let shut = (): void => {};
 
   /// Take the focus to the first row of the menu, once per opening.
   ///
@@ -236,7 +254,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 
       // Straight into it: what the human does next is write the brief, and the
       // Conversation appearing in the sidebar is the confirmation on the way.
-      setOpen(false);
+      shut();
       void queries.invalidateQueries({ queryKey: ["conversations"] });
       props.open(outcome.Started.id);
     },
@@ -257,59 +275,31 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 
       // Straight onto its page, which is where the two pairings and the base
       // commit are fixed and where adopting is pressed.
-      setOpen(false);
+      shut();
       void queries.invalidateQueries({ queryKey: ["conversations"] });
       props.open(outcome.Started.id);
     },
   }));
 
-  // The way out that needs no aim: a menu drawn over the page has to be
-  // dismissible from the keyboard, and the focus goes back to the button that
-  // opened it. The other way — a press on the page — is the backdrop's, so the
-  // press taking the menu back cannot also press something underneath it.
-  const escape = (ev: KeyboardEvent) => {
-    if (ev.key === "Escape" && open()) {
-      setOpen(false);
-      trigger.focus();
-    }
-  };
-
-  document.addEventListener("keydown", escape);
-  onCleanup(() => document.removeEventListener("keydown", escape));
-
   return (
-    <div class="new-conversation">
-      <button
-        type="button"
-        class="new-conversation-trigger"
-        ref={trigger}
-        aria-haspopup="menu"
-        aria-expanded={open() ? "true" : "false"}
-        aria-controls="new-conversation-menu"
-        onClick={() => {
-          taken = false;
-          setOpen(!open());
-        }}
-      >
-        New conversation
-        {/* Which way the menu will go, and no part of what the button says. */}
-        <span class="new-conversation-mark" aria-hidden="true">
-          ▾
-        </span>
-      </button>
-
-      <Show when={open()}>
-        <div
-          class="new-conversation-backdrop"
-          aria-hidden="true"
-          onClick={() => setOpen(false)}
-        />
-        <div
-          class="new-conversation-menu"
-          id="new-conversation-menu"
-          role="menu"
-          aria-label="New conversation"
-        >
+    <Menu
+      class="new-conversation"
+      name="New conversation"
+      closer={(close) => (shut = close)}
+      opening={() => (taken = false)}
+      trigger={
+        <>
+          New conversation
+          {/* Which way the menu will go, and no part of what the button
+              says. */}
+          <span class="new-conversation-mark" aria-hidden="true">
+            ▾
+          </span>
+        </>
+      }
+    >
+      {() => (
+        <>
           <Switch>
             <Match when={repos.data?.length === 0}>
               {/* Nothing to attach a Conversation to, so the only thing to
@@ -390,9 +380,9 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
               The conversation could not be started: {adopt.error?.message}
             </p>
           </Show>
-        </div>
-      </Show>
-    </div>
+        </>
+      )}
+    </Menu>
   );
 }
 

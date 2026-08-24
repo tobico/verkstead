@@ -382,44 +382,49 @@ function Chosen(props: {
 }): JSX.Element {
   return (
     <section class="direction-pick decided" id="direction">
-      {/* Asked as a Question is asked, and read back the same way: the label
-          floated in the accent with the agent's argument running beside it. It
-          is a question — what should become of this — so it is drawn as one
-          rather than as a section of furniture with a heading over it. */}
-      <div class="ask">
-        <AskText
-          name={DIRECTION_LABEL}
-          html={props.proposal.rationale_html}
-        />
+      {/* Headed and carded exactly as the chooser is — see `Choosing` — because
+          the record is that same section read after the fact, and a heading the
+          answering page had and this one dropped would be two pages. */}
+      <h2 class="section-heading">Direction</h2>
+      <div class="direction-card">
+        {/* Asked as a Question is asked, and read back the same way: the label
+            floated in the accent with the agent's argument running beside it,
+            keeping the place a Question's number keeps. */}
+        <div class="ask">
+          <AskText
+            name={DIRECTION_LABEL}
+            html={props.proposal.rationale_html}
+          />
+        </div>
+        <ul class="directions">
+          <For each={DIRECTIONS}>
+            {(offered) => (
+              <li
+                class="direction"
+                classList={{
+                  recommended: props.proposal.direction === offered,
+                  chosen: props.picked === offered,
+                }}
+              >
+                <span class="direction-name">{DIRECTION[offered]}</span>
+                <Show when={props.proposal.direction === offered}>
+                  <span class="star" title="the agent's Recommendation">
+                    ★
+                  </span>
+                </Show>
+                <Show when={props.picked === offered}>
+                  <span class="chose">chosen</span>
+                </Show>
+              </li>
+            )}
+          </For>
+        </ul>
+        <Show when={props.picked === null}>
+          <p class="semantics">
+            No direction was picked, so the proposal went back to the agent.
+          </p>
+        </Show>
       </div>
-      <ul class="directions">
-        <For each={DIRECTIONS}>
-          {(offered) => (
-            <li
-              class="direction"
-              classList={{
-                recommended: props.proposal.direction === offered,
-                chosen: props.picked === offered,
-              }}
-            >
-              <span class="direction-name">{DIRECTION[offered]}</span>
-              <Show when={props.proposal.direction === offered}>
-                <span class="star" title="the agent's Recommendation">
-                  ★
-                </span>
-              </Show>
-              <Show when={props.picked === offered}>
-                <span class="chose">chosen</span>
-              </Show>
-            </li>
-          )}
-        </For>
-      </ul>
-      <Show when={props.picked === null}>
-        <p class="semantics">
-          No direction was picked, so the proposal went back to the agent.
-        </p>
-      </Show>
     </section>
   );
 }
@@ -699,6 +704,10 @@ function isAnswer(answer: Answer): boolean {
 /// as much a Response as any other. It has to read as one rather than as a page
 /// whose Answers failed to arrive, which is what a column of Unanswered with no
 /// word about why would look like.
+///
+/// Which is the whole of what this says, so a Set answered in silence gets
+/// nothing: with no comment there is no counter-question to explain, and the
+/// line was only the column of Unanswered read back at whoever was reading it.
 function nothingAnswered(response: Response): string | null {
   if (response.answers.some(isAnswer)) {
     return null;
@@ -709,6 +718,5 @@ function nothingAnswered(response: Response): string | null {
   return commented
     ? "Nothing here was answered. The comment below is the whole Response — a " +
         "counter-question — and every question went back to the agent still open."
-    : "Nothing here was answered, and nothing was said about the Set either: " +
-        "every question went back to the agent still open.";
+    : null;
 }

@@ -65,6 +65,8 @@
     }
   ],
   "ready_to_grill": false,
+  "ready_to_resume": true,
+  "ready_to_stop": false,
   "repo": {
     "default_branch": "main",
     "id": 1,
@@ -108,14 +110,10 @@
       }
     },
     {
-      "Interruption": {
+      "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
-        "git_status": "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n",
-        "how": "the session exited with status 1",
-        "id": 19,
-        "settled": null,
-        "tail": "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error",
-        "what": "the task in .tasks/03-commit-events.md"
+        "html": "<p><strong>The task in .tasks/03-commit-events.md</strong> stopped.</p>\n<p>the session exited with status 1</p>\n<h3>The worktree</h3>\n<div class=\"wide\">\n<pre><code>## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n</code></pre>\n</div>\n<h3>What the last session said</h3>\n<div class=\"wide\">\n<pre><code>error[E0432]: unresolved import `crate::sweep`\n  --&gt; crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error\n</code></pre>\n</div>",
+        "id": 19
       }
     }
   ],

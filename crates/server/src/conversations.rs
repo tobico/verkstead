@@ -3,10 +3,9 @@
 //!
 //! Two of the three edits are decided against the repository rather than taken
 //! on trust, and git is the one asked both times — whether a name is one it
-//! would take for a branch, and whether anything in the repository answers to
-//! what was typed as a base commit. Refused here rather than at grill start,
-//! where a bad name or a commit that is not there would be a failure with nobody
-//! watching.
+//! would take for a branch, and whether the repository has the branch the work
+//! is to come off. Refused here rather than at grill start, where a bad name or
+//! a branch that is not there would be a failure with nobody watching.
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
 //! somewhere to work — see [`start_grilling`] — and where the session that does
@@ -40,10 +39,16 @@ use crate::worktrees;
 /// The name is the server's because the record is: a prefill the browser
 /// invented would be a name the server never saw, and the human may well leave
 /// it as it is.
-pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
+///
+/// The two Pairings are prefilled the same way, off what the Repo was last
+/// grilled with — see [`prefill`].
+pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
     Ok(
-        match store::start_conversation(pool, repo_id, &branch_name()).await? {
-            Some(id) => Started::Started { id },
+        match store::start_conversation(&state.pool, repo_id, &branch_name()).await? {
+            Some(id) => {
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
             None => Started::NoSuchRepo,
         },
     )
@@ -63,18 +68,93 @@ pub(crate) async fn start(pool: &SqlitePool, repo_id: i64) -> Result<Started> {
 /// somebody finished between the notice and the click is a thing to say on the
 /// page rather than a start to refuse.
 pub(crate) async fn start_adopting(
-    pool: &SqlitePool,
+    state: &AppState,
     repo_id: i64,
     roadmap: &str,
 ) -> Result<Started> {
     Ok(
-        match store::start_adoption(pool, repo_id, &branch_name(), roadmap).await? {
-            Some(id) => Started::Started { id },
+        match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
+            Some(id) => {
+                prefill(state, id, repo_id).await;
+                Started::Started { id }
+            }
             None => Started::NoSuchRepo,
         },
     )
 }
 
+/// Fill a new Conversation's two pickers with what its Repo was last grilled
+/// with.
+///
+/// A default and not a lock: both are still the human's to change, and changing
+/// one before pressing Start Grilling is what the Repo remembers next — the
+/// memory is written from the Conversation at grill start, whatever it says by
+/// then.
+///
+/// **Each half is judged before it is applied**, against the same reading the
+/// pane gives a chosen Pairing: a Profile whose pair has gone, or which no
+/// longer lists the model it was remembered with, is a Pairing that would fail
+/// to start a session, and a picker prefilled with one would be worse than a
+/// picker left empty. What does not survive the judging is simply not applied,
+/// which leaves that picker exactly as a Repo with no memory leaves it.
+///
+/// Nothing here refuses the start. The Conversation exists by the time this
+/// runs, and answering the button with a failure would say that it does not —
+/// so a memory that could not be read is logged and the human gets the empty
+/// pickers they would have got anyway.
+async fn prefill(state: &AppState, id: i64, repo_id: i64) {
+    if let Err(error) = remembered(state, id, repo_id).await {
+        tracing::warn!(
+            error = ?error,
+            conversation_id = id,
+            "the Repo's remembered Pairings could not be applied to a new Conversation"
+        );
+    }
+}
+
+/// What [`prefill`] does, with somewhere for a store error to go.
+async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
+    let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
+
+    if let Some((profile_id, model)) = usable(&state.watched, remembered.grilling).await? {
+        store::set_grilling_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    }
+
+    if let Some((profile_id, model)) = usable(&state.watched, remembered.implementation).await? {
+        store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    }
+
+    Ok(())
+}
+
+/// A remembered Pairing as something to prefill a picker with, or `None` where
+/// it is not one any more.
+///
+/// Read as a row rather than trusted as a pair of ids, which is the reading
+/// [`start_grilling`] gives the Pairings it is about to launch under: whether
+/// the Profile's pair is still where it was left is a question for the Watched
+/// Paths, and whether it still lists the model is a question for the Profile's
+/// own list.
+async fn usable(
+    watched: &crate::watched::WatchedPaths,
+    remembered: Option<store::Pairing>,
+) -> Result<Option<(i64, String)>> {
+    let Some(model) = remembered
+        .as_ref()
+        .and_then(|pairing| pairing.model.clone())
+    else {
+        return Ok(None);
+    };
+
+    let Some(pairing) = crate::profiles::pairing(watched, remembered).await? else {
+        return Ok(None);
+    };
+
+    Ok(
+        (pairing.profile.broken.is_none() && pairing.profile.models.contains(&model))
+            .then_some((pairing.profile.id, model)),
+    )
+}
 /// Finish what answering a Question Set started, and say what it did to the
 /// Conversation it was asked from.
 ///
@@ -100,9 +180,9 @@ pub(crate) async fn start_adopting(
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has recorded the pick. What a session that could not be picked up
-/// leaves behind is something to see in the log, and no more than that. An
-/// Interruption is raised about a session that ran and went wrong — see
-/// [`crate::interruptions`] — and this is not one.
+/// leaves behind is something to see in the log, and no more than that. A halt
+/// is written about a run that stopped — see [`crate::halts`] — and this is not
+/// one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -172,8 +252,7 @@ pub(crate) async fn settle_a_proposal(
     if !write_the_artifact(state, conversation_id, picked).await {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
-        // there is nothing here to raise an Interruption about — no session ran
-        // and went wrong.
+        // there is nothing here to halt over — no session ran and went wrong.
         tracing::error!(
             conversation_id,
             ?picked,
@@ -201,11 +280,8 @@ pub(crate) async fn settle_a_proposal(
 ///
 /// Whether a watcher was armed. `false` is a Conversation with no session
 /// running, which has nothing to arm one *on*: the pick is recorded, so the
-/// human's answer stands, and what to make of nobody writing what it asked for
-/// is said by whoever asked. The two callers mean different things by it — a
-/// pick just answered with no session is a Conversation grilling with nothing
-/// grilling it, and a pick a restart found is a session this restart killed — so
-/// neither is said here.
+/// human's answer stands, and what to make of a pick with nothing grilling it is
+/// said by the caller rather than here.
 async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> bool {
     let Some(session) = state.sessions.following(id) else {
         return false;
@@ -229,88 +305,6 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
     );
 
     true
-}
-
-/// Arm the watcher again for every Conversation left grilling on a pick.
-///
-/// What a restarting server does, and the counterpart to
-/// [`crate::wrapping::resume`] one rung down the ladder. A pick is a row and
-/// survives the restart; the grilling session that would have written the
-/// artifact was a process and did not, so a server that came back up and armed
-/// nothing would leave a Conversation grilling for ever with nobody watching and
-/// nothing having said so.
-///
-/// It goes through the same arming every pick does rather than a path of its own,
-/// which is what makes the recovery honest: the watcher is armed from the stored
-/// latest pick, and finds what is actually running. In practice that is nothing —
-/// a restarted server has no sessions at all — and *here* that is a run which has
-/// stopped rather than something to note and carry on from, because a session
-/// really was writing the artifact until this restart killed it. So what this
-/// leaves on each Timeline is an Interruption naming the tail the Conversation
-/// was waiting on, which the human can retry into a fresh session or take over —
-/// see [`crate::runner::nobody_writing`].
-///
-/// Raising one twice is not raising two: the store keeps one open Interruption
-/// per Conversation, so a server restarted again over the same Conversation
-/// leaves the first standing.
-///
-/// The task is handed back rather than let go, for the reason
-/// [`crate::wrapping::resume`]'s is: the stall sweep calls a grilling with no
-/// session undriven, and every one of these is exactly that until this has said
-/// what it has to say about it. A sweep that looked first would raise its own
-/// Interruption over the top of the better one. See [`crate::stalls::sweeping`].
-#[must_use = "the sweep waits for the grillings to be looked over before it \
-              judges whether anything is driving them"]
-pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
-            Ok(conversations) => conversations,
-            Err(error) => {
-                tracing::error!(error = ?error, "listing the Conversations to resume watching failed");
-                return;
-            }
-        };
-
-        for id in conversations
-            .into_iter()
-            .filter(|conversation| conversation.state == store::Lifecycle::Grilling)
-            .map(|conversation| conversation.id)
-        {
-            // The row a sidebar is drawn from says which state a Conversation is
-            // in and not what it picked, so the pick is read back per grilling.
-            // A question asked once per Conversation actually grilling, which is
-            // a handful at the very most.
-            let picked = match store::load_conversation(&state.pool, id).await {
-                Ok(Some(conversation)) => conversation.direction,
-                Ok(None) => continue,
-                Err(error) => {
-                    tracing::error!(error = ?error, conversation_id = id, "reading what a grilling was picked on failed");
-                    continue;
-                }
-            };
-
-            let Some(direction) = picked else {
-                // A grilling that has not been picked on yet is waiting on the
-                // human, not on an artifact. There is nothing to watch for.
-                continue;
-            };
-
-            tracing::info!(
-                conversation_id = id,
-                ?direction,
-                "a Conversation was left grilling on a pick, so its watcher is armed again",
-            );
-
-            // Which in practice is every one of them: a restarted server has no
-            // sessions at all, so what this arming does is find that out and say
-            // so where the human is looking.
-            if !write_the_artifact(&state, id, direction).await {
-                crate::runner::nobody_writing(&state, id, direction).await;
-            }
-        }
-    })
 }
 
 /// Record that the grilling is over and the work is being built.
@@ -431,49 +425,56 @@ pub(crate) async fn rename_branch(
     })
 }
 
-/// Record the commit the work branches from, or put the Conversation back on the
+/// Record the branch the work comes off, or put the Conversation back on the
 /// default-branch rule.
 ///
-/// What is stored is the commit the repository resolved, not what was typed: a
-/// tag or a branch name is a moving target, and the point of overriding the rule
-/// is to pin the work to one commit. Blank counts as clearing it — a field
-/// emptied is the human taking the override away, not naming a commit called
-/// nothing.
-pub(crate) async fn set_base_commit(
+/// What is stored is the name, not the commit it stands at: the choice is one of
+/// the repository's branches, and what the human means by picking one is *come
+/// off whatever is on it when this starts* — so it is resolved at grill start
+/// and not before. Blank counts as clearing it — a choice unmade is the human
+/// taking the override away, not naming a branch called nothing.
+///
+/// Refused unless the repository really has a branch by that name, asked of the
+/// branches themselves rather than of `rev-parse`: a sha or a tag resolves and
+/// is still not something this stores, there being no way to pick one.
+pub(crate) async fn set_base_branch(
     pool: &SqlitePool,
     id: i64,
     asked: Option<&str>,
 ) -> Result<BaseRecorded> {
     let asked = asked.map(str::trim).filter(|asked| !asked.is_empty());
 
-    let commit = match asked {
-        None => None,
-        Some(asked) => {
-            // The repository to ask is the Conversation's own, so the
-            // Conversation has to be there before there is anywhere to ask.
-            let Some(conversation) = store::load_conversation(pool, id).await? else {
-                return Ok(BaseRecorded::NoSuchConversation);
-            };
+    if let Some(branch) = asked {
+        // The repository to ask is the Conversation's own, so the Conversation
+        // has to be there before there is anywhere to ask.
+        let Some(conversation) = store::load_conversation(pool, id).await? else {
+            return Ok(BaseRecorded::NoSuchConversation);
+        };
 
-            let asked = asked.to_owned();
-            let resolved =
-                tokio::task::spawn_blocking(move || resolve(&conversation.repo.path, &asked))
-                    .await?;
-
-            match resolved {
-                Some(commit) => Some(commit),
-                None => return Ok(BaseRecorded::NoSuchCommit),
-            }
+        // Past drafting is answered here rather than by the store below, so that
+        // a Conversation whose base was frozen months ago is told *that* rather
+        // than told about a branch the repository has since lost. The store
+        // asks again all the same: this read and that write are not one moment.
+        if conversation.state != store::Lifecycle::Draft {
+            return Ok(BaseRecorded::NotDrafting);
         }
-    };
 
-    Ok(
-        match store::set_base_commit(pool, id, commit.as_deref()).await? {
-            store::Edited::Saved => BaseRecorded::Recorded,
-            store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
-            store::Edited::NotDrafting => BaseRecorded::NotDrafting,
-        },
-    )
+        let branch = branch.to_owned();
+        let known = tokio::task::spawn_blocking(move || {
+            worktrees::branches(&conversation.repo.path).contains(&branch)
+        })
+        .await?;
+
+        if !known {
+            return Ok(BaseRecorded::NoSuchBranch);
+        }
+    }
+
+    Ok(match store::set_base_commit(pool, id, asked).await? {
+        store::Edited::Saved => BaseRecorded::Recorded,
+        store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
+        store::Edited::NotDrafting => BaseRecorded::NotDrafting,
+    })
 }
 
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
@@ -498,9 +499,10 @@ pub(crate) async fn set_base_commit(
 /// would be an agent nobody could see or stop. It is also the one part of this
 /// that failing does not refuse — the branch is made, the Brief is frozen, and a
 /// session that would not start is logged, leaving a Conversation that is
-/// grilling with a Timeline that says so and no session on it. Not an
-/// Interruption either: a grilling is attended, and those are for the unattended
-/// runs a human is not watching.
+/// grilling with a Timeline that says so and no session on it. Not a halt
+/// either: the human is at the button they have just pressed, and what a halt is
+/// for is telling them about a run that stopped while nobody was watching. The
+/// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
@@ -537,10 +539,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::EmptyBrief);
     }
 
-    // What the work branches from. An override is re-resolved rather than
-    // trusted: it resolved when the human typed it, and a commit can be gone by
-    // now. Without one it is the default branch's tip, which is a rule that has
-    // never resolved to anything until this moment.
+    // What the work branches from, resolved here and nowhere earlier: what the
+    // human picked is a branch, and what they meant by picking it is wherever it
+    // stands at this moment. Without one it is the default branch, which is the
+    // same rule by another name.
     let named = conversation
         .base_commit
         .clone()
@@ -581,6 +583,16 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::Grilling::NotDrafting => return Ok(GrillingStarted::NotDrafting),
         store::Grilling::Started => {}
     }
+
+    // From here the Conversation says it is being grilled, and the thing that
+    // will say so is a session that does not exist yet. So a registration stands
+    // in for it across the launch, which is the slowest part of this: a sweep
+    // that looked in between would find a Conversation grilling with nothing
+    // grilling it, and halt a press the human is still standing at. Held to the
+    // end of this rather than handed on — what drives a grilling from there is
+    // its session — and what it leaves behind where the launch fails is a stall
+    // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].
+    let _driving = state.drivers.driving(id);
 
     // Read back rather than assembled from what was just recorded: what the
     // session runs against is the Conversation as it now stands, worktree and
@@ -1039,31 +1051,6 @@ fn is_branch_name(branch: &str) -> bool {
             &["check-ref-format", &format!("refs/heads/{branch}")],
         )
         .is_some()
-}
-
-/// The commit `asked` names in the repository at `path`, in full, or `None` if
-/// nothing there answers to it.
-///
-/// `^{commit}` is what makes a tag or a branch resolve to the commit it points
-/// at rather than to itself, and what refuses a tree or a blob that happens to
-/// share a prefix.
-fn resolve(path: &Path, asked: &str) -> Option<String> {
-    let commit = git(
-        path,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            // Whatever was typed is the human's, so it must not be able to
-            // arrive as an option.
-            "--end-of-options",
-            &format!("{asked}^{{commit}}"),
-        ],
-    )?;
-
-    let commit = commit.trim();
-
-    (!commit.is_empty()).then(|| commit.to_owned())
 }
 
 /// A branch name to start a Conversation under, until the human names it

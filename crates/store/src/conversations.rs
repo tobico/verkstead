@@ -285,17 +285,6 @@ pub enum Event {
     /// and are fetched when somebody looks.
     PullRequest(super::PullRequest),
 
-    /// A run that stopped: something Verkstead noticed and cannot resolve
-    /// itself, with the evidence it gathered and whatever the human did about
-    /// it — see [`super::interruptions`].
-    ///
-    /// Its body is not in the `body` column either, for the commit's reason:
-    /// what an Interruption is, is a row of separate facts. Boxed, as a Question
-    /// Set is: it carries a git status and the tail of a session's output, and
-    /// an enum every Brief and every move was as large as would cost a
-    /// Timeline's worth of memory to hold the one kind that needs it.
-    Interruption(Box<super::Interruption>),
-
     /// Something Verkstead has to say on its own account: which stage it has
     /// started and where the branch went, or that a roadmap has no stages left
     /// to run.
@@ -306,8 +295,9 @@ pub enum Event {
     /// read afterwards, and a decision only the log knows about is one nobody
     /// looking at the work will ever find.
     ///
-    /// Never something to do about — an Interruption is what an open question
-    /// looks like, and this is closed by the time it is written.
+    /// Never something to do about, whatever it says: a Notice is written
+    /// after the fact, and what a run that stopped is waiting on is the halt
+    /// beside it rather than anything on the Timeline — see [`super::halts`].
     Notice(String),
 
     /// A Manual Task: the instruction the human typed at the end of the
@@ -319,9 +309,9 @@ pub enum Event {
     /// and what the session it starts does lands as the Events that work lands
     /// as.
     ///
-    /// Beside the run rather than a step of it. It moves no state, and it is
-    /// not a [`Step`](super::Step) — the unattended unit a done file ends —
-    /// however much the two look alike from the session's end.
+    /// Beside the run rather than a step of it. It moves no state, and it is not
+    /// a Step — the unattended unit a done file ends — however much the two look
+    /// alike from the session's end.
     ManualTask(String),
 }
 
@@ -358,7 +348,6 @@ impl Event {
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
-            Self::Interruption(_) => super::interruptions::INTERRUPTION,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
         }
@@ -381,8 +370,6 @@ impl Event {
             Self::Commit(_) => "",
             // Nothing either, and for the commit's reason.
             Self::PullRequest(_) => "",
-            // Nothing either, and for the commit's reason.
-            Self::Interruption(_) => "",
             Self::Notice(markdown) => markdown,
             Self::ManualTask(instruction) => instruction,
         }
@@ -402,7 +389,6 @@ impl Event {
         set: Option<SetOnTimeline>,
         commit: Option<super::Commit>,
         pull_request: Option<super::PullRequest>,
-        interruption: Option<super::Interruption>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -421,11 +407,6 @@ impl Event {
                 pull_request
                     .ok_or_else(|| anyhow!("a pull request Event has no pull request beside it"))?,
             ),
-            super::interruptions::INTERRUPTION => {
-                Self::Interruption(Box::new(interruption.ok_or_else(|| {
-                    anyhow!("an Interruption Event has no evidence beside it")
-                })?))
-            }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
@@ -932,9 +913,9 @@ async fn started(
 /// - A **Question Set with no Response and no archiving** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - An **open Interruption**, which is a run stopped on a choice only they can
-///   make. Read off the table rather than off the Timeline, so the whole list
-///   costs one query.
+/// - A **halt**, which is a Conversation nothing is driving any more and which
+///   goes again only when the human says so. Read off the table rather than off
+///   the Timeline, so the whole list costs one query.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -959,8 +940,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                           )
                     )
                     OR EXISTS (
-                        SELECT 1 FROM interruptions i
-                        WHERE i.conversation_id = c.id AND i.remedy IS NULL
+                        SELECT 1 FROM halts h WHERE h.conversation_id = c.id
                     )
                 ) AS waiting
          FROM conversations c
@@ -1142,14 +1122,14 @@ pub enum Role {
 }
 
 impl Role {
-    fn stored(self) -> &'static str {
+    pub(crate) fn stored(self) -> &'static str {
         match self {
             Self::Grilling => "grilling",
             Self::Implementation => "implementation",
         }
     }
 
-    fn column(self) -> &'static str {
+    pub(crate) fn column(self) -> &'static str {
         match self {
             Self::Grilling => "grilling_profile_id",
             Self::Implementation => "implementation_profile_id",
@@ -1319,11 +1299,6 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // conversation took, and the last thing it said.
     let mut summaries = super::captures::on_timeline(pool, conversation_id).await?;
 
-    // Then the Interruptions. Cheap where the join would not have been — an
-    // Interruption is the rare Event, so this nearly always comes back with
-    // nothing.
-    let mut interruptions = super::interruptions::on_timeline(pool, conversation_id).await?;
-
     // And the pull request, for the same arithmetic and a cheaper read still:
     // there is one per Conversation, and until the finish step has run there is
     // none.
@@ -1389,21 +1364,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
             // Taken out rather than looked up, because each belongs to exactly
             // one Event and the Events are walked once.
             let summary = summaries.remove(&id);
-            let interruption = interruptions.remove(&id);
             let pull_request = pull_requests.remove(&id);
 
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(
-                    &kind,
-                    body,
-                    summary,
-                    set,
-                    commit,
-                    pull_request,
-                    interruption,
-                )?,
+                event: Event::read(&kind, body, summary, set, commit, pull_request)?,
             })
         })
         .collect()
@@ -1548,8 +1514,8 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 ///
 /// The newest rather than the batch's own, because nothing on the record says
 /// which session asked one and nothing has to. One Worktree holds one agent and
-/// nothing advances past an open Interruption, so the proposal a batch session
-/// made is the last one there is for as long as anything is asking about it.
+/// nothing advances past a halt, so the proposal a batch session made is the
+/// last one there is for as long as anything is asking about it.
 pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     Ok(proposals(pool, conversation_id).await?.last().copied())
 }
@@ -1941,6 +1907,10 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// did not, the rule was the default branch's tip *at grill start* — so this is
 /// the moment that rule resolves to a commit, and after it there is a fact about
 /// what the work branched from rather than a rule about what it would have.
+///
+/// It is also where the Repo remembers what it was grilled with — see
+/// [`super::pairings::remember`] — because this is the moment the two Pairings
+/// stop being changeable and become what the work is actually running under.
 pub async fn start_grilling(
     pool: &SqlitePool,
     id: i64,
@@ -1985,6 +1955,12 @@ pub async fn start_grilling(
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
+
+    // And what it is being grilled with, against its Repo, so the next
+    // Conversation started on that Repo arrives with both pickers filled. In
+    // this transaction because this is the moment the Pairings are fixed: a
+    // memory written a moment later could be of a choice that never ran.
+    super::pairings::remember(&mut tx, id).await?;
 
     tx.commit().await.context("starting a grilling")?;
 

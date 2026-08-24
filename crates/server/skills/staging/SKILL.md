@@ -25,13 +25,12 @@ beside the pick as part of what the staging has to answer to. Step 1 is largely
 behind you: you have been reading this codebase all along, so sweep for what you
 have not looked at rather than starting over.
 
-**You are a fresh session.** The grilling that settled this work is over and its
-context is gone: the earlier attempt at this staging ended without a roadmap,
-and the human asked for it to be run again. The prompt carries the Brief and
-whatever they wrote alongside the retry, and there is no handoff document — what
-you have besides those is the repository. Ground the plan in it thoroughly
-before you draft anything, and put what you cannot settle from it to the human
-in the Set below rather than guessing.
+**You are a fresh session.** The grilling that settled this work is over and
+its context is gone: the earlier attempt at this staging ended without a
+roadmap, and the human pressed Resume. The prompt carries the Brief, and there
+is no handoff document — what you have besides it is the repository. Ground the
+plan in it thoroughly before you draft anything, and put what you cannot settle
+from it to the human in the Set below rather than guessing.
 
 Either way, the direction is settled and the staging is what is left.
 

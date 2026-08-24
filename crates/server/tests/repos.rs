@@ -73,6 +73,11 @@ async fn listed(app: &Router) -> Vec<RepoEntry> {
     get(app, "/api/ui/repos").await
 }
 
+/// The branches of one registered Repo, which is what the base dropdown offers.
+async fn branches(app: &Router, id: i64) -> Vec<String> {
+    get(app, &format!("/api/ui/repos/{id}/branches")).await
+}
+
 async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
     let (status, body) = fetch(
         app,
@@ -314,4 +319,65 @@ async fn a_repository_with_no_branch_to_call_its_default_is_refused() {
     git(&repo, &["checkout", "--quiet", "--detach", "HEAD"]);
 
     assert_eq!(register(&app, &repo).await, Registered::NoDefaultBranch);
+}
+
+/// The list a drafting Conversation picks what it comes off out of: every
+/// branch the repository has, local and remote-tracking both.
+///
+/// `origin/HEAD` is left out of it. It is a symbolic ref — another name for a
+/// branch that is already on the list — and offering it twice would be offering
+/// a choice that is not one.
+#[tokio::test]
+async fn a_repos_branches_are_the_local_and_remote_tracking_ones() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    git(&repo, &["branch", "release"]);
+    git(&repo, &["remote", "add", "origin", repo.to_str().unwrap()]);
+    git(&repo, &["fetch", "--quiet", "origin"]);
+    git(
+        &repo,
+        &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ],
+    );
+
+    assert_eq!(register(&app, &repo).await, Registered::Added);
+    let id = listed(&app).await[0].id;
+
+    assert_eq!(
+        branches(&app, id).await,
+        vec![
+            "main".to_owned(),
+            "release".to_owned(),
+            "origin/main".to_owned(),
+            "origin/release".to_owned(),
+        ],
+        "the locals first, then what the remote is carrying",
+    );
+}
+
+/// A Repo that is not registered has no branches to read, and saying so is a
+/// refusal rather than an empty list: an empty list is a repository with
+/// nothing on it, which is a different thing to be told.
+#[tokio::test]
+async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
+    let watched = tempfile::tempdir().unwrap();
+    let (_dir, app) = app_watching(watched.path()).await;
+
+    for asked in ["404", "not-a-number"] {
+        let (status, _) = fetch(
+            &app,
+            Request::builder()
+                .uri(format!("/api/ui/repos/{asked}/branches"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND, "asking about {asked}");
+    }
 }

@@ -71,8 +71,8 @@ use crate::store;
 /// wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or a run stopped at an Interruption. Idle rather than looping, for the
-/// checks watcher's reason — nothing advances past an open Interruption, and a
+/// gone, or driving that halted. Idle rather than looping, for the checks
+/// watcher's reason — nothing advances past a halt, and a
 /// watcher that dispatched sessions behind one would be working on a run the
 /// human has stopped.
 ///
@@ -122,15 +122,10 @@ async fn once(state: &AppState, conversation_id: i64) -> Watching {
     }
 
     // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past an Interruption* means no session is launched while the
-    // human is still being asked something.
-    match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(Some(_)) => return Watching::Done("the run is blocked on the human"),
-        Ok(None) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            return Watching::Again;
-        }
+    // not advance past a halt* means no session is launched while the human is
+    // the only thing that can start one.
+    if crate::halts::stopped(state, conversation_id).await {
+        return Watching::Done("driving has stopped");
     }
 
     // Before anything is read of GitHub or settled here: a batch session that

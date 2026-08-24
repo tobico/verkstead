@@ -4,8 +4,8 @@
 //!
 //! Three small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
-//! pull request, the commits a fix session lands, the Interruption where it
-//! stops asking the machine. What is kept here is the bookkeeping underneath:
+//! pull request, the commits a fix session lands, the Notice of the halt where
+//! it stops asking the machine. What is kept here is the bookkeeping underneath:
 //! facts that decide what Verkstead does next and that nobody would want a row
 //! on a Timeline for.
 //!
@@ -375,12 +375,12 @@ pub async fn record_addressed_comments(
 /// The other half of [`record_addressed_comments`], and what a batch session
 /// that did not finish leaves behind: the comments were recorded as addressed as
 /// it was dispatched, and a session that fell over before it put anything to the
-/// human addressed none of them. Forgetting them is what makes the retry the
-/// batch over again, in a session as fresh as the first.
+/// human addressed none of them. Forgetting them is what makes Resume the batch
+/// over again, in a session as fresh as the first.
 ///
 /// Only ever called for a batch nothing is left running about — the session is
-/// gone and the run is stopped at the Interruption saying so — so there is
-/// nothing racing this to dispatch about them in the meantime.
+/// gone and the run has halted with a Notice saying so — so there is nothing
+/// racing this to dispatch about them in the meantime.
 pub async fn forget_addressed_comments(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -478,9 +478,9 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
 /// Forget what a Conversation's checks have already been given, so they start
 /// again from nothing.
 ///
-/// What a retried Interruption does. The human has read the evidence and asked
-/// for another go, and a count left standing would be a retry that raised the
-/// same Interruption on its next poll without dispatching anything.
+/// What Resume does. The human has read the Notice of what stopped and asked
+/// for another go, and a count left standing would be a watcher that halted all
+/// over again on its next poll without dispatching anything.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")
         .bind(conversation_id)

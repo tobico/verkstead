@@ -26,6 +26,11 @@
 //! walk into the pane by opening something. The selection is not in the URL —
 //! an Event opened is a place in a page rather than a page, and a Conversation
 //! whose Timeline has moved on is not one to restore a scroll position into.
+//!
+//! What is *not* held here is the Conversation itself. Reading one, and drawing
+//! the two panes it is read in, is `Reading` below — keyed on the id, so that
+//! switching between Conversations builds those panes again rather than reading
+//! the second Conversation into the first one's page.
 
 import { useNavigate, useParams } from "@solidjs/router";
 import {
@@ -33,6 +38,7 @@ import {
   Show,
   Switch,
   createEffect,
+  createMemo,
   createSignal,
   on,
   onCleanup,
@@ -47,7 +53,6 @@ import type {
   CommitEvent,
   ConversationView,
   HandoffEvent,
-  InterruptionEvent,
   ManualTaskEvent,
   PullRequestEvent,
   QuestionSetEvent,
@@ -57,7 +62,6 @@ import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
-import { Interrupted } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
@@ -85,7 +89,6 @@ type Opened =
   | { output: AgentOutputEvent }
   | { asked: QuestionSetEvent }
   | { commit: CommitEvent }
-  | { stopped: InterruptionEvent }
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
@@ -99,7 +102,6 @@ function which(
   | AgentOutputEvent
   | QuestionSetEvent
   | CommitEvent
-  | InterruptionEvent
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
@@ -112,9 +114,6 @@ function which(
   }
   if ("commit" in open) {
     return open.commit;
-  }
-  if ("stopped" in open) {
-    return open.stopped;
   }
   if ("brief" in open) {
     return open.brief;
@@ -137,10 +136,6 @@ function setIn(open: Opened): QuestionSetEvent | undefined {
 
 function commitIn(open: Opened): CommitEvent | undefined {
   return "commit" in open ? open.commit : undefined;
-}
-
-function stoppedIn(open: Opened): InterruptionEvent | undefined {
-  return "stopped" in open ? open.stopped : undefined;
 }
 
 function pullRequestIn(open: Opened): PullRequestEvent | undefined {
@@ -320,7 +315,11 @@ export function Workbench(): JSX.Element {
   /// Which Conversation the URL names, or the empty string on the bare
   /// workbench. Unparsed, like a Set's id: the server decides what names
   /// nothing.
-  const selected = () => params.id ?? "";
+  ///
+  /// A memo rather than a read of the params, because what hangs off it is a
+  /// key: it has to say nothing at all when the router has moved and the id has
+  /// not.
+  const selected = createMemo(() => params.id ?? "");
 
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
@@ -336,94 +335,12 @@ export function Workbench(): JSX.Element {
     }),
   );
 
-  /// The Event the details pane is showing, where it is one that has a full
-  /// self to show. An id whose Event has gone leaves the pane empty, which is
-  /// what it is when nothing is open at all.
-  ///
-  /// Eight kinds have one: a session's output, whose full self is its
-  /// Capture; a Question Set, whose full self is the document it was asked
-  /// as; a commit, whose full self is its diff; an interruption, whose full
-  /// self is the evidence it was raised with; the pull request, whose full
-  /// self is what is on it at GitHub right now; and the three documents — the
-  /// Brief, the handoff and a Manual Task's instruction — whose full self is
-  /// the markdown their card shows five lines of. The kind travels with it,
-  /// because it is what decides which pane is drawn.
-  ///
-  /// A Brief still being drafted is here too, and nothing ever selects it: the
-  /// card is a field with the setup under it rather than a card to press, which
-  /// is the Timeline's own rule about its own card. Saying it a second time here
-  /// would be two rules to keep in step.
-  ///
-  /// The pull request is looked for among the pinned events rather than in the
-  /// timeline, because that is where it is drawn: it is the one event that
-  /// stays in view rather than scrolling past, and it opens all the same.
-  const opened = (conversation: ConversationView): Opened | undefined => {
-    const id = event();
-
-    return [
-      ...conversation.timeline.map((entry): Opened | undefined => {
-        if ("AgentOutput" in entry) {
-          return { output: entry.AgentOutput };
-        }
-        if ("QuestionSet" in entry) {
-          return { asked: entry.QuestionSet };
-        }
-        if ("Commit" in entry) {
-          return { commit: entry.Commit };
-        }
-        if ("Interruption" in entry) {
-          return { stopped: entry.Interruption };
-        }
-        if ("Brief" in entry) {
-          return { brief: entry.Brief };
-        }
-        if ("Handoff" in entry) {
-          return { handoff: entry.Handoff };
-        }
-        if ("ManualTask" in entry) {
-          return { manual: entry.ManualTask };
-        }
-        return undefined;
-      }),
-      ...conversation.pinned.map((pinned): Opened | undefined =>
-        "PullRequest" in pinned ? { opened: pinned.PullRequest } : undefined,
-      ),
-    ].find((open) => open !== undefined && which(open).id === id);
-  };
-
-  const conversation = useReading(() => ({
-    queryKey: ["conversation", selected()],
-    queryFn: () => loadConversation(selected()),
-    enabled: selected() !== "",
-
-    // Nothing polls this. What a Timeline keeps up with is the Nudges about its
-    // own Conversation — a Question Set arriving, a session's output growing,
-    // a commit landing — and what stands behind a Nudge that never arrived is
-    // the catch-up in `nudge.ts`: coming back to the page reads it whole
-    // (ADR-0009).
-
-    // Merge each read into the Conversation already drawn rather than replacing
-    // it, so that an Event which did not change stays the same Event and the row
-    // drawn for it is left alone.
-    //
-    // Solid Query turns the core's structural sharing off and offers this in its
-    // place, and off is not a setting this page can live with: a talking session
-    // has this re-read a second at a time over a Timeline that has mostly not
-    // moved, and without this each read is a new object for every Event on it,
-    // so `For` throws away every row and builds it again. What goes with the
-    // rows is everything they were holding — the Brief being typed into above
-    // all, which is a half-written document and the only copy of itself there
-    // is.
-    //
-    // What actually matches the rows up is position, not the key named here. A
-    // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
-    // a level down where reconcile — which reads the key off the array element
-    // itself — cannot see it, and elements without the key are matched by
-    // index. That is sound for this array: Events are only ever appended, so
-    // the prefix is stable and every row keeps its identity. The Transcript's
-    // turns carry their `id` flat for exactly this reason.
-    freshness: { reconcile: "id" },
-  }));
+  /// The selection as something to key on: a new object each time the id
+  /// really changes, and the same one for as long as it does not. What hangs
+  /// off it is the whole of the Conversation-reading half of the page, so a
+  /// switch tears that down and builds it again — which is what `Reading` is
+  /// for, and why it is a component at all.
+  const open = createMemo(() => ({ id: selected() }));
 
   return (
     <div
@@ -455,9 +372,170 @@ export function Workbench(): JSX.Element {
         />
       </Show>
 
+      {/* The Conversation the URL names, in the two panes it is read in.
+
+          Keyed on its id, so that switching to another one throws this away
+          and builds it again from nothing. Without that the switch was
+          dropped, and dropped worst where it should have been cheapest: on a
+          Conversation already read once, answered out of the cache. The query
+          has its payload merged into the store rather than put in its place
+          (see the query in `Reading`), and reconcile exempts the root of a
+          store from the key it is told to match by — so the second
+          Conversation went into the first one's object, the object stayed the
+          object it had always been, and with nothing to fetch there was not
+          even a moment of loading to rebuild the page at. Everything the
+          middle pane was holding went on standing over a Conversation that
+          was no longer on screen: a Brief half typed into above all, which is
+          the only copy of itself there is.
+
+          The merge itself is right and stays. What it is for is a re-read of
+          the Conversation already open, where keeping the rows is the whole
+          point; it is only across a change of Conversation that it has
+          nothing to say, and this is what says so. */}
+      <Show when={open()} keyed>
+        {(open) => (
+          <Reading
+            id={open.id}
+            event={event()}
+            select={setEvent}
+            pane={setPane}
+            close={close}
+            divider={
+              <Show when={allThree()}>
+                <Divider
+                  divider="timeline"
+                  label="Resize the timeline pane"
+                  share={shown().timeline}
+                  travel={range("timeline", shown(), allThree())}
+                  drag={drag}
+                  nudge={nudge}
+                  restore={defaults}
+                />
+              </Show>
+            }
+          />
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/// One Conversation, in the two panes it is read in: its Timeline in the
+/// middle, and the full self of whatever is open in it on the right.
+///
+/// Both panes and the query behind them are one component so that one
+/// `<Show keyed>` around it rebuilds all three together — the reason it
+/// exists is in the comment at the call site. It draws no frame of its own:
+/// the panes are grid children of the workbench, so what comes back is the
+/// two of them and the divider between them, loose.
+function Reading(props: {
+  /// The Conversation to read, or the empty string on the bare workbench.
+  id: string;
+
+  /// Which Event the details pane is showing, and how to change it.
+  event: number | null;
+  select: (event: number) => void;
+
+  /// Which level a narrow window is showing, and the way back out of the
+  /// details pane.
+  pane: (pane: Pane) => void;
+  close: () => void;
+
+  /// The line between the two panes, which is the frame's rather than this
+  /// component's: how wide the panes stand is a property of the workbench,
+  /// and the handle only stands here because that is where the grid puts it.
+  divider: JSX.Element;
+}): JSX.Element {
+  /// The Event the details pane is showing, where it is one that has a full
+  /// self to show. An id whose Event has gone leaves the pane empty, which is
+  /// what it is when nothing is open at all.
+  ///
+  /// Seven kinds have one: a session's output, whose full self is its
+  /// Capture; a Question Set, whose full self is the document it was asked
+  /// as; a commit, whose full self is its diff; the pull request, whose full
+  /// self is what is on it at GitHub right now; and the three documents — the
+  /// Brief, the handoff and a Manual Task's instruction — whose full self is
+  /// the markdown their card shows five lines of. The kind travels with it,
+  /// because it is what decides which pane is drawn.
+  ///
+  /// A Brief still being drafted is here too, and nothing ever selects it: the
+  /// card is a field with the setup under it rather than a card to press, which
+  /// is the Timeline's own rule about its own card. Saying it a second time here
+  /// would be two rules to keep in step.
+  ///
+  /// The pull request is looked for among the pinned events rather than in the
+  /// timeline, because that is where it is drawn: it is the one event that
+  /// stays in view rather than scrolling past, and it opens all the same.
+  const opened = (conversation: ConversationView): Opened | undefined => {
+    const id = props.event;
+
+    return [
+      ...conversation.timeline.map((entry): Opened | undefined => {
+        if ("AgentOutput" in entry) {
+          return { output: entry.AgentOutput };
+        }
+        if ("QuestionSet" in entry) {
+          return { asked: entry.QuestionSet };
+        }
+        if ("Commit" in entry) {
+          return { commit: entry.Commit };
+        }
+        if ("Brief" in entry) {
+          return { brief: entry.Brief };
+        }
+        if ("Handoff" in entry) {
+          return { handoff: entry.Handoff };
+        }
+        if ("ManualTask" in entry) {
+          return { manual: entry.ManualTask };
+        }
+        return undefined;
+      }),
+      ...conversation.pinned.map((pinned): Opened | undefined =>
+        "PullRequest" in pinned ? { opened: pinned.PullRequest } : undefined,
+      ),
+    ].find((open) => open !== undefined && which(open).id === id);
+  };
+
+  const conversation = useReading(() => ({
+    queryKey: ["conversation", props.id],
+    queryFn: () => loadConversation(props.id),
+    enabled: props.id !== "",
+
+    // Nothing polls this. What a Timeline keeps up with is the Nudges about its
+    // own Conversation — a Question Set arriving, a session's output growing,
+    // a commit landing — and what stands behind a Nudge that never arrived is
+    // the catch-up in `nudge.ts`: coming back to the page reads it whole
+    // (ADR-0009).
+
+    // Merge each read into the Conversation already drawn rather than replacing
+    // it, so that an Event which did not change stays the same Event and the row
+    // drawn for it is left alone.
+    //
+    // Solid Query turns the core's structural sharing off and offers this in its
+    // place, and off is not a setting this page can live with: a talking session
+    // has this re-read a second at a time over a Timeline that has mostly not
+    // moved, and without this each read is a new object for every Event on it,
+    // so `For` throws away every row and builds it again. What goes with the
+    // rows is everything they were holding — the Brief being typed into above
+    // all, which is a half-written document and the only copy of itself there
+    // is.
+    //
+    // What actually matches the rows up is position, not the key named here. A
+    // Timeline Event is `{"Brief": {…, "id": 4}}` on the wire, so its `id` sits
+    // a level down where reconcile — which reads the key off the array element
+    // itself — cannot see it, and elements without the key are matched by
+    // index. That is sound for this array: Events are only ever appended, so
+    // the prefix is stable and every row keeps its identity. The Transcript's
+    // turns carry their `id` flat for exactly this reason.
+    freshness: { reconcile: "id" },
+  }));
+
+  return (
+    <>
       <section class="pane timeline-pane" aria-label="Timeline">
         <Switch>
-          <Match when={selected() === ""}>
+          <Match when={props.id === ""}>
             {/* The resting state of the workbench, and what it says is the one
                 thing there is to do from here. */}
             <p class="empty">Pick a conversation, or start one.</p>
@@ -474,27 +552,17 @@ export function Workbench(): JSX.Element {
             {(conversation) => (
               <Timeline
                 conversation={conversation()}
-                back={() => setPane("conversations")}
-                details={() => setPane("details")}
-                selected={event()}
-                select={setEvent}
+                back={() => props.pane("conversations")}
+                details={() => props.pane("details")}
+                selected={props.event}
+                select={props.select}
               />
             )}
           </Match>
         </Switch>
       </section>
 
-      <Show when={allThree()}>
-        <Divider
-          divider="timeline"
-          label="Resize the timeline pane"
-          share={shown().timeline}
-          travel={range("timeline", shown(), allThree())}
-          drag={drag}
-          nudge={nudge}
-          restore={defaults}
-        />
-      </Show>
+      {props.divider}
 
       <section class="pane details-pane" aria-label="Details">
         {/* Nothing at all where nothing is open, which on a wide window is a
@@ -510,7 +578,7 @@ export function Workbench(): JSX.Element {
                       <Output
                         conversation={conversation()}
                         output={output()}
-                        back={() => setPane("timeline")}
+                        back={() => props.pane("timeline")}
                       />
                     )}
                   </Match>
@@ -518,8 +586,8 @@ export function Workbench(): JSX.Element {
                     {(asked) => (
                       <Asked
                         asked={asked()}
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -528,18 +596,8 @@ export function Workbench(): JSX.Element {
                       <Commit
                         conversation={conversation()}
                         commit={commit()}
-                        back={() => setPane("timeline")}
-                        close={close}
-                      />
-                    )}
-                  </Match>
-                  <Match when={stoppedIn(open())}>
-                    {(stopped) => (
-                      <Interrupted
-                        conversation={conversation()}
-                        stopped={stopped()}
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -548,8 +606,8 @@ export function Workbench(): JSX.Element {
                       <PullRequest
                         conversation={conversation()}
                         opened={opened()}
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -563,8 +621,8 @@ export function Workbench(): JSX.Element {
                         heading="Brief"
                         html={brief().html}
                         empty="Nothing was written."
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -574,8 +632,8 @@ export function Workbench(): JSX.Element {
                         heading="Handoff"
                         html={handoff().html}
                         empty="The grilling wrote nothing down."
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -585,8 +643,8 @@ export function Workbench(): JSX.Element {
                         heading="Manual task"
                         html={manual().html}
                         empty="Nothing was asked for."
-                        back={() => setPane("timeline")}
-                        close={close}
+                        back={() => props.pane("timeline")}
+                        close={props.close}
                       />
                     )}
                   </Match>
@@ -596,6 +654,6 @@ export function Workbench(): JSX.Element {
           )}
         </Show>
       </section>
-    </div>
+    </>
   );
 }

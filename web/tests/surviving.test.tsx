@@ -162,7 +162,7 @@ describe("what a Nudge leaves standing", () => {
   it("keeps the open menu's repo rows", async () => {
     theWorkbench();
     const { container, client } = mount();
-    fireEvent.click(await drawn(container, ".new-conversation-trigger"));
+    fireEvent.click(await drawn(container, ".new-conversation > .menu-trigger"));
     await drawn(container, ".in-repo");
     const offered = nodes(container, ".in-repo");
 
@@ -209,7 +209,7 @@ describe("what a picker shows and what it would send", () => {
   it("stops offering a repo that has been unregistered", async () => {
     const { holds } = theRepos();
     const { container, client } = mount();
-    fireEvent.click(await drawn(container, ".new-conversation-trigger"));
+    fireEvent.click(await drawn(container, ".new-conversation > .menu-trigger"));
     await drawn(container, ".in-repo");
 
     holds([FIRST]);

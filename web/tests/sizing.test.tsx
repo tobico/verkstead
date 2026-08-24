@@ -394,4 +394,54 @@ describe("the rules the widths are read by", () => {
         "  height: 100dvh;\n",
     );
   });
+
+  /// Where the panes stand side by side the frame is the window, and the page
+  /// behind it never scrolls: not by a pane standing past the bottom of the
+  /// frame, and not by a pane that has been scrolled to its end handing the
+  /// rest of the gesture out to the document. Both of those put blank space
+  /// under the workbench and pushed it off the screen.
+  it("keeps the page from scrolling under the panes", () => {
+    const beside = layout(BESIDE);
+
+    // The frame is the window's height, and whatever gets its own height wrong
+    // is clipped rather than turned into document to scroll.
+    expect(beside).toContain("    height: 100dvh;\n");
+    expect(beside).toContain("    overflow: hidden;\n");
+
+    // Each pane scrolls on its own, and stops when it runs out.
+    expect(beside).toContain(
+      "  .pane {\n    overflow-y: auto;\n" +
+        "    /* A pane scrolled to its end stops there. Left to itself the browser hands\n" +
+        "       the rest of the gesture to the document, which is the same page-under-\n" +
+        "       the-panes scroll by another route. */\n" +
+        "    overscroll-behavior: contain;\n  }",
+    );
+
+    // The one pane with a height of its own takes it from the row it is in
+    // rather than asking the viewport a second time: two resolutions of one
+    // `dvh` that disagree by a pixel are a pixel of page. Said after the rule
+    // it is overriding rather than up here with the rest of the layout, which
+    // is the only place it could win.
+    expect(stylesheet).toContain(
+      `@media ${BESIDE} {\n` +
+        "  .workbench > .details-pane:has(.screen) {\n" +
+        "    height: auto;\n  }\n}",
+    );
+
+    // And the terminal inside it, which is a scroller of its own.
+    expect(stylesheet).toMatch(
+      /\.screen \.terminal-host \{[^}]*overscroll-behavior: contain;/,
+    );
+  });
 });
+
+/// What one of the workbench's two breakpoints holds, as text. The rules are
+/// what these tests read — jsdom lays out no grids — and reading them a
+/// breakpoint at a time is what says which side of it a rule is on.
+function layout(breakpoint: string): string {
+  const opened = stylesheet.indexOf(`@media ${breakpoint} {`);
+  expect(opened, `the stylesheet should have a ${breakpoint} layout`).not.toBe(
+    -1,
+  );
+  return stylesheet.slice(opened, stylesheet.indexOf("\n}\n", opened));
+}

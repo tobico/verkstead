@@ -52,6 +52,20 @@ pub const TOKEN_CLASSES: &[&str] = &[
 /// unhighlighted. See the dependency's note in the workspace manifest.
 static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_no_newlines);
 
+/// Deserialize the syntax set now, so that no request has to.
+///
+/// The set is a few megabytes, and [`LazyLock`] builds it on whichever thread
+/// asks first — which, left alone, is whoever opens the first Diff of the
+/// process, and that open takes the whole build with it. Forced at startup and
+/// away from the serving path, it is already there when the first request wants
+/// it, and the first diff costs what the second one does.
+///
+/// Calling it twice is calling it once: the lock builds the set exactly one
+/// time, whoever asks for it.
+pub fn warm() {
+    LazyLock::force(&SYNTAXES);
+}
+
 /// The syntax to highlight a file with, or `None` for one nothing recognises.
 ///
 /// Keyed off the extension, falling back to the whole file name for the ones that
@@ -201,7 +215,22 @@ pub fn escaped(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{block, escaped, for_path, for_token, line};
+    use super::{block, escaped, for_path, for_token, line, warm};
+
+    #[test]
+    fn the_set_can_be_built_before_anything_asks_for_it() {
+        // Startup calls this, and a test that has already highlighted something
+        // calls it against a set that is built — both of which have to be the
+        // same nothing-to-see.
+        warm();
+        warm();
+
+        assert_eq!(
+            for_path("src/limits.rs").map(|syntax| &*syntax.name),
+            Some("Rust"),
+            "the warmed set is the one the highlighter goes on to use",
+        );
+    }
 
     #[test]
     fn a_fence_names_its_language_the_way_a_fence_does() {

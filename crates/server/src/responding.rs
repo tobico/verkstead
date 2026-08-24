@@ -26,16 +26,15 @@
 //! being a session launch. A batch session that asked, was answered and then went
 //! — cleanly or otherwise — with nothing committed since is a wrap-up owing work
 //! nobody is left to do. So the record is asked afterwards rather than the
-//! session trusted, and what is owed stops the run at an Interruption. Retrying
-//! it is the doing over again: one fix session handed every accepted proposal at
-//! once, because the decisions were made and only the carrying out failed.
-//! Nothing is asked again.
+//! session trusted, and what is owed halts the run. Resuming is the doing over
+//! again: one fix session handed every accepted proposal at once, because the
+//! decisions were made and only the carrying out failed. Nothing is asked again.
 //!
 //! A batch session that ended badly having been owed nothing never got as far as
-//! asking. That stops the run at an Interruption too — and because the batch was
-//! written down as addressed the moment it was dispatched, the comments are
-//! forgotten again as it is raised, so a retry is the batch over again in a
-//! session as fresh as the first.
+//! asking. That halts the run too — and because the batch was written down as
+//! addressed the moment it was dispatched, the comments are forgotten again as
+//! the halt is recorded, so a Resume is the batch over again in a session as
+//! fresh as the first.
 //!
 //! **And nothing the human was asked goes quietly either**, which is the review's
 //! net once more and the failure the addressing-as-dispatched trade opens. The
@@ -50,9 +49,9 @@
 //! review owes its own: **answered**, and the fixes are landed by a fresh session
 //! with nobody asked for anything; **unanswered**, and there is nothing to carry
 //! out and nobody to carry it out, so the Set is closed unanswered and the run
-//! stops at an Interruption.
+//! halts.
 //!
-//! What was said goes back to being unread as that is raised. The record cannot
+//! What was said goes back to being unread as that halt is recorded. The record cannot
 //! say which comments the dead session was dealing with and which the review
 //! folded in before it, so every one of them is read again — a comment read twice
 //! costs a session's work, and one dropped costs the human theirs. Which is safe
@@ -95,7 +94,7 @@ pub(crate) async fn run(state: &AppState, conversation_id: i64, said: &str, whic
 ///
 /// `ended_badly` is how it ended where it did not end well, and the Timeline
 /// Event it was printing into. A session owed nothing that ended badly is one
-/// that never got as far as asking, which is the other Interruption here.
+/// that never got as far as asking, which is the other stop here.
 async fn over(
     state: &AppState,
     conversation_id: i64,
@@ -137,32 +136,6 @@ async fn over(
         comments = which.len(),
         "what was said on the pull request has been answered, so the wrap-up carries on"
     );
-}
-
-/// Answer the batch again because the human asked for it — or land what it was
-/// answered and never landed, which is the other thing a retry here can mean.
-///
-/// Which of the two is a fact about the record rather than something to choose,
-/// and it is not chosen here: putting the wrap-up back under watch is the whole
-/// of a retry, because the comments watcher asks that question on every poll and
-/// is the one place that answers it — see [`unattended`]. Proposals the human
-/// accepted with nothing committed since are the doing alone. Everything else is
-/// the batch over again: the comments were forgotten as the Interruption was
-/// raised, so the watcher this puts back on dispatches a fresh session about the
-/// same words.
-///
-/// The wrap-up's other halves go back under watch with it. Nothing advances past
-/// an open Interruption, so the checks stopped being watched when this one was
-/// raised, and a retry that started only the fixes would leave the pull request's
-/// checks unwatched for the rest of the wrap-up.
-pub(crate) async fn retried(state: AppState, conversation_id: i64) {
-    tracing::info!(
-        conversation_id,
-        "what was said on the pull request was retried, so the whole wrap-up goes back \
-         under watch"
-    );
-
-    crate::wrapping::watching(&state, conversation_id);
 }
 
 /// See to whatever a batch session that is no longer running left behind, and say
@@ -253,11 +226,11 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// Stop the run: a batch session's proposal is up and nobody is left to act on
 /// it.
 ///
-/// The Set is closed as this is raised, for the reason the review closes its own
-/// — a question whose answer nothing would read is one to take off the Timeline
+/// The Set is closed as this halts, for the reason the review closes its own — a
+/// question whose answer nothing would read is one to take off the Timeline
 /// rather than leave standing. And what was said goes back to being unread with
-/// it, so that the human's feedback outlives the session that lost it and a retry
-/// is a fresh session about the same words.
+/// it, so that the human's feedback outlives the session that lost it and a
+/// Resume is a fresh session about the same words.
 ///
 /// `which` is the batch, where the caller is the driver that dispatched it and
 /// therefore knows. `None` is a caller that cannot know — a server that came back
@@ -268,15 +241,15 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// reads the code as it now stands: a question the commits since have answered is
 /// one it says so about and asks nothing more of.
 ///
-/// Forgotten before the Interruption is raised, exactly as [`stopped`] forgets
-/// them, so that a forgetting that fails leaves the run stopped rather than
-/// quietly going round again.
+/// Forgotten before the halt is recorded, exactly as [`stopped`] forgets them,
+/// so that a forgetting that fails leaves the run stopped rather than quietly
+/// going round again.
 ///
 /// `ended_badly` is how the session went where this is being raised as one ends
 /// and it did not end well, with the Timeline Event it was printing into.
 ///
-/// The three remedies all mean something: answer what was said again, read the
-/// comments yourself, or end the run.
+/// [`store::Halt::Deliberate`]: what to do about it is Resume, which answers
+/// what was said again, or reading the comments yourself, or ending the run.
 async fn abandoned(
     state: &AppState,
     conversation_id: i64,
@@ -291,17 +264,17 @@ async fn abandoned(
 
     let left = "a session read what was said on the pull request and put what it would \
                 do to you, and it is gone, so its questions have been closed unanswered. \
-                Retrying reads what was said again.";
+                Resuming reads what was said again.";
 
     let (how, writing) = match ended_badly {
         Some((how, writing)) => (format!("{how}, and {left}"), Some(writing)),
         None => (left.to_owned(), None),
     };
 
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Comments,
+        crate::halts::Decided::Verkstead,
         "acting on the answers to what was proposed about the pull request's comments",
         &how,
         writing,
@@ -311,8 +284,8 @@ async fn abandoned(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session's proposal was left with nobody to act on it and the \
-             Interruption saying so could not be raised"
+            "a batch session's proposal was left with nobody to act on it and the halt \
+             saying so could not be recorded"
         );
     }
 }
@@ -459,16 +432,18 @@ async fn unlanded(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> 
 /// Stop the run: the batch session did not finish, and what to do about it is
 /// the human's.
 ///
-/// The comments are forgotten first, because a retry is the batch over again and
-/// they were written down as addressed the moment it was dispatched. Forgotten
-/// rather than left, so that the session the retry's watcher starts is one about
-/// the same words rather than one about nothing — and forgotten before the
-/// Interruption is raised, so that a forgetting that fails leaves the run stopped
+/// The comments are forgotten first, because going again is the batch over again
+/// and they were written down as addressed the moment it was dispatched.
+/// Forgotten rather than left, so that the session Resume's watcher starts is one
+/// about the same words rather than one about nothing — and forgotten before the
+/// halt is recorded, so that a forgetting that fails leaves the run stopped
 /// rather than quietly going round again.
 ///
 /// The evidence is the tail of what the session said, which is where one that
-/// fell over says why — and the three remedies all mean something: answer what
-/// was said again, read the comments yourself, or end the run.
+/// fell over says why.
+///
+/// [`store::Halt::Deliberate`]: what to do about it is Resume, which answers what
+/// was said again, or reading the comments yourself, or ending the run.
 async fn stopped(
     state: &AppState,
     conversation_id: i64,
@@ -481,10 +456,10 @@ async fn stopped(
         tracing::error!(error = ?error, conversation_id, "forgetting a batch nobody answered failed");
     }
 
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Comments,
+        crate::halts::Decided::Verkstead,
         "answering what was said on the pull request",
         how,
         Some(writing),
@@ -494,7 +469,7 @@ async fn stopped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session did not finish and the Interruption saying so could not be raised"
+            "a batch session did not finish and the halt saying so could not be recorded"
         );
     }
 }
@@ -502,14 +477,16 @@ async fn stopped(
 /// Stop the run: the human accepted fixes that nothing landed, and only they can
 /// say what happens now.
 ///
-/// The Interruption names the doing rather than the reading, because that is the
-/// half that failed — and it says what is owed in the session's own words, so the
-/// choice is answerable without opening the Set again. Retrying it is the fixes
-/// in one session; taking over is the human making them; aborting ends the run
-/// with the branch exactly as the session left it.
+/// The Notice names the doing rather than the reading, because that is the half
+/// that failed — and it says what is owed in the session's own words, so what to
+/// do about it is answerable without opening the Set again.
 ///
-/// The comments are not forgotten here, unlike the other Interruption's: they
-/// were answered, and what is owed is the answer rather than the reading.
+/// [`store::Halt::Deliberate`]: what to do is Resume, which is the fixes in one
+/// session, or the human making them, or aborting the run with the branch
+/// exactly as the session left it.
+///
+/// The comments are not forgotten here, unlike the other stop's: they were
+/// answered, and what is owed is the answer rather than the reading.
 ///
 /// `how` is how the session ended where it ended badly, and `writing` the Event
 /// it was printing into — both absent for a session that saw itself out and
@@ -521,10 +498,10 @@ async fn dropped(
     how: Option<&str>,
     writing: Option<i64>,
 ) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Comments,
+        crate::halts::Decided::Verkstead,
         "landing the fixes what was said on the pull request was answered with",
         &owing(owed, how),
         writing,
@@ -534,19 +511,19 @@ async fn dropped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session's accepted fixes were never landed and the Interruption saying \
-             so could not be raised"
+            "a batch session's accepted fixes were never landed and the halt saying so \
+             could not be recorded"
         );
     }
 }
 
-/// What is owed, as the Interruption says it: how many fixes, and the session's
-/// own words for each.
+/// What is owed, as the Notice says it: how many fixes, and the session's own
+/// words for each.
 ///
 /// Its words rather than Verkstead's, because the human decided against those
 /// words an hour ago and these are the ones they will recognise. Clamped to a
 /// line the way the review's are, and for the same reason — this is one line on
-/// a card read on a phone. See [`crate::review::in_a_line`].
+/// read on a phone. See [`crate::review::in_a_line`].
 fn owing(owed: &[store::Fixing], how: Option<&str>) -> String {
     let fixes = owed
         .iter()
@@ -632,9 +609,9 @@ mod tests {
         );
     }
 
-    /// What the Interruption says: that the fixes never landed, and which ones.
+    /// What the Notice says: that the fixes never landed, and which ones.
     #[test]
-    fn the_interruption_says_what_is_unlanded_in_the_sessions_own_words() {
+    fn the_notice_says_what_is_unlanded_in_the_sessions_own_words() {
         let says = owing(
             &[
                 finding("Move the reset above the comparison.", ""),

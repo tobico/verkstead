@@ -27,7 +27,7 @@ The vocabulary in bold is the project's, defined once in
 | `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, the **Agent Profile**'s claude pair, and nothing else of the machine |
 | `agent`, `grilling`, `next-stage`, `next-tasks` — one wrapper per thing you might start | One **Conversation**, which runs through Draft → Grilling → Direction → Implementing → Wrapping → Done |
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
-| roadrunner's interruptions | **Interruptions** and their **Remedies**, as Events you answer from the workbench or your phone |
+| roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
 | askance — one queue of Question Sets for the machine | **Question Sets** on the Timeline of the Conversation they were asked from |
 | The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and mounted read-only over the sandbox's, so a session's behaviour is the product's |
 | A gate at every commit | No commit gates. Review consolidates in the wrap-up, per pull request |
@@ -108,9 +108,9 @@ drafting, and grilling starting is what fixes them.
    it turns on has gone from the Worktree *and* the commit removing it has
    landed *and* the session has gone quiet. Commits appear on the Timeline with
    their diffs. Where Verkstead cannot go on — a session that exited badly, or
-   one that landed nothing — an **Interruption** opens, and the run holds until
-   you pick **Retry** (with whatever you say passed into the fresh session),
-   **take over manually**, or **abort**.
+   one that landed nothing — it **halts**: a **Notice** on the Timeline says
+   what stopped and why, your phone is told, and nothing else is launched until
+   you press **Resume**.
 6. **The finish runs unattended.** The last Step pushes and opens a **draft
    pull request** per the target repo's `docs/agents/git-workflow.md`, and the
    Conversation moves to Wrapping. The PR is a pinned Event; its commits and
@@ -141,9 +141,12 @@ to run. Nobody presses anything for either.
   longer take turns, and the checkout you have open in an editor is not what a
   session is editing.
 - **A run that stops is a thing on a page**, not a terminal you have to find.
-  The Interruption carries the evidence — which Step failed, how it ended, what
+  The stop Notice carries the evidence — which Step failed, how it ended, what
   git made of the Worktree, and the tail of what the session last said — read
-  at the moment the run stopped and kept.
+  at the moment the run stopped and kept. Getting going again is one **Resume**,
+  which works out what ought to be running now rather than replaying whatever
+  failed; where you want the work steered instead, a **Manual Task** is what
+  says so.
 - **Review happens once, on the pull request.** This is what "no commit gates"
   buys: nothing pauses per commit, and everything you would have said there is
   said in the wrap-up instead.
