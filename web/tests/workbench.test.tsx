@@ -1686,18 +1686,30 @@ describe("a conversation's pairings", () => {
   });
 
   /// A conversation missing either profile is identifiably not ready, and the
-  /// answer is the server's rather than a count of the two fields.
-  it("says whether the conversation is ready to grill", async () => {
+  /// answer is the server's rather than a count of the two fields. What is
+  /// missing is not said here, though: the button at the end of the record is
+  /// the one thing that explains itself, and a verdict up here as well would be
+  /// the same complaint twice.
+  it("says nothing about readiness until there is something to affirm", async () => {
     withConversation(UNCHOSEN);
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByText(/Not ready to grill/));
-    expect(container.querySelector(".readiness")!.classList).not.toContain(
-      "ready",
-    );
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    expect(container.querySelector(".readiness")).toBeNull();
+    expect(screen.queryByText(/Not ready to grill/)).toBeNull();
 
     // The fixture's own conversation has both, and the server says so.
     expect(OPEN.ready_to_grill).toBe(true);
+  });
+
+  /// One row where the pane is wide enough for two, which is the stylesheet's
+  /// half of it; what this holds is that they are the one row's to lay out.
+  it("draws the two pickers as a single row", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, ".conversation-profiles .pairings");
+    expect(row.querySelectorAll(".profile-choice")).toHaveLength(2);
   });
 
   it("says it is ready when the server says so", async () => {
@@ -1724,10 +1736,10 @@ describe("a conversation's pairings", () => {
       ready_to_grill: false,
     };
     withConversation(broken);
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText("Its config file is gone."));
-    await waitFor(() => screen.getByText(/Not ready to grill/));
+    expect(container.querySelector(".readiness")).toBeNull();
   });
 
   it("says why a choice was refused, in words", async () => {
@@ -2131,7 +2143,7 @@ function theHeld(running: boolean, ...answers: Parameters<typeof serving>) {
 /// holds — a refusal from the server, a worktree that has gone.
 function theWorkbenchWith(
   over: Partial<ConversationView>,
-  ...answers: Array<() => Promise<Response>>
+  ...answers: Parameters<typeof serving>
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -2271,12 +2283,62 @@ describe("starting the grilling", () => {
     ).toBeTruthy();
   });
 
-  it("says what is missing instead of offering a dead button", async () => {
+  /// An unready conversation gets the button all the same, drawn inert. Not
+  /// `disabled`, because a disabled button takes no press — and a press is how
+  /// the human reaches the explanation on a phone, where a `title` would never
+  /// show.
+  it("draws the button inert rather than withholding it", async () => {
     theWorkbenchWith({ ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByText(/the grilling can start/));
-    expect(container.querySelector(".start-grilling .start")).toBeNull();
+    const start = await drawn<HTMLButtonElement>(
+      container,
+      ".start-grilling .start",
+    );
+
+    expect(start.textContent).toContain("Start grilling");
+    expect(start.classList).toContain("inert");
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    expect(start.disabled).toBe(false);
+
+    // Nothing said until it is asked, and neither of the notes that used to
+    // stand in for the button.
+    expect(screen.queryByText(/This needs a brief/)).toBeNull();
+    expect(screen.queryByText(/the grilling can start/)).toBeNull();
+  });
+
+  it("answers a press on the inert button with what is missing, and starts nothing", async () => {
+    const fetching = theWorkbenchWith(
+      { ready_to_grill: false },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json("Started" satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".start-grilling .start"));
+
+    await waitFor(() => screen.getByText(/This needs a brief/));
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+  });
+
+  /// The same words for whoever has a pointer to hover with, and gone again
+  /// when the pointer is.
+  it("shows what is missing on hover too", async () => {
+    theWorkbenchWith({ ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, ".start-grilling .start");
+
+    fireEvent.mouseEnter(start);
+    await waitFor(() => screen.getByText(/This needs a brief/));
+
+    fireEvent.mouseLeave(start);
+    await waitFor(() =>
+      expect(screen.queryByText(/This needs a brief/)).toBeNull(),
+    );
   });
 
   it("posts to the conversation's own grill route, with nothing in the body", async () => {

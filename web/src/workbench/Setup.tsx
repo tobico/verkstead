@@ -135,7 +135,11 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
-            <>
+            /* Side by side wherever there is room for two, stacked where there
+               is not. The wrap is the pane's own width rather than the
+               window's, because this card is drawn in a pane the human can
+               narrow. */
+            <div class="pairings">
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
@@ -152,20 +156,20 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                 chosen={props.conversation.implementation_pairing}
                 choose={chooseImplementationPairing}
               />
-            </>
+            </div>
           )}
         </Match>
       </Switch>
 
-      {/* Whether this conversation will grill, which is the server's rule and
-          not a count of the two fields above: a profile whose pair has gone is
-          not one to launch a session under, and there is more to being ready
-          than the pairings. Said here because this is where the pairings are
-          fixed; the button it gates is at the end of the record below.
+      {/* That this conversation will grill, which is the server's rule and not
+          a count of the two fields above. An affirmation and nothing else: what
+          is *missing* is the business of the button it gates, at the end of the
+          record below, and said in both places it would be one complaint about
+          the pairings here and the same complaint again there.
 
-          An adopting conversation never grills, so that verdict is not the one
-          to draw for it — it would read as needing a brief nobody here writes.
-          What stands instead is why both pairings are fixed all the same. */}
+          An adopting conversation never grills, so it is not the line to draw
+          for it — it would read as needing a brief nobody here writes. What
+          stands instead is why both pairings are fixed all the same. */}
       <Show
         when={!props.conversation.adopting}
         fallback={
@@ -176,22 +180,9 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
           </p>
         }
       >
-        <p
-          class="note readiness"
-          classList={{ ready: props.conversation.ready_to_grill }}
-        >
-          <Show
-            when={props.conversation.ready_to_grill}
-            fallback={
-              <>
-                Not ready to grill: this needs a brief, and both pairings chosen
-                and working.
-              </>
-            }
-          >
-            Ready to grill.
-          </Show>
-        </p>
+        <Show when={props.conversation.ready_to_grill}>
+          <p class="note readiness ready">Ready to grill.</p>
+        </Show>
       </Show>
     </section>
   );

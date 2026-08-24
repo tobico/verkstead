@@ -1255,16 +1255,28 @@ function Commit(props: {
 
 /// The button that gives a Conversation somewhere to work.
 ///
-/// Drawn only while there is something to start. `ready_to_grill` decides
-/// whether it is *offered* rather than whether it is enabled: a conversation
-/// that has already started has nothing to press, and one that is not ready is
-/// told what is missing rather than handed a dead control. The server checks
-/// every one of the conditions again regardless — the page's copy is only as
-/// fresh as its last read.
+/// Drawn whenever there is something to start, ready or not. `ready_to_grill`
+/// decides how it *behaves* rather than whether it is there: an unready button
+/// looks inert and, pressed, says what is missing instead of starting. So it is
+/// `aria-disabled` rather than `disabled` — a truly disabled button takes no
+/// press to answer, and its only way of explaining itself is a `title` that a
+/// phone will never show. The explanation is on hover as well, for whoever has a
+/// pointer to hover with.
+///
+/// The server checks every one of the conditions again regardless — the page's
+/// copy is only as fresh as its last read.
 function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
+
+  // Whether the explanation is out: pressed, it stays out, because it was asked
+  // for; hovered, it comes and goes with the pointer.
+  const [asked, setAsked] = createSignal(false);
+  const [hovered, setHovered] = createSignal(false);
+
+  const ready = () => props.conversation.ready_to_grill;
+  const missing = () => !ready() && (asked() || hovered());
 
   const start = useMutation(() => ({
     mutationFn: () => startGrilling(props.conversation.id),
@@ -1287,26 +1299,30 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   return (
     <Show when={props.conversation.state === "Draft"}>
       <div class="start-grilling">
+        <button
+          type="button"
+          class="start"
+          classList={{ inert: !ready() }}
+          // Only ever `disabled` for a press already in flight. Not being ready
+          // is the other thing entirely: that press has an answer to give.
+          disabled={start.isPending}
+          aria-disabled={!ready()}
+          onClick={() => (ready() ? start.mutate() : setAsked(true))}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          {start.isPending ? "Starting…" : "Start grilling"}
+        </button>
         <Show
-          when={props.conversation.ready_to_grill}
+          when={ready()}
           fallback={
-            // Deliberately not the setup's wording. That one is a verdict on
-            // the conversation, drawn where the profiles are fixed; this one
-            // stands in for the button, and says what would make it appear.
-            <p class="note">
-              Write the brief and choose both agent profiles, and the grilling
-              can start.
-            </p>
+            <Show when={missing()}>
+              <p class="note wanting">
+                This needs a brief, and both pairings chosen and working.
+              </p>
+            </Show>
           }
         >
-          <button
-            type="button"
-            class="start"
-            disabled={start.isPending}
-            onClick={() => start.mutate()}
-          >
-            {start.isPending ? "Starting…" : "Start grilling"}
-          </button>
           <p class="note">
             This creates the branch and its worktree, and freezes the brief.
           </p>

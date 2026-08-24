@@ -15,7 +15,7 @@ onto them, and timeline presentation put straight.
 - [x] 04: Speed up the first diff — [details](04-first-diff-speed.md)
 - [x] 05: Autosave the branch, drop the saved indicator — [details](05-branch-autosave.md)
 - [x] 06: Base commit as a branch dropdown — [details](06-base-branch-dropdown.md)
-- [ ] 07: Redraw the grilling threshold — [details](07-grilling-threshold.md)
+- [x] 07: Redraw the grilling threshold — [details](07-grilling-threshold.md)
 - [ ] 08: Remember pairings per repo — [details](08-pairing-memory.md)
 - [ ] 09: One menu component, one shadow — [details](09-menu-component.md)
 - [ ] 10: Settings behind an ellipsis menu — [details](10-settings-menu.md)
