@@ -83,6 +83,7 @@ import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
+import { SETTLE } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -95,21 +96,14 @@ export const ABBREVIATED = 7;
 /// What each way of being refused a Brief says.
 ///
 /// `Saved` is here for completeness of the mapping and never drawn: a save that
-/// worked is said by the indicator on the card, in one word.
+/// worked says nothing at all, because a field quietly keeping up is what the
+/// human already expects of it.
 export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
   Saved: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
-
-/// How long a pause in typing is, before what is in the Brief field is kept.
-///
-/// Long enough that a sentence is one save rather than a save a word, and short
-/// enough that a human who typed and then sat back has a saved brief by the time
-/// they have read it over. Leaving the field saves it whatever the timer was
-/// about to do.
-const SETTLE = 800;
 
 /// And each way of being refused a start.
 ///
@@ -1521,31 +1515,18 @@ function Brief(props: {
 
   onCleanup(() => clearTimeout(pause));
 
-  /// What the quiet indicator says, and nothing until something has been
-  /// typed: a Brief nobody has touched saying `Saved` is the card claiming
-  /// credit for what the human did on another day.
-  const standing = () => {
-    if (save.isPending) return "Saving…";
-    if (unsaved()) return "Not saved yet";
-    return typed() === null ? "" : "Saved";
-  };
-
   return (
     <Openable
       kind="brief"
       selected={props.selected}
       open={frozen() ? props.open : null}
     >
+      {/* The heading alone: a field that keeps itself needs no word beside it
+          saying so, and a line that changed as fast as this one was read past
+          on a card the eye is meant to be typing into. What a save cannot do
+          is still said, under the field, in words. */}
       <div class="event-head">
         <h2>Brief</h2>
-        {/* Where the Edit button used to be, saying what became of what was
-            typed. Announced politely, because it is the only word the human
-            gets that the record has their brief. */}
-        <Show when={writing() && standing() !== ""}>
-          <p class="brief-standing" aria-live="polite">
-            {standing()}
-          </p>
-        </Show>
       </div>
 
       <Show

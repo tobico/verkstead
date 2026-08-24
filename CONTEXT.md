@@ -93,8 +93,8 @@ rather than editing the frozen one.
 
 Written where it is read: while the Conversation is drafting, the Brief on its
 card *is* the field — raw markdown, always open, keeping itself on a pause in
-the typing and whenever the field is left, with a word beside the heading
-saying the record has it. There is no Edit and no Save, because there is no
+the typing and whenever the field is left, and saying nothing about it either
+way. There is no Edit, no Save and no word about saving, because there is no
 other thing the Brief could be doing while it is a draft. Once it freezes it is
 the server's rendering of it and nothing else.
 

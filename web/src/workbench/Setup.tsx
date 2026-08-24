@@ -19,7 +19,14 @@
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  onCleanup,
+  type JSX,
+} from "solid-js";
 
 import {
   chooseGrillingPairing,
@@ -41,6 +48,7 @@ import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import { SETTLE } from "./settling";
 
 /// What each way of being refused a branch name says.
 export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
@@ -279,39 +287,108 @@ function PairingPicker(props: {
 ///
 /// Nothing is created by naming it. The branch itself arrives with the stage
 /// that starts grilling; this is the name it will be given.
+///
+/// It keeps itself the way the Brief above it does — on a pause in the typing
+/// and on the way out of the field — because it is the same card and a field
+/// with a button beside it would be the one thing on that card asking to be
+/// pressed. There is no word about saving either: what a save cannot do is
+/// said, and what it did is the name in the field and in the sidebar.
 function BranchName(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
+  // What has been typed, or nothing if nothing has been: the field follows the
+  // Conversation until the first keystroke and follows itself after it, so a
+  // read landing mid-name cannot take the name with it.
   const [named, setNamed] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<BranchRenamed | null>(null);
 
   /// What is in the field: what has been typed, or the name as it stands.
   const branch = () => named() ?? props.conversation.branch;
 
+  // The last name a save asked for, whatever became of it: where the save
+  // landed it is what the record has, and where it was refused it is the name
+  // the refusal was about. Either way, asking again for that same string would
+  // only get the same answer back.
+  const [asked, setAsked] = createSignal<string | null>(null);
+  const recorded = () => asked() ?? props.conversation.branch;
+
+  /// Whether the field has moved on since the last save, which is the whole of
+  /// what there is to save.
+  const unsaved = () => branch() !== recorded();
+
   const rename = useMutation(() => ({
-    mutationFn: (branch: string) =>
-      renameBranch(props.conversation.id, branch),
+    mutationFn: (branch: string) => renameBranch(props.conversation.id, branch),
     onSuccess: (outcome: BranchRenamed) => {
       if (outcome !== "Renamed") {
         setRefused(outcome);
         return;
       }
 
-      // The field goes back to following the Conversation, which is about to
-      // come back saying what this asked for.
       setRefused(null);
-      setNamed(null);
       void queries.invalidateQueries({ queryKey: ["conversation"] });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
+    // Whatever became of it, the field may have been typed into while it was
+    // in flight — so the moment one save is done the next is considered.
+    onSettled: () => {
+      saving = false;
+      keep();
+    },
   }));
+
+  /// Whether a save is in the air.
+  ///
+  /// Tracked here rather than read off the mutation, because the callbacks that
+  /// decide what to do next run before it has been told the save is over — and
+  /// what they are for is deciding whether to start another.
+  let saving = false;
+
+  // The pause: one timer, restarted by every keystroke and cancelled by
+  // whatever saves before it comes round.
+  let pause: ReturnType<typeof setTimeout> | undefined;
+
+  const settle = () => {
+    clearTimeout(pause);
+    pause = setTimeout(keep, SETTLE);
+  };
+
+  /// Keep what is in the field, if the record does not have it already.
+  ///
+  /// One save at a time, and what was typed meanwhile saved when the one in
+  /// flight comes back — two in the air could land in either order, and the
+  /// loser would be the record.
+  ///
+  /// A refusal only stops it where the refusal is permanent. `NotABranchName`
+  /// is not: the name is validated server-side alone, so a pause in the middle
+  /// of typing one is refused for what is not there yet, and the keystroke
+  /// after it may well be what fixes it. What stops that becoming a request a
+  /// second is that the same string is never asked about twice.
+  const keep = () => {
+    clearTimeout(pause);
+    if (settled() || !unsaved() || saving) return;
+
+    const name = branch();
+    saving = true;
+    setAsked(name);
+    rename.mutate(name);
+  };
+
+  /// Whether what came back is worth not asking about again.
+  const settled = () => {
+    const outcome = refused();
+    return outcome === "NoSuchConversation" || outcome === "NotDrafting";
+  };
+
+  onCleanup(() => clearTimeout(pause));
 
   return (
     <form
       class="branch-name"
       onSubmit={(ev) => {
+        // Nothing to press, so this is Enter in the field: the same save the
+        // pause was about to make, made now.
         ev.preventDefault();
-        rename.mutate(branch());
+        keep();
       }}
     >
       <label for="branch">Branch</label>
@@ -325,16 +402,15 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           value={branch()}
           onInput={(ev) => {
             setNamed(ev.currentTarget.value);
-            setRefused(null);
+            settle();
           }}
+          onBlur={() => keep()}
         />
-        <button
-          type="submit"
-          disabled={rename.isPending || branch() === props.conversation.branch}
-        >
-          Rename
-        </button>
       </div>
+      {/* A refusal stands until the next save answers, rather than clearing on
+          the next keystroke: it is the only thing that says why the sidebar is
+          not following the field, and one that vanished as it was read would
+          leave the human nothing. */}
       <Show when={refused()}>
         {(outcome) => <p class="error">{BRANCH_REFUSAL[outcome()]}</p>}
       </Show>

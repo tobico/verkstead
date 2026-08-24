@@ -121,7 +121,7 @@ const BRIEF = briefOf(OPEN);
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  // One test drives the brief field's typing pause on a clock of its own.
+  // Two tests drive a self-saving field's typing pause on a clock of their own.
   vi.useRealTimers();
   // The state is the instance's own, over the one every other test reads off
   // the prototype — so it goes when the test does.
@@ -1086,11 +1086,7 @@ describe("a conversation's timeline", () => {
 /// The brief while the Conversation is drafting: a field that is always there
 /// and saves itself, rather than a rendering with a way into a form.
 describe("writing the brief", () => {
-  /// The field, and the word beside the heading about what became of what is
-  /// in it.
   const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
-  const indicator = (container: ParentNode) =>
-    container.querySelector(".brief-standing")?.textContent ?? "";
 
   /// Where a save of the Brief goes.
   const WRITING = `/api/ui/conversations/${OPEN.id}/brief`;
@@ -1132,14 +1128,14 @@ describe("writing the brief", () => {
 
     await waitFor(() => expect(sent(fetching, WRITING)).toEqual({ markdown: written }));
 
-    // The field stays where it is, and says the record has what is in it.
-    await waitFor(() => expect(indicator(container)).toBe("Saved"));
+    // The field stays where it is, and says nothing at all about the save.
     expect(field().value).toBe(written);
+    expect(container.querySelector(".brief-standing")).toBeNull();
   });
 
   it("saves what was typed after a pause in the typing", async () => {
     const fetching = theWorkbench(json("Saved"));
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
     // The clock is this test's from here: what it is about is a pause, and a
@@ -1152,14 +1148,37 @@ describe("writing the brief", () => {
     // pause is there to stop.
     await vi.advanceTimersByTimeAsync(100);
     expect(writes(fetching, WRITING)).toBe(0);
-    expect(indicator(container)).toBe("Not saved yet");
 
     await vi.advanceTimersByTimeAsync(2_000);
 
     // One save, of the whole of what was typed rather than of the first half.
     expect(writes(fetching, WRITING)).toBe(1);
     expect(sent(fetching, WRITING)).toEqual({ markdown: "# Half a thought" });
-    await waitFor(() => expect(indicator(container)).toBe("Saved"));
+  });
+
+  /// The card said Saving… / Not saved yet / Saved beside the heading, and now
+  /// says nothing at all: a field that keeps itself needs no running commentary,
+  /// and the line changed often enough to pull the eye off what was being typed.
+  it("says nothing beside the heading in any state of a save", async () => {
+    const fetching = theWorkbench(json("Saved"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    const quiet = () => {
+      expect(container.querySelector(".brief-standing")).toBeNull();
+      expect(container.textContent).not.toContain("Saving");
+      expect(container.textContent).not.toContain("Not saved yet");
+      expect(container.textContent).not.toContain("Saved");
+    };
+
+    // Untouched, typed into and not yet saved, saving, and saved.
+    quiet();
+    fireEvent.input(field(), { target: { value: "# Something" } });
+    quiet();
+    fireEvent.blur(field());
+    quiet();
+    await waitFor(() => expect(writes(fetching, WRITING)).toBe(1));
+    quiet();
   });
 
   /// Leaving a field nothing was typed into is not an edit, and neither is
@@ -1315,6 +1334,8 @@ describe("a conversation's setup", () => {
     );
   });
 
+  /// The branch keeps itself the way the brief above it does: there is nothing
+  /// to press, and leaving the field is what sends what is in it.
   it("offers the branch name the server prefilled, and sends a new one", async () => {
     const fetching = theWorkbench(json("Renamed"));
     mount(`/conversations/${OPEN.id}`);
@@ -1322,9 +1343,10 @@ describe("a conversation's setup", () => {
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
 
     fireEvent.input(field, { target: { value: "counter-in-redis" } });
-    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.blur(field);
 
     await waitFor(() =>
       expect(
@@ -1333,17 +1355,70 @@ describe("a conversation's setup", () => {
     );
   });
 
-  it("says why a branch name was refused, in words", async () => {
-    theWorkbench(json("NotABranchName"));
+  it("saves a typed branch name after a pause in the typing", async () => {
+    const fetching = theWorkbench(json("Renamed"));
+    mount(`/conversations/${OPEN.id}`);
+    await waitFor(() => screen.getByLabelText("Branch"));
+    const naming = `/api/ui/conversations/${OPEN.id}/branch`;
+
+    vi.useFakeTimers();
+    fireEvent.input(screen.getByLabelText("Branch"), {
+      target: { value: "counter-in" },
+    });
+    fireEvent.input(screen.getByLabelText("Branch"), {
+      target: { value: "counter-in-redis" },
+    });
+
+    // Mid-name, and nothing has gone out.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(writes(fetching, naming)).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // One save, of the whole of what was typed.
+    expect(writes(fetching, naming)).toBe(1);
+    expect(sent(fetching, naming)).toEqual({ branch: "counter-in-redis" });
+  });
+
+  /// Whether a name is one git would take is the server's to say, so a pause in
+  /// the middle of typing one can come back refused for what is not there yet.
+  /// The refusal is said in words and goes away by itself once the name is one
+  /// the server will have.
+  it("says why a branch name was refused, and heals when it is valid", async () => {
+    let outcome = "NotABranchName";
+    const fetching = theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/branch`,
+        () => json(outcome)(),
+        "POST",
+      ),
+    );
     mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByLabelText("Branch"));
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "two..dots" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    fireEvent.blur(screen.getByLabelText("Branch"));
 
     await waitFor(() => screen.getByText(/will not take that as a branch name/i));
+
+    // The next keystroke fixes it, and the save after that clears the refusal:
+    // a name refused is not a field that has stopped trying.
+    outcome = "Renamed";
+    fireEvent.input(screen.getByLabelText("Branch"), {
+      target: { value: "two-dots" },
+    });
+    fireEvent.blur(screen.getByLabelText("Branch"));
+
+    await waitFor(() =>
+      expect(
+        writes(fetching, `/api/ui/conversations/${OPEN.id}/branch`),
+      ).toBe(2),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/will not take that as a branch name/i)).toBeNull(),
+    );
   });
 
   it("shows the base commit that was recorded, and sends a new one", async () => {
