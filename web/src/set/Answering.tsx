@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 
+import { Modal } from "../Modal";
 import { submitResponse } from "../api/client";
 import type {
   AskView,
@@ -285,36 +286,30 @@ export function Answering(props: {
           never blocks: leaving the whole Set open with only a comment is a
           counter-question, not a mistake, and it comes through here like any
           other. */}
-      <Show when={confirming()}>
-        {(open) => (
-          <div class="confirm-backdrop">
-            <div
-              class="confirm"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="confirm-title"
-            >
-              <p id="confirm-title">Going back unanswered:</p>
-              <ul class="unanswered">
-                <For each={open()}>{(name) => <li>{name}</li>}</For>
-              </ul>
-              <p class="note">The agent will be told these are still open.</p>
-              <div class="confirm-actions">
-                <button
-                  type="button"
-                  class="secondary"
-                  onClick={() => setConfirming(null)}
-                >
-                  Keep answering
-                </button>
-                <button type="button" onClick={sendAnyway}>
-                  Send anyway
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </Show>
+      <Modal
+        class="confirm"
+        open={confirming() !== null}
+        close={() => setConfirming(null)}
+        labelledBy="confirm-title"
+      >
+        <p id="confirm-title">Going back unanswered:</p>
+        <ul class="unanswered">
+          <For each={confirming() ?? []}>{(name) => <li>{name}</li>}</For>
+        </ul>
+        <p class="note">The agent will be told these are still open.</p>
+        <div class="confirm-actions">
+          <button
+            type="button"
+            class="secondary"
+            onClick={() => setConfirming(null)}
+          >
+            Keep answering
+          </button>
+          <button type="button" onClick={sendAnyway}>
+            Send anyway
+          </button>
+        </div>
+      </Modal>
     </>
   );
 }
@@ -322,6 +317,12 @@ export function Answering(props: {
 /// The direction chooser, injected onto any Set whose agent closed with a
 /// proposal: how the work gets built, decided in the one place the human is
 /// already looking.
+///
+/// Drawn as the page's own sections are: a heading naming what is decided, and
+/// a card under it holding the whole of the deciding. Which makes this a
+/// "Direction" section carrying one question-like card, rather than the bare
+/// run of controls it briefly was — the label keeps the place a Question's
+/// number keeps, so the two line up down the page.
 ///
 /// All three every time, whichever one was recommended — the recommendation is
 /// marked and never preselected, exactly as an Option's ★ is, so nothing is
@@ -350,56 +351,64 @@ function Choosing(props: {
 }): JSX.Element {
   return (
     <section class="direction-pick" id="direction">
-      {/* Asked as a Question is asked: the label floated in the accent with the
-          agent's argument running beside it, and the three to pick from under
-          it where a Question's Options are. */}
-      <div class="ask">
-        <AskText
-          name={DIRECTION_LABEL}
-          html={props.proposal.rationale_html}
-        />
-      </div>
-      <ul class="directions">
-        <For each={DIRECTIONS}>
-          {(offered) => {
-            const recommended = () => props.proposal.direction === offered;
+      {/* Headed like the Preface and the Postscript, and holding one card like
+          the Questions do: the section names what is being decided and the card
+          is the deciding, so this reads as one more question under a heading of
+          its own rather than as furniture of a different kind. */}
+      <h2 class="section-heading">Direction</h2>
+      <div class="direction-card">
+        {/* Asked as a Question is asked: the label floated in the accent with
+            the agent's argument running beside it, and the three to pick from
+            under it where a Question's Options are. */}
+        <div class="ask">
+          <AskText
+            name={DIRECTION_LABEL}
+            html={props.proposal.rationale_html}
+          />
+        </div>
+        <ul class="directions">
+          <For each={DIRECTIONS}>
+            {(offered) => {
+              const recommended = () => props.proposal.direction === offered;
 
-            return (
-              <li
-                class="direction"
-                classList={{ recommended: recommended() }}
-              >
-                <label>
-                  <input
-                    type="radio"
-                    id={`direction-${offered}`}
-                    name="direction"
-                    value={offered}
-                    checked={props.picked() === offered}
-                    // Both gestures, for the reason an Option answers both: an
-                    // arrow key fires a change and never a click, and a click on
-                    // what is already picked fires a click and never a change.
-                    onChange={() => props.move(offered)}
-                    onClick={() => props.pick(offered)}
-                  />
-                  <span class="direction-name">{DIRECTION[offered]}</span>
-                  <Show when={recommended()}>
-                    <span class="star" title="the agent's Recommendation">
-                      ★
-                    </span>
-                  </Show>
-                </label>
-                <p class="note">{DIRECTION_NOTE[offered]}</p>
-              </li>
-            );
-          }}
-        </For>
-      </ul>
-      <p class="semantics">
-        Picking a direction accepts the proposal and lets the agent get on with
-        it. Anything else — an answer of your own, questions left open, nothing
-        picked here — sends it back for another round.
-      </p>
+              return (
+                <li
+                  class="direction"
+                  classList={{ recommended: recommended() }}
+                >
+                  <label>
+                    <input
+                      type="radio"
+                      id={`direction-${offered}`}
+                      name="direction"
+                      value={offered}
+                      checked={props.picked() === offered}
+                      // Both gestures, for the reason an Option answers
+                      // both: an arrow key fires a change and never a click,
+                      // and a click on what is already picked fires a click
+                      // and never a change.
+                      onChange={() => props.move(offered)}
+                      onClick={() => props.pick(offered)}
+                    />
+                    <span class="direction-name">{DIRECTION[offered]}</span>
+                    <Show when={recommended()}>
+                      <span class="star" title="the agent's Recommendation">
+                        ★
+                      </span>
+                    </Show>
+                  </label>
+                  <p class="note">{DIRECTION_NOTE[offered]}</p>
+                </li>
+              );
+            }}
+          </For>
+        </ul>
+        <p class="semantics">
+          Picking a direction accepts the proposal and lets the agent get on
+          with it. Anything else — an answer of your own, questions left open,
+          nothing picked here — sends it back for another round.
+        </p>
+      </div>
     </section>
   );
 }

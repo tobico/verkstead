@@ -56,13 +56,17 @@ flowchart LR
   outside them. Repos are registered from within the watched paths.
 - A **conversation** is the core entity: attached to a repo and a base commit,
   starting from a **brief** (an editable markdown document). The base commit
-  defaults to the default branch's tip at grill start and is overridable per
-  conversation. Each conversation owns one branch and one worktree; the branch
-  name is prefilled randomly and customizable while the brief is drafted.
-  Worktrees live under Verkstead's own data directory and are kept until the
-  conversation is aborted — *corrected 2026-08-20, building stage 02*: this said
-  "archived", and there is no archive action on a conversation. Aborting is what
-  the teardown hangs off, and it leaves the branch alone.
+  defaults to the default branch's tip at grill start; overriding it is picking
+  another of the repo's branches out of a dropdown, local or remote-tracking,
+  which is stored by name and resolved at grill start the same way (*settled
+  2026-08-24, building ui-refinements*: it took a typed commit before, resolved
+  and pinned when it was typed). Each conversation owns one branch and one
+  worktree; the branch name is prefilled randomly and customizable while the
+  brief is drafted. Worktrees live under Verkstead's own data directory and
+  are kept until the conversation is aborted — *corrected 2026-08-20, building
+  stage 02*: this said "archived", and there is no archive action on a
+  conversation. Aborting is what the teardown hangs off, and it leaves the
+  branch alone.
 - **Lifecycle:** Draft → Grilling → Direction → Implementing → Wrapping →
   Done. *Blocked on you* is a badge on any active state, not a state. A Done
   conversation can reopen with a new brief round. Aborting is possible from
@@ -85,7 +89,9 @@ flowchart LR
   costs a tap every time and the counts stay small. Both are fixed when
   grilling starts, alongside the branch, the base commit and the brief: what
   runs the work is settled before the work begins rather than swapped
-  underneath it.
+  underneath it. Each repo remembers the pair it was last grilled with, so the
+  next conversation on it arrives with both pickers filled — a prefill the
+  human may change, kept server-side so a phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
   network policy) lives in global defaults with per-repo overrides. *Settled
   2026-08-20, building stage 02*: it is configured where the watched paths are —

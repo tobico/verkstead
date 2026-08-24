@@ -81,12 +81,14 @@ import type {
   TaskListEvent,
   TimelineEvent,
 } from "../api/types";
+import { Menu } from "../Menu";
 import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
+import { keeping } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -99,21 +101,14 @@ export const ABBREVIATED = 7;
 /// What each way of being refused a Brief says.
 ///
 /// `Saved` is here for completeness of the mapping and never drawn: a save that
-/// worked is said by the indicator on the card, in one word.
+/// worked says nothing at all, because a field quietly keeping up is what the
+/// human already expects of it.
 export const BRIEF_REFUSAL: Record<BriefSaved, string> = {
   Saved: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The brief was frozen when grilling started, so it cannot be edited.",
 };
-
-/// How long a pause in typing is, before what is in the Brief field is kept.
-///
-/// Long enough that a sentence is one save rather than a save a word, and short
-/// enough that a human who typed and then sat back has a saved brief by the time
-/// they have read it over. Leaving the field saves it whatever the timer was
-/// about to do.
-const SETTLE = 800;
 
 /// And each way of being refused a start.
 ///
@@ -1041,8 +1036,11 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
           {(task) => (
             <li classList={{ done: task.done }}>
               <Box done={task.done} />
-              <span class="n">{task.number}</span>
               <span class="what">{task.title}</span>
+              {/* At the far end of the row, where it is out of the way of the
+                  reading: what a backlog is scanned for is which titles are
+                  left, and a number is what one is quoted by afterwards. */}
+              <span class="n">{task.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, so a list read aloud or copied out still says
                   which tasks are finished. */}
@@ -1082,8 +1080,10 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
           {(stage) => (
             <li classList={{ done: stage.done }}>
               <Box done={stage.done} />
-              <span class="n">{stage.number}</span>
               <span class="what">{stage.title}</span>
+              {/* At the far end of the row, as a task's is, and for the reason
+                  a task's is. */}
+              <span class="n">{stage.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, for the reason a task's does: a list read aloud
                   or copied out still says which stages are finished. */}
@@ -1248,10 +1248,10 @@ function AgentOutput(props: {
 /// far enough to clear the label, so the two texts share a left edge and the
 /// card reads down rather than across.
 ///
-/// Every pair is drawn — a long Set earns a long card. Nothing is clamped here
-/// the way a document card is: a document has a first paragraph that stands for
-/// the rest of it, and a Set that showed four of its questions would be a Set
-/// with questions hidden in it.
+/// Every pair is drawn — a long Set earns a long card. No document card's clamp
+/// here, which would keep four of the questions and hide the rest: what is cut
+/// is each line rather than the list, so every question is on the card and the
+/// long ones end in an ellipsis. The whole of any of them is a press away.
 ///
 /// A button, as a session's output is, and for the same reason: the whole
 /// document is in the details pane, and this is how it is opened.
@@ -1377,16 +1377,28 @@ function Commit(props: {
 
 /// The button that gives a Conversation somewhere to work.
 ///
-/// Drawn only while there is something to start. `ready_to_grill` decides
-/// whether it is *offered* rather than whether it is enabled: a conversation
-/// that has already started has nothing to press, and one that is not ready is
-/// told what is missing rather than handed a dead control. The server checks
-/// every one of the conditions again regardless — the page's copy is only as
-/// fresh as its last read.
+/// Drawn whenever there is something to start, ready or not. `ready_to_grill`
+/// decides how it *behaves* rather than whether it is there: an unready button
+/// looks inert and, pressed, says what is missing instead of starting. So it is
+/// `aria-disabled` rather than `disabled` — a truly disabled button takes no
+/// press to answer, and its only way of explaining itself is a `title` that a
+/// phone will never show. The explanation is on hover as well, for whoever has a
+/// pointer to hover with.
+///
+/// The server checks every one of the conditions again regardless — the page's
+/// copy is only as fresh as its last read.
 function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
+
+  // Whether the explanation is out: pressed, it stays out, because it was asked
+  // for; hovered, it comes and goes with the pointer.
+  const [asked, setAsked] = createSignal(false);
+  const [hovered, setHovered] = createSignal(false);
+
+  const ready = () => props.conversation.ready_to_grill;
+  const missing = () => !ready() && (asked() || hovered());
 
   const start = useMutation(() => ({
     mutationFn: () => startGrilling(props.conversation.id),
@@ -1409,26 +1421,30 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   return (
     <Show when={props.conversation.state === "Draft"}>
       <div class="start-grilling">
+        <button
+          type="button"
+          class="start"
+          classList={{ inert: !ready() }}
+          // Only ever `disabled` for a press already in flight. Not being ready
+          // is the other thing entirely: that press has an answer to give.
+          disabled={start.isPending}
+          aria-disabled={!ready()}
+          onClick={() => (ready() ? start.mutate() : setAsked(true))}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+        >
+          {start.isPending ? "Starting…" : "Start grilling"}
+        </button>
         <Show
-          when={props.conversation.ready_to_grill}
+          when={ready()}
           fallback={
-            // Deliberately not the setup's wording. That one is a verdict on
-            // the conversation, drawn where the profiles are fixed; this one
-            // stands in for the button, and says what would make it appear.
-            <p class="note">
-              Write the brief and choose both agent profiles, and the grilling
-              can start.
-            </p>
+            <Show when={missing()}>
+              <p class="note wanting">
+                This needs a brief, and both pairings chosen and working.
+              </p>
+            </Show>
           }
         >
-          <button
-            type="button"
-            class="start"
-            disabled={start.isPending}
-            onClick={() => start.mutate()}
-          >
-            {start.isPending ? "Starting…" : "Start grilling"}
-          </button>
           <p class="note">
             This creates the branch and its worktree, and freezes the brief.
           </p>
@@ -1453,8 +1469,9 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 ///
 /// A menu rather than three buttons, because the last of them throws a worktree
 /// away and the header is somewhere the human's cursor passes on the way to
-/// everything else. Native `details`/`summary`, so it opens, closes and reaches
-/// the keyboard without any of that being this component's to get right.
+/// everything else. The [`Menu`](../Menu.tsx) every dropdown here is, so it
+/// opens, closes and reaches the keyboard without any of that being this
+/// component's to get right.
 ///
 /// In order of what each costs: stop, which waits for the task the run is on;
 /// force stop, which does not; and abort, which is not a stop at all but the end
@@ -1467,9 +1484,12 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const [open, setOpen] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
   const [halting, setHalting] = createSignal<ConversationStopped | null>(null);
+
+  // The menu's own way to shut, held here because what closes this one is the
+  // press coming back rather than the press going out.
+  let shut = (): void => {};
 
   /// What every press here leaves behind: a page drawn against a conversation
   /// that has moved. Reading it again is both the correction and, where the
@@ -1490,7 +1510,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
       setHalting(outcome);
 
       if (outcome === "Stopped") {
-        setOpen(false);
+        shut();
       }
 
       reread();
@@ -1515,93 +1535,99 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 
       // Aborted or already aborted: what was asked for holds either way.
       setRefused(null);
-      setOpen(false);
+      shut();
       reread();
     },
   }));
 
   return (
-    <details
+    <Menu
       class="conversation-actions"
-      open={open()}
-      onToggle={(ev) => setOpen(ev.currentTarget.open)}
+      label="Conversation actions"
+      name="Conversation actions"
+      closer={(close) => (shut = close)}
+      trigger="⋯"
     >
-      <summary aria-label="Conversation actions">⋯</summary>
-      <div class="menu">
-        <Show when={props.conversation.ready_to_stop}>
-          <div class="action">
-            <button
-              type="button"
-              class="stop"
-              disabled={stop.isPending}
-              onClick={() => stop.mutate()}
-            >
-              {stop.isPending ? "Stopping…" : "Stop"}
-            </button>
-            <p class="note">Pause after the current task until you resume.</p>
-            <Show when={halting() === "Stopping"}>
-              <p class="note waiting">
-                The session running now finishes its task first. Nothing will be
-                started after it.
-              </p>
-            </Show>
-          </div>
-
-          <Show when={props.conversation.working}>
+      {() => (
+        <>
+          <Show when={props.conversation.ready_to_stop}>
             <div class="action">
               <button
                 type="button"
-                class="force-stop"
-                disabled={force.isPending}
-                onClick={() => force.mutate()}
+                role="menuitem"
+                class="stop"
+                disabled={stop.isPending}
+                onClick={() => stop.mutate()}
               >
-                {force.isPending ? "Stopping…" : "Force stop"}
+                {stop.isPending ? "Stopping…" : "Stop"}
               </button>
-              <p class="note">Halt any running tasks and stop immediately.</p>
+              <p class="note">Pause after the current task until you resume.</p>
+              <Show when={halting() === "Stopping"}>
+                <p class="note waiting">
+                  The session running now finishes its task first. Nothing will
+                  be started after it.
+                </p>
+              </Show>
+            </div>
+
+            <Show when={props.conversation.working}>
+              <div class="action">
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="force-stop"
+                  disabled={force.isPending}
+                  onClick={() => force.mutate()}
+                >
+                  {force.isPending ? "Stopping…" : "Force stop"}
+                </button>
+                <p class="note">Halt any running tasks and stop immediately.</p>
+              </div>
+            </Show>
+          </Show>
+
+          <Show
+            when={props.conversation.state !== "Aborted"}
+            fallback={<p class="note">This conversation has been aborted.</p>}
+          >
+            <div class="action">
+              <button
+                type="button"
+                role="menuitem"
+                class="abort"
+                disabled={abort.isPending}
+                onClick={() => abort.mutate()}
+              >
+                {abort.isPending ? "Aborting…" : "Abort conversation"}
+              </button>
+              <p class="note">
+                Permanently end the conversation and delete the worktree. The
+                branch stays where it is.
+              </p>
             </div>
           </Show>
-        </Show>
 
-        <Show
-          when={props.conversation.state !== "Aborted"}
-          fallback={<p class="note">This conversation has been aborted.</p>}
-        >
-          <div class="action">
-            <button
-              type="button"
-              class="abort"
-              disabled={abort.isPending}
-              onClick={() => abort.mutate()}
-            >
-              {abort.isPending ? "Aborting…" : "Abort conversation"}
-            </button>
-            <p class="note">
-              Permanently end the conversation and delete the worktree. The
-              branch stays where it is.
+          <Show when={halting() && STOP_REFUSAL[halting()!]}>
+            <p class="error">{STOP_REFUSAL[halting()!]}</p>
+          </Show>
+          <Show when={stop.isError || force.isError}>
+            <p class="error">
+              The conversation could not be stopped:{" "}
+              {stop.error?.message ?? force.error?.message}
             </p>
-          </div>
-        </Show>
+          </Show>
 
-        <Show when={halting() && STOP_REFUSAL[halting()!]}>
-          <p class="error">{STOP_REFUSAL[halting()!]}</p>
-        </Show>
-        <Show when={stop.isError || force.isError}>
-          <p class="error">
-            The conversation could not be stopped:{" "}
-            {stop.error?.message ?? force.error?.message}
-          </p>
-        </Show>
-
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
-        </Show>
-        <Show when={abort.isError}>
-          <p class="error">
-            The conversation could not be aborted: {abort.error?.message}
-          </p>
-        </Show>
-      </div>
-    </details>
+          <Show when={refused()}>
+            {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+          </Show>
+          <Show when={abort.isError}>
+            <p class="error">
+              The conversation could not be aborted: {abort.error?.message}
+            </p>
+          </Show>
+        </>
+      )}
+    </Menu>
   );
 }
 
@@ -1677,6 +1703,13 @@ function Brief(props: {
   /// is to save.
   const unsaved = () => text() !== recorded();
 
+  /// Whether a refusal has come back, which stops the field for good: both of
+  /// them are permanent — a Brief that has frozen does not thaw, and a
+  /// Conversation that is gone does not come back. Trying again every time the
+  /// typing paused would be a request a second for as long as the human went on
+  /// writing, and the answer would be the one already on the card.
+  const settled = () => refused() !== null;
+
   const save = useMutation(() => ({
     mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
     onSuccess: (outcome: BriefSaved, markdown: string) => {
@@ -1694,48 +1727,17 @@ function Brief(props: {
       // The readiness verdict under this card is a fact about the Brief, so it
       // is read again every time the Brief moves.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
-
-      // Typed into while that was in flight, so the record is behind again.
-      if (unsaved()) keep();
     },
+    // Whatever became of it, the field may have been typed into while it was in
+    // flight — so the moment one save is done the next is considered.
+    onSettled: () => keeper.done(),
   }));
 
-  // The pause: one timer, restarted by every keystroke and cancelled by
-  // whatever saves before it comes round.
-  let pause: ReturnType<typeof setTimeout> | undefined;
-
-  const settle = () => {
-    clearTimeout(pause);
-    pause = setTimeout(keep, SETTLE);
-  };
-
-  /// Keep what is in the field, if the record does not have it already.
-  ///
-  /// One save at a time: another started while one is in flight could land in
-  /// either order, and the loser would be the record. What was typed meanwhile
-  /// is saved when the one in flight comes back.
-  ///
-  /// A refusal stops it for good, because both of them are permanent — a Brief
-  /// that has frozen does not thaw, and a Conversation that is gone does not
-  /// come back. Trying again every time the typing paused would be a request a
-  /// second for as long as the human went on writing, and the answer would be
-  /// the same one already on the card.
-  const keep = () => {
-    clearTimeout(pause);
-    if (refused() || !unsaved() || save.isPending) return;
-    save.mutate(text());
-  };
-
-  onCleanup(() => clearTimeout(pause));
-
-  /// What the quiet indicator says, and nothing until something has been
-  /// typed: a Brief nobody has touched saying `Saved` is the card claiming
-  /// credit for what the human did on another day.
-  const standing = () => {
-    if (save.isPending) return "Saving…";
-    if (unsaved()) return "Not saved yet";
-    return typed() === null ? "" : "Saved";
-  };
+  const keeper = keeping({
+    unsaved,
+    settled,
+    save: () => save.mutate(text()),
+  });
 
   return (
     <Openable
@@ -1743,16 +1745,12 @@ function Brief(props: {
       selected={props.selected}
       open={frozen() ? props.open : null}
     >
+      {/* The heading alone: a field that keeps itself needs no word beside it
+          saying so, and a line that changed as fast as this one was read past
+          on a card the eye is meant to be typing into. What a save cannot do
+          is still said, under the field, in words. */}
       <div class="event-head">
         <h2>Brief</h2>
-        {/* Where the Edit button used to be, saying what became of what was
-            typed. Announced politely, because it is the only word the human
-            gets that the record has their brief. */}
-        <Show when={writing() && standing() !== ""}>
-          <p class="brief-standing" aria-live="polite">
-            {standing()}
-          </p>
-        </Show>
       </div>
 
       <Show
@@ -1793,9 +1791,9 @@ function Brief(props: {
             value={text()}
             onInput={(ev) => {
               setTyped(ev.currentTarget.value);
-              settle();
+              keeper.settle();
             }}
-            onBlur={() => keep()}
+            onBlur={() => keeper.keep()}
           />
         </div>
       </Show>

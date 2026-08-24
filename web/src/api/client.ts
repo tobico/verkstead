@@ -98,6 +98,15 @@ export function listRepos(): Promise<RepoEntry[]> {
   return get<RepoEntry[]>("/api/ui/repos");
 }
 
+/// Every branch of one registered Repo, local and remote-tracking both — which
+/// is what a drafting Conversation picks the one it comes off out of.
+///
+/// Read out of git by the server every time it is asked: branches move without
+/// Verkstead hearing about it, so there is nothing here that could be kept.
+export function listBranches(repoId: number): Promise<string[]> {
+  return get<string[]>(`/api/ui/repos/${repoId}/branches`);
+}
+
 /// Ask Verkstead to take on the repository at an absolute path.
 ///
 /// Like answering a Set, the outcome is the answer's body rather than its
@@ -268,13 +277,16 @@ export function renameBranch(
   return post<BranchRenamed>(`/api/ui/conversations/${id}/branch`, { branch });
 }
 
-/// Override the commit the work branches from, or pass `null` to put the
-/// Conversation back on the default-branch rule.
-export function setBaseCommit(
+/// Choose the branch the work comes off, or pass `null` to put the Conversation
+/// back on the default-branch rule.
+///
+/// The name rather than where it stands: it is resolved when grilling starts, so
+/// the work comes off wherever that branch is then.
+export function setBaseBranch(
   id: number,
-  commit: string | null,
+  branch: string | null,
 ): Promise<BaseRecorded> {
-  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { commit });
+  return post<BaseRecorded>(`/api/ui/conversations/${id}/base`, { branch });
 }
 
 /// Give a Conversation somewhere to work and set it grilling: a branch off its

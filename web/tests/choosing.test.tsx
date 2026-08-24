@@ -11,6 +11,7 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import stylesheet from "../src/main.css?raw";
 import type { Direction, SetView, Submitted } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import { answering, sent, texts } from "./reading";
@@ -104,13 +105,30 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("asks it the way a question is asked, labelled End", async () => {
     const { page } = await answering(PROPOSING);
 
-    const label = page.querySelector(".direction-pick .ask .text .label");
+    const label = page.querySelector(".direction-card .ask .text .label");
     expect(label, "expected the ask's label on the chooser").toBeTruthy();
     expect(label!.textContent).toBe("End");
-    expect(
-      page.querySelector(".direction-pick h2"),
-      "and no heading over it, because a question carries none",
-    ).toBeNull();
+  });
+
+  /// The house pattern every other section on the page keeps: the name of the
+  /// section outside, what it holds in a card. Which is what makes the chooser
+  /// read as one more question under a heading of its own, rather than as a
+  /// piece of furniture that arrived from somewhere else.
+  it("is a headed section holding one question-like card", async () => {
+    const { page } = await answering(PROPOSING);
+
+    const heading = page.querySelector(".direction-pick > h2.section-heading");
+    expect(heading, "expected the section's heading over the card").toBeTruthy();
+    expect(heading!.textContent).toBe("Direction");
+
+    const card = page.querySelector(".direction-pick > .direction-card");
+    expect(card, "expected the card under the heading").toBeTruthy();
+    for (const part of [".ask .text .label", ".directions", ".semantics"]) {
+      expect(
+        card!.querySelector(part),
+        `${part} belongs inside the card, as a question's parts do`,
+      ).toBeTruthy();
+    }
   });
 
   it("says what picking one does, so the Preface does not have to", async () => {
@@ -236,9 +254,24 @@ describe("the record a picked-on Set becomes", () => {
   it("reads back as the question it was asked as", async () => {
     const { page } = await answering(PROPOSED);
 
-    const label = page.querySelector(".direction-pick .ask .text .label");
+    const label = page.querySelector(".direction-card .ask .text .label");
     expect(label, "expected the ask's label on the record").toBeTruthy();
     expect(label!.textContent).toBe("End");
+  });
+
+  /// Headed and carded on the record exactly as on the chooser: the two are one
+  /// section read at two moments, and a record that dropped the heading would be
+  /// a different page from the one that was answered.
+  it("keeps the heading and the card on the settled record", async () => {
+    const { page } = await answering(PROPOSED);
+
+    const heading = page.querySelector(".direction-pick > h2.section-heading");
+    expect(heading, "expected the heading over the record").toBeTruthy();
+    expect(heading!.textContent).toBe("Direction");
+    expect(
+      page.querySelector(".direction-pick > .direction-card .directions"),
+      "and the three inside the card, as they were picked from",
+    ).toBeTruthy();
   });
 
   it("keeps the directions that were turned down", async () => {
@@ -258,3 +291,40 @@ describe("the record a picked-on Set becomes", () => {
     ).toHaveLength(0);
   });
 });
+
+/// The Gutter the page's cards reserve at a wide window, and the card's place in
+/// it — asserted off the stylesheet, because jsdom computes no layout and a
+/// media query it never evaluates is a rule no rendered page can be asked about.
+///
+/// Two rules make the alignment: the one that reserves the Gutter inside the
+/// card, and the one that hangs a label out into it. The label used to hang off
+/// `.direction-pick` — the section, which reserves nothing — so at a wide window
+/// it hung outside the column entirely. Both name the card now.
+describe("the card in the wide-window Gutter", () => {
+  it("reserves the Gutter like the page's other cards", () => {
+    expect(
+      declares(
+        ".preface-body,\n  .postscript-card,\n  .direction-card,\n  .question",
+      ),
+    ).toContain("--bleed: var(--gutter);");
+  });
+
+  it("hangs the End label in the Gutter the card reserved", () => {
+    expect(stylesheet).toContain(".direction-card > .ask > .text > .label {");
+    expect(
+      stylesheet,
+      "and no longer off the section, which reserves no Gutter of its own",
+    ).not.toContain(".direction-pick > .ask > .text > .label");
+  });
+});
+
+/// What one rule declares, read off the stylesheet by the selector list that
+/// carries it.
+function declares(selectors: string): string {
+  const at = stylesheet.indexOf(`\n  ${selectors} {\n`);
+  expect(
+    at,
+    `expected the stylesheet to hold \`${selectors}\``,
+  ).toBeGreaterThan(-1);
+  return stylesheet.slice(at, stylesheet.indexOf("\n  }", at));
+}

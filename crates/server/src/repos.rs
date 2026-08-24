@@ -94,6 +94,22 @@ fn is_repository_root(path: &Path) -> bool {
         .is_some_and(|top| top == path)
 }
 
+/// Every branch of a registered Repo, for the dropdown a Conversation picks the
+/// one it comes off out of.
+///
+/// `None` is a Repo that is not registered. The reading itself is git's — see
+/// [`crate::worktrees::branches`] — and it runs off the runtime, because a
+/// repository with a great many refs is not a quick call.
+pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<String>>> {
+    let Some(repo) = store::load_repo(pool, id).await? else {
+        return Ok(None);
+    };
+
+    Ok(Some(
+        tokio::task::spawn_blocking(move || crate::worktrees::branches(&repo.path)).await?,
+    ))
+}
+
 /// The branch a Conversation branches from unless it is told otherwise.
 ///
 /// What the remote calls its default, where there is a remote to ask — that is

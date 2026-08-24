@@ -93,8 +93,8 @@ rather than editing the frozen one.
 
 Written where it is read: while the Conversation is drafting, the Brief on its
 card *is* the field — raw markdown, always open, keeping itself on a pause in
-the typing and whenever the field is left, with a word beside the heading
-saying the record has it. There is no Edit and no Save, because there is no
+the typing and whenever the field is left, and saying nothing about it either
+way. There is no Edit, no Save and no word about saving, because there is no
 other thing the Brief could be doing while it is a draft. Once it freezes it is
 the server's rendering of it and nothing else.
 
@@ -216,6 +216,16 @@ Both are **fixed when grilling starts**, alongside the branch, the base commit
 and the Brief: what runs the work is settled before the work begins rather than
 swapped underneath it — and the implementation one is used long after that,
 which is exactly why it is not left changeable until then.
+
+Each Repo **remembers the last pair it was grilled with**, so a new
+Conversation on it arrives with both pickers already filled. Written at grill
+start, from what the Conversation is actually running under; remembered
+server-side rather than in a browser, because the workbench is answered from a
+phone as readily as from a desk. A prefill and not a lock: it is the human's to
+change before pressing, and what they changed it to is what gets remembered
+next. A remembered Pairing whose Profile has broken, or which no longer lists
+the model, is silently not applied — an unchosen picker, exactly as a Repo with
+no memory gives.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
 profile (the Profile is half of it)
 
@@ -330,7 +340,7 @@ it has to start — that Stage's own plan commit writes to the roadmap, so when 
 settles the Stage after it begins the ordinary unattended way, and an adopted
 roadmap is a staged one from there on. Never stacks: there is no predecessor
 Conversation to stack on, and building on an unmerged branch is the human's
-move, made by setting the base commit.
+move, made by picking that branch as the base.
 _Avoid_: import, attach, resume, take over, migrate
 
 **Abandoned**:

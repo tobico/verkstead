@@ -8,7 +8,13 @@
 //! What is worth proving here is that a refusal reads as a refusal. The boundary
 //! itself is the server's — the tests over there are what say a path outside a
 //! Watched Path is turned away — and this side's whole job is to say which of
-//! them happened in words the human can act on.
+//! them happened in words the human can act on, inside the form the path is
+//! about to be corrected in.
+//!
+//! What a modal *is* — the dialog, Escape, a press away from the card — belongs
+//! to `Modal` and is read in `modals.test.tsx`. What is here is this section's
+//! half of it: which press opens the form, that a refusal keeps it up, and that
+//! a registration takes it away.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,8 +32,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/// Type a path into the form and send it.
+/// Open the form, which is what the button on the heading does.
+function addRepo() {
+  fireEvent.click(screen.getByRole("button", { name: "Add a repo" }));
+}
+
+/// The form, or nothing at all where it has not been opened.
+function theForm(container: ParentNode): HTMLDialogElement | null {
+  return container.querySelector<HTMLDialogElement>("dialog.add-repo");
+}
+
+/// Type a path into the form and send it, opening the form first.
 function register(path: string) {
+  addRepo();
   const field = screen.getByLabelText(/absolute path/i);
   fireEvent.input(field, { target: { value: path } });
   fireEvent.click(screen.getByRole("button", { name: "Register" }));
@@ -87,6 +104,48 @@ describe("the Repo list", () => {
 });
 
 describe("registering a repo", () => {
+  /// The form is a modal, so nothing of it is on the page until it is asked
+  /// for: what this section is for is reading which repos are registered.
+  it("draws no form until the button on the heading is pressed", async () => {
+    serving(json(REPOS));
+    const { container } = mount(RepoList);
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    expect(theForm(container)).toBeNull();
+
+    addRepo();
+
+    expect(theForm(container)!.open, "opened as a modal").toBe(true);
+    expect(screen.getByLabelText(/absolute path/i)).toBeTruthy();
+  });
+
+  it("takes the form away once the repo is registered", async () => {
+    serving(json([]), json("Added"), json(REPOS));
+    const { container } = mount(RepoList);
+    await waitFor(() => screen.getByText("No repos are registered yet."));
+
+    register("/srv/repos/verkstead");
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+  });
+
+  /// And a form opened again is a fresh one: the path that was registered is
+  /// not a draft anything here promised to keep.
+  it("opens empty again after a registration", async () => {
+    serving(json([]), json("Added"), json(REPOS));
+    mount(RepoList);
+    await waitFor(() => screen.getByText("No repos are registered yet."));
+
+    register("/srv/repos/verkstead");
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    addRepo();
+
+    expect(
+      (screen.getByLabelText(/absolute path/i) as HTMLInputElement).value,
+    ).toBe("");
+  });
+
   it("sends the path that was typed, and shows what came back", async () => {
     const arrival: RepoEntry = {
       id: 7,
@@ -113,20 +172,6 @@ describe("registering a repo", () => {
     );
   });
 
-  it("empties the field once the repo is taken, so the next one starts clean", async () => {
-    serving(json([]), json("Added"), json(REPOS));
-    mount(RepoList);
-    await waitFor(() => screen.getByText("No repos are registered yet."));
-
-    register("/srv/repos/verkstead");
-
-    await waitFor(() =>
-      expect(
-        (screen.getByLabelText(/absolute path/i) as HTMLInputElement).value,
-      ).toBe(""),
-    );
-  });
-
   /// Every way the server can turn a path away, each said in its own words: a
   /// refusal the human cannot tell from another is a refusal they cannot act on.
   const REFUSALS: Array<[Exclude<Registered, "Added">, RegExp]> = [
@@ -141,12 +186,15 @@ describe("registering a repo", () => {
   for (const [outcome, said] of REFUSALS) {
     it(`says why a path was refused as ${outcome}`, async () => {
       serving(json([]), json(outcome));
-      mount(RepoList);
+      const { container } = mount(RepoList);
       await waitFor(() => screen.getByText("No repos are registered yet."));
 
       register("/elsewhere/verkstead");
 
       await waitFor(() => expect(screen.getByText(said)).toBeTruthy());
+      // Said inside the form, which stays up: a refusal is answered by
+      // correcting the path, and there is nowhere else to correct it.
+      expect(theForm(container)!.open).toBe(true);
       // Nothing was registered, so the field keeps what was typed: it is the
       // path the human is about to correct.
       expect(
@@ -172,18 +220,40 @@ describe("registering a repo", () => {
 
   it("shows the server's own wording when it could not answer at all", async () => {
     serving(json([]), json({ error: "the Repo could not be registered" }, 500));
-    mount(RepoList);
+    const { container } = mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
 
     register("/srv/repos/verkstead");
 
     await waitFor(() => screen.getByText(/the Repo could not be registered/));
+    expect(theForm(container)!.open).toBe(true);
+  });
+
+  /// Cancel registers nothing, and takes what was typed with it: the ways out
+  /// a modal has are Escape and a press away from the card, and this is the one
+  /// a thumb has.
+  it("registers nothing when the form is cancelled", async () => {
+    const fetching = serving(json(REPOS));
+    const { container } = mount(RepoList);
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    addRepo();
+    fireEvent.input(screen.getByLabelText(/absolute path/i), {
+      target: { value: "/srv/repos/verkstead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([, init]) => init && "method" in init),
+    ).toHaveLength(0);
   });
 
   it("sends nothing at all for an empty path", async () => {
     const fetching = serving(json([]));
     mount(RepoList);
     await waitFor(() => screen.getByText("No repos are registered yet."));
+    addRepo();
 
     // The button is the guard: there is nothing to send, so there is nothing to
     // press.

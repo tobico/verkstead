@@ -1,5 +1,10 @@
 //! The agent profiles page: the accounts a session can be run under, and the
-//! one form that adds or rewrites one.
+//! one form that adds or rewrites one, which is a modal drawn over the list.
+//!
+//! What a modal *is* — the dialog, Escape, a press away from the card — belongs
+//! to `Modal` and is read in `modals.test.tsx`. What is here is this page's half
+//! of it: which press opens the form, what it is filled in with when it opens,
+//! and that a refusal keeps it up.
 //!
 //! `tests/fixtures/profiles.json` is a golden fixture like the workbench's:
 //! `cargo test` renders the real endpoint and writes the file, so what these
@@ -59,6 +64,27 @@ function sent(fetching: ReturnType<typeof serving>, path: string): unknown {
   );
   expect(written, `expected the page to have written to ${path}`).toBeTruthy();
   return JSON.parse(String(written![1]?.body));
+}
+
+/// Open the empty form, which is what the button on the heading does.
+function addProfile() {
+  fireEvent.click(screen.getByRole("button", { name: "Add a profile" }));
+}
+
+/// Open it filled in with what a profile already says, which is what a row's
+/// own edit does.
+function editProfile(name: string) {
+  fireEvent.click(
+    screen
+      .getByText(name)
+      .closest("li")!
+      .querySelector(".profile-actions button")!,
+  );
+}
+
+/// The form, or nothing at all where it has not been opened.
+function theForm(container: ParentNode): HTMLDialogElement | null {
+  return container.querySelector<HTMLDialogElement>("dialog.edit-profile");
 }
 
 /// Fill the form in, whichever profile it is about.
@@ -146,6 +172,23 @@ describe("the agent profiles page", () => {
     );
   });
 
+  /// The list is what stays on the page. Adding one is a form, and the form is
+  /// drawn over the page when it is asked for — so until then there is none of
+  /// it, and the list is not pushed down under one.
+  it("keeps no form on the page until one is asked for", async () => {
+    theProfiles();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(FABLE.name));
+
+    expect(theForm(container)).toBeNull();
+    expect(screen.queryByLabelText("Name")).toBeNull();
+
+    addProfile();
+
+    expect(theForm(container)!.open, "opened as a modal").toBe(true);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+  });
+
   it("says so plainly when nothing is saved yet", async () => {
     serving(whenever("/api/ui/profiles", json([])));
     mount();
@@ -160,6 +203,7 @@ describe("saving a profile", () => {
     mount();
     await waitFor(() => screen.getByText(FABLE.name));
 
+    addProfile();
     fillIn(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -170,17 +214,16 @@ describe("saving a profile", () => {
 
   /// The form is spent once it is taken: the profile appearing on the list
   /// underneath is the whole of the confirmation.
-  it("empties the form once the server took it", async () => {
+  it("takes the form away once the server took it", async () => {
     theProfiles(json("Saved"));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(FABLE.name));
 
+    addProfile();
     fillIn(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""),
-    );
+    await waitFor(() => expect(theForm(container)).toBeNull());
   });
 
   /// Each refusal is a different sentence, and each names which of the two paths
@@ -200,13 +243,20 @@ describe("saving a profile", () => {
     ["NameTaken", /another profile is called that already/i],
   ])("says why %s was refused, in words", async (outcome, said) => {
     theProfiles(json(outcome));
-    mount();
+    const { container } = mount();
     await waitFor(() => screen.getByText(FABLE.name));
 
+    addProfile();
     fillIn(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => screen.getByText(said));
+    // Inside the form, and the form still up: what was typed is still there to
+    // be corrected, which is the whole use of being told what was wrong with it.
+    const refusal = await waitFor(() => screen.getByText(said));
+    expect(theForm(container)!.contains(refusal)).toBe(true);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      NEW.name,
+    );
   });
 
   /// A server that could not answer at all, which is the one thing here that is
@@ -216,6 +266,7 @@ describe("saving a profile", () => {
     mount();
     await waitFor(() => screen.getByText(FABLE.name));
 
+    addProfile();
     fillIn(NEW);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -229,17 +280,12 @@ describe("rewriting a profile", () => {
   it("fills the form in with what the profile already says", async () => {
     theProfiles();
     mount();
+    await waitFor(() => screen.getByText(FABLE.name));
 
-    fireEvent.click(
-      (await waitFor(() => screen.getByText(FABLE.name)))
-        .closest("li")!
-        .querySelector(".profile-actions button")!,
-    );
+    editProfile(FABLE.name);
 
-    await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-        FABLE.name,
-      ),
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+      FABLE.name,
     );
     expect(
       (screen.getByLabelText("Models, one per line") as HTMLTextAreaElement)
@@ -256,17 +302,9 @@ describe("rewriting a profile", () => {
   it("sends the rewrite to the profile it is about", async () => {
     const fetching = theProfiles(json("Saved"));
     mount();
+    await waitFor(() => screen.getByText(FABLE.name));
 
-    fireEvent.click(
-      (await waitFor(() => screen.getByText(FABLE.name)))
-        .closest("li")!
-        .querySelector(".profile-actions button")!,
-    );
-    await waitFor(() =>
-      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
-        FABLE.name,
-      ),
-    );
+    editProfile(FABLE.name);
 
     // A line apiece, which is how the whole list is retyped: the models go over
     // as the lines they were written on.
@@ -285,21 +323,62 @@ describe("rewriting a profile", () => {
     );
   });
 
-  it("goes back to adding when the edit is cancelled", async () => {
+  /// Three ways out, and none of them saves: the button a thumb has, the key a
+  /// keyboard has, and a press away from the card. What each of them leaves is
+  /// the list, with the profile as it was.
+  it.each([
+    ["Cancel is pressed", () => fireEvent.click(screen.getByRole("button", { name: "Cancel" }))],
+    ["Escape is pressed", () => fireEvent.keyDown(document, { key: "Escape" })],
+  ])("takes the form away, unsaved, when %s", async (_, back) => {
+    const fetching = theProfiles();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(FABLE.name));
+
+    editProfile(FABLE.name);
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "something else" },
+    });
+
+    back();
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
+      "nothing was sent",
+    ).toHaveLength(0);
+  });
+
+  /// The press away from the card, which lands on the dialog rather than on
+  /// anything of the page behind it.
+  it("takes the form away, unsaved, on a press away from it", async () => {
+    const fetching = theProfiles();
+    const { container } = mount();
+    await waitFor(() => screen.getByText(FABLE.name));
+
+    editProfile(FABLE.name);
+    fireEvent.click(theForm(container)!);
+
+    await waitFor(() => expect(theForm(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([, init]) => init?.method === "POST"),
+      "nothing was sent",
+    ).toHaveLength(0);
+  });
+
+  /// Opened again, it is about whatever it was opened at: what was typed into it
+  /// last time went away with it, and nothing here promised to keep a draft.
+  it("opens empty again after an edit was abandoned", async () => {
     theProfiles();
     mount();
+    await waitFor(() => screen.getByText(FABLE.name));
 
-    fireEvent.click(
-      (await waitFor(() => screen.getByText(FABLE.name)))
-        .closest("li")!
-        .querySelector(".profile-actions button")!,
-    );
-    await waitFor(() => screen.getByRole("button", { name: "Cancel" }));
-
+    editProfile(FABLE.name);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await waitFor(() => screen.getByRole("button", { name: "Save" }));
+    addProfile();
+
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
   });
 });
 

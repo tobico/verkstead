@@ -1377,13 +1377,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
-    store::set_base_commit(
-        &pool,
-        drafting,
-        Some("6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7"),
-    )
-    .await
-    .unwrap();
+
+    // Pinned to a branch rather than left on the rule, so the fixture carries
+    // the shape a picked base has: a name, resolved when grilling starts. What
+    // it resolves to is only ever a commit once the work is on it, which the
+    // grilling one below shows.
+    store::set_base_commit(&pool, drafting, Some("release-1.4"))
+        .await
+        .unwrap();
 
     // A second one, so the sidebar is a list rather than a row — and against the
     // other Repo, because what a row names beside the branch is which repository

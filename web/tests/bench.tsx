@@ -33,6 +33,14 @@ export const OPEN = conversation as ConversationView;
 export const REPOS = repos as RepoEntry[];
 export const PROFILES = profiles as ProfileEntry[];
 
+/// And the third, which belongs to the repo the open Conversation is in: what
+/// the base dropdown offers under the rule.
+///
+/// Written here rather than read out of a fixture, because it is a list of
+/// strings: there is no shape for a golden file to hold true, and the endpoint
+/// reads it out of a real git repository, which the fixtures have none of.
+export const BRANCHES = ["main", "release-1.4", "origin/main"];
+
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in
 /// the app.
@@ -71,6 +79,7 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
     whenever("/api/ui/abandoned-roadmaps", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     ...answers,

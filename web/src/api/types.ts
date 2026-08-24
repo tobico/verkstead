@@ -279,19 +279,20 @@ columns: Array<string>, options: Array<OptionView>, };
 export type Author = { name: string, email: string, };
 
 /**
- * The commit to branch from, or `null` to go back to the default-branch rule.
+ * The branch to come off, or `null` to go back to the default-branch rule.
  */
-export type BaseCommitOverride = { 
+export type BaseBranchChoice = { 
 /**
- * Whatever names a commit in the repository — a short hash, a tag, a branch
- * — which the server resolves before it records anything.
+ * One of the repository's own branches, local or remote-tracking, by name.
+ * Stored as the name and resolved when grilling starts, so the work comes
+ * off wherever that branch stands then.
  */
-commit: string | null, };
+branch: string | null, };
 
 /**
- * What became of overriding the base commit.
+ * What became of choosing the branch the work comes off.
  */
-export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchCommit";
+export type BaseRecorded = "Recorded" | "NoSuchConversation" | "NotDrafting" | "NoSuchBranch";
 
 /**
  * One line of the backend's own bookkeeping.
