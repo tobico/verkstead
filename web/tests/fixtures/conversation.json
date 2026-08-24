@@ -37,6 +37,7 @@
   },
   "pinned": [],
   "ready_to_grill": true,
+  "ready_to_resume": false,
   "repo": {
     "default_branch": "main",
     "id": 1,

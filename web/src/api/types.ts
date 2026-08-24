@@ -518,6 +518,21 @@ implementation_pairing: PairingView | null,
  */
 ready_to_grill: boolean, 
 /**
+ * Whether there is driving to start again: the Conversation is in a state
+ * something ought to be driving, and nothing is.
+ *
+ * What decides whether Resume is offered, and the server's rule rather
+ * than something the page works out from the fields around it — *driven*
+ * is a register of tasks that are running, and a page cannot see one.
+ * Every refusal is checked again when the button is pressed; this says
+ * only that it was worth offering as of the moment it was read.
+ *
+ * A question about a process as much as about the record, so a restarted
+ * server reads every Conversation it left mid-run as one to resume —
+ * which each of them is.
+ */
+ready_to_resume: boolean, 
+/**
  * What this Conversation is adopting, where it is adopting anything.
  *
  * `null` is the ordinary Conversation, which begins with a Brief and a
@@ -1276,6 +1291,18 @@ comment?: string | null,
  * human disagreeing, and `None` anywhere else is every ordinary Response.
  */
 direction?: Direction | null, };
+
+/**
+ * What became of pressing Resume.
+ *
+ * Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+ * own on top of theirs: Resume is never silent. Either something is running —
+ * which needs no announcement, the session showing up on the Timeline — or
+ * nothing is, and the one place that can say why is the answer to the press.
+ * A recompute that quietly found nothing to launch is exactly the failure this
+ * whole feature is replacing.
+ */
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

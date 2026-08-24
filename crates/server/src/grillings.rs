@@ -36,15 +36,16 @@ use crate::store;
 /// to ask it again, and this is what tells it that it may.
 const LEFT_OPEN: &str = "_Left open._";
 
-/// Grill the work again, because the human pressed Retry on the stall that said
-/// nothing was.
+/// Grill the work again, because the human pressed Resume on a Conversation
+/// nothing was grilling.
 ///
-/// `note` is what they wrote beside the Remedy, and it reaches the session where
-/// every other retry's note reaches one: last, under everything else — see
-/// [`skills::retrying`].
+/// `note` is empty for a Resume, which carries none: steering the work is what a
+/// Manual Task is for. What still writes one is the Retry remedy on an
+/// Interruption of before, and it reaches the session where every other retry's
+/// note reaches one: last, under everything else — see [`skills::retrying`].
 ///
-/// `driving` is the registration [`crate::runner::retry`] took as the press
-/// arrived, held across the launch and let go once the session is registered.
+/// `driving` is the registration the press took as it arrived, held across the
+/// launch and let go once the session is registered.
 /// What drives a grilling is its session and nothing else — see
 /// [`crate::drivers`] — so this is a handover to the session rather than to a
 /// task of Verkstead's, and it is over the moment there is one.

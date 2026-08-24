@@ -32,7 +32,7 @@ use verkstead_render::{
     ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
     ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed,
+    Resumed, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed,
     Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
@@ -143,6 +143,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/manual-task",
             post(start_manual_task),
         )
+        // And the press beside it, which is the other way a stopped Conversation
+        // gets going: what Verkstead itself should be doing, worked out again
+        // from where the work now stands. Per Conversation for the same reason,
+        // and with no body at all — there is nothing to say about it beyond
+        // which Conversation it is.
+        .route("/api/ui/conversations/{id}/resume", post(resume))
         .route(
             "/api/ui/conversations/{id}/grilling-pairing",
             post(choose_grilling_pairing),
@@ -665,6 +671,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
+    // And whether there is driving to start again, which is the same kind of
+    // fact about the other end of the ladder: the Conversation says it is being
+    // worked on and nothing is working on it. Asked of the running server as
+    // much as of the record — see [`crate::resume::ready`].
+    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, halted.is_some());
+
     // And what the human has taken the keyboard of, which is the other thing the
     // work can be stopped on and the one that is nowhere on the Timeline: a Hold
     // leaves no Event, because the Timeline records the work rather than the
@@ -699,6 +711,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         base_commit: conversation.base_commit,
         state: lifecycle(conversation.state),
         ready_to_grill,
+        ready_to_resume,
         adopting,
         grilling_pairing,
         implementation_pairing,
@@ -1267,6 +1280,31 @@ async fn start_manual_task(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
             unavailable("the manual task could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/resume` — start driving it again.
+///
+/// What should be running is recomputed from the state the Conversation is in
+/// and what its branch has written, rather than being read off whatever stopped:
+/// a halt is answered whenever the human gets to it, and the work moves on in
+/// the meantime.
+///
+/// Answered as soon as the decision is made rather than once the session is up.
+/// What Resume starts takes as long as it takes — a grilling relaunch waits for
+/// the Worktree, and a wrap-up is four watchers — and the browser is waiting for
+/// *whether* it started, which is what the named outcomes say.
+async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Resumed::NoSuchConversation).into_response();
+    };
+
+    match crate::resume::resume(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
+            unavailable("the conversation could not be resumed")
         }
     }
 }

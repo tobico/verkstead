@@ -511,16 +511,22 @@ pub(crate) async fn retry(state: AppState, conversation_id: i64, step: store::St
 /// Start driving a stalled implementation again, from wherever the repository
 /// now stands.
 ///
-/// What Retry means where the Conversation it was pressed on is Implementing —
-/// see [`crate::stalls::retried`], which reads that off the state and hands it
-/// here. Which run stopped is the direction's to say, and each of the three
-/// picks up exactly where its own retry would: the backlog off `.tasks/`, an
-/// inline run in a fresh session, a roadmap off what the branch has written.
+/// What Resume means where the Conversation it was pressed on is Implementing —
+/// see [`crate::resume`], which is what decides that and hands it here, and
+/// [`crate::stalls::retried`], which is the same move by the remedy that is on
+/// its way out. Which run stopped is the direction's to say, and each of the
+/// three picks up exactly where its own retry would: the backlog off `.tasks/`,
+/// an inline run in a fresh session, a roadmap off what the branch has written.
 ///
-/// Nothing is decided from the stall itself, because a stall knows nothing: it
-/// was raised about a Conversation with nothing running, so there is no step to
-/// read and no session's last words to go on. What there is, is the repository,
-/// which is the same thing every other retry asks.
+/// Nothing is decided from what stopped, because it knows nothing worth having:
+/// a run that halted with nothing running left no step to read and no session's
+/// last words to go on. What there is, is the repository — which is the same
+/// thing every turn of an ordinary run asks.
+///
+/// The reading here is the second one: the press has already asked what there is
+/// to work in order to refuse by name where there is nothing. Read again rather
+/// than carried, because a spawn is a moment later and where an agent is about
+/// to be let loose is the one thing that must not be guessed at.
 ///
 /// The registration is handed on rather than taken again, so a Conversation the
 /// human has just pressed Retry on is driven from that moment rather than from
@@ -1494,6 +1500,17 @@ fn pending(worktree: &Path, path: &Path) -> Option<bool> {
     let said = git(worktree, &["status", "--porcelain", "--", &path])?;
 
     Some(!said.trim().is_empty())
+}
+
+/// Whether `.tasks/` has anything left in it to work.
+///
+/// The one thing about a backlog anybody outside the runner asks: Resume refuses
+/// by name where there is nothing to launch a session for, and what *nothing*
+/// means is this module's own answer rather than a second reading of the
+/// directory — see [`crate::resume`]. What is left is asked again by whatever
+/// the resume spawns, a moment later and for itself.
+pub(crate) async fn anything_to_work(worktree: &Path) -> bool {
+    decide(worktree).await != Step::Nothing
 }
 
 /// What to run next in `worktree`, off the runtime's threads.

@@ -34,6 +34,7 @@ import type {
   RemedySettled,
   RepoEntry,
   Response as Decided,
+  Resumed,
   Screen,
   SetView,
   SettingsEdit,
@@ -354,6 +355,18 @@ export function startManualTask(
     instruction,
     ...pairing,
   });
+}
+
+/// Start driving a conversation again, from wherever the work now stands.
+///
+/// Nothing is sent with it. What should be running is the server's to work out
+/// from the conversation's state and its branch — a press that named a step
+/// would be a page deciding something it read a moment ago and cannot check.
+///
+/// What comes back either says driving has started or names the reason nothing
+/// could: resume is never silent, and the refusals are what that means.
+export function resume(id: number): Promise<Resumed> {
+  return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
 }
 
 /// The Agent Profiles a session can be run under, by name.

@@ -225,6 +225,20 @@ pub struct ConversationView {
     /// what it says is true only as of the moment it was read.
     pub ready_to_grill: bool,
 
+    /// Whether there is driving to start again: the Conversation is in a state
+    /// something ought to be driving, and nothing is.
+    ///
+    /// What decides whether Resume is offered, and the server's rule rather
+    /// than something the page works out from the fields around it — *driven*
+    /// is a register of tasks that are running, and a page cannot see one.
+    /// Every refusal is checked again when the button is pressed; this says
+    /// only that it was worth offering as of the moment it was read.
+    ///
+    /// A question about a process as much as about the record, so a restarted
+    /// server reads every Conversation it left mid-run as one to resume —
+    /// which each of them is.
+    pub ready_to_resume: bool,
+
     /// What this Conversation is adopting, where it is adopting anything.
     ///
     /// `null` is the ordinary Conversation, which begins with a Brief and a
@@ -1632,6 +1646,55 @@ pub enum ManualTaskStarted {
     /// it. The reason is in the server's log, as a worktree git refused is: this
     /// is the one refusal with nothing for the human to correct.
     NotStarted,
+}
+
+/// What became of pressing Resume.
+///
+/// Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+/// own on top of theirs: Resume is never silent. Either something is running —
+/// which needs no announcement, the session showing up on the Timeline — or
+/// nothing is, and the one place that can say why is the answer to the press.
+/// A recompute that quietly found nothing to launch is exactly the failure this
+/// whole feature is replacing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Resumed {
+    /// Driving has started again: the halt is cleared and what the lifecycle
+    /// and the branch say should be running is being launched.
+    Resumed,
+
+    NoSuchConversation,
+
+    /// It is drafting, done or aborted, so nothing was ever supposed to be
+    /// driving it. None of the three is a Conversation standing still.
+    NotDriven,
+
+    /// Something is driving it already — a session, a runner, a wrap-up's
+    /// watchers. The second press of the button is the first one arriving
+    /// again, and starting a second driver would be two agents in one Worktree.
+    AlreadyDriven,
+
+    /// There is no Worktree to work in. A Conversation past drafting is
+    /// supposed to have one, so this is a record that cannot be true — or a
+    /// directory that has gone from under Verkstead.
+    NowhereToWork,
+
+    /// It says it is implementing and nothing says how the work is being built,
+    /// which is another record that cannot be true: a Conversation implements
+    /// because a direction was picked.
+    NoDirection,
+
+    /// The backlog it was working has nothing left in it — never written, or
+    /// finished with. Either way there is no step to read off `.tasks/`.
+    NothingToWork,
+
+    /// The grilling Pairing has gone, and a grilling runs under that one
+    /// whatever else has happened since.
+    NoGrillingPairing,
+
+    /// And the implementation Pairing has gone, which is what every session of
+    /// the work itself runs under.
+    NoImplementationPairing,
 }
 
 /// What became of pressing Adopt.

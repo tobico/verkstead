@@ -46,6 +46,8 @@ mod push;
 mod reply;
 mod repos;
 mod responses;
+/// Starting to drive a Conversation again, from wherever it now stands.
+mod resume;
 mod review;
 mod runner;
 /// What a session can reach: the bwrap surface built around one Conversation's

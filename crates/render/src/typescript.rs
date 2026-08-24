@@ -22,7 +22,7 @@ use crate::{
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
     ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetView,
+    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Resumed, Screen, SetView,
     SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
@@ -144,6 +144,12 @@ fn the_viewers_types_are_written_from_these() {
     // `ConversationView` above, rendered like the handoff.
     ManualTaskSubmission::export_all(&config).unwrap();
     ManualTaskStarted::export_all(&config).unwrap();
+
+    // And the press beside it, which takes no request shape at all: what to
+    // start again is recomputed from the lifecycle and the branch, so all there
+    // is to send is which Conversation. What comes back is the outcome — a
+    // start, or the named reason there was nothing to start.
+    Resumed::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

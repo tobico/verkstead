@@ -46,8 +46,9 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Shown,
-    Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn, Watching,
+    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
+    Resumed, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
@@ -359,12 +360,29 @@ impl Grilling {
             .halt
     }
 
-    /// And start driving it again the way task 04's Resume will: the halt taken
-    /// away, and nothing else touched.
+    /// Take the halt away and touch nothing else, which is the half of Resume
+    /// the badge hangs on.
+    ///
+    /// Through the store rather than through the press, for the tests that are
+    /// about what the badge is drawn from: Resume also starts a session, and a
+    /// session starting is not what those are asking about.
     async fn drive_again(&self) {
         let pool = open_database(&self.database).await.unwrap();
 
         verkstead_store::clear_halt(&pool, self.id).await.unwrap();
+    }
+
+    /// And press Resume, the way the button at the end of a Timeline does.
+    ///
+    /// Nothing goes with it: what should be running is recomputed from the state
+    /// the Conversation is in and what its branch has written.
+    async fn resume(&self) -> Resumed {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/resume", self.id),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     /// Wait until there is a session running, and hand back the Event it is
@@ -506,6 +524,34 @@ questions:
         recommended: true
       - n: 2
         text: Split the migration out
+"#;
+
+/// A round of grilling that came back: what the session asked before it died,
+/// and what a fresh one has to be told rather than ask again.
+const ASKED_ALREADY: &str = r#"
+title: How the limiter counts
+questions:
+  - label: Q1
+    text: Per key or per address?
+    options:
+      - n: 1
+        text: Per key
+      - n: 2
+        text: Per address
+"#;
+
+/// And one that did not: the Set the session was still waiting on when it went,
+/// which nothing is reading any more.
+const LEFT_HANGING: &str = r#"
+title: What happens when it trips
+questions:
+  - label: Q2
+    text: How long should a client be locked out?
+    options:
+      - n: 1
+        text: A minute
+      - n: 2
+        text: Until the window rolls over
 "#;
 
 /// How fast these run the backlog: fast enough that a test spends its time
@@ -7696,4 +7742,392 @@ async fn wrapping_unwatched(fixture: &Grilling) {
     pool.close().await;
 
     assert_eq!(recorded, verkstead_server::store::Wrapping::Started);
+}
+
+/// Resume on a stalled backlog run picks the backlog up again, reading what is
+/// next off `.tasks/` exactly as the runner always does.
+///
+/// What is next is the repository's to say and has not changed on account of
+/// nothing having been running: the task whose session died is still there, so
+/// that is the task the fresh session is started on. Nothing here reverts
+/// anything, and nothing reads the step off whatever stopped — a halt is
+/// answered whenever the human gets to it, and the branch is what has the
+/// answer by then.
+#[tokio::test]
+async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository() {
+    let fixture = grilling_swept(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ ! -f TRIED ]; then
+                printf 'once\n' > TRIED
+                printf 'this task is beyond me\n'
+                exit 1
+            else
+                printf 'prompt was: %s\n' "$2"
+                sleep 300
+            fi
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let halted = fixture.halted().await;
+
+    assert!(
+        halted.html.contains(".tasks/01-count.md"),
+        "the run stopped at the task whose session died: {:?}",
+        halted.html,
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the run picks the backlog up again, which is the fork that reads it: {printed:?}",
+    );
+    assert!(
+        printed.contains("The API has none."),
+        "primed with the Brief the work started from: {printed:?}",
+    );
+    assert!(
+        !printed.contains("What I said when I asked you to try this again"),
+        "and told nothing beside it: Resume carries no note, steering being what \
+         a manual task is for: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on, None,
+        "nothing is waiting on the human once the Conversation is being driven again",
+    );
+    assert!(
+        !view.ready_to_resume,
+        "and there is nothing left to resume, because something is driving it",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "while the Notice stays where it is: it is a stop that really happened",
+    );
+
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "and it is the same task, because nothing reverted anything",
+    );
+}
+
+/// Resume on a stalled grilling means a fresh grilling, because there is nothing
+/// else it could mean: an interview lives in the session having it, and that
+/// session is gone.
+///
+/// What survives it is what the human already answered, which is on the Timeline
+/// — so the fresh session is primed with the Brief it always had and a digest of
+/// every Set that came back, and does not open by asking again what was settled
+/// yesterday.
+///
+/// And the Set the dead session left open is archived on the way past. Nothing
+/// is waiting on that Answer any more, so leaving it open would be the human
+/// answering into nothing.
+#[tokio::test]
+async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_settled() {
+    let fixture = grilling_swept(r#"printf 'prompt was: %s\n' "$2""#).await;
+
+    fixture.quiet().await;
+
+    // What the dead session got through before it went: one Set answered, and
+    // one still hanging with nobody left to read the Answer.
+    let answered = fixture.ask(ASKED_ALREADY).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                answered,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "and burst on top of it" }
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let orphan = fixture.ask(LEFT_HANGING).await;
+
+    let halted = fixture.halted().await;
+
+    assert!(
+        halted.html.contains("Grilling the work"),
+        "the Conversation says it is being grilled and nothing is: {:?}",
+        halted.html,
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/grilling/SKILL.md"),
+        "a grilling started again is a grilling: {printed:?}",
+    );
+    assert!(
+        printed.contains("The API has none."),
+        "on the Brief it was always about: {printed:?}",
+    );
+    assert!(
+        printed.contains("Per key — and burst on top of it"),
+        "and told what the human already settled, so it does not ask again: {printed:?}",
+    );
+    assert!(
+        !printed.contains("How long should a client be locked out"),
+        "the Set nobody answered said nothing, so nothing of it is quoted: {printed:?}",
+    );
+
+    let hanging = sets(&fixture.view().await)
+        .into_iter()
+        .find(|asked| asked.set_id == orphan)
+        .expect("the Set the dead session left open is on the Timeline")
+        .standing
+        .clone();
+
+    assert!(
+        matches!(hanging, verkstead_render::Standing::ArchivedUnanswered(_)),
+        "and nothing is left for the human to answer into: {hanging:?}",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and the halt is gone, so nothing is waiting on the human",
+    );
+}
+
+/// Resume on a wrap-up that stopped at a red check watches it again from no
+/// attempts spent.
+///
+/// The fix counters go first, exactly as the old Retry took them: the human has
+/// read what stopped and asked for another go, and a count left standing would
+/// be a watcher that halted again on its next poll without dispatching anything.
+/// A third fix session is what says they were forgotten — two is every one the
+/// branch was allowed.
+#[tokio::test]
+async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spent() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let halted = fixture.halted().await;
+
+    assert!(
+        halted.html.contains("Rust"),
+        "the run stopped on the red check: {:?}",
+        halted.html,
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(halted.id),
+        "and the human is what it is waiting on",
+    );
+    assert_eq!(fixes(&fixture.view().await), 2, "having had both its goes");
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // A third fix session says both halves of it at once. Nothing advances past
+    // a halt, so one dispatching at all is the halt gone; and two attempts is
+    // every one the branch was allowed, so a third is the count forgotten.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+}
+
+/// A Resume with nothing to start refuses by name, and leaves the Conversation
+/// exactly as it found it.
+///
+/// The whole of what this replaces: a press that quietly decided there was
+/// nothing to do left the human as stuck as they were, with no more to go on
+/// than a line in a log they cannot see. So the reason comes back to the page
+/// that asked, and the halt it was pressed on stands.
+///
+/// A finish step whose pull request `gh` could not find is the plainest way to
+/// have one: the backlog is worked through and taken away, the Conversation is
+/// still implementing, and there is nothing left in `.tasks/` to read a step
+/// off. What is missing is out on GitHub, which is not something a session can
+/// be launched at.
+#[tokio::test]
+async fn resuming_with_nothing_to_start_refuses_by_name_and_changes_nothing() {
+    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+
+    worked_to_empty(&fixture).await;
+
+    let halted = fixture.halted().await;
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::NothingToWork,
+        "there is no backlog to read a step off, and saying so is the whole job",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on,
+        Some(halted.id),
+        "the halt stands: a refusal changes nothing",
+    );
+    assert!(
+        view.ready_to_resume,
+        "and the button is still there, because nothing is driving it yet",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "and the Conversation is where it was",
+    );
+}
+
+/// And a Resume pressed twice is the first press arriving again.
+///
+/// The second one finds something driving the Conversation — which is what the
+/// first one started — and refuses as such. Starting a second driver would be
+/// two agents in one Worktree, which is the one thing every gate here exists to
+/// stop.
+#[tokio::test]
+async fn a_resume_pressed_twice_is_refused_as_already_driven() {
+    // The first session says its piece and goes, which is the stall; the one
+    // Resume starts stays, which is what the second press has to find.
+    let fixture = grilling_swept(
+        r#"
+        if [ ! -f TRIED ]; then
+            printf 'once\n' > TRIED
+            printf 'the grilling has nothing to say\n'
+        else
+            printf 'the grilling is running\n'
+            sleep 300
+        fi
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+    fixture.halted().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    // Waited for rather than pressed straight away: what the second press has to
+    // find is the session the first one started, and starting one is the slow
+    // part of a resume.
+    fixture.until(|view| view.working.then_some(())).await;
+
+    assert_eq!(fixture.resume().await, Resumed::AlreadyDriven);
+}
+
+/// Resume is offered exactly where the Conversation is in a driven state and
+/// nothing is driving it.
+///
+/// Which is a question about the running server rather than about the record —
+/// what drives a Conversation is a session or a task of Verkstead's own, and
+/// neither leaves a row behind. So the page is told, rather than being left to
+/// work it out from a state and a Timeline that cannot say.
+#[tokio::test]
+async fn resume_is_offered_exactly_where_nothing_is_driving() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+
+    let fixture = grilling_spilling(
+        spill,
+        &format!(
+            r#"
+printf 'the grilling is running\n'
+while [ ! -f {gate} ]; do sleep 0.05; done
+"#,
+            gate = quoted(&gate),
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    assert!(
+        !fixture.view().await.ready_to_resume,
+        "a grilling is driven by its session, and this one is still talking",
+    );
+
+    // The session goes, and with it the only thing that was driving it.
+    std::fs::write(&gate, "go").unwrap();
+
+    fixture
+        .until(|view| view.ready_to_resume.then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Grilling,
+        "which is a state something ought to be driving, and is what makes a \
+         Conversation with nothing driving it worth offering the press on",
+    );
 }

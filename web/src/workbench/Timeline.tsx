@@ -51,6 +51,7 @@ import {
 import {
   abortConversation,
   listProfiles,
+  resume,
   saveBrief,
   startGrilling,
   startManualTask,
@@ -72,6 +73,7 @@ import type {
   PinnedEvent,
   PullRequestEvent,
   QuestionSetEvent,
+  Resumed,
   StageListEvent,
   TaskListEvent,
   TimelineEvent,
@@ -158,6 +160,31 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
   NoSuchModel: "That profile no longer lists that model.",
   NotStarted:
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
+};
+
+/// And each way of being refused a resume.
+///
+/// Every one of them is the button doing the one thing it is for: saying what
+/// there is to do about a conversation nothing is driving. A press that quietly
+/// found nothing to start would leave the human exactly as stuck as they were,
+/// which is why the server names these rather than logging them.
+export const RESUME_REFUSAL: Record<Resumed, string> = {
+  Resumed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDriven:
+    "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
+  AlreadyDriven:
+    "Something is already driving this conversation. Have a look at what it is doing.",
+  NowhereToWork:
+    "This conversation has no worktree to work in, so there is nowhere to start.",
+  NoDirection:
+    "Nothing on the record says how this work is being built, so there is no run to pick up.",
+  NothingToWork:
+    "There is no backlog left to work — nothing was written, or it is finished with. Set the next thing going by hand.",
+  NoGrillingPairing:
+    "Choose a grilling profile and model first, on the brief.",
+  NoImplementationPairing:
+    "Choose an implementation profile and model first, on the brief.",
 };
 
 /// The state a move came *from*: the state the move before it went to, and
@@ -452,14 +479,79 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      {/* And under that, the way to move the conversation by hand. It is not
-          one of the two above — neither is it for one state, nor is it the one
-          thing there is to do from here. It is what is offered *whenever
-          nothing is running*, which is a quiet moment between steps as much as
-          it is a run that has stopped, so it sits below whichever of the two is
-          drawn rather than instead of it. */}
+      {/* And under that, the two ways to get a conversation moving again. Both
+          are offered *whenever nothing is running*, which is a quiet moment
+          between steps as much as it is a run that has stopped, so they sit
+          below whichever of the two above is drawn rather than instead of it.
+
+          Resume first, because it is the one that carries on what Verkstead was
+          already doing: the other is for the thing it was never going to do. */}
+      <Resume conversation={props.conversation} />
       <ManualTaskComposer conversation={props.conversation} />
     </>
+  );
+}
+
+/// The one standing way to get Verkstead driving again: a button, and what it
+/// refuses with when there is nothing to drive.
+///
+/// Drawn exactly where the server says it is worth drawing — see
+/// `ready_to_resume`, which is the state being one something ought to be driving
+/// and nothing driving it. The page cannot work that out for itself: what drives
+/// a conversation is a register of running tasks, and a register lives in the
+/// server.
+///
+/// It carries nothing. What to start is recomputed from the conversation's state
+/// and its branch at the moment of the press, which is the whole point of one
+/// button rather than a remedy per way of stopping — steering the work is what
+/// the manual task below is for.
+function Resume(props: { conversation: ConversationView }): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<Resumed | null>(null);
+
+  const press = useMutation(() => ({
+    mutationFn: () => resume(props.conversation.id),
+    onSuccess: (outcome: Resumed) => {
+      setRefused(outcome === "Resumed" ? null : outcome);
+
+      // Either way the page it was pressed on is out of date: driving has
+      // started, or the world had moved under the button. Reading it again is
+      // both the correction and the explanation.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <Show when={props.conversation.ready_to_resume}>
+      <div class="resume">
+        <h2>Nothing is driving this</h2>
+
+        <button
+          type="button"
+          class="resume-conversation"
+          disabled={press.isPending}
+          onClick={() => press.mutate()}
+        >
+          {press.isPending ? "Resuming…" : "Resume"}
+        </button>
+
+        <p class="note">
+          Verkstead works out what should be running from where the work now
+          stands, and starts it.
+        </p>
+
+        <Show when={refused()}>
+          {(outcome) => <p class="error">{RESUME_REFUSAL[outcome()]}</p>}
+        </Show>
+        <Show when={press.isError}>
+          <p class="error">
+            The conversation could not be resumed: {press.error?.message}
+          </p>
+        </Show>
+      </div>
+    </Show>
   );
 }
 

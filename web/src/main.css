@@ -2737,6 +2737,48 @@ main:has(.workbench) {
   font-size: 0.9rem;
 }
 
+/* Starting Verkstead driving again, above the way to move the conversation by
+   hand: the two are the same kind of thing — offered whenever nothing is
+   running rather than in one state — and each is set off by a rule of its own,
+   so the end of the record is still visible as an end. */
+.resume {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.resume h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.resume .resume-conversation {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.resume .resume-conversation:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.resume .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.resume .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
 /* The way to move a conversation by hand, under whichever of the two above is
    drawn rather than instead of one: neither of those is for a state this is
    for, and this is offered whenever nothing is running rather than in one

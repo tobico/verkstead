@@ -47,6 +47,7 @@
     }
   ],
   "ready_to_grill": false,
+  "ready_to_resume": true,
   "repo": {
     "default_branch": "main",
     "id": 1,

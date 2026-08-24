@@ -31,6 +31,7 @@ import type {
   PullRequestDetails,
   Remedy,
   RemedySettled,
+  Resumed,
   Screen,
   Shown,
   SetView,
@@ -44,6 +45,7 @@ import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import {
   CLAMPED_LINES,
   MANUAL_TASK_REFUSAL,
+  RESUME_REFUSAL,
   SWIPE,
 } from "../src/workbench/Timeline";
 import {
@@ -5248,6 +5250,89 @@ describe("a manual task", () => {
 
     expect(asked.querySelectorAll("button")).toHaveLength(0);
     expect(asked.querySelectorAll("textarea")).toHaveLength(0);
+  });
+});
+
+/// Where a resume is pressed.
+const RESUMING = `/api/ui/conversations/${WRAPPING.id}/resume`;
+
+describe("the resume button", () => {
+  /// Drawn on the server's word alone. What drives a conversation is a register
+  /// of running tasks, which lives in the server — a page working it out from
+  /// the state and the session it can see would be a second opinion about a
+  /// question only one side can answer.
+  it("is drawn where nothing is driving the conversation", async () => {
+    theWrapping({ ready_to_resume: true });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const resume = await drawn(container, ".resume");
+
+    expect(resume.querySelector(".resume-conversation")!.textContent).toContain(
+      "Resume",
+    );
+  });
+
+  /// And gone where something is. There is nothing to start again, and a button
+  /// offering to would be one that could only refuse.
+  it("goes where something is driving it already", async () => {
+    theWrapping({ ready_to_resume: false });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    await drawn(container, ".timeline");
+
+    expect(container.querySelector(".resume")).toBeNull();
+  });
+
+  /// Nothing goes with the press. What should be running is recomputed from
+  /// where the work now stands, which is the whole reason there is one button
+  /// rather than a choice of them.
+  it("sends the press with nothing on it", async () => {
+    const fetching = theWrapping(
+      { ready_to_resume: true },
+      whenever(RESUMING, json("Resumed" as Resumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const resume = await drawn(container, ".resume");
+    fireEvent.click(resume.querySelector(".resume-conversation")!);
+
+    await waitFor(() => expect(sent(fetching, RESUMING)).toEqual({}));
+  });
+
+  /// A press that found nothing to start says so where it was pressed. This is
+  /// the whole of what resume is for: a conversation nothing is driving, and
+  /// the reason nothing is.
+  it("says in words that there was nothing to start", async () => {
+    theWrapping(
+      { ready_to_resume: true },
+      whenever(RESUMING, json("NothingToWork" as Resumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const resume = await drawn(container, ".resume");
+    fireEvent.click(resume.querySelector(".resume-conversation")!);
+
+    const refused = await drawn(container, ".resume .error");
+
+    expect(refused.textContent).toBe(RESUME_REFUSAL.NothingToWork);
+    expect(refused.textContent).toContain("no backlog left");
+  });
+
+  /// And a second press on a conversation the first one got going is refused as
+  /// driven, which is the same press arriving twice rather than a mistake.
+  it("says in words that something is driving it now", async () => {
+    theWrapping(
+      { ready_to_resume: true },
+      whenever(RESUMING, json("AlreadyDriven" as Resumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const resume = await drawn(container, ".resume");
+    fireEvent.click(resume.querySelector(".resume-conversation")!);
+
+    const refused = await drawn(container, ".resume .error");
+
+    expect(refused.textContent).toBe(RESUME_REFUSAL.AlreadyDriven);
   });
 });
 
