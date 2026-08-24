@@ -6974,11 +6974,16 @@ fn out_of_window(sentence: &str) -> String {
                     # window comes back. Redrawn eight times over a second —
                     # more than the half a second Verkstead writes down what a
                     # session printed on, so the banner is looked at more than
-                    # once — with the spinner turning in front of it, which is
-                    # what makes each repaint a different line.
-                    for turning in '*' '+' 'x' 'X'; do
-                        printf '%s {sentence}\r\n' "$turning"
-                        sleep 0.125
+                    # once — with claude's own spinner turning in front of it,
+                    # which is what makes each repaint a different line.
+                    for pass in 1 2; do
+                        for turning in \
+                            '\xe2\x9c\xbb' '\xe2\x9c\xbd' \
+                            '\xe2\x9c\xb3' '\xe2\x9c\xa2'
+                        do
+                            printf "$turning {sentence}\r\n"
+                            sleep 0.125
+                        done
                     done
                 fi
                 printf 'working %s\n' "$next"
@@ -7042,8 +7047,8 @@ async fn an_account_out_of_window_pauses_the_run_and_tells_the_devices() {
          the task was being worked under",
     );
     assert!(
-        waiting.said.contains("Usage limit reached"),
-        "with the backend's own sentence kept as it was printed: {:?}",
+        waiting.said.contains("✻ Usage limit reached"),
+        "with the backend's own sentence kept as it was printed, spinner and all: {:?}",
         waiting.said,
     );
     assert_eq!(

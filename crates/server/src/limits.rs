@@ -18,11 +18,13 @@
 //! than out of anything the agent is asked.
 //!
 //! A line that *says* it rather than one that mentions it: the phrase has to open
-//! the line, once the terminal's own decoration is off the front of it. That is
-//! what keeps a session reading this very file from pausing itself. What it
-//! cannot rule out is an agent that opens a line with the phrase for reasons of
-//! its own — and that is the cheap failure of the two, being one press to undo,
-//! where a limit nobody noticed is a run that goes quiet for five hours.
+//! the line, once the terminal's own decoration is off the front of it — and
+//! decoration is what a terminal draws with rather than every character that is
+//! not a letter, which is what keeps a session reading this very file from
+//! pausing itself. See [`says_so`]. What it cannot rule out is an agent that
+//! opens a line with the phrase and nothing in front of it, for reasons of its
+//! own — and that is the cheap failure of the two, being one press to undo, where
+//! a limit nobody noticed is a run that goes quiet for five hours.
 //!
 //! **Nothing here switches accounts.** An exhausted Profile is a wait, never a
 //! reason to spend a different one: no Conversation moves to another Profile
@@ -105,15 +107,35 @@ pub(crate) fn exhausted(text: &str) -> Option<Exhausted> {
 /// border, the spinner, the bullet, the spaces. That is the difference between a
 /// status line the agent's display drew and a sentence about limits inside the
 /// work.
+///
+/// **Decoration is what a terminal draws with**, which is the narrower half of
+/// [`DECORATION`]: whitespace, and the symbols outside ASCII that a display
+/// reaches for. ASCII punctuation is not decoration, because it is what *code*
+/// opens a line with — a quotation mark, a backtick, a dash, a hash. Verkstead
+/// builds this repository, so a session grepping the file this matcher lives in
+/// prints a dozen lines that quote the phrase, and reading one of those as its
+/// own account running out would stop the run it was in the middle of.
 fn says_so(line: &str) -> bool {
     let said: String = line
-        .trim_start_matches(|character: char| !character.is_alphanumeric())
+        .trim_start_matches(DECORATION)
         .chars()
         .take(EXHAUSTED.len())
         .collect();
 
     said.eq_ignore_ascii_case(EXHAUSTED)
 }
+
+/// What a terminal puts in front of a status line, and nothing else.
+///
+/// Whitespace and the non-ASCII symbols a display draws with — the box borders,
+/// the bullets, the spinner glyphs. Deliberately not every non-alphanumeric
+/// character: see [`says_so`] for what the wider rule cost.
+fn decoration(character: char) -> bool {
+    character.is_whitespace() || (!character.is_ascii() && !character.is_alphanumeric())
+}
+
+/// The same as a pattern, so the trim above reads as what it does.
+const DECORATION: fn(char) -> bool = decoration;
 
 /// When the window resets, out of the sentence that said it was exhausted.
 ///
@@ -696,6 +718,32 @@ mod tests {
             "No limit was reached.",
         ] {
             assert_eq!(exhausted(line), None, "{line:?} paused a run");
+        }
+    }
+
+    /// And this repository's own lines, quoted exactly as they sit in it.
+    ///
+    /// Verkstead builds this repository: a session that greps for the phrase, or
+    /// opens the file the matcher lives in, prints these on its terminal. Reading
+    /// one as its own account running out would stop the run it was in the middle
+    /// of — a false alarm this build could not have anywhere else, and the one it
+    /// is most likely to hit.
+    #[test]
+    fn this_repositorys_own_fixtures_do_not_pause_the_session_reading_them() {
+        for line in [
+            // `crates/store/tests/pauses.rs`, and every other test that stands a
+            // sentence up to be recognised.
+            r#"            "Usage limit reached · continuing shortly","#,
+            r#"        "Usage limit reached · continuing automatically at 3pm · esc to cancel","#,
+            // The tests at the foot of this very file.
+            r#"            "usage limit reached — check plan","#,
+            r#"            "  │ USAGE LIMIT REACHED","#,
+            // And a line of prose about it, in a document or a commit message.
+            "- Usage limit reached is the phrase, and only the phrase",
+            "# Usage limit reached",
+            "> Usage limit reached, said the display",
+        ] {
+            assert_eq!(exhausted(line), None, "{line:?} paused the run reading it");
         }
     }
 
