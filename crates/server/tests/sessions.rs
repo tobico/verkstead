@@ -4114,6 +4114,164 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
     );
 }
 
+/// And the two milestones a whole run passes through on its way there reach the
+/// devices: the work landing on a pull request, and the Conversation reaching
+/// Done.
+///
+/// These are the moments the work moved on with nobody watching. Everything
+/// between the direction and Done happens unattended by design — that is what
+/// the pipeline is *for* — and a human who has to keep opening the sidebar to
+/// find out whether it did is one the notifications were never written for.
+///
+/// The device subscribes after the direction is picked, so what is read back is
+/// the milestones alone: a Question Set's push is `push_delivery.rs`'s subject
+/// and there is none left to send after this point anyway.
+#[tokio::test]
+async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let before = fixture.view().await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // In the order they happened: the pull request opens the wrap-up, and Done
+    // is what ends it.
+    let pushed = pushes(&taken, 2).await;
+    let opened = phone.read(&pushed[0]);
+    let done = phone.read(&pushed[1]);
+
+    assert_eq!(
+        opened["path"],
+        format!("/conversations/{}", fixture.id),
+        "tapping either opens the Conversation it is about",
+    );
+    assert_eq!(
+        opened["title"],
+        format!("{} is on pull request #41", before.branch),
+        "and the pull request's says which one, because that is where the human's \
+         own part of the work starts",
+    );
+    assert_eq!(opened["project"], before.repo.name);
+
+    assert_eq!(done["path"], format!("/conversations/{}", fixture.id));
+    assert_eq!(
+        done["title"],
+        format!("{} is done", before.branch),
+        "and Done's says so in words nothing else here says",
+    );
+
+    // Long enough for many more polls of the settling loop and the checks
+    // watcher, either of which could have said the same thing twice.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "one push per milestone, and no reminders about a Conversation that is over",
+    );
+}
+
+/// And none of it can hold the work up: a push service that cannot be reached
+/// costs a notification and nothing else.
+///
+/// Every one of these is sent from behind the thing it announces, which is what
+/// makes them safe to send at all — the pull request is recorded, the wrap-up
+/// settles and the Conversation reaches Done whether or not a phone hears about
+/// any of it. Reached through an address nothing is listening on, because that
+/// is the shape of it on the real internet: a vendor's push service down, or a
+/// tailnet with no way out.
+///
+/// The device stays on the list, too. Only a `404` or a `410` says a
+/// subscription is finished with — see `push_delivery.rs` — and a service that
+/// cannot be reached has said nothing at all about the device.
+#[tokio::test]
+async fn a_push_service_that_cannot_be_reached_costs_a_notification_and_nothing_else() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let phone = Device::new(&nowhere().await, "phone");
+    fixture.subscribe(&phone).await;
+
+    // Which arrives on its own, at the pace it would have without any of this:
+    // a run that waited on the push services would never get here at all.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+    let opened = pull_request(&view).expect("the pull request is on the record");
+
+    assert_eq!(opened.number, 41, "the record landed with nobody told");
+    assert!(
+        interruptions(&view).is_empty(),
+        "and a notification nobody could be sent is not a run that went wrong: {:?}",
+        interruptions(&view),
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let devices = verkstead_server::store::push_subscriptions(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    assert_eq!(
+        devices
+            .iter()
+            .map(|device| device.endpoint.as_str())
+            .collect::<Vec<_>>(),
+        [phone.endpoint.as_str()],
+        "and the device is still on the list: nothing said it had gone",
+    );
+}
+
+/// An address nothing is listening on: bound to claim a free port, then dropped.
+async fn nowhere() -> String {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("a port to claim");
+    let at = listener.local_addr().unwrap();
+    drop(listener);
+
+    format!("http://{at}")
+}
+
 /// A commit landing on the pull request is a new run to wait on, so the green the
 /// last one left does not stand.
 ///
@@ -4501,6 +4659,115 @@ async fn a_session_that_exits_badly_stops_the_run_at_an_interruption() {
     assert!(
         worktree.join("limiter.md").exists(),
         "and the repo is left exactly as the session left it",
+    );
+}
+
+/// And the devices are told, which is the half of an Interruption that reaches
+/// somebody who is not at the workbench.
+///
+/// A run that stops unattended and says nothing is the failure this whole
+/// pipeline is built to avoid: the Timeline is where the human looks, but only
+/// once they are looking. The Question Set that ended the grilling is subscribed
+/// for too, so what is read back is both notifications side by side — a phone
+/// that lit up the same way for either would be a phone that says only *some*
+/// decision is waiting.
+#[tokio::test]
+async fn a_run_that_stops_unattended_tells_the_devices() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'half a limiter\n' > limiter.md
+            printf 'error: unresolved import crate::window\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    let laptop = Device::new(&service, "laptop");
+    fixture.subscribe(&phone).await;
+    fixture.subscribe(&laptop).await;
+
+    let before = fixture.view().await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    // Two devices, and one push each for the Set and for the stopping: the Set
+    // arrived first and the run stopped after it was answered, so what is here
+    // is four in that order.
+    let pushed = pushes(&taken, 4).await;
+
+    for device in [&phone, &laptop] {
+        let mine: Vec<serde_json::Value> = pushed
+            .iter()
+            .filter(|push| push.device == device.name)
+            .map(|push| device.read(push))
+            .collect();
+
+        assert_eq!(mine.len(), 2, "{} was told twice", device.name);
+
+        assert_eq!(
+            mine[0]["path"],
+            format!("/sets/{set}"),
+            "the Question Set's own push, which opens the Set",
+        );
+        assert_eq!(mine[0]["title"], "Ready to build the rate limiter");
+
+        assert_eq!(
+            mine[1]["path"],
+            format!("/conversations/{}", fixture.id),
+            "and the Interruption's, which opens the Conversation whose run stopped",
+        );
+        assert_eq!(
+            mine[1]["title"],
+            format!(
+                "{} stopped while implementing the work inline",
+                before.branch
+            ),
+            "saying which piece of work stopped and which step it stopped at — and \
+             nothing of what the session was doing, which is the Interruption's own \
+             evidence rather than a lock screen's",
+        );
+        assert_eq!(mine[1]["project"], before.repo.name);
+    }
+
+    // Long enough for a second round to have gone out if the stopping were
+    // announced again on every poll of the run that is no longer advancing.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        4,
+        "one push per device per thing that happened, and no reminders",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "the Interruption is still open: telling the devices is not answering it",
+    );
+    assert_eq!(
+        interruptions(&view).len(),
+        1,
+        "and nothing about the push put a second one on the Timeline",
     );
 }
 
@@ -5334,16 +5601,26 @@ const RECORDS_STACKING: &str = r#"    printf '# Git workflow\n\n## Review proces
 /// Both stages open, which is a roadmap with something to start.
 const TWO_STAGES: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n"#;
 
-/// Take a roadmap Conversation from its Brief to a settled wrap-up: staged,
-/// pushed, reviewed, green, done — with nothing pressed but the two the human
-/// presses at the start.
-async fn staged_and_settled(fixture: &Grilling) {
+/// The two presses a roadmap Conversation ever takes: start grilling, and pick
+/// the roadmap direction on the Set that ends it.
+///
+/// Everything after this happens with nobody watching, which is what makes the
+/// far side of it worth a notification — so it is a step of its own, for the
+/// tests that subscribe a device in between.
+async fn staged(fixture: &Grilling) {
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+}
+
+/// Take a roadmap Conversation from its Brief to a settled wrap-up: staged,
+/// pushed, reviewed, green, done — with nothing pressed but the two the human
+/// presses at the start.
+async fn staged_and_settled(fixture: &Grilling) {
+    staged(fixture).await;
 
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
@@ -5595,6 +5872,84 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     );
 }
 
+/// And the roadmap moving on is the third milestone: the devices are told which
+/// stage started, and tapping it opens the Conversation the work is on now.
+///
+/// This is the moment the pipeline is *for* — a stage complete, its successor
+/// already running, and nobody asked about any of it. What the human would
+/// otherwise do is open the sidebar to find out whether it happened.
+///
+/// The Conversation that settled is announced too, in its own words: they are
+/// two facts about two Conversations, and a phone told only that something was
+/// done would say nothing about the thing that had started.
+#[tokio::test]
+async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let roadmap = fixture.view().await;
+    let stage = stage_of(&fixture).await;
+
+    // Three: the pull request the staging session opened, the roadmap
+    // Conversation reaching Done, and the stage that started behind it.
+    let told: Vec<serde_json::Value> = pushes(&taken, 3)
+        .await
+        .iter()
+        .map(|push| phone.read(push))
+        .collect();
+
+    let titles: Vec<&str> = told
+        .iter()
+        .map(|notice| notice["title"].as_str().unwrap())
+        .collect();
+
+    let started = told
+        .iter()
+        .find(|notice| notice["title"] == "Stage 01 of the `rate-limiting` roadmap has started")
+        .unwrap_or_else(|| panic!("nothing said a stage had started: {titles:?}"));
+
+    assert_eq!(
+        started["path"],
+        format!("/conversations/{}", stage.id),
+        "tapping it opens the stage, which is where the work is now — not the \
+         Conversation it was started from",
+    );
+    assert_eq!(started["project"], roadmap.repo.name);
+
+    assert!(
+        titles.contains(&format!("{} is done", roadmap.branch).as_str()),
+        "and the Conversation that settled says so in words of its own: {titles:?}",
+    );
+    assert!(
+        titles.contains(&format!("{} is on pull request #41", roadmap.branch).as_str()),
+        "as does the pull request it opened on the way: {titles:?}",
+    );
+
+    // Long enough for the stage's own run to have got going and said something
+    // else, if starting one were worth announcing twice.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        3,
+        "one push per thing that happened, and nothing about the stage's own work",
+    );
+}
+
 /// A repository that records no way to stack a roadmap stage gets a branch off
 /// its default branch — and the Timeline says so plainly rather than Verkstead
 /// inventing a convention the repository never agreed to.
@@ -5640,10 +5995,15 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
     );
 }
 
-/// A roadmap with every stage checked starts nothing, and the Timeline says why.
+/// A roadmap with every stage checked starts nothing, and the Timeline says why
+/// — and the devices are told the roadmap is finished.
 ///
 /// Which is where the whole pipeline stops of its own accord: there is no stage
 /// left, so there is nothing to carry on and nothing for the human to do.
+///
+/// The last stage of a roadmap completing has no stage after it to be announced
+/// by, so this is what says it happened. Told about the Conversation that
+/// settled, because with nothing started there is no other one to open.
 #[tokio::test]
 async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_complete() {
     let spill = tempfile::tempdir().unwrap();
@@ -5662,7 +6022,17 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     )
     .await;
 
-    staged_and_settled(&fixture).await;
+    staged(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let before = fixture.view().await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
 
     let said = said_by(&fixture).await;
 
@@ -5680,6 +6050,33 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
     );
+
+    // The pull request, the Conversation reaching Done, and the roadmap running
+    // out of stages behind it.
+    let told: Vec<serde_json::Value> = pushes(&taken, 3)
+        .await
+        .iter()
+        .map(|push| phone.read(push))
+        .collect();
+
+    let finished = told
+        .iter()
+        .find(|notice| notice["title"] == "The `rate-limiting` roadmap is complete")
+        .unwrap_or_else(|| {
+            panic!(
+                "nothing said the roadmap was finished: {:?}",
+                told.iter()
+                    .map(|notice| &notice["title"])
+                    .collect::<Vec<_>>(),
+            )
+        });
+
+    assert_eq!(
+        finished["path"],
+        format!("/conversations/{}", fixture.id),
+        "and it opens the Conversation that settled, there being no stage to open",
+    );
+    assert_eq!(finished["project"], before.repo.name);
 }
 
 /// A roadmap committed on the repository's default branch, as the old tools or

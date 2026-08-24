@@ -16,10 +16,12 @@ self.addEventListener("fetch", () => {});
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
-// Something is waiting for the human: a Question Set has arrived, or a Hold has
-// stood a while with nobody coming back to it. The worker does the same two
-// things with either — it shows a notification, and it tells every Verkstead
-// that is already open to look again.
+// Something happened while nobody was watching: something is waiting for the
+// human — a Question Set, a Hold nobody came back to, a run stopped or an
+// account out of window — or the work moved on past a milestone, a pull request
+// opened, a roadmap stage started or a Conversation done. The worker does the
+// same two things with every one of them: it shows a notification, and it tells
+// every Verkstead that is already open to look again.
 //
 // The notification is not the negotiable half. The subscription was made with
 // `userVisibleOnly`, and a push that showed nothing would cost the subscription
@@ -28,16 +30,18 @@ self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim(
 self.addEventListener("push", (event) => {
   const notice = read(event.data);
 
-  // Where the notice says to go: the Set's own page for a Set, the held
-  // Conversation for a Hold. The server names it, because what the push is
-  // about is the server's to know — see `Notice` in `crates/server/src/push.rs`.
+  // Where the notice says to go: the Set's own page for a Set, and the
+  // Conversation it is about for everything else. The server names it, because
+  // what the push is about is the server's to know — see `Notice` in
+  // `crates/server/src/push.rs`.
   // The workbench where a push could not say: every Conversation is there, and
   // so is every Set through the one it was asked from.
   const url = notice.path || "/";
 
-  // The title is the notice's own, so it says which decision is waiting rather
-  // than that some decision is. The project goes in the body, because it is what
-  // tells two of them apart at a glance.
+  // The title is the notice's own, so it says which thing happened rather than
+  // that something did — see `News::title` in `crates/server/src/push.rs`, where
+  // all of them are written together for exactly that reason. The project goes in
+  // the body, because it is what tells two of them apart at a glance.
   event.waitUntil(
     Promise.all([
       self.registration.showNotification(notice.title || "Verkstead is waiting for you", {
@@ -54,8 +58,8 @@ self.addEventListener("push", (event) => {
   );
 });
 
-// Tapped. What it was about is what opens — the Set, or the Conversation whose
-// session is held — in the Verkstead that is already there if there is one.
+// Tapped. What it was about is what opens — the Set, or the Conversation the news
+// was about — in the Verkstead that is already there if there is one.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   event.waitUntil(open((event.notification.data || {}).url || "/"));

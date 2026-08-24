@@ -34,7 +34,9 @@
 //! Nothing here is refused for and nothing is returned. It runs at the end of an
 //! unattended run with nobody watching, and what it has to say it says on the
 //! Timeline as a notice — which is what a decision taken while nobody was looking
-//! is owed.
+//! is owed. Where the roadmap itself moved on — a stage started, or the last one
+//! finished — the devices are told as well, because a notice on a Timeline
+//! nobody has open reaches nobody at all.
 
 use std::path::Path;
 
@@ -106,7 +108,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                 "every stage of the roadmap is done, so nothing was started",
             );
 
-            return say(
+            say(
                 &state,
                 conversation_id,
                 &format!(
@@ -115,6 +117,17 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
                 ),
             )
             .await;
+
+            // A stage completing is a milestone, and this is the last one
+            // completing: there is no stage after it to be announced by, so the
+            // roadmap running out is what the devices are told instead.
+            crate::push::told(
+                &state.pool,
+                conversation_id,
+                crate::push::News::RoadmapComplete { roadmap },
+            );
+
+            return;
         }
         Next::Unstartable { why } => {
             tracing::warn!(conversation_id, why, "the next stage could not be started");
@@ -300,6 +313,20 @@ async fn start(
         label = stage.label,
         roadmap = stage.roadmap,
         "the next stage of the roadmap has started",
+    );
+
+    // And the devices, because a roadmap moving on is the milestone the human
+    // would otherwise find out about by opening the sidebar: the stage before
+    // this one is complete and this one is already running, and none of it was
+    // asked for. Told about the stage that started rather than the one that
+    // settled — that is where the work is now, so that is what tapping it opens.
+    crate::push::told(
+        &state.pool,
+        id,
+        crate::push::News::StageStarted {
+            label: stage.label.clone(),
+            roadmap: stage.roadmap.clone(),
+        },
     );
 
     // Both Timelines were said by the notices above, each on its own. What is

@@ -454,7 +454,14 @@ async fn pause(
         conversation: conversation_id,
     });
 
-    crate::push::paused(pool, conversation_id, profile, resets_at.as_deref());
+    crate::push::told(
+        pool,
+        conversation_id,
+        crate::push::News::OutOfWindow {
+            profile: profile.to_owned(),
+            resets_at,
+        },
+    );
 }
 
 /// Start the work again: close the wait, and get the Conversation driving where

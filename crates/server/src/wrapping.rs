@@ -102,6 +102,20 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
                 conversation: conversation_id,
             });
 
+            // And the devices are told, because this is one of the moments the
+            // work moved on with nobody watching: the whole run from the Brief
+            // to here happened unattended, and the pull request is where the
+            // human's own part of it starts. Behind the record, which the store
+            // has already taken — a push service that cannot be reached costs a
+            // notification and never the pull request.
+            crate::push::told(
+                &state.pool,
+                conversation_id,
+                crate::push::News::OnAPullRequest {
+                    number: opened.number,
+                },
+            );
+
             // And the wrap-up itself starts here. The branch has just been
             // pushed, so GitHub is already running the checks and nobody else is
             // going to look — and nobody has read the branch at all.

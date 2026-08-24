@@ -13,6 +13,10 @@
 //! that has gone. [`settle`] runs whenever the human gets to it, which may be the
 //! next morning, and acts on what they chose.
 //!
+//! Between the two, the devices are told — see [`crate::push`]. The Timeline is
+//! where the human looks, but only once they are looking, and a run that stops
+//! unattended and says nothing is the failure this pipeline exists to avoid.
+//!
 //! Nothing here reverts, resets or stashes anything. In every case the repository
 //! is left exactly as the session left it — that is what makes *take over
 //! manually* a remedy at all, and it is why aborting from here does not remove
@@ -93,6 +97,22 @@ pub(crate) async fn raise(
             state.nudges.announce(Nudge::Conversation {
                 conversation: conversation_id,
             });
+
+            // And the human is not at the page. A run that stops unattended and
+            // says nothing is the failure the whole pipeline is built to avoid,
+            // so the devices are told — behind the record, which has already
+            // landed, and never in front of it.
+            //
+            // Once per Interruption rather than once per stopping, because that
+            // is what the raising already is: a Conversation that has one open
+            // took no second row and takes no second push.
+            crate::push::told(
+                &state.pool,
+                conversation_id,
+                crate::push::News::Stopped {
+                    what: what.to_owned(),
+                },
+            );
         }
         None => tracing::info!(
             conversation_id,

@@ -49,6 +49,12 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
                     conversation: conversation_id,
                 });
 
+                // And the devices are told: nobody pressed anything to get here
+                // and nobody was watching it happen, which is exactly what a
+                // milestone notification is for. Behind the move, which the
+                // store has already made.
+                crate::push::told(&state.pool, conversation_id, crate::push::News::Done);
+
                 // And a settled wrap-up is what lets the next roadmap stage
                 // start, which is the whole of what makes a staged roadmap
                 // execute itself — see [`crate::continuing`]. Asked of every
