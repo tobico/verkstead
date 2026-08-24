@@ -46,6 +46,18 @@ HTMLCanvasElement.prototype.getContext = () => null;
 // contents' animated jump, and what its tests watch is `scrollIntoView`.
 window.scrollTo = () => {};
 
+// Another gap in the same environment, filled here for the same reason: jsdom
+// has `PointerEvent` but none of the capture that goes with it. A drag takes
+// hold of the pointer so that every move reaches the grip it started on, even
+// once the pointer has left it — see `Conversations.tsx`.
+//
+// Capture is about what a real pointer does between elements, and there is no
+// real pointer here: a test fires the moves at the grip itself, which is where
+// they would have arrived. So these take the call and do nothing with it.
+Element.prototype.setPointerCapture = () => {};
+Element.prototype.releasePointerCapture = () => {};
+Element.prototype.hasPointerCapture = () => false;
+
 // A third gap in the same environment: jsdom has no layout, so it has no
 // `ResizeObserver` either. The Screen of a live session watches the pane it is
 // drawn in with one, to send its width up the socket — see `Screen.tsx`.

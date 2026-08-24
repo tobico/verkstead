@@ -776,6 +776,18 @@ export type NewAdoption = { repo_id: number, roadmap: string, };
 export type NewConversation = { repo_id: number, };
 
 /**
+ * The order the human has just dragged the sidebar into: every Conversation
+ * they can see, by id, top first.
+ *
+ * The whole list rather than the one row that moved, because the whole list is
+ * what a drag produces and what the human is looking at when they let go. A
+ * move said as *this one, to there* would have to be replayed against a list
+ * the server might have added to since; a list said whole is simply what they
+ * meant.
+ */
+export type NewOrder = { order: Array<number>, };
+
+/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered

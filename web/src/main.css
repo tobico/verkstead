@@ -960,13 +960,25 @@ main:has(.workbench) {
   gap: 0.5rem;
 }
 
+/* The row itself is the card and the grip beside it: the card is what is
+   pressed to open the Conversation, and the grip is what is dragged to move it.
+   Two targets rather than one, because a card that was both would have to guess
+   which of the two a press meant — and on a phone it would have to take the
+   touch that was meant to scroll the list. */
+.conversation-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
 /* A row rather than a column: the name and the repo it is in stack down the
    left, and whatever mark the Conversation carries sits at the right edge. */
-.conversation-row button {
+.conversation-row .open {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0.85rem 1rem;
   font: inherit;
   color: inherit;
@@ -979,7 +991,7 @@ main:has(.workbench) {
 
 /* Which one is open, said with the accent down the near edge rather than with a
    fill: the row is read, and a wash behind it would fight the words. */
-.conversation-row.selected button {
+.conversation-row.selected .open {
   border-color: var(--accent);
   box-shadow: inset 0.2rem 0 0 var(--accent);
 }
@@ -990,7 +1002,7 @@ main:has(.workbench) {
    `border-style` alone, so a selected draft is still the accent down its near
    edge — a dotted accent border is a draft that is open, which is both things at
    once and is what it should look like. */
-.conversation-row.draft button {
+.conversation-row.draft .open {
   border-style: dotted;
 }
 
@@ -1003,12 +1015,73 @@ main:has(.workbench) {
    `--ink-soft` sits undimmed, so the name reads as small print rather than as
    something failing. Which is why the line under it is lifted to `--ink` below —
    left soft it would be dimmed twice. */
-.conversation-row.ended button {
+.conversation-row.ended .open {
   opacity: 0.65;
 }
 
 .conversation-row.ended .meta {
   color: var(--ink);
+}
+
+/* Something is waiting on the human, and the whole card says so: the accent all
+   the way round it, at the card's weight — one 1px border and one 1px inset
+   shadow being the same 2px this is. A border rather than the mark alone,
+   because what this has to survive is a glance down a list on a phone, and an
+   edge is legible where a 12px dot beside four names is not.
+
+   The accent rather than the `--stopped` red for the reason the mark inside it
+   is the accent: an ask left open, a run stopped on an Interruption and an
+   account out of window are none of them anything going wrong. */
+.conversation-row.waiting .open {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Open *and* waiting: both marks on the one card, the near edge thickened and
+   the ring around it, rather than the later rule taking the earlier one's
+   shadow away. */
+.conversation-row.selected.waiting .open {
+  box-shadow:
+    inset 0.2rem 0 0 var(--accent),
+    inset 0 0 0 1px var(--accent);
+}
+
+/* The grip: the part of a row that is dragged rather than pressed, which is how
+   the human says where a Conversation sits. Its own target beside the card, as
+   wide as a thumb and as tall as the row.
+
+   `touch-action: none` is what makes it work on a phone at all: without it a
+   touch that starts here scrolls the sidebar, and the pointer events the drag is
+   made of are cancelled the moment it does. It is on the grip alone, so the rest
+   of the list scrolls under a thumb exactly as it did. */
+.conversation-row .grip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  padding: 0;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: grab;
+  touch-action: none;
+  font: inherit;
+  font-size: 1rem;
+  letter-spacing: -0.25em;
+  text-indent: -0.25em;
+}
+
+/* The row under the hand: lifted off the list while it is being moved, so what
+   is being dragged is the one thing on the list that is obviously moving. */
+.conversation-row.held .grip {
+  cursor: grabbing;
+}
+
+.conversation-row.held .open {
+  border-color: var(--accent);
+  opacity: 0.9;
 }
 
 /* The left-hand column: everything the row says in words. `min-width: 0` so a
@@ -1038,18 +1111,24 @@ main:has(.workbench) {
    a card does not resize when a session finishes and leaves an ask behind it. */
 .conversation-row .mark {
   flex: none;
-  width: 0.75rem;
-  height: 0.75rem;
-  border-radius: 50%;
+  width: 1rem;
+  height: 1rem;
 }
 
 /* Something is waiting on the human: an ask left open, a run stopped on an
-   Interruption, or a direction to choose. The ember, filled — the one mark on
-   this card that is about them rather than about the work, and the reason it is
-   the accent rather than the `--stopped` red is that not one of the three is
-   anything going wrong. */
+   Interruption, or a direction to choose. An icon rather than the dot it used to
+   be — a shape reads at a glance where a dot has to be looked at, and this is a
+   list that is glanced down. The border around the whole card is the other half
+   of the same mark; see `.conversation-row.waiting`. */
 .conversation-row .mark.waiting {
+  display: grid;
+  place-items: center;
   background: var(--accent);
+  border-radius: 50%;
+  color: var(--card);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* And a session getting on with it: a ring with one lit arc, turning slowly.
@@ -1059,6 +1138,7 @@ main:has(.workbench) {
 .conversation-row .mark.working {
   border: 1.5px solid var(--edge);
   border-top-color: var(--ink-soft);
+  border-radius: 50%;
   animation: turning 1.4s linear infinite;
 }
 

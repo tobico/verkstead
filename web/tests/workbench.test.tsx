@@ -310,14 +310,39 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(".mark.waiting")).toBeNull();
   });
 
-  it("shows a dot on a conversation waiting on the human", async () => {
+  /// An icon and a border round the whole card, rather than the dot this used
+  /// to be: what it has to survive is a glance down a list on a phone.
+  it("marks a conversation waiting on the human, card and all", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
 
-    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.waiting")?.textContent).toBe("!");
     expect(card!.querySelector(".mark.working")).toBeNull();
+
+    // The border is the card's own, so the row carries it and the stylesheet
+    // says what it looks like — jsdom lays nothing out.
+    expect(card!.classList.contains("waiting")).toBe(true);
+    expect(stylesheet).toContain(
+      ".conversation-row.waiting .open {\n" +
+        "  border-color: var(--accent);\n" +
+        "  box-shadow: inset 0 0 0 1px var(--accent);\n" +
+        "}",
+    );
+  });
+
+  /// The mark is a character, and a character is something a screen reader
+  /// would otherwise read out beside the label that already said it.
+  it("keeps the mark out of what is read aloud", async () => {
+    theSidebar({ state: "Grilling", working: false, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(
+      card!.querySelector(".mark.waiting")!.getAttribute("aria-hidden"),
+    ).toBe("true");
   });
 
   /// A Blocking Ask is exactly this: the session that asked is still alive and
@@ -340,6 +365,9 @@ describe("how a card says where its conversation has got to", () => {
     const [card] = await cards(container);
 
     expect(card!.querySelector(".mark")).toBeNull();
+
+    // Neither half of the waiting mark: no icon above, and no border here.
+    expect(card!.classList.contains("waiting")).toBe(false);
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
@@ -353,7 +381,7 @@ describe("how a card says where its conversation has got to", () => {
 
     // What "draft" means is the stylesheet's, and jsdom lays nothing out.
     expect(stylesheet).toContain(
-      ".conversation-row.draft button {\n  border-style: dotted;\n}",
+      ".conversation-row.draft .open {\n  border-style: dotted;\n}",
     );
   });
 
@@ -430,6 +458,190 @@ describe("how a card says where its conversation has got to", () => {
         "  }\n" +
         "}",
     );
+  });
+});
+
+/// The order the sidebar is in, which is the human's own: they drag a row's grip
+/// and the whole list goes to the server, so it survives a reload, a restart and
+/// a second device without any of the three being a case this page knows about.
+///
+/// What the server does with the order is asked over there — the tests in
+/// `crates/server/tests/conversations.rs` say where an unplaced Conversation
+/// lands. What is asked here is that the list moves under the hand and that what
+/// is sent is what is on the screen.
+describe("the order the human puts the sidebar in", () => {
+  /// A sidebar of three named rows, over an endpoint that takes an order and
+  /// answers with nothing — which is what the real one does. A test wanting it
+  /// to answer otherwise says so, and what it says wins.
+  function three(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(
+        "/api/ui/conversations",
+        json(
+          ["first", "second", "third"].map((branch, n) => ({
+            ...SIDEBAR[0]!,
+            id: n + 1,
+            branch,
+          })),
+        ),
+      ),
+      whenever(
+        "/api/ui/conversations/order",
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "POST",
+      ),
+      ...answers,
+    );
+  }
+
+  /// The branches the sidebar is showing, top first.
+  async function order(container: ParentNode): Promise<(string | null)[]> {
+    return (await cards(container)).map(
+      (card) => card.querySelector(".title")!.textContent,
+    );
+  }
+
+  /// The rows laid out down the pane, one under the last.
+  ///
+  /// jsdom has no layout — every rect is zeros — and a drag asks the rows where
+  /// they are to say which one the pointer is over. The rect is worked out at
+  /// the moment it is asked for rather than fixed here, because the list moves
+  /// under the hand: a row that was second and is now first has to answer for
+  /// where it is now.
+  function laidOut(rows: HTMLElement[], height = 60) {
+    const list = rows[0]!.parentElement!;
+    const drawn = () => [...list.querySelectorAll<HTMLElement>(".conversation-row")];
+
+    for (const row of rows) {
+      row.getBoundingClientRect = () => {
+        const at = drawn().indexOf(row) * height;
+        return {
+          top: at,
+          bottom: at + height,
+          height,
+          left: 0,
+          right: 240,
+          width: 240,
+          x: 0,
+          y: at,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+    }
+  }
+
+  /// Drag one row's grip to a height on the pane, and let go.
+  function dragTo(card: HTMLElement, y: number) {
+    const grip = card.querySelector<HTMLElement>(".grip")!;
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 0 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: y });
+    fireEvent.pointerUp(grip, { pointerId: 1 });
+  }
+
+  it("moves the row under the hand and sends the whole list", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    // The third row, dragged to the top of the pane.
+    dragTo(rows[2]!, 10);
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+
+    // The list as it now stands, by id, rather than the row that moved: what is
+    // on the screen is what they meant.
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [3, 1, 2],
+      }),
+    );
+  });
+
+  it("drops a row at the end when the hand goes past the last one", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[0]!, 500);
+
+    expect(await order(container)).toEqual(["second", "third", "first"]);
+  });
+
+  /// A grip that could only be dragged would be a control half the people using
+  /// it could not reach.
+  it("moves a row a step at a time from the keyboard", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    expect(await order(container)).toEqual(["first", "third", "second"]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [1, 3, 2],
+      }),
+    );
+  });
+
+  it("leaves the top row where it is when it is asked to go higher", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[0]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "there is nowhere to move it to, so there is nothing to save",
+    ).toBe(0);
+  });
+
+  /// The grip is a second control on a row that already has one, and it does a
+  /// different thing: it says so itself rather than leaving the card's label to
+  /// cover both.
+  it("names what each grip moves", async () => {
+    three();
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector(".grip")!.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Move first", "Move second", "Move third"]);
+  });
+
+  /// Most answering happens on a phone, and a touch that starts on the grip has
+  /// to drag the row rather than scroll the list out from under it.
+  it("takes the touch that starts on a grip", () => {
+    expect(stylesheet).toContain("  cursor: grab;\n  touch-action: none;\n");
+  });
+
+  /// The order that was not saved is not the order to draw: what comes back is
+  /// the server's, with the reason under it.
+  it("says so and puts the list back when the order will not save", async () => {
+    three(
+      whenever(
+        "/api/ui/conversations/order",
+        json({ error: "the server is not taking orders" }, 503),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    await waitFor(() =>
+      screen.getByText(/The order could not be saved/, { exact: false }),
+    );
+    expect(await order(container)).toEqual(["first", "second", "third"]);
   });
 });
 

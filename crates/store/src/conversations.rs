@@ -899,12 +899,19 @@ async fn started(
     Ok(Some(id))
 }
 
-/// Every Conversation, newest first, and whether each is waiting on the human.
+/// Every Conversation in the order the human put them in, and whether each is
+/// waiting on the human.
 ///
-/// Newest first like the Set lists, and for the same reason: what was started
-/// last is what is being worked on. The design gives the sidebar a manual order
-/// eventually; until there is one, the order a Conversation was started in is
-/// the one order that means anything.
+/// The order is theirs: this is one person's working set, and which piece of
+/// work sits at the top is something they say by dragging a row rather than
+/// something a sort decides — see [`super::place_conversations`], which is where
+/// what they said is kept.
+///
+/// What has never been placed goes above what has, newest first among itself.
+/// A Conversation started a minute ago is the one thing on this list nobody has
+/// had the chance to place, and putting it at the top is both the predictable
+/// answer and the useful one: it arrives where it will be seen, and the hand-made
+/// order underneath it is left exactly as it was.
 ///
 /// `waiting` is an `OR` over the sources, computed here rather than by the
 /// caller, because every one of them is a read of this database and the sidebar
@@ -959,7 +966,8 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                 ) AS waiting
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
-         ORDER BY c.id DESC",
+         LEFT JOIN placements m ON m.conversation_id = c.id
+         ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
     )
     .fetch_all(pool)
     .await

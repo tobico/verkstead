@@ -512,6 +512,80 @@ async fn nothing_started_means_an_empty_sidebar() {
     assert!(sidebar(&app).await.is_empty());
 }
 
+/// The order of the sidebar as it comes back over the wire, by id.
+async fn order(app: &Router) -> Vec<i64> {
+    sidebar(app).await.into_iter().map(|row| row.id).collect()
+}
+
+/// Say where the whole list goes, which is what letting go of a dragged row
+/// sends. Answered with nothing, because there is nothing to answer.
+async fn place(app: &Router, ids: &[i64]) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/ui/conversations/order")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "order": ids })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "placing failed: {body}");
+}
+
+#[tokio::test]
+async fn the_sidebar_comes_back_in_the_order_it_was_dragged_into() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+    let third = started(&app, repo_id).await;
+
+    assert_eq!(
+        order(&app).await,
+        vec![third, second, first],
+        "unplaced, the list is newest first",
+    );
+
+    place(&app, &[second, first, third]).await;
+
+    assert_eq!(
+        order(&app).await,
+        vec![second, first, third],
+        "and afterwards it is where the human put it — which is what a reload, a \
+         restart and a second device each read",
+    );
+}
+
+/// The one row nobody could have placed, because it did not exist when they
+/// dragged. Above the order rather than at the end of it: it is where the work
+/// they just started will be looked for.
+#[tokio::test]
+async fn a_conversation_started_after_the_order_lands_at_the_top() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+
+    place(&app, &[first, second]).await;
+    let third = started(&app, repo_id).await;
+
+    assert_eq!(order(&app).await, vec![third, first, second]);
+}
+
+/// A viewer sends the list it drew, and a row can be gone by the time it lands.
+#[tokio::test]
+async fn an_order_naming_a_conversation_that_is_not_there_is_still_taken() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let first = started(&app, repo_id).await;
+    let second = started(&app, repo_id).await;
+
+    place(&app, &[second, 9_999, first]).await;
+
+    assert_eq!(order(&app).await, vec![second, first]);
+}
+
 /// A claude dir and config file pair inside `watched`, so a Profile saved from
 /// it is one a session could actually be run under.
 fn pair(watched: &Path, account: &str) -> (PathBuf, PathBuf) {

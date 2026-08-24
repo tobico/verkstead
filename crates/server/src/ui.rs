@@ -30,7 +30,7 @@ use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, PauseResumed,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
     ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
     RepoEntry, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
     Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
@@ -55,6 +55,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
         )
+        // The order the human dragged that list into. A path of its own under
+        // the list rather than a field on anything in it: what it says is about
+        // the sidebar rather than about any one Conversation, and the whole
+        // order is what a drag produces.
+        .route("/api/ui/conversations/order", post(place_conversations))
         // The roadmaps in the registered Repos that nothing is driving, drawn
         // as a notice under the new-conversation box. Beside the Conversations
         // rather than under a Repo, because that is where it is read: what it
@@ -480,6 +485,32 @@ async fn start_conversation(
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation failed");
             unavailable("the Conversation could not be started")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/order` — the sidebar, in the order the human just
+/// dragged it into.
+///
+/// Refused for nothing. Every id is either a Conversation, which is placed, or
+/// not one, which is passed over — a viewer sends the list it drew, and by the
+/// time it lands a row may have been started or aborted. There is nothing to
+/// answer with beyond that it was taken, so it answers with nothing.
+///
+/// The Nudge is what carries it to the other devices: an order is the list
+/// having moved, which is the one thing every open sidebar has to read again.
+async fn place_conversations(
+    State(state): State<AppState>,
+    Json(placed): Json<NewOrder>,
+) -> HttpResponse {
+    match store::place_conversations(&state.pool, &placed.order).await {
+        Ok(()) => {
+            state.nudges.announce(Nudge::Conversations);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "placing the Conversations failed");
+            unavailable("the order could not be saved")
         }
     }
 }

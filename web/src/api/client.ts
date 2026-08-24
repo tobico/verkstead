@@ -134,9 +134,23 @@ export function startAdoption(
   });
 }
 
-/// The Conversations in the sidebar, newest first.
+/// The Conversations in the sidebar, in the order the human put them in.
 export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");
+}
+
+/// Say where the whole list goes, which is what letting go of a dragged row
+/// does.
+///
+/// The whole order rather than the row that moved: the list the human is
+/// looking at is what they meant, and a move replayed against a list the server
+/// has added to since would not be it.
+///
+/// Answered with nothing at all — there is no outcome to read. An id naming a
+/// Conversation that has gone is passed over on the other side, which is what a
+/// list drawn a moment ago is allowed to carry.
+export async function placeConversations(order: number[]): Promise<void> {
+  await refused(await sent("/api/ui/conversations/order", { order }));
 }
 
 /// One Conversation with its Timeline.
@@ -518,7 +532,7 @@ async function taken<T>(response: Response): Promise<T> {
 }
 
 /// Throw if the server refused, in its own words. Split out from [`taken`] for
-/// the one endpoint that answers with no body to read.
+/// the endpoints that answer with no body to read.
 async function refused(response: Response): Promise<void> {
   if (!response.ok) {
     throw new RefusedError(response.status, await refusal(response));

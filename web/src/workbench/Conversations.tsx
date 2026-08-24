@@ -19,18 +19,34 @@
 //! draft on a page shaped for adopting, which is the other way work gets into
 //! the pipeline.
 //!
+//! The order the rows are in is the human's own. This is one person's working
+//! set, so which piece of work sits at the top is theirs to say rather than a
+//! sort's — they say it by dragging a row's grip, and what they said is the
+//! server's to keep. So a drag sends the whole list and the list comes back from
+//! the server on every read, which is what makes the order survive a reload, a
+//! restart and a second device without any of the three being a case.
+//!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are a line at the
 //! bottom of it rather than a page of their own to find.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createEffect,
+  createSignal,
+  type JSX,
+} from "solid-js";
 
 import {
   listAbandonedRoadmaps,
   listConversations,
   listRepos,
+  placeConversations,
   startAdoption,
   startConversation,
 } from "../api/client";
@@ -72,6 +88,124 @@ export function Conversations(props: {
   const [against, setAgainst] = createSignal("");
 
   const chosen = () => against() || String(repos.data?.[0]?.id ?? "");
+
+  // The order the human is making with their hand, until the server's own list
+  // says the same thing. Null the rest of the time, which is every moment
+  // nobody is dragging: the order is the server's fact and this is only ever
+  // the half-second before it has heard about it.
+  const [dragged, setDragged] = createSignal<number[] | null>(null);
+
+  // Which row is under the hand, or null when none is.
+  const [held, setHeld] = createSignal<number | null>(null);
+
+  // The list to draw: the server's, in the order being dragged where there is
+  // one. A Conversation that has appeared since the drag began is not in that
+  // order and goes to the top, which is where an unplaced one goes on the
+  // server too.
+  const shown = (): ConversationEntry[] => {
+    const rows = conversations.data ?? [];
+    const order = dragged();
+    if (!order) return rows;
+
+    const placed = order
+      .map((id) => rows.find((row) => row.id === id))
+      .filter((row): row is ConversationEntry => row !== undefined);
+
+    return [...rows.filter((row) => !order.includes(row.id)), ...placed];
+  };
+
+  const place = useMutation(() => ({
+    mutationFn: (order: number[]) => placeConversations(order),
+    onSuccess: () => {
+      // Read the list back, which is what lets go of the local order below.
+      // The other devices hear the same news as a Nudge.
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+    onError: () => {
+      // The order was not saved, so drawing it would be drawing something that
+      // is not true. The server's list comes back instead, with the error under
+      // the box saying why it is what it is.
+      setDragged(null);
+    },
+  }));
+
+  // Let go of the local order the moment the server's list agrees with it,
+  // rather than when the request came back: between those two is the re-read,
+  // and a list swapped for the old order in the middle of it is a list that
+  // jumps back and then forward again.
+  createEffect(() => {
+    const order = dragged();
+    const arrived = conversations.data;
+    if (!order || !arrived || held() !== null) return;
+
+    if (
+      arrived.length === order.length &&
+      arrived.every((row, n) => row.id === order[n])
+    ) {
+      setDragged(null);
+    }
+  });
+
+  // The list element, so a drag can ask where the rows actually are. A drag is
+  // about pixels, and pixels are something only the DOM knows.
+  let list: HTMLUListElement | undefined;
+
+  /// Take hold of a row: the order stops being the server's for as long as the
+  /// hand is on it.
+  const grab = (event: PointerEvent, id: number) => {
+    // The primary button, a finger or a pen. A right-click is not a drag.
+    if (event.button !== 0) return;
+
+    // So a touch drags the row instead of selecting the text under it.
+    event.preventDefault();
+
+    // Every move from here reaches this grip, whatever the pointer ends up
+    // over — including the gap between two rows and the world outside the
+    // sidebar.
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+    // Held first and ordered second, in that order: the two are read together
+    // by the effect below, and an order taken hold of by nobody is one it is
+    // entitled to throw away.
+    setHeld(id);
+    setDragged(shown().map((row) => row.id));
+  };
+
+  /// The hand moved: put the held row where the pointer is.
+  const drag = (event: PointerEvent) => {
+    const id = held();
+    const order = dragged();
+    if (id === null || !order || !list) return;
+
+    const to = order.indexOf(under(list, event.clientY));
+    if (to < 0 || to === order.indexOf(id)) return;
+
+    setDragged(moved(order, id, to));
+  };
+
+  /// The hand let go: what is on the screen is what the human meant, so that is
+  /// what is sent.
+  const drop = () => {
+    const order = dragged();
+    if (held() === null) return;
+
+    setHeld(null);
+    if (order) place.mutate(order);
+  };
+
+  /// And the same move made from the keyboard, which is the whole of what a
+  /// grip has to offer somebody who is not dragging anything: one row up, one
+  /// row down, and the list saved each time as a drag saves it.
+  const step = (id: number, by: number) => {
+    const order = shown().map((row) => row.id);
+    const from = order.indexOf(id);
+    const to = from + by;
+    if (from < 0 || to < 0 || to >= order.length) return;
+
+    const put = moved(order, id, to);
+    setDragged(put);
+    place.mutate(put);
+  };
 
   const start = useMutation(() => ({
     mutationFn: (repoId: number) => startConversation(repoId),
@@ -166,21 +300,30 @@ export function Conversations(props: {
           <p class="empty">Nothing is being worked on yet.</p>
         </Match>
         <Match when={conversations.data}>
-          {(rows) => (
-            <ul class="conversation-list">
-              <For each={rows()}>
-                {(entry) => (
-                  <ConversationRow
-                    entry={entry}
-                    selected={String(entry.id) === props.selected}
-                    open={props.open}
-                  />
-                )}
-              </For>
-            </ul>
-          )}
+          <ul class="conversation-list" ref={list}>
+            <For each={shown()}>
+              {(entry) => (
+                <ConversationRow
+                  entry={entry}
+                  selected={String(entry.id) === props.selected}
+                  held={held() === entry.id}
+                  open={props.open}
+                  grab={grab}
+                  drag={drag}
+                  drop={drop}
+                  step={step}
+                />
+              )}
+            </For>
+          </ul>
         </Match>
       </Switch>
+
+      {/* The order was not saved, which is worth saying because what is on the
+          screen is the server's order rather than the one they just made. */}
+      <Show when={place.isError}>
+        <p class="error">The order could not be saved: {place.error?.message}</p>
+      </Show>
 
       {/* The rest of Verkstead, which is one page: the Repos and the Agent
           Profiles a Conversation is settled against, and what Verkstead itself
@@ -344,7 +487,12 @@ function spoken(entry: ConversationEntry): string {
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
+  held: boolean;
   open: (id: number) => void;
+  grab: (event: PointerEvent, id: number) => void;
+  drag: (event: PointerEvent) => void;
+  drop: () => void;
+  step: (id: number, by: number) => void;
 }): JSX.Element {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Aborted";
@@ -352,14 +500,20 @@ function ConversationRow(props: {
   return (
     <li
       class="conversation-row"
+      // Read by the drag to say which row the pointer is over, which is a
+      // question about the rendered list rather than about the data behind it.
+      data-id={props.entry.id}
       classList={{
         selected: props.selected,
         draft: props.entry.state === "Draft",
         ended: ended(),
+        waiting: mark(props.entry) === "waiting",
+        held: props.held,
       }}
     >
       <button
         type="button"
+        class="open"
         aria-current={props.selected ? "true" : undefined}
         aria-label={spoken(props.entry)}
         onClick={() => props.open(props.entry.id)}
@@ -374,9 +528,77 @@ function ConversationRow(props: {
             the whole width to its name. The label above has already said what
             it means, so there is nothing here for a screen reader to find. */}
         <Show when={mark(props.entry)}>
-          {(which) => <span class={`mark ${which()}`} />}
+          {(which) => (
+            <span class={`mark ${which()}`} aria-hidden="true">
+              {which() === "waiting" ? WANTS_YOU : ""}
+            </span>
+          )}
         </Show>
+      </button>
+
+      {/* The grip: what is dragged, and the one control on this row that is
+          about the list rather than about the Conversation. Its own label,
+          because what it does is not what the card beside it does — and its own
+          keys, because a control that could only be dragged would be a control
+          half the people using it could not reach. */}
+      <button
+        type="button"
+        class="grip"
+        aria-label={`Move ${props.entry.branch}`}
+        onPointerDown={(event) => props.grab(event, props.entry.id)}
+        onPointerMove={props.drag}
+        onPointerUp={props.drop}
+        onPointerCancel={props.drop}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            props.step(props.entry.id, -1);
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            props.step(props.entry.id, 1);
+          }
+        }}
+      >
+        {GRIP}
       </button>
     </li>
   );
 }
+
+/// The same list with one row moved to a place in it, which is the whole of
+/// what a drag and an arrow key each do.
+function moved(order: number[], id: number, to: number): number[] {
+  const put = [...order];
+  put.splice(put.indexOf(id), 1);
+  put.splice(to, 0, id);
+  return put;
+}
+
+/// Which row the pointer is over: the first whose bottom edge is below it, and
+/// the last row when it is below all of them.
+///
+/// By the rendered rows rather than by arithmetic over a row height, because
+/// rows are not all one height — a long branch name wraps — and a drag that
+/// guessed would put the row somewhere the human was not pointing.
+function under(list: HTMLUListElement, y: number): number {
+  const rows = [...list.querySelectorAll<HTMLElement>(".conversation-row")];
+  const over =
+    rows.find((row) => y < row.getBoundingClientRect().bottom) ?? rows.at(-1);
+
+  return Number(over?.dataset.id ?? NaN);
+}
+
+/// What the mark on a Conversation waiting on the human says, inside the accent
+/// disc the stylesheet draws around it.
+///
+/// An icon rather than the dot this used to be, because what it has to survive
+/// is a glance down a list on a phone: a shape is read where a dot has to be
+/// looked for. Hidden from a screen reader, which is told the same thing in
+/// words by the card's own label — see [`spoken`].
+const WANTS_YOU = "!";
+
+/// And what the grip says: the dots everything draggable is gripped by, so that
+/// what it is for needs no explaining. Two columns of them, which is the shape
+/// the convention is, in characters rather than in a drawing — every other mark
+/// in this viewer is a character.
+const GRIP = "⋮⋮";

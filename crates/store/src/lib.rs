@@ -34,6 +34,7 @@ mod conversations;
 mod deferrals;
 mod interruptions;
 mod pauses;
+mod placements;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -63,6 +64,7 @@ pub use pauses::{
     By, Pause, Resumed, Resuming, Waiting, open_pause, pause, record_pause, resume_pause,
     waiting_pauses,
 };
+pub use placements::place_conversations;
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
     load_profile, profiles, update_profile,
@@ -689,6 +691,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // off the Conversations alone: none of it is something that happened, so
     // none of it is an Event.
     wrap_up::apply_schema(pool).await?;
+
+    // And where the human put each Conversation in the sidebar, which hangs off
+    // the Conversations alone for that reason too — an order is a fact about the
+    // list rather than a thing that happened to the work.
+    placements::apply_schema(pool).await?;
 
     Ok(())
 }

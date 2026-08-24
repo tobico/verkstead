@@ -20,9 +20,9 @@ use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, PauseResumed, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetReading,
+    ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetReading,
     SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
@@ -67,6 +67,10 @@ fn the_viewers_types_are_written_from_these() {
     AbandonedRepo::export_all(&config).unwrap();
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
+
+    // And the order the human dragged that sidebar into, which is the one thing
+    // they say about the list itself rather than about anything on it.
+    NewOrder::export_all(&config).unwrap();
 
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.

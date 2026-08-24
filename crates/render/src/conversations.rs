@@ -1545,6 +1545,20 @@ pub struct NewAdoption {
     pub roadmap: String,
 }
 
+/// The order the human has just dragged the sidebar into: every Conversation
+/// they can see, by id, top first.
+///
+/// The whole list rather than the one row that moved, because the whole list is
+/// what a drag produces and what the human is looking at when they let go. A
+/// move said as *this one, to there* would have to be replayed against a list
+/// the server might have added to since; a list said whole is simply what they
+/// meant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewOrder {
+    pub order: Vec<i64>,
+}
+
 /// What became of starting one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
