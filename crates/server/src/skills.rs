@@ -1365,6 +1365,34 @@ mod tests {
         );
     }
 
+    /// The escape hatch: a finding too big for the sitting may offer to be split
+    /// out instead, and what the session then writes for it is a backlog rather
+    /// than a fix.
+    #[test]
+    fn the_reviewing_skill_offers_a_split_only_where_the_work_is_too_big() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("split: Q3.2"),
+            "the Option that means split it out is named beside the one that means fix \
+             it: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Offer it rarely, and never by default"),
+            "and offered only where the work is genuinely too big — an ordinary review \
+             carries no split at all: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("`.tasks/` backlog") && reviewing.contains("TODO.md"),
+            "what a split pick is owed is a backlog, written here: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("Do not build any of it"),
+            "and written rather than built, because a backlog is worked a session at a \
+             time: {reviewing}"
+        );
+    }
+
     /// The other half: the session waits for the answers rather than being ended
     /// on the ask, and what it does with them is what the human wrote.
     #[test]
@@ -1570,6 +1598,11 @@ mod tests {
             responding.contains("The answers are yours to wait for"),
             "and nothing ends this session on the ask, as nothing ends the review's: \
              {responding}"
+        );
+        assert!(
+            responding.contains("No `split` here"),
+            "and the escape hatch is the review's alone: a batch session that split \
+             something out would be owed a backlog nobody reads it for — {responding}"
         );
     }
 

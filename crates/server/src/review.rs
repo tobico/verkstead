@@ -41,6 +41,21 @@
 //! Answering the Set settles nothing — the Response is what the session acts on,
 //! and it is still acting when it arrives.
 //!
+//! **A finding too big for the sitting can be split out instead.** Where the
+//! review judges one more work than it can do between the answers and its push,
+//! it offers a third Option on that finding — and where the human picks it, what
+//! the session writes for that finding is a `.tasks/` backlog rather than a fix.
+//! The Conversation then goes back down the ladder: Wrapping to Implementing,
+//! the backlog worked a session at a time as any other is, and the finish that
+//! follows the last task wraps it up again on the pull request it already had,
+//! reviewed afresh. See [`crate::runner::build_the_split_out`].
+//!
+//! Offered rarely and never by default: a Set that put the choice on every
+//! finding would be asking the human to plan the work as well as decide it, and
+//! the ordinary handful of fixes is what this whole phase exists to keep in one
+//! session. A review that offers none is the common case and is not the poorer
+//! for it.
+//!
 //! **Nothing the human accepted is allowed to go quietly.** A session that asked,
 //! was answered and then went — cleanly or otherwise — with nothing committed
 //! since is a wrap-up owing work nobody is left to do, and a review that settled
@@ -50,7 +65,10 @@
 //! the answers is the doing never having happened. That stops the run at an
 //! Interruption saying what is owed, and a retry is the doing over again — one
 //! fix session handed every accepted finding at once, because the decisions were
-//! made and only the carrying out failed. Nothing is asked again.
+//! made and only the carrying out failed. Nothing is asked again. A split pick
+//! is owed the same way and reads the same rule the other way round: what it is
+//! owed is the backlog, so the branch is asked whether one is on it rather than
+//! whether anything was committed.
 //!
 //! A review session that ends badly having been owed nothing is not a review that
 //! had nothing to do: it is a review that did not finish. That stops the run at
@@ -73,6 +91,8 @@
 //! where a session is dispatched, and the watcher never dispatched this one — so
 //! anything still red once the Worktree is free meets the watcher's ordinary
 //! flow, whole. See [`crate::checks`].
+
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::runner::Reviewed;
@@ -129,20 +149,22 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     }
 }
 
-/// The review session is over: settle the review, or stop the run.
+/// The review session is over: settle the review, send the work back to be
+/// built, or stop the run.
 ///
-/// One question first, and it is asked of the record rather than of the session:
-/// is there anything the human accepted that never landed? That is the failure
-/// this half exists for, and it reads the same whether the session saw itself out
-/// or fell over — the decisions are made either way, and what is owed is owed.
+/// One question first, and it is asked of the record and the branch rather than
+/// of the session: is there anything the human decided about that never landed?
+/// That is the failure this half exists for, and it reads the same whether the
+/// session saw itself out or fell over — the decisions are made either way, and
+/// what is owed is owed.
 ///
 /// `ended_badly` is how it ended where it did not end well, and the Timeline
 /// Event it was printing into. A session owed nothing that ended badly is a
 /// review that did not finish, which is the other Interruption here.
 async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(String, i64)>) {
-    let owed = unlanded(state, conversation_id).await;
+    let owed = owing_now(state, conversation_id).await;
 
-    if !owed.is_empty() {
+    if !owed.nothing() {
         let (how, writing) = match &ended_badly {
             Some((how, writing)) => (Some(how.as_str()), Some(*writing)),
             None => (None, None),
@@ -156,23 +178,105 @@ async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(Strin
     }
 
     // Everything it was sent to do is done: the branch read, whatever it found
-    // put to the human, and whatever they accepted fixed and pushed.
-    settle(state, conversation_id).await;
+    // put to the human, whatever they accepted fixed and pushed, and whatever
+    // they split out written as a backlog.
+    carried_out(state, conversation_id).await
+}
+
+/// What a review that did everything it was sent to do leaves behind: a wrap-up
+/// with one less thing to wait on, or a Conversation on its way back to being
+/// built.
+///
+/// Which of the two is a fact about what the human answered rather than a
+/// choice. A Response that split nothing out is the ordinary end — the fixes are
+/// pushed and the review is over. One that split anything out has a backlog on
+/// the branch that nobody has worked, and a wrap-up that settled over the top of
+/// it would reach Done with the work it agreed to still unwritten.
+///
+/// Asked of the record rather than of the branch, unlike [`owing_now`]: what
+/// decides this is what the human picked, and the backlog being there has
+/// already been established by the time this runs.
+async fn carried_out(state: &AppState, conversation_id: i64) {
+    if split_out(state, conversation_id).await.is_empty() {
+        settle(state, conversation_id).await;
+
+        tracing::info!(
+            conversation_id,
+            "the review is over, so the wrap-up carries on"
+        );
+
+        return;
+    }
+
+    built_instead(state, conversation_id).await
+}
+
+/// Send the Conversation back down the ladder to build what the review split
+/// out.
+///
+/// The one move out of Wrapping there is, and the review's settle goes with it —
+/// see [`store::implement_again`], which does both in one transaction. So there
+/// is nothing to settle here and nothing to unsettle: this review is over
+/// without ever having been settled, and the one the second wrap runs is a fresh
+/// reading of a branch that has since been built on.
+///
+/// The backlog is then worked exactly as any other is, in a task of its own —
+/// spawned rather than awaited, because the Turn this Conversation's Worktree is
+/// under is still held by the review that is calling this, and the first session
+/// of the backlog needs it.
+///
+/// Anything but a move that was made leaves it where it is, with the reason in
+/// the log: a Conversation aborted out from under the session that wrote the
+/// backlog is not one to start building.
+async fn built_instead(state: &AppState, conversation_id: i64) {
+    match store::implement_again(&state.pool, conversation_id).await {
+        Ok(store::Rebuilding::Started) => {}
+        Ok(store::Rebuilding::NotWrapping) => {
+            return tracing::info!(
+                conversation_id,
+                "the Conversation stopped wrapping up, so the backlog its review wrote \
+                 was not started"
+            );
+        }
+        Ok(store::Rebuilding::NoSuchConversation) => {
+            return tracing::error!(
+                conversation_id,
+                "there is no Conversation left to build the backlog its review wrote"
+            );
+        }
+        Err(error) => {
+            return tracing::error!(
+                error = ?error,
+                conversation_id,
+                "sending a Conversation back to build what its review split out failed"
+            );
+        }
+    }
 
     tracing::info!(
         conversation_id,
-        "the review is over, so the wrap-up carries on"
+        "the review split findings out into a backlog, so the Conversation goes back to \
+         build it"
     );
+
+    // The Timeline has a move on it and a task list pinned above it, and an open
+    // page should say so without being reloaded.
+    state.nudges.announce(Nudge::Conversation {
+        conversation: conversation_id,
+    });
+
+    crate::runner::build_the_split_out(state, conversation_id);
 }
 
 /// Review it again because the human asked for it — or land what it was answered
 /// and never landed, which is the other thing a retry here can mean.
 ///
 /// Which of the two is a fact about the record rather than something to choose:
-/// findings the human accepted with nothing committed since are a run that
+/// findings the human decided about with nothing to show for it are a run that
 /// stopped between the deciding and the doing, and what a retry owes there is the
-/// doing alone. Everything else is the review over again, in a session as fresh
-/// as the first.
+/// doing alone — the fixes committed, the split-out findings written as a
+/// backlog, or both. Everything else is the review over again, in a session as
+/// fresh as the first.
 ///
 /// The wrap-up's other half goes back under watch either way. The checks stopped
 /// being watched when this Interruption was raised — nothing advances past an
@@ -181,30 +285,37 @@ async fn over(state: &AppState, conversation_id: i64, ended_badly: Option<(Strin
 pub(crate) async fn retried(state: AppState, conversation_id: i64) {
     crate::wrapping::watching(&state, conversation_id);
 
-    let owed = unlanded(&state, conversation_id).await;
+    let owed = owing_now(&state, conversation_id).await;
 
-    if owed.is_empty() {
+    if owed.nothing() {
         tracing::info!(conversation_id, "the review is being run again");
         return;
     }
 
     tracing::info!(
         conversation_id,
-        fixes = owed.len(),
+        fixes = owed.fixes.len(),
+        splits = owed.splits.len(),
         "the review was answered and never acted on, so a session is starting on the \
-         fixes alone"
+         doing alone"
     );
 
     land(state, conversation_id, owed).await
 }
 
-/// Land the fixes the human accepted, in one session that does nothing else.
+/// Do what the review was answered and never did, in one session that does
+/// nothing else.
 ///
-/// One session handed all of them together, which is what the review's own would
+/// One session handed all of it together, which is what the review's own would
 /// have done: the decisions were made, so there is nothing to propose and nothing
 /// to read the branch for a second time. A session per finding would be a fresh
 /// context per fix, each re-reading the diff to work out what the review already
 /// wrote down.
+///
+/// The fixes and the backlog go to the same session and are told apart in what it
+/// is handed — see [`feedback`]. They are one piece of work in the sense that
+/// matters here: everything the human decided about, carried out on one branch by
+/// one agent, once.
 ///
 /// The Worktree is taken for it like any other session's, so a red check going
 /// red mid-fix queues behind this rather than ending it.
@@ -212,7 +323,7 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
 /// Asked of the record again afterwards, exactly as it was the first time: a fix
 /// session that landed nothing has left the same work owed, and letting that one
 /// through would be the failure this whole path exists to close.
-async fn land(state: AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
+async fn land(state: AppState, conversation_id: i64, owed: Owing) {
     let _turn = state.sessions.turn(conversation_id).await;
 
     // Asked on the other side of the wait, for the reason the review asks twice:
@@ -220,41 +331,92 @@ async fn land(state: AppState, conversation_id: i64, owed: Vec<store::Fixing>) {
     if !crate::wrapping::still_going(&state, conversation_id).await {
         tracing::info!(
             conversation_id,
-            "the Conversation stopped wrapping up, so the fixes it owed were not dispatched"
+            "the Conversation stopped wrapping up, so what it owed was not dispatched"
         );
         return;
     }
 
     let writing = crate::runner::address(&state, conversation_id, &feedback(&owed)).await;
 
-    let owed = unlanded(&state, conversation_id).await;
+    let owed = owing_now(&state, conversation_id).await;
 
-    if !owed.is_empty() {
+    if !owed.nothing() {
         return dropped(&state, conversation_id, &owed, None, writing).await;
     }
 
-    settle(&state, conversation_id).await;
-
     tracing::info!(
         conversation_id,
-        "the fixes the review was owed have landed, so the wrap-up carries on"
+        "what the review was owed has landed, so the wrap-up carries on"
     );
+
+    carried_out(&state, conversation_id).await
 }
 
-/// What the fix session is told: every finding the human accepted, in the words
-/// the review wrote for whoever would fix them, and whatever they said beside
-/// each answer.
+/// What the fix session is told: every finding the human decided about, in the
+/// words the review wrote for whoever would carry them out, and whatever they
+/// said beside each answer.
 ///
 /// Their words go under each finding rather than over it, for the reason a retry
 /// note goes under the documents: the finding says what is wrong, and this says
 /// what they thought about it. "Yes, but leave the public signature alone" is
 /// only worth writing if it reaches the session that can act on it.
 ///
+/// Two instructions where the human answered both ways, and they are different
+/// work: what was accepted is fixed on the branch, and what was split out is
+/// written down as a backlog for sessions of its own rather than built here.
+///
 /// Nothing here is put as a question. The Set was answered and the answers are
 /// what this is made of, so a session that came back with a proposal would be
 /// asking the human to decide something they already have.
-fn feedback(owed: &[store::Fixing]) -> String {
-    let findings = owed
+fn feedback(owed: &Owing) -> String {
+    let mut told = String::from(
+        "The review of this branch raised what is below, and the human has already said \
+         what to do about each of them. The session that was to carry that out ended \
+         without landing anything, so what is left is the doing rather than the deciding: \
+         none of this is still a question.\n",
+    );
+
+    if !owed.fixes.is_empty() {
+        told.push_str(&format!(
+            "\nFix {each}, commit, and push so the pull request has {it}.\n\n{findings}\n",
+            each = match owed.fixes.len() {
+                1 => "this",
+                _ => "each of these",
+            },
+            it = match owed.fixes.len() {
+                1 => "it",
+                _ => "them",
+            },
+            findings = written(&owed.fixes),
+        ));
+    }
+
+    if !owed.splits.is_empty() {
+        told.push_str(&format!(
+            "\nAnd write {this} into a `.tasks/` backlog: a `TODO.md` listing {them} and one \
+             numbered `NN-<slug>.md` task file each, carrying what the review wrote below so \
+             that whoever works it needs nothing else. Commit the backlog. Do not build {them} \
+             here — a backlog is worked a session at a time, and Verkstead runs this one once \
+             it is on the branch.\n\n{findings}\n",
+            this = match owed.splits.len() {
+                1 => "this",
+                _ => "these",
+            },
+            them = match owed.splits.len() {
+                1 => "it",
+                _ => "them",
+            },
+            findings = written(&owed.splits),
+        ));
+    }
+
+    told
+}
+
+/// One run of findings as the session reads them: the review's words, and the
+/// human's under each where they wrote any.
+fn written(findings: &[store::Fixing]) -> String {
+    findings
         .iter()
         .map(|finding| match finding.said.trim().is_empty() {
             true => finding.what.trim().to_owned(),
@@ -265,26 +427,7 @@ fn feedback(owed: &[store::Fixing]) -> String {
             ),
         })
         .collect::<Vec<String>>()
-        .join("\n\n---\n\n");
-
-    format!(
-        "The review of this branch raised {this}, and the human has said to fix {it}. The \
-         session that was to do it ended without landing anything, so what is left is the \
-         doing rather than the deciding: none of this is still a question. Fix {each}, commit, \
-         and push so the pull request has {it}.\n\n{findings}\n",
-        this = match owed.len() {
-            1 => "this",
-            _ => "these",
-        },
-        it = match owed.len() {
-            1 => "it",
-            _ => "them",
-        },
-        each = match owed.len() {
-            1 => "it",
-            _ => "each of them",
-        },
-    )
+        .join("\n\n---\n\n")
 }
 
 /// The findings this Conversation's review was told to fix and nothing has
@@ -305,6 +448,96 @@ async fn unlanded(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> 
             tracing::error!(error = ?error, conversation_id, "reading what a review was owed failed");
             Vec::new()
         }
+    }
+}
+
+/// The findings this Conversation's review was told to split out into a backlog
+/// of their own, landed or not.
+///
+/// A store that will not answer reads as *nothing split out*, which is the right
+/// way round for both things this decides: whether to stop the run, and whether
+/// to send a Conversation back down the ladder.
+async fn split_out(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> {
+    match store::split_out(&state.pool, conversation_id).await {
+        Ok(split) => split,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a review split out failed");
+            Vec::new()
+        }
+    }
+}
+
+/// Everything the human decided about that has nothing to show for it.
+///
+/// The two halves are owed differently because they land differently. A fix is
+/// owed until something is committed after the Answers, which is the record's
+/// question and the store's to answer. A split is owed until there is a backlog
+/// on the branch — a `.tasks/` list, committed as it stands — which is the
+/// Worktree's question and no reading of the record can stand in for it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Owing {
+    /// Findings the human said to fix here, with nothing committed since.
+    fixes: Vec<store::Fixing>,
+
+    /// Findings they said to split out, with no backlog written.
+    splits: Vec<store::Fixing>,
+}
+
+impl Owing {
+    /// Whether nothing at all is owed, which is the ordinary answer.
+    fn nothing(&self) -> bool {
+        self.fixes.is_empty() && self.splits.is_empty()
+    }
+}
+
+/// What this Conversation's review is owed as things stand.
+///
+/// Asked afresh every time rather than remembered, for the reason the record is
+/// asked rather than the session trusted: what is owed is a question about the
+/// branch and the Set, and both move while a session runs.
+///
+/// The branch is only asked about where something was split out, which is the
+/// rare case: an ordinary review owes a `git status` of one path to nobody.
+async fn owing_now(state: &AppState, conversation_id: i64) -> Owing {
+    let fixes = unlanded(state, conversation_id).await;
+    let splits = split_out(state, conversation_id).await;
+
+    if splits.is_empty() || backlog(state, conversation_id).await {
+        return Owing {
+            fixes,
+            splits: Vec::new(),
+        };
+    }
+
+    Owing { fixes, splits }
+}
+
+/// Whether the backlog a review split its findings out into is on the branch.
+///
+/// A Conversation with no Worktree left has nowhere for one to be, and a store
+/// that will not answer has said nothing about whether it is there. Both read as
+/// *not written*, which is the right way round for what is on the other side of
+/// this: an Interruption the human can dismiss with a glance at the branch,
+/// against a wrap-up that carried on as though work nobody had written was done.
+async fn backlog(state: &AppState, conversation_id: i64) -> bool {
+    let worktree = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.worktree,
+        Ok(None) => {
+            tracing::error!(
+                conversation_id,
+                "there is no Conversation left to look for a backlog in"
+            );
+            return false;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation to look for a backlog in failed");
+            return false;
+        }
+    };
+
+    match worktree {
+        Some(worktree) => crate::runner::backlog_landed(&worktree).await,
+        None => false,
     }
 }
 
@@ -411,14 +644,14 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
     }
 }
 
-/// Stop the run: the human accepted fixes that nothing landed, and only they can
-/// say what happens now.
+/// Stop the run: the human decided about findings that nothing came of, and only
+/// they can say what happens now.
 ///
 /// The Interruption names the doing rather than the reading, because that is the
 /// half that failed — and it says what is owed in the review's own words, so the
-/// choice is answerable without opening the Set again. Retrying it is the fixes
-/// in one session; taking over is the human making them; aborting ends the run
-/// with the branch exactly as the session left it.
+/// choice is answerable without opening the Set again. Retrying it is the doing
+/// over again in one session; taking over is the human doing it; aborting ends
+/// the run with the branch exactly as the session left it.
 ///
 /// `how` is how the session ended where it ended badly, and `writing` the Event
 /// it was printing into — both absent for a session that saw itself out and
@@ -426,7 +659,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 async fn dropped(
     state: &AppState,
     conversation_id: i64,
-    owed: &[store::Fixing],
+    owed: &Owing,
     how: Option<&str>,
     writing: Option<i64>,
 ) {
@@ -434,7 +667,7 @@ async fn dropped(
         state,
         conversation_id,
         store::Step::Review,
-        "landing the fixes the review's findings were accepted for",
+        what_failed(owed),
         &owing(owed, how),
         writing,
     )
@@ -443,9 +676,23 @@ async fn dropped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review's accepted fixes were never landed and the Interruption saying so \
-             could not be raised"
+            "a review's decided findings were never acted on and the Interruption saying \
+             so could not be raised"
         );
+    }
+}
+
+/// Which half of the doing failed, as the step line above the evidence says it.
+///
+/// Three answers because there are three ways to owe something, and the human
+/// reads this line before they read anything else: a review that pushed its
+/// fixes and never wrote the backlog is a different thing to go and look at from
+/// one that did neither.
+fn what_failed(owed: &Owing) -> &'static str {
+    match (owed.fixes.is_empty(), owed.splits.is_empty()) {
+        (false, true) => "landing the fixes the review's findings were accepted for",
+        (true, false) => "writing the backlog the review's findings were split out into",
+        _ => "carrying out what was decided about the review's findings",
     }
 }
 
@@ -456,34 +703,59 @@ async fn dropped(
 /// each is on the Set the human answered, one row up the same Timeline.
 const OWED_WIDTH: usize = 100;
 
-/// What is owed, as the Interruption says it: how many fixes, and the review's
-/// own words for each.
+/// What is owed, as the Interruption says it: how many of each, and the review's
+/// own words for every one of them.
 ///
 /// The review's words rather than Verkstead's, because the human decided against
 /// those words an hour ago and these are the ones they will recognise.
-fn owing(owed: &[store::Fixing], how: Option<&str>) -> String {
-    let fixes = owed
-        .iter()
-        .map(|finding| format!("“{}”", in_a_line(&finding.what)))
-        .collect::<Vec<String>>()
-        .join("; ");
+fn owing(owed: &Owing, how: Option<&str>) -> String {
+    let mut halves = Vec::new();
 
-    let what = format!(
-        "{} the human accepted {} landed: {fixes}",
-        match owed.len() {
-            1 => "one fix".to_owned(),
-            n => format!("{n} fixes"),
-        },
-        match owed.len() {
-            1 => "was never",
-            _ => "were never",
-        },
-    );
+    if !owed.fixes.is_empty() {
+        halves.push(format!(
+            "{} the human accepted {} landed: {}",
+            match owed.fixes.len() {
+                1 => "one fix".to_owned(),
+                n => format!("{n} fixes"),
+            },
+            match owed.fixes.len() {
+                1 => "was never",
+                _ => "were never",
+            },
+            in_lines(&owed.fixes),
+        ));
+    }
+
+    if !owed.splits.is_empty() {
+        halves.push(format!(
+            "{} the human split out {} written into a backlog: {}",
+            match owed.splits.len() {
+                1 => "one finding".to_owned(),
+                n => format!("{n} findings"),
+            },
+            match owed.splits.len() {
+                1 => "was never",
+                _ => "were never",
+            },
+            in_lines(&owed.splits),
+        ));
+    }
+
+    let what = halves.join(", and ");
 
     match how {
         Some(how) => format!("{how}, and {what}"),
         None => format!("it ended without pushing, and {what}"),
     }
+}
+
+/// A run of findings as one line of the Interruption's evidence.
+fn in_lines(findings: &[store::Fixing]) -> String {
+    findings
+        .iter()
+        .map(|finding| format!("“{}”", in_a_line(&finding.what)))
+        .collect::<Vec<String>>()
+        .join("; ")
 }
 
 /// One finding on one line: whitespace collapsed, and clamped to what a card
@@ -511,15 +783,31 @@ mod tests {
         }
     }
 
+    /// What is owed where the human said to fix everything here.
+    fn fixing(findings: Vec<store::Fixing>) -> Owing {
+        Owing {
+            fixes: findings,
+            splits: Vec::new(),
+        }
+    }
+
+    /// And where they said to split everything out instead.
+    fn splitting(findings: Vec<store::Fixing>) -> Owing {
+        Owing {
+            fixes: Vec::new(),
+            splits: findings,
+        }
+    }
+
     /// What a fix session is told about the findings: the review's own words for
     /// whoever would fix them, and that these are decisions rather than
     /// proposals.
     #[test]
     fn a_fix_session_is_told_every_accepted_finding_at_once() {
-        let told = feedback(&[
+        let told = feedback(&fixing(vec![
             finding("`window.rs` never resets the counter between windows.", ""),
             finding("`limits.rs` and `window.rs` each grew their own clock.", ""),
-        ]);
+        ]));
 
         assert!(
             told.contains("`window.rs` never resets the counter")
@@ -527,12 +815,16 @@ mod tests {
             "both findings, in the words the review wrote: {told}",
         );
         assert!(
-            told.contains("said to fix them") && told.contains("none of this is still a question"),
+            told.contains("Fix each of these") && told.contains("none of this is still a question"),
             "and that the deciding is over: {told}",
         );
         assert!(
             !told.contains("What they said"),
             "with nothing said about words nobody wrote: {told}",
+        );
+        assert!(
+            !told.contains(".tasks/"),
+            "and nothing about a backlog nobody asked for: {told}",
         );
     }
 
@@ -540,10 +832,10 @@ mod tests {
     /// the Answer's free text is kept on the Set at all.
     #[test]
     fn what_the_human_wrote_alongside_reaches_the_session_that_can_act_on_it() {
-        let told = feedback(&[finding(
+        let told = feedback(&fixing(vec![finding(
             "`window.rs` never resets the counter between windows.",
             "Yes, but leave the public signature alone.",
-        )]);
+        )]));
 
         assert!(
             told.contains("leave the public signature alone"),
@@ -555,16 +847,67 @@ mod tests {
         );
     }
 
+    /// A finding the human split out is owed a backlog rather than a fix, and the
+    /// session is told the difference: write it down, and do not build it here.
+    #[test]
+    fn a_split_finding_is_told_as_a_backlog_to_write_rather_than_work_to_do() {
+        let told = feedback(&splitting(vec![finding(
+            "The whole clock abstraction wants rebuilding.",
+            "Agreed, but keep the public signature.",
+        )]));
+
+        assert!(
+            told.contains("`.tasks/` backlog") && told.contains("TODO.md"),
+            "what to write: {told}",
+        );
+        assert!(
+            told.contains("Do not build it here"),
+            "and that writing it is the whole of the job: {told}",
+        );
+        assert!(
+            told.contains("The whole clock abstraction")
+                && told.contains("keep the public signature"),
+            "carrying the review's words and the human's: {told}",
+        );
+        assert!(
+            !told.contains("commit, and push"),
+            "with nothing said about fixes nobody accepted: {told}",
+        );
+    }
+
+    /// A Response answered both ways is two instructions, because it is two
+    /// different pieces of work — and each finding is under the one it belongs
+    /// to.
+    #[test]
+    fn a_mixed_response_tells_the_session_to_fix_one_and_write_the_other_down() {
+        let told = feedback(&Owing {
+            fixes: vec![finding("Reset the counter as the window rolls.", "")],
+            splits: vec![finding("Rebuild the clock abstraction.", "")],
+        });
+
+        assert!(
+            told.contains("Fix this") && told.contains("`.tasks/` backlog"),
+            "both instructions: {told}",
+        );
+        assert!(
+            told.find("Reset the counter") < told.find("`.tasks/` backlog"),
+            "the fixes under the one that asks for them: {told}",
+        );
+        assert!(
+            told.find("`.tasks/` backlog") < told.find("Rebuild the clock"),
+            "and the split findings under theirs: {told}",
+        );
+    }
+
     /// What the Interruption says: that the fixes never landed, and which ones.
     #[test]
     fn the_interruption_says_what_is_unlanded_in_the_review_s_own_words() {
-        let says = owing(
-            &[
-                finding("Reset the counter as the window rolls.", ""),
-                finding("Collapse the two clocks onto one.", ""),
-            ],
-            None,
-        );
+        let owed = fixing(vec![
+            finding("Reset the counter as the window rolls.", ""),
+            finding("Collapse the two clocks onto one.", ""),
+        ]);
+
+        let says = owing(&owed, None);
 
         assert!(
             says.contains("2 fixes") && says.contains("never landed"),
@@ -574,13 +917,61 @@ mod tests {
             says.contains("Reset the counter") && says.contains("Collapse the two clocks"),
             "and what, as the review wrote it: {says}",
         );
+        assert_eq!(
+            what_failed(&owed),
+            "landing the fixes the review's findings were accepted for",
+            "under the half of the doing that failed",
+        );
+    }
+
+    /// A backlog nobody wrote is owed the same way and says so in its own words:
+    /// what failed there is the writing rather than the landing.
+    #[test]
+    fn a_split_that_was_never_written_says_the_backlog_is_what_is_missing() {
+        let owed = splitting(vec![finding("Rebuild the clock abstraction.", "")]);
+
+        let says = owing(&owed, None);
+
+        assert!(
+            says.contains("one finding") && says.contains("never written into a backlog"),
+            "what is owed: {says}",
+        );
+        assert!(
+            says.contains("Rebuild the clock abstraction"),
+            "and which: {says}",
+        );
+        assert_eq!(
+            what_failed(&owed),
+            "writing the backlog the review's findings were split out into",
+        );
+    }
+
+    /// A session that did neither says both, which is the one card the human
+    /// reads before they go and look at the branch.
+    #[test]
+    fn a_session_that_landed_neither_says_both_halves() {
+        let owed = Owing {
+            fixes: vec![finding("Reset the counter as the window rolls.", "")],
+            splits: vec![finding("Rebuild the clock abstraction.", "")],
+        };
+
+        let says = owing(&owed, None);
+
+        assert!(
+            says.contains("one fix") && says.contains("one finding"),
+            "both halves: {says}",
+        );
+        assert_eq!(
+            what_failed(&owed),
+            "carrying out what was decided about the review's findings",
+        );
     }
 
     /// A session that fell over says both: how it ended, and what it left owed.
     #[test]
     fn a_session_that_ended_badly_says_so_beside_what_it_left() {
         let says = owing(
-            &[finding("Reset the counter as the window rolls.", "")],
+            &fixing(vec![finding("Reset the counter as the window rolls.", "")]),
             Some("exited with status 1"),
         );
 

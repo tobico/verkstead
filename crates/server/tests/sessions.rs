@@ -4527,9 +4527,11 @@ async fn a_review_whose_findings_were_all_declined_settles_by_ending() {
 /// either: the pull request the second finish step opens is the one the first
 /// one did.
 ///
-/// The two moves are made here rather than by a session, because the session
-/// that writes the backlog is task 08's. What starts the second wrap's watchers
-/// is a restart, which takes up every Conversation it finds wrapping.
+/// The two moves are made here rather than by a session, so that what is under
+/// test is the plumbing on its own — the whole path a review takes through it is
+/// [`a_review_that_split_a_finding_out_sends_the_work_back_to_be_built`]. What
+/// starts the second wrap's watchers is a restart, which takes up every
+/// Conversation it finds wrapping.
 ///
 /// The checks cannot be asked about, which is what keeps both wraps going: one
 /// that had finished would be a Conversation there was nothing left to review
@@ -4675,6 +4677,359 @@ async fn review_asked(fixture: &Grilling) -> Option<i64> {
     pool.close().await;
 
     asked
+}
+
+/// The Set a review writes where one of its findings is too big to fix in the
+/// sitting it was found in: a third Option on that Question, and a `split` naming
+/// it, so all three answers mean something.
+const REVIEW_WITH_A_SPLIT: &str = r#"
+title: Review of the rate limiter branch
+preface: |
+  Two things worth a decision, and one of them is bigger than this sitting.
+questions:
+  - label: Q1
+    text: The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: The clock abstraction wants rebuilding rather than patching.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 2
+        text: Split it out as its own work
+        recommended: true
+      - n: 3
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset the counter as the window rolls.
+    - fix: Q2.1
+      split: Q2.2
+      what: Collapse the three clocks onto one, injected at construction.
+"#;
+
+/// A review session that writes what was split out as a `.tasks/` backlog and
+/// then ends — once.
+///
+/// Once, because the same stub runs the second wrap's review: a session that
+/// split its findings out every time it read the branch would send the work back
+/// for ever, and what a test wants to watch is the round trip finishing. The
+/// marker is in the spilling directory, which is the one thing bound writable
+/// into every Sandbox of the fixture.
+///
+/// `also` is whatever it does before writing the backlog, which is how a test
+/// says whether anything was accepted to fix here as well.
+fn review_then_split(once: &Path, also: &str) -> String {
+    format!(
+        "    printf 'reading the branch\n'\n    \
+         if [ -e {once} ]; then\n        \
+         printf 'I read the whole branch and found nothing worth raising\n'\n        \
+         exit 0\n    \
+         fi\n    \
+         : > {once}\n    \
+         while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+         {also}mkdir -p .tasks\n    \
+         printf '# Rebuilding the clock\n\n## Tasks\n\n' > .tasks/TODO.md\n    \
+         printf -- '- [ ] 01: collapse the clocks\n' >> .tasks/TODO.md\n    \
+         printf '# 01. Collapse the clocks\n' > .tasks/01-clocks.md\n    \
+         git add -A\n    \
+         git commit --quiet -m 'chore: plan the clock tasks'\n    \
+         printf 'fixed what was accepted and split the rest out\n'",
+        once = quoted(once),
+    )
+}
+
+/// What a session does about a finding the human accepted to fix here, as the
+/// half of [`review_then_split`] a mixed pick adds.
+const AND_A_FIX: &str = "printf 'a fix\n' >> fixes.md\n    \
+     git add -A\n    \
+     git commit --quiet -m 'fix: reset the counter as the window rolls'\n    ";
+
+/// How many times this Conversation has been moved into `state`, which is what
+/// tells a second wrap from a first.
+fn moves_into(view: &ConversationView, state: Lifecycle) -> usize {
+    view.timeline
+        .iter()
+        .filter(|event| matches!(event, TimelineEvent::Moved(moved) if moved.state == state))
+        .count()
+}
+
+/// The escape hatch, end to end.
+///
+/// One review, two findings, and the human answers them differently: fix the
+/// first here, split the second out. So the session does both — the fix
+/// committed and pushed as any accepted finding is, the split written down as a
+/// `.tasks/` backlog — and what Verkstead does with a wrap-up that ended holding
+/// a backlog is send it back down the ladder. The list is then worked a session
+/// at a time like any other, and the finish that follows the last task wraps the
+/// work up again on the pull request it already had, read afresh by a review that
+/// knows nothing of the first.
+///
+/// The checks cannot be asked about, which is what keeps both wraps going: one
+/// that had finished would be a Conversation there was nothing left to review
+/// from.
+#[tokio::test]
+async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let once = spill.path().join("split-written");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, AND_A_FIX));
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2, "free_text": "Keep the public signature." },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The one move down the ladder: a wrap-up that ended holding a backlog is a
+    // Conversation with work to build.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+
+    // Which is then worked and finished, and the finish wraps it up a second
+    // time on the pull request it already had.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Wrapping) == 2).then_some(()))
+        .await;
+
+    let deadline = Instant::now() + PATIENCE;
+    let read_again = loop {
+        let written = std::fs::read_to_string(&reviews).unwrap_or_default();
+
+        if prompts(&written).len() > 1 {
+            break written;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the second wrap never read the branch: {written}",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(
+        prompts(&read_again).len(),
+        2,
+        "one review per wrap, and the second wrap ran its own: {read_again}",
+    );
+
+    let view = fixture.view().await;
+    let landed: Vec<&str> = commits(&view)
+        .iter()
+        .map(|commit| commit.subject.as_str())
+        .collect();
+
+    assert!(
+        landed
+            .iter()
+            .any(|subject| subject.starts_with("fix: reset the counter")),
+        "the finding they accepted was fixed by the session that raised it: {landed:?}",
+    );
+    assert!(
+        landed
+            .iter()
+            .any(|subject| subject.starts_with("chore: plan the clock tasks")),
+        "and the one they split out was written down rather than built: {landed:?}",
+    );
+    assert_eq!(
+        landed
+            .iter()
+            .filter(|subject| subject.starts_with("chore: finish"))
+            .count(),
+        2,
+        "which was then worked to empty and finished, like any other backlog: {landed:?}",
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "and nothing stopped on the way: {:?}",
+        interruptions(&view),
+    );
+    assert_eq!(
+        sets(&view).len(),
+        2,
+        "the human was asked twice — the grilling's proposal and the one review \
+         that found anything: {:?}",
+        sets(&view).len(),
+    );
+}
+
+/// A Response that accepted nothing to fix here and split one finding out works
+/// the same way: there is nothing to commit but the backlog, and committing the
+/// backlog is the whole of what the session was answered.
+///
+/// The half of the rule that would be easy to get wrong — a wrap-up that only
+/// went back down the ladder where something had been fixed first would strand
+/// the split-out work of every review whose other findings were declined.
+#[tokio::test]
+async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let once = spill.path().join("split-written");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, &review_then_split(&once, ""));
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+    let landed: Vec<&str> = commits(&view)
+        .iter()
+        .map(|commit| commit.subject.as_str())
+        .collect();
+
+    assert!(
+        landed
+            .iter()
+            .any(|subject| subject.starts_with("chore: plan the clock tasks")),
+        "the backlog is what it committed: {landed:?}",
+    );
+    assert!(
+        !landed
+            .iter()
+            .any(|subject| subject.starts_with("fix: reset the counter")),
+        "and nothing was fixed, because nothing was accepted to fix: {landed:?}",
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "a review that fixed nothing and split something out owes nobody a fix: {:?}",
+        interruptions(&view),
+    );
+}
+
+/// And a session that landed neither stops the run, saying which half is which.
+///
+/// *Nothing the human accepted goes quietly* reads a split pick the other way
+/// round: what a split is owed is the backlog rather than a commit, so a wrap-up
+/// that settled on the strength of a fix having landed would reach Done with
+/// agreed work nobody had even written down.
+#[tokio::test]
+async fn a_split_nobody_wrote_a_backlog_for_stops_the_run() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.what.contains("writing the backlog"),
+        "the step is named as the half that failed — the fix landed and the \
+         backlog was never written: {stopped:?}",
+    );
+    assert!(
+        stopped.how.contains("never written into a backlog")
+            && stopped.how.contains("Collapse the three clocks"),
+        "and what is owed is said in the words the review wrote: {stopped:?}",
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "a review whose split-out work was never written settles nothing",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and nothing went back down the ladder: there is no backlog to build",
+    );
+
+    // Retrying it is the doing over again, and the session is told both halves of
+    // it: fix what was accepted, and write down what was split out.
+    assert_eq!(
+        fixture.settle(stopped.id, "Retry", "").await,
+        RemedySettled::Settled,
+    );
+
+    let told = until_written(&dispatched).await;
+
+    assert_eq!(
+        prompts(&told).len(),
+        1,
+        "one session for the lot of it, rather than one per finding: {told}",
+    );
+    assert!(
+        told.contains("Collapse the three clocks") && told.contains(".tasks/"),
+        "handed the split-out finding as a backlog to write: {told}",
+    );
+    assert!(
+        told.contains("Do not build"),
+        "and told that writing it is the whole of the job: {told}",
+    );
 }
 
 /// One agent in one Worktree, which is what the wrap-up's turns are for.

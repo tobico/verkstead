@@ -15,7 +15,7 @@ use verkstead_store::{
     ask, finish_wrap_up, fix_attempts, forget_addressed_comments, forget_fix_attempts,
     implement_again, last_proposal, load_conversation, load_response, load_set, open_database,
     pick_direction, record_addressed_comments, record_commit, record_fix_attempt,
-    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
+    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up, split_out,
     start_conversation, start_grilling, submit_response, timeline, unlanded_batch_fixes,
     unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
@@ -592,6 +592,203 @@ async fn a_commit_after_the_answers_is_the_fixes_landing() {
         Vec::new(),
         "and a commit after them is nothing left owed",
     );
+}
+
+/// The review's Set where one finding is too big to fix in the sitting: it names
+/// a second Option beside the one that means fix it, and picking that one means
+/// work it as a task of its own.
+fn reviewing_with_a_split() -> verkstead_schema::QuestionSet {
+    verkstead_schema::QuestionSet::from_yaml(
+        r#"
+title: Review of the rate limiter branch
+questions:
+  - label: Q1
+    text: The window counter is never reset between windows.
+    options:
+      - n: 1
+        text: Fix it
+        recommended: true
+      - n: 2
+        text: Leave it
+  - label: Q2
+    text: The clock abstraction wants rebuilding rather than patching.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 2
+        text: Split it out as its own work
+        recommended: true
+      - n: 3
+        text: Leave it
+review:
+  findings:
+    - fix: Q1.1
+      what: Reset the counter as the window rolls.
+    - fix: Q2.1
+      split: Q2.2
+      what: Collapse the three clocks onto one, injected at construction.
+"#,
+    )
+    .unwrap()
+}
+
+/// A split pick is not a fix to make here, and it is not the human declining
+/// either: it is work for a backlog, and what says it has been carried out is a
+/// backlog on the branch rather than anything on the record.
+///
+/// So the two readings are separate. What was accepted to fix here is
+/// [`unlanded_fixes`] and nothing else, and a session that fixed only that is a
+/// session that has done half of what it was answered.
+#[tokio::test]
+async fn a_finding_split_out_is_owed_a_backlog_rather_than_a_fix() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "a wrap-up nobody has reviewed has split nothing out",
+    );
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "and neither has a review still waiting on the human",
+    );
+
+    let taken = submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  \
+             - label: Q1\n    selected: 1\n  \
+             - label: Q2\n    selected: 2\n    free_text: Yes, but keep the public signature.\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    let Submission::Accepted(_) = taken else {
+        panic!("the Response resolves the Set, so it should be taken: {taken:?}");
+    };
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Reset the counter as the window rolls.".to_owned(),
+            said: String::new(),
+        }],
+        "the finding they said to fix here is a fix and the split one is not",
+    );
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        vec![verkstead_store::Fixing {
+            what: "Collapse the three clocks onto one, injected at construction.".to_owned(),
+            said: "Yes, but keep the public signature.".to_owned(),
+        }],
+        "and the split one is work for a backlog, carrying what they said beside the pick",
+    );
+}
+
+/// And a commit is not a backlog. What lands a fix says nothing about whether
+/// the tasks were written, so the split reading is not filtered by one: what
+/// answers that is the branch, which the store cannot see.
+#[tokio::test]
+async fn a_commit_after_the_answers_does_not_land_what_was_split_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .unwrap();
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 1\n  - label: Q2\n    selected: 2\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
+
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "the fix landed",
+    );
+    assert_eq!(
+        split_out(&pool, id).await.unwrap().len(),
+        1,
+        "and what was split out is still what was split out: whether it was written \
+         is a question about `.tasks/` rather than about the commits",
+    );
+}
+
+/// A finding whose split Option was not the one they picked is not split out.
+/// Fixing it here and leaving it alone are the other two answers, and neither is
+/// work for a backlog.
+#[tokio::test]
+async fn only_the_option_named_as_the_split_splits_anything_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing_with_a_split())
+        .await
+        .unwrap()
+        .unwrap();
+
+    submit_response(
+        &pool,
+        &Settlements::new(8),
+        asked.id,
+        &verkstead_schema::Response::from_yaml(
+            "answers:\n  - label: Q1\n    selected: 2\n  - label: Q2\n    selected: 1\n",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        split_out(&pool, id).await.unwrap(),
+        Vec::new(),
+        "they said to fix it here, which is not splitting it out",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap().len(),
+        1,
+        "and it is owed as the fix it is",
+    );
+}
+
+/// A review that offered no split at all splits nothing out, which is the
+/// ordinary Set: the escape hatch is offered where the work is too big and
+/// nowhere else.
+#[tokio::test]
+async fn a_review_that_offered_no_split_splits_nothing_out() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    answer_the_review(&pool, asked.id).await;
+
+    assert_eq!(split_out(&pool, id).await.unwrap(), Vec::new());
 }
 
 /// A review whose every finding was declined owes nothing, which is the ordinary

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
-use verkstead_schema::{Direction, QuestionSet, SetCreated};
+use verkstead_schema::{Decided, Direction, QuestionSet, Response, Review, SetCreated};
 
 /// The word the `direction` column holds.
 ///
@@ -1676,21 +1676,64 @@ async fn unlanded_on(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Re
         return Ok(Vec::new());
     };
 
-    let fixing: Vec<Fixing> = review
-        .findings
-        .iter()
-        .filter(|finding| finding.accepted(&answered.response))
-        .map(|finding| Fixing {
-            what: finding.what.trim().to_owned(),
-            said: finding.said(&answered.response).to_owned(),
-        })
-        .collect();
+    let fixing = decided_as(review, &answered.response, Decided::Fix);
 
     if fixing.is_empty() || landed_since(pool, conversation_id, &answered.submitted_at).await? {
         return Ok(Vec::new());
     }
 
     Ok(fixing)
+}
+
+/// The findings this Conversation's review was told to split out into a backlog
+/// of their own, in the order the review raised them.
+///
+/// The escape hatch's half of [`unlanded_fixes`], and it reads the same record
+/// the other way: a finding the human answered with the Option it named as
+/// *split it out* is work for a session of its own rather than work for the
+/// session that asked. Empty is the ordinary answer — a review that offered no
+/// split at all, one still waiting on the human, one whose splits were declined.
+///
+/// **Nothing here asks whether it landed**, unlike [`unlanded_fixes`]. What says
+/// a split has been carried out is a `.tasks/` backlog on the branch, and that is
+/// a question about the Worktree rather than about the record — so this says what
+/// was split out and its caller says whether the backlog is there.
+pub async fn split_out(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = review_asked(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let Some(stored) = super::load_set(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let Some(review) = &stored.set.review else {
+        return Ok(Vec::new());
+    };
+
+    let Some(answered) = super::load_response(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    Ok(decided_as(review, &answered.response, Decided::Split))
+}
+
+/// The findings a Response decided one way, as the session that acts on them is
+/// told about them.
+///
+/// One reading for both outcomes, because they are the same question asked of
+/// different Options — and what the human wrote beside their Answer travels with
+/// the finding either way, the schema following the pick to find it.
+fn decided_as(review: &Review, response: &Response, decided: Decided) -> Vec<Fixing> {
+    review
+        .findings
+        .iter()
+        .filter(|finding| finding.decided(response) == decided)
+        .map(|finding| Fixing {
+            what: finding.what.trim().to_owned(),
+            said: finding.said(response).to_owned(),
+        })
+        .collect()
 }
 
 /// Whether anything has been committed on this Conversation's branch since

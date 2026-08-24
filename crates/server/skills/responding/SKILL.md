@@ -126,6 +126,10 @@ review:
 - **`fix` names the Option that means do it** — `Q1.1` for a Question's, `Q1a.1`
   for a Sub-question's. It has to be an Option your Set actually offers, or the
   Set is refused: nothing else turns what was said into work.
+- **No `split` here.** Splitting a finding out into a backlog belongs to the one
+  review that read the branch whole. A comment asking for more than a batch
+  session can do is worth saying so about in the Question, so the human can
+  decline it knowing why — it is not a backlog for you to plan.
 - **Every finding in the block is a Question in the Set**, and one Set for the
   batch rather than one per comment.
 - **Read `verkstead guide` before you write it** — how a Set is labelled, how

@@ -45,9 +45,9 @@ pub use conversations::{
     abort_conversation, adopting, ask, asked_from, conversations, implement_again, last_proposal,
     load_conversation, note, pick_direction, record_handoff, record_manual_task, rename_branch,
     review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_state, stacks_on, start_adoption, start_conversation,
-    start_grilling, start_implementing, start_stage, timeline, unanswered_set_since,
-    unlanded_batch_fixes, unlanded_fixes,
+    set_implementation_pairing, set_state, split_out, stacks_on, start_adoption,
+    start_conversation, start_grilling, start_implementing, start_stage, timeline,
+    unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,

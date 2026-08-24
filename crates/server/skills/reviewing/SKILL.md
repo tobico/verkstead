@@ -17,6 +17,11 @@ its pull request. Nobody else is sent to act on those comments: what they ask fo
 goes into your Set beside what you found yourself, so the human decides about
 their own words rather than watching a session act on them unasked.
 
+Where something you find is genuinely too big to fix in this sitting, you can
+offer to split it out into a backlog for sessions of their own instead — see
+step 5. That is the exception and not the shape of the job: the ordinary review
+is a handful of fixes, made here.
+
 The branch is already pushed and already has an open pull request. There is
 nothing to create, nothing to switch to, and nothing to open.
 
@@ -164,6 +169,57 @@ review:
   a sitting's worth of decisions is a review that should raise the ones that
   matter.
 
+### When a finding is too big for this session
+
+Everything above assumes what you found can be fixed between the human's answer
+and your push, which is nearly always true. Where one genuinely cannot — a
+rewrite that wants breaking into steps, a change whose blast radius is the
+branch over again — you may offer to split it out instead, and `split` names the
+Option that means that:
+
+```yaml
+  - label: Q3
+    text: |
+      The clock abstraction wants rebuilding rather than patching. Three
+      modules hold their own notion of now, and untangling them touches most
+      of the tests in the crate — more than I can do without leaving the
+      branch half-migrated.
+    options:
+      - n: 1
+        text: Fix it here
+      - n: 2
+        text: Split it out as its own work
+        recommended: true
+      - n: 3
+        text: Leave it
+review:
+  findings:
+    - fix: Q3.1
+      split: Q3.2
+      what: |
+        `crates/limiter/src/` — `limits.rs`, `window.rs` and `refill.rs` each
+        hold their own notion of now. Collapse them onto one clock, injected at
+        construction, and move the tests that pin the other two onto it.
+```
+
+- **Offer it rarely, and never by default.** A Set that put the choice on every
+  finding would be asking the human to plan the work as well as decide it, and
+  what this whole phase is for is keeping the ordinary handful of fixes in one
+  session. Most reviews offer no split at all and are not the poorer for it: if
+  you could do it today, it is a fix.
+- **All three answers mean something** — fix it here, split it out, leave it —
+  and the human decides per finding. Recommend the one you would take.
+- **`split` is held to what `fix` is held to**: an Option your Set actually
+  offers, in the same notation. It cannot be the finding's own `fix` Option, and
+  no two findings may turn on the same Option, or the Set is refused.
+- **`what` is written for whoever works the task**, which is somebody else
+  entirely and later. That is the same brief you would write for a fix session,
+  because a split finding becomes exactly that: a task file, worked by a session
+  with none of your context.
+- **A split is not a way out of deciding.** Something you have not thought
+  through is not a task to hand on, and something you simply do not fancy is a
+  fix. Offer it where the work is too big and nowhere else.
+
 Then put it through `verkstead ask`, **as a background command**: it blocks
 until they answer, and that may be hours — they are on a phone rather than at
 this terminal.
@@ -188,8 +244,11 @@ may reframe the answers above it.
 - **What they wrote beside a yes is part of the instruction.** "Yes, but leave
   the public signature alone" changes what you do, and it is the reason their
   words come back to you at all.
-- **A finding they declined is over.** Do not fix it, do not fix half of it, and
-  do not raise it again.
+  - **A finding they declined is over.** Do not fix it, do not fix half of it, and
+    do not raise it again.
+  - **A finding they split out is neither.** It is not fixed here and it is not
+    forgotten: what you owe it is step 8's backlog, and starting on it here is
+    doing the thing they said not to do in this session.
 - **Unanswered is not a yes.** Leave it as declined. Where it is one you
   genuinely cannot leave — the correctness bug the rest of the branch turns on —
   go back with one short Set about that alone and wait as before.
@@ -232,7 +291,42 @@ yourself. A fix written from the name of a job is a guess.
 - **Its own commit**, like each finding's, so it reads against the check it was
   for.
 
-## 8. Commit it and push it
+## 8. Write down anything they split out
+
+A finding they answered with **split it out** is not work for this session. What
+you owe it is a `.tasks/` backlog — written here, committed here, and worked by
+nobody in this Worktree today.
+
+The branch's own backlog is finished with by the time you are reading it, so
+what you write is a fresh one:
+
+- **`TODO.md` first**: a heading naming the work, a paragraph saying what it is
+  for, and one `- [ ] NN: <title> — [details](NN-<slug>.md)` entry per split
+  finding, in the order they should be worked.
+- **One `NN-<slug>.md` task file per finding**, numbered from `01`. Each carries
+  what you wrote in that finding's `what`, whatever the human wrote beside their
+  pick, and acceptance criteria that say when it is done. Write it for a session
+  with none of your context that will never speak to you — because that is what
+  works it.
+- **Nothing else goes in.** What they accepted is fixed above and what they
+  declined is over: a backlog of anything but what they split out is work nobody
+  agreed to.
+- **Do not build any of it.** Writing the list is the whole of the job here, and
+  a task you fixed on the way is a task the session sent to do it will find
+  already done.
+- **Its own commit**, and a bookkeeping one — a backlog commit carries no
+  summary, the way a plan commit does not.
+
+What follows is Verkstead's. It reads the backlog off the branch, sends this
+Conversation back to be built, and works the list a session at a time; the finish
+that follows the last task wraps the work up again on this same pull request, and
+a fresh review reads the whole branch then. So there is nothing here to hand over
+and nobody to hand it to — the task files are the handover.
+
+If they split nothing out, there is nothing to write. Leave no `.tasks/` behind:
+an empty backlog is a run Verkstead would start and find nothing in.
+
+## 9. Commit it and push it
 
 **Nothing waits on approval.** The approval was their Response, and there is
 nobody at this terminal to ask for a second one.
@@ -242,7 +336,8 @@ One commit per finding, so each reads against the decision that asked for it:
     git add -A
     git commit -m "fix: <the finding, and what you did about it>"
 
-Then push once, when the last of them is in:
+Then push once, when the last of them is in — the backlog's commit included, if
+you wrote one:
 
     git push
 
@@ -290,9 +385,9 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
 Do not open a pull request, do not touch any other branch, and do not merge
 anything. The pull request exists, and merging is the human's act.
 
-Then say what you fixed and what you left, and stop.
+Then say what you fixed, what you split out and what you left, and stop.
 
-## 9. A review with nothing to raise
+## 10. A review with nothing to raise
 
 Nothing to raise means both halves: you found nothing yourself, *and* nothing
 said on the pull request asks for anything. Comments you were given are the other

@@ -771,6 +771,38 @@ async fn work(
     carry_on(state, conversation_id, driving).await
 }
 
+/// Work the backlog a wrap-up's review split its findings out into, from its
+/// first task to the pull request the branch already has.
+///
+/// The one entry into a run that is not a direction being followed. What
+/// launched it is a review the human answered by splitting work out — see
+/// [`crate::review`] — and the Conversation has just been sent back down the
+/// ladder to Implementing to build it. So which direction was picked for it in
+/// the first place is beside the point: what is next is `.tasks/`, exactly as it
+/// is for every other turn of a run, and the finish that follows the last task
+/// wraps the Conversation up a second time.
+///
+/// The registration is taken here rather than by the caller, because the caller
+/// is the review's own task and is about to end: a gap between the two would be
+/// a Conversation the stall sweep found with nothing driving it.
+pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
+    let driving = state.drivers.driving(conversation_id);
+    let state = state.clone();
+
+    tokio::spawn(async move { carry_on(state, conversation_id, driving).await });
+}
+
+/// Whether `worktree` holds a backlog, committed as it stands.
+///
+/// What says the work a review split out has landed, asked by exactly the rule a
+/// breakdown's own step is judged by — the list being there and git having
+/// nothing pending for it. A `TODO.md` written and not committed is a session
+/// still mid-write, and a wrap-up that read that as done would send the
+/// Conversation back to build a backlog that is about to be swept away.
+pub(crate) async fn backlog_landed(worktree: &Path) -> bool {
+    check(worktree, &Landing::Arrived(todo())).await
+}
+
 /// Work whatever the backlog has left, one fresh session per step, until it is
 /// empty.
 ///
