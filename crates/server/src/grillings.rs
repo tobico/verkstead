@@ -15,10 +15,18 @@
 //! them the interview twice.
 //!
 //! **And except for what was left hanging.** A session that died mid-question
-//! leaves a Question Set open with nothing waiting on the Answer: the human can
-//! still see it, still answer it, and nothing will ever read what they write.
-//! So the relaunch archives it unanswered first — the same archiving the human
-//! reaches by hand for a Set whose agent has gone.
+//! leaves a **Blocking Ask** open with nothing waiting on the Answer: the human
+//! can still see it, still answer it, and nothing will ever read what they
+//! write. So the relaunch archives it unanswered first — the same archiving the
+//! human reaches by hand for a Set whose agent has gone.
+//!
+//! **A Deferred Ask is left standing**, and that is the same rule read the other
+//! way. Nothing was ever waiting on one — see [`crate::deferrals`] — so a dead
+//! session takes nothing away from it, and what the human writes is folded into
+//! the prompt of whichever session builds next. Archiving one here would close a
+//! question they were meant to answer in their own time, and close it on the
+//! grounds that nobody would read the answer, which is the one thing that is not
+//! true of it.
 
 use verkstead_schema::Nudge;
 
@@ -175,12 +183,18 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
     }
 }
 
-/// The Sets on the Timeline that are still waiting on the human.
+/// The Blocking Asks on the Timeline that are still waiting on the human.
+///
+/// Blocking alone: a Deferred Ask is one nothing was ever waiting on, so the
+/// session dying takes nothing away from it and it is left where it is — see the
+/// module note.
 fn open(timeline: &[store::TimelineEvent]) -> Vec<i64> {
     timeline
         .iter()
         .filter_map(|event| match &event.event {
-            store::Event::QuestionSet(asked) => asked.settlement.is_none().then_some(asked.set_id),
+            store::Event::QuestionSet(asked) => {
+                (asked.settlement.is_none() && !asked.deferred).then_some(asked.set_id)
+            }
             _ => None,
         })
         .collect()

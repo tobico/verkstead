@@ -10842,6 +10842,80 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     );
 }
 
+/// And the Deferred Ask the dead session left behind is *not* archived, which is
+/// the same rule read the other way.
+///
+/// Nothing was ever waiting on one, so a session dying takes nothing away from
+/// it: the human answers it in their own time and the Answers are folded into
+/// whichever session builds next. Archiving it here would close a question they
+/// were meant to answer, on the grounds that nobody would read the answer — the
+/// one thing that is not true of a Deferred Ask.
+#[tokio::test]
+async fn resuming_a_stalled_grilling_leaves_its_deferred_asks_open() {
+    let fixture = grilling_swept(
+        r#"
+        if [ -f GRILLED ]; then
+            sleep 300
+        else
+            printf 'once\n' > GRILLED
+        fi
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    // One of each, left behind by the session that went: a Blocking Ask with
+    // nobody reading the Answer, and a Deferred Ask that never had anybody.
+    let blocking = fixture.ask(LEFT_HANGING).await;
+    let deferred = fixture.ask_deferred(DEFERRED).await;
+
+    fixture.halted().await;
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let standing = |view: &ConversationView, wanted: i64| {
+        sets(view)
+            .into_iter()
+            .find(|asked| asked.set_id == wanted)
+            .expect("the Set is on the Timeline")
+            .standing
+            .clone()
+    };
+
+    // Waited for on the blocking one, because that is the archiving the relaunch
+    // does: once it has happened, the deferred one has been walked past too.
+    let view = fixture
+        .until(|view| {
+            matches!(
+                standing(view, blocking),
+                verkstead_render::Standing::ArchivedUnanswered(_)
+            )
+            .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        matches!(
+            standing(&view, deferred),
+            verkstead_render::Standing::Waiting(verkstead_schema::Liveness::Deferred),
+        ),
+        "the Deferred Ask is still the human's to answer: {:?}",
+        standing(&view, deferred),
+    );
+
+    // And answering it still reaches a session, which is the whole of what
+    // leaving it open was for.
+    assert_eq!(
+        fixture
+            .respond(
+                deferred,
+                serde_json::json!([{ "label": "Q9", "selected": 1 }]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+}
+
 /// Resume on a wrap-up that stopped at a red check watches it again from no
 /// attempts spent.
 ///
