@@ -1473,13 +1473,14 @@ pub struct BranchRename {
     pub branch: String,
 }
 
-/// The commit to branch from, or `null` to go back to the default-branch rule.
+/// The branch to come off, or `null` to go back to the default-branch rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct BaseCommitOverride {
-    /// Whatever names a commit in the repository — a short hash, a tag, a branch
-    /// — which the server resolves before it records anything.
-    pub commit: Option<String>,
+pub struct BaseBranchChoice {
+    /// One of the repository's own branches, local or remote-tracking, by name.
+    /// Stored as the name and resolved when grilling starts, so the work comes
+    /// off wherever that branch stands then.
+    pub branch: Option<String>,
 }
 
 /// What became of an edit to a Brief.
@@ -1510,7 +1511,7 @@ pub enum BranchRenamed {
     NotABranchName,
 }
 
-/// What became of overriding the base commit.
+/// What became of choosing the branch the work comes off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum BaseRecorded {
@@ -1521,9 +1522,11 @@ pub enum BaseRecorded {
     /// grilling started.
     NotDrafting,
 
-    /// Nothing in that repository answers to what was typed. Refused now rather
-    /// than at grill start, where it would be a failure with nobody watching.
-    NoSuchCommit,
+    /// That repository has no branch by that name. Refused now rather than at
+    /// grill start, where it would be a failure with nobody watching — and
+    /// asked of the branches themselves, because a branch is the whole of what
+    /// there is to pick.
+    NoSuchBranch,
 }
 
 /// What became of starting a Conversation grilling.

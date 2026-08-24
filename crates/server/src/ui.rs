@@ -28,7 +28,7 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
+    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
     ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
     ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
@@ -50,6 +50,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/sets/{id}/response", post(submit_response))
         .route("/api/ui/sets/{id}/archive", post(archive_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
+        // What one Repo's branches are, which is what a drafting Conversation
+        // picks the one it comes off out of. Under the Repo rather than under
+        // the Conversation: the branches are the repository's, and two
+        // Conversations against one Repo are looking at the same list.
+        .route("/api/ui/repos/{id}/branches", get(branches))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -102,7 +107,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
-        .route("/api/ui/conversations/{id}/base", post(set_base_commit))
+        .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method.
@@ -364,6 +369,28 @@ async fn repos(State(state): State<AppState>) -> HttpResponse {
         .collect();
 
     Json(rows).into_response()
+}
+
+/// `GET /api/ui/repos/{id}/branches` — every branch of one registered Repo,
+/// local and remote-tracking, for the dropdown that picks what the work comes
+/// off.
+///
+/// Read out of git every time rather than kept anywhere: branches are the
+/// repository's own and move without Verkstead hearing about it, so a stored
+/// list would be one more thing to be wrong.
+async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match crate::repos::branches(&state.pool, id).await {
+        Ok(Some(branches)) => Json(branches).into_response(),
+        Ok(None) => no_such_repo(&id.to_string()),
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
+            unavailable("the Repo's branches could not be read")
+        }
+    }
 }
 
 /// `POST /api/ui/repos` — take on the repository at a path.
@@ -1158,23 +1185,22 @@ async fn rename_branch(
     }
 }
 
-/// `POST /api/ui/conversations/{id}/base` — override the base commit, or put the
-/// Conversation back on the default-branch rule.
-async fn set_base_commit(
+/// `POST /api/ui/conversations/{id}/base` — choose the branch the work comes
+/// off, or put the Conversation back on the default-branch rule.
+async fn set_base_branch(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(override_): Json<BaseCommitOverride>,
+    Json(choice): Json<BaseBranchChoice>,
 ) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::BaseRecorded::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::set_base_commit(&state.pool, id, override_.commit.as_deref()).await
-    {
+    match crate::conversations::set_base_branch(&state.pool, id, choice.branch.as_deref()).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "recording a base commit failed");
-            unavailable("the base commit could not be recorded")
+            tracing::error!(error = ?error, conversation_id = id, "recording a base branch failed");
+            unavailable("the base branch could not be recorded")
         }
     }
 }
@@ -1693,6 +1719,15 @@ fn no_such_conversation(id: &str) -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new(format!("there is no Conversation {id}")),
+    )
+}
+
+/// There is no such Repo to read the branches of. Worded like the two above,
+/// and for their reason: what was asked for is what a URL held.
+fn no_such_repo(id: &str) -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new(format!("there is no Repo {id}")),
     )
 }
 

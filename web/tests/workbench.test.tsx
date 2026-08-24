@@ -47,6 +47,7 @@ import {
   SWIPE,
 } from "../src/workbench/Timeline";
 import {
+  BRANCHES,
   OPEN,
   PROFILES,
   REPOS,
@@ -851,7 +852,7 @@ describe("the adoption page", () => {
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
-    expect(screen.getByLabelText("Base commit")).toBeTruthy();
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
   });
 
@@ -870,13 +871,12 @@ describe("the adoption page", () => {
     expect(screen.queryByLabelText("Branch")).toBeNull();
   });
 
-  /// The stage is the server's reading at the base commit, so a base recorded
-  /// is a page read again — and what it names then is the stage that is next
-  /// *there*.
-  it("names the stage again when the base commit changes", async () => {
+  /// The stage is the server's reading at the base, so a base recorded is a page
+  /// read again — and what it names then is the stage that is next *there*.
+  it("names the stage again when the base branch changes", async () => {
     const elsewhere: ConversationView = {
       ...ADOPTING,
-      base_commit: "9a1c3e5b7d90f2468ace13579bdf02468ace1357",
+      base_commit: "release-1.4",
       adopting: {
         ...ADOPTION,
         stage: {
@@ -910,10 +910,9 @@ describe("the adoption page", () => {
       ),
     );
 
-    fireEvent.input(await waitFor(() => screen.getByLabelText("Base commit")), {
+    fireEvent.change(await waitFor(() => screen.getByLabelText("Base branch")), {
       target: { value: elsewhere.base_commit },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Record" }));
 
     await waitFor(() =>
       expect(container.querySelector(".adoption .stage")!.textContent).toContain(
@@ -1288,7 +1287,7 @@ describe("a conversation's setup", () => {
     const setup = await drawn(container, ".timeline-event > .brief .conversation-setup");
 
     expect(setup.querySelector(".branch-name")).toBeTruthy();
-    expect(setup.querySelector(".base-commit")).toBeTruthy();
+    expect(setup.querySelector(".base-branch")).toBeTruthy();
     expect(setup.querySelector(".conversation-profiles")).toBeTruthy();
 
     // Under the words rather than over them: the brief is what the card is,
@@ -1310,7 +1309,7 @@ describe("a conversation's setup", () => {
 
     expect(container.querySelector(".conversation-setup")).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
-    expect(screen.queryByLabelText("Base commit")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
   });
 
@@ -1421,42 +1420,105 @@ describe("a conversation's setup", () => {
     );
   });
 
-  it("shows the base commit that was recorded, and sends a new one", async () => {
+  /// The base dropdown, once the branch it is about to be asked for is one of
+  /// the options.
+  ///
+  /// Waited for rather than taken the moment the label is drawn: the branches
+  /// arrive on a read of their own, and a `<select>` told to show an option it
+  /// has not been given yet falls to the first one it has — which would be the
+  /// rule, and a pick nobody made.
+  async function basePicker(offering: string): Promise<HTMLSelectElement> {
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Base branch"),
+    )) as HTMLSelectElement;
+
+    await waitFor(() =>
+      expect([...picker.options].map((option) => option.value)).toContain(
+        offering,
+      ),
+    );
+
+    return picker;
+  }
+
+  /// The rule first, then the branches — and no way to type a commit, because
+  /// there is no longer anything to pin to but a branch.
+  it("offers the default rule and then every branch of the repo", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Base branch"),
+    )) as HTMLSelectElement;
+
+    await waitFor(() => expect(picker.options).toHaveLength(4));
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      ...BRANCHES,
+    ]);
+    expect(picker.options[0]!.textContent).toContain(OPEN.repo.default_branch);
+
+    expect(picker.value, "the pinned branch is what it shows").toBe(
+      OPEN.base_commit,
+    );
+    expect(screen.queryByRole("button", { name: "Record" })).toBeNull();
+  });
+
+  it("records the branch that was picked, by name", async () => {
     const fetching = theWorkbench(json("Recorded"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Base commit"));
 
-    const field = screen.getByLabelText("Base commit") as HTMLInputElement;
-    expect(field.value).toBe(OPEN.base_commit);
-
-    fireEvent.input(field, { target: { value: "v0.1.0" } });
-    fireEvent.click(screen.getByRole("button", { name: "Record" }));
+    fireEvent.change(await basePicker("origin/main"), {
+      target: { value: "origin/main" },
+    });
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toEqual({
-        commit: "v0.1.0",
+        branch: "origin/main",
       }),
     );
   });
 
-  /// Emptying the field is the override taken away, not a commit called
-  /// nothing — and what it goes back to is the rule, which the pane says in
-  /// words because an empty field cannot.
-  it("takes the override away when the field is emptied", async () => {
+  /// The first entry is the override taken away, not a branch called nothing —
+  /// and what it goes back to is the rule, which the pane says in words because
+  /// a dropdown entry cannot say when it will resolve.
+  it("takes the override away when the rule is picked", async () => {
     const fetching = theWorkbench(json("Recorded"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Base commit"));
 
-    fireEvent.input(screen.getByLabelText("Base commit"), {
+    fireEvent.change(await basePicker("origin/main"), {
       target: { value: "" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Record" }));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/base`)).toEqual({
-        commit: null,
+        branch: null,
       }),
     );
+  });
+
+  /// A base the list does not hold — the branch taken away since it was picked,
+  /// or the list still on its way — is drawn all the same: falling quietly to
+  /// the rule would show one base while the record held another.
+  it("still shows a pinned branch the list has lost", async () => {
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(["main"])),
+      whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
+    );
+    mount(`/conversations/${OPEN.id}`);
+
+    const picker = await basePicker("main");
+
+    await waitFor(() => expect(picker.options).toHaveLength(3));
+    expect([...picker.options].map((option) => option.value)).toEqual([
+      "",
+      OPEN.base_commit,
+      "main",
+    ]);
+    expect(picker.value).toBe(OPEN.base_commit);
   });
 
   it("names the branch an unpinned conversation will start from", async () => {
@@ -1465,16 +1527,17 @@ describe("a conversation's setup", () => {
       whenever("/api/ui/conversations", json(SIDEBAR)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(rule)),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByLabelText("Base commit"));
+    await waitFor(() => screen.getByLabelText("Base branch"));
 
-    expect((screen.getByLabelText("Base commit") as HTMLInputElement).value).toBe(
-      "",
-    );
-    expect(container.querySelector(".base-commit .note")!.textContent).toContain(
+    expect(
+      (screen.getByLabelText("Base branch") as HTMLSelectElement).value,
+    ).toBe("");
+    expect(container.querySelector(".base-branch .note")!.textContent).toContain(
       OPEN.repo.default_branch,
     );
   });

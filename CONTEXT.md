@@ -318,7 +318,7 @@ it has to start — that Stage's own plan commit writes to the roadmap, so when 
 settles the Stage after it begins the ordinary unattended way, and an adopted
 roadmap is a staged one from there on. Never stacks: there is no predecessor
 Conversation to stack on, and building on an unmerged branch is the human's
-move, made by setting the base commit.
+move, made by picking that branch as the base.
 _Avoid_: import, attach, resume, take over, migrate
 
 **Abandoned**:

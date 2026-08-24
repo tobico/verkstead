@@ -17,14 +17,14 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
+    BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted, ConversationEntry,
+    ConversationView, GrillingStarted, HandedBack, ManualTaskStarted, ManualTaskSubmission,
+    NewAdoption, NewConversation, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
+    RemedyChoice, RemedySettled, RepoEntry, Screen, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, Shown, Started, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -73,7 +73,7 @@ fn the_viewers_types_are_written_from_these() {
     BriefSaved::export_all(&config).unwrap();
     BranchRename::export_all(&config).unwrap();
     BranchRenamed::export_all(&config).unwrap();
-    BaseCommitOverride::export_all(&config).unwrap();
+    BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.

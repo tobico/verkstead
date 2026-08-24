@@ -1,7 +1,7 @@
 //! A Conversation's setup: what has to be settled before anything will run it,
 //! drawn under the Brief it belongs to.
 //!
-//! The branch the work will be done on, the commit it will branch from, and the
+//! The branch the work will be done on, the branch it will come off, and the
 //! two pairings its sessions run under. All four are facts about the
 //! Conversation rather than about any one Event, and all four are the human's to
 //! change for as long as it is still drafting.
@@ -31,9 +31,10 @@ import {
 import {
   chooseGrillingPairing,
   chooseImplementationPairing,
+  listBranches,
   listProfiles,
   renameBranch,
-  setBaseCommit,
+  setBaseBranch,
 } from "../api/client";
 import type {
   BaseRecorded,
@@ -59,12 +60,12 @@ export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
   NotABranchName: "Git will not take that as a branch name.",
 };
 
-/// And a base commit.
+/// And a base branch.
 export const BASE_REFUSAL: Record<BaseRecorded, string> = {
   Recorded: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "The base commit was captured when grilling started.",
-  NoSuchCommit: "That repo has nothing by that name.",
+  NoSuchBranch: "That repo has no branch by that name any more.",
 };
 
 /// And a pairing choice.
@@ -89,7 +90,7 @@ export function Setup(props: {
       <Show when={!props.conversation.adopting}>
         <BranchName conversation={props.conversation} />
       </Show>
-      <BaseCommit conversation={props.conversation} />
+      <BaseBranch conversation={props.conversation} />
 
       <Profiles conversation={props.conversation} />
     </section>
@@ -423,74 +424,104 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The commit the work branches from.
+/// What the first entry of the base dropdown sends, which is nothing: the rule
+/// is the override taken away, and the record holds no branch for it.
+const RULE = "";
+
+/// The branch the work comes off.
 ///
-/// Empty is not a missing value: it is the rule — the default branch's tip as it
-/// stands when grilling starts — which is why the field says which branch that
-/// is rather than leaving the human to guess what nothing means.
-function BaseCommit(props: { conversation: ConversationView }): JSX.Element {
+/// A dropdown of the repository's own branches, with the rule — the default
+/// branch as it stands when grilling starts — as its first entry, because that
+/// is what choosing nothing means and it is worth reading rather than guessing
+/// at. There is nothing to type: a sha or a tag would pin the work to a moment,
+/// and what this asks is which line of work to come off.
+///
+/// A picked branch is stored by name and resolved when grilling starts, so the
+/// work branches from wherever that branch stands then — which is the point of
+/// picking one over its tip.
+function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const [typed, setTyped] = createSignal<string | null>(null);
   const [refused, setRefused] = createSignal<BaseRecorded | null>(null);
 
-  const commit = () => typed() ?? props.conversation.base_commit ?? "";
+  // Under the Repo's key, because that is what they belong to: two conversations
+  // against one repository are reading the same list, and a repo that moved is
+  // the one thing the page hears about that could have moved these.
+  const branches = useReading(() => ({
+    queryKey: ["repos", props.conversation.repo.id, "branches"],
+    queryFn: () => listBranches(props.conversation.repo.id),
+
+    // Merged by position, there being no key on a string: a branch that is
+    // still there is the same string, so the option drawn for it survives a
+    // re-read whether or not the ones around it did.
+    freshness: { reconcile: "id" },
+  }));
+
+  /// What is chosen, as the dropdown writes it: the empty string is the rule.
+  const chosen = (): string => props.conversation.base_commit ?? "";
+
+  /// What is offered: the rule, then the repository's branches — and what is
+  /// chosen wherever the list does not hold it, which is the list still on its
+  /// way and a branch taken away since it was picked. Drawn either way, because
+  /// falling quietly to the rule would show one base while the record held
+  /// another.
+  const options = (): string[] => {
+    const listed = branches.data ?? [];
+    const pinned = chosen();
+
+    return pinned === "" || listed.includes(pinned)
+      ? [RULE, ...listed]
+      : [RULE, pinned, ...listed];
+  };
 
   const record = useMutation(() => ({
-    mutationFn: (commit: string) =>
-      // Emptied is the override taken away rather than a commit called nothing.
-      setBaseCommit(props.conversation.id, commit.trim() === "" ? null : commit),
+    mutationFn: (branch: string) =>
+      // The rule is the override taken away rather than a branch called
+      // nothing.
+      setBaseBranch(props.conversation.id, branch === RULE ? null : branch),
     onSuccess: (outcome: BaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
+        // Picked out of a list this card read a moment ago: reading it again is
+        // both the correction and the explanation.
+        void queries.invalidateQueries({
+          queryKey: ["repos", props.conversation.repo.id, "branches"],
+        });
         return;
       }
 
       setRefused(null);
-      setTyped(null);
       void queries.invalidateQueries({ queryKey: ["conversation"] });
     },
   }));
 
   return (
-    <form
-      class="base-commit"
-      onSubmit={(ev) => {
-        ev.preventDefault();
-        record.mutate(commit());
-      }}
-    >
-      <label for="base-commit">Base commit</label>
-      <div class="field-line">
-        <input
-          id="base-commit"
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder={`${props.conversation.repo.default_branch} at grill start`}
-          value={commit()}
-          onInput={(ev) => {
-            setTyped(ev.currentTarget.value);
-            setRefused(null);
-          }}
-        />
-        <button
-          type="submit"
-          disabled={
-            record.isPending ||
-            commit() === (props.conversation.base_commit ?? "")
-          }
-        >
-          Record
-        </button>
-      </div>
+    <div class="base-branch">
+      <label for="base-branch">Base branch</label>
+      {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
+          branch while the mutation below would record another — see
+          `src/picking.tsx`. The rule is an option of its own rather than the
+          picker's placeholder: it is a choice to go back to, and the placeholder
+          is a state there is no way out of. */}
+      <Picker
+        id="base-branch"
+        options={options()}
+        value={(branch) => branch}
+        label={(branch) =>
+          branch === RULE
+            ? `Default branch (${props.conversation.repo.default_branch})`
+            : branch
+        }
+        chosen={chosen()}
+        pick={(picked) => record.mutate(picked)}
+        disabled={record.isPending}
+      />
       <p class="note">
         <Show
           when={props.conversation.base_commit}
           fallback={
             <>
-              Left empty, the work branches from{" "}
+              The work branches from{" "}
               <span class="default-branch">
                 {props.conversation.repo.default_branch}
               </span>{" "}
@@ -498,21 +529,30 @@ function BaseCommit(props: { conversation: ConversationView }): JSX.Element {
             </>
           }
         >
-          Pinned. Empty the field to go back to branching from{" "}
-          <span class="default-branch">
-            {props.conversation.repo.default_branch}
-          </span>
-          .
+          {(branch) => (
+            <>
+              Pinned to{" "}
+              <span class="default-branch">{branch()}</span> — the work branches
+              from wherever it stands when grilling starts.
+            </>
+          )}
         </Show>
       </p>
+      {/* The list is what there is to pick out of, so a read that failed is
+          said rather than drawn as a repository with one branch. */}
+      <Show when={branches.isError}>
+        <p class="error">
+          Could not read the repo's branches: {branches.error?.message}
+        </p>
+      </Show>
       <Show when={refused()}>
         {(outcome) => <p class="error">{BASE_REFUSAL[outcome()]}</p>}
       </Show>
       <Show when={record.isError}>
         <p class="error">
-          The base commit could not be recorded: {record.error?.message}
+          The base branch could not be recorded: {record.error?.message}
         </p>
       </Show>
-    </form>
+    </div>
   );
 }

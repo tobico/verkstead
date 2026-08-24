@@ -61,7 +61,7 @@ pub use push::{
     PushSubscription, Subscribing, VapidKeys, forget_subscription, push_subscriptions,
     store_subscription, vapid_keys,
 };
-pub use repos::{Repo, register_repo, registered_repos};
+pub use repos::{Repo, load_repo, register_repo, registered_repos};
 pub use session_names::session_id;
 pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};

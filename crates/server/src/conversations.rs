@@ -3,10 +3,9 @@
 //!
 //! Two of the three edits are decided against the repository rather than taken
 //! on trust, and git is the one asked both times — whether a name is one it
-//! would take for a branch, and whether anything in the repository answers to
-//! what was typed as a base commit. Refused here rather than at grill start,
-//! where a bad name or a commit that is not there would be a failure with nobody
-//! watching.
+//! would take for a branch, and whether the repository has the branch the work
+//! is to come off. Refused here rather than at grill start, where a bad name or
+//! a branch that is not there would be a failure with nobody watching.
 //!
 //! Starting the grilling is where a Conversation stops being a record and gets
 //! somewhere to work — see [`start_grilling`] — and where the session that does
@@ -431,49 +430,56 @@ pub(crate) async fn rename_branch(
     })
 }
 
-/// Record the commit the work branches from, or put the Conversation back on the
+/// Record the branch the work comes off, or put the Conversation back on the
 /// default-branch rule.
 ///
-/// What is stored is the commit the repository resolved, not what was typed: a
-/// tag or a branch name is a moving target, and the point of overriding the rule
-/// is to pin the work to one commit. Blank counts as clearing it — a field
-/// emptied is the human taking the override away, not naming a commit called
-/// nothing.
-pub(crate) async fn set_base_commit(
+/// What is stored is the name, not the commit it stands at: the choice is one of
+/// the repository's branches, and what the human means by picking one is *come
+/// off whatever is on it when this starts* — so it is resolved at grill start
+/// and not before. Blank counts as clearing it — a choice unmade is the human
+/// taking the override away, not naming a branch called nothing.
+///
+/// Refused unless the repository really has a branch by that name, asked of the
+/// branches themselves rather than of `rev-parse`: a sha or a tag resolves and
+/// is still not something this stores, there being no way to pick one.
+pub(crate) async fn set_base_branch(
     pool: &SqlitePool,
     id: i64,
     asked: Option<&str>,
 ) -> Result<BaseRecorded> {
     let asked = asked.map(str::trim).filter(|asked| !asked.is_empty());
 
-    let commit = match asked {
-        None => None,
-        Some(asked) => {
-            // The repository to ask is the Conversation's own, so the
-            // Conversation has to be there before there is anywhere to ask.
-            let Some(conversation) = store::load_conversation(pool, id).await? else {
-                return Ok(BaseRecorded::NoSuchConversation);
-            };
+    if let Some(branch) = asked {
+        // The repository to ask is the Conversation's own, so the Conversation
+        // has to be there before there is anywhere to ask.
+        let Some(conversation) = store::load_conversation(pool, id).await? else {
+            return Ok(BaseRecorded::NoSuchConversation);
+        };
 
-            let asked = asked.to_owned();
-            let resolved =
-                tokio::task::spawn_blocking(move || resolve(&conversation.repo.path, &asked))
-                    .await?;
-
-            match resolved {
-                Some(commit) => Some(commit),
-                None => return Ok(BaseRecorded::NoSuchCommit),
-            }
+        // Past drafting is answered here rather than by the store below, so that
+        // a Conversation whose base was frozen months ago is told *that* rather
+        // than told about a branch the repository has since lost. The store
+        // asks again all the same: this read and that write are not one moment.
+        if conversation.state != store::Lifecycle::Draft {
+            return Ok(BaseRecorded::NotDrafting);
         }
-    };
 
-    Ok(
-        match store::set_base_commit(pool, id, commit.as_deref()).await? {
-            store::Edited::Saved => BaseRecorded::Recorded,
-            store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
-            store::Edited::NotDrafting => BaseRecorded::NotDrafting,
-        },
-    )
+        let branch = branch.to_owned();
+        let known = tokio::task::spawn_blocking(move || {
+            worktrees::branches(&conversation.repo.path).contains(&branch)
+        })
+        .await?;
+
+        if !known {
+            return Ok(BaseRecorded::NoSuchBranch);
+        }
+    }
+
+    Ok(match store::set_base_commit(pool, id, asked).await? {
+        store::Edited::Saved => BaseRecorded::Recorded,
+        store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
+        store::Edited::NotDrafting => BaseRecorded::NotDrafting,
+    })
 }
 
 /// Give a drafting Conversation somewhere to work: a branch off its base commit
@@ -537,10 +543,10 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::EmptyBrief);
     }
 
-    // What the work branches from. An override is re-resolved rather than
-    // trusted: it resolved when the human typed it, and a commit can be gone by
-    // now. Without one it is the default branch's tip, which is a rule that has
-    // never resolved to anything until this moment.
+    // What the work branches from, resolved here and nowhere earlier: what the
+    // human picked is a branch, and what they meant by picking it is wherever it
+    // stands at this moment. Without one it is the default branch, which is the
+    // same rule by another name.
     let named = conversation
         .base_commit
         .clone()
@@ -1039,31 +1045,6 @@ fn is_branch_name(branch: &str) -> bool {
             &["check-ref-format", &format!("refs/heads/{branch}")],
         )
         .is_some()
-}
-
-/// The commit `asked` names in the repository at `path`, in full, or `None` if
-/// nothing there answers to it.
-///
-/// `^{commit}` is what makes a tag or a branch resolve to the commit it points
-/// at rather than to itself, and what refuses a tree or a blob that happens to
-/// share a prefix.
-fn resolve(path: &Path, asked: &str) -> Option<String> {
-    let commit = git(
-        path,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            // Whatever was typed is the human's, so it must not be able to
-            // arrive as an option.
-            "--end-of-options",
-            &format!("{asked}^{{commit}}"),
-        ],
-    )?;
-
-    let commit = commit.trim();
-
-    (!commit.is_empty()).then(|| commit.to_owned())
 }
 
 /// A branch name to start a Conversation under, until the human names it

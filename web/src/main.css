@@ -973,8 +973,15 @@ main:has(.workbench) {
   margin-bottom: 1.5rem;
 }
 
-.new-conversation-trigger,
-.field-line button {
+/* The width of the pane, because it is the pane's one action and the menu comes
+   down the width of it. The mark is pushed to the far end, where a dropdown's
+   is. */
+.new-conversation-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -985,19 +992,7 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-/* The width of the pane, because it is the pane's one action and the menu comes
-   down the width of it. The mark is pushed to the far end, where a dropdown's
-   is. */
-.new-conversation-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-}
-
-.new-conversation-trigger:disabled,
-.field-line button:disabled {
+.new-conversation-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -1729,12 +1724,12 @@ main:has(.workbench) {
    the brief above it does, and the base commit with the button that records
    it. */
 .branch-name,
-.base-commit {
+.base-branch {
   margin-bottom: 1.5rem;
 }
 
 .branch-name label,
-.base-commit label {
+.base-branch label {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.9rem;
@@ -1759,21 +1754,33 @@ main:has(.workbench) {
   padding: 0.5rem 0.6rem;
 }
 
-/* What an empty field means, which is a rule rather than a missing value — so it
-   is said in words under the field rather than left to be guessed. */
+/* What a control does not say for itself: the base dropdown's first entry is a
+   rule rather than a branch, and what it will resolve to is not known until
+   grilling starts. So it is said in words underneath. */
 .note {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
 
-.note .default-branch,
-.base-commit input {
+.note .default-branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
+/* The same control the pairings are picked with, because it is the same kind of
+   choice: one of a short list the repository already holds. */
+.base-branch select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
 .branch-name .error,
-.base-commit .error,
+.base-branch .error,
 .new-conversation .error,
 .brief > .error,
 .conversation-profiles .error {

@@ -116,6 +116,40 @@ pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
     }
 }
 
+/// Every branch of `repo` a Conversation could be based on: the local ones and
+/// the remote-tracking ones both, in the order git lists them — the locals
+/// first, then whatever the remotes are carrying.
+///
+/// Both, because both are things the human works from: a branch of their own
+/// they have not pushed, and one somebody else pushed that is not merged yet.
+/// A symbolic ref is not one of them and is left out — `origin/HEAD` is another
+/// name for a branch that is already in the list, and offering it twice would
+/// be offering a choice that is not one.
+///
+/// Empty for a repository git would not read, which is the same answer as a
+/// repository with no branches. Nothing is decided on the difference: what this
+/// list is for is a dropdown, and a dropdown offering nothing but the default
+/// rule is the honest reading of *there is nothing here to pick*.
+pub(crate) fn branches(repo: &Path) -> Vec<String> {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(symref)\t%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    );
+
+    listed
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(symref, _)| symref.is_empty())
+        .map(|(_, name)| name.to_owned())
+        .collect()
+}
+
 /// The commit `named` resolves to in `repo`, in full, or `None` if nothing there
 /// answers to it.
 ///
