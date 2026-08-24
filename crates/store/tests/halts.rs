@@ -10,8 +10,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Halt, Halted, clear_halt, halt, halted, open_database, register_repo,
-    start_conversation, timeline,
+    ConversationRow, Event, Halt, Halted, clear_halt, conversations, halt, halted, open_database,
+    register_repo, start_conversation, start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -217,4 +217,52 @@ async fn clearing_a_halt_nothing_wrote_is_nothing_to_do() {
     clear_halt(&pool, id).await.unwrap();
 
     assert_eq!(halted(&pool, id).await.unwrap(), None);
+}
+
+/// A halted Conversation is one the sidebar draws as waiting on the human.
+///
+/// The badge on its own page points at the Notice; the list has no Notice to
+/// point at and only the dot, so what it needs is the fact — and a stop the
+/// sidebar said nothing about would be one the human found by opening every
+/// Conversation they have.
+#[tokio::test]
+async fn a_halted_conversation_is_waiting_on_the_human_in_the_sidebar() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    start_grilling(
+        &pool,
+        id,
+        "abc1234",
+        Path::new("/data/worktrees/rate-limiting"),
+    )
+    .await
+    .unwrap();
+
+    let waiting = |rows: Vec<ConversationRow>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the list")
+            .waiting
+    };
+
+    assert!(
+        !waiting(conversations(&pool).await.unwrap()),
+        "a Conversation being grilled is not waiting on anybody",
+    );
+
+    halt(&pool, id, Halt::Deliberate, SAID).await.unwrap();
+
+    assert!(
+        waiting(conversations(&pool).await.unwrap()),
+        "and one that has stopped is",
+    );
+
+    clear_halt(&pool, id).await.unwrap();
+
+    assert!(
+        !waiting(conversations(&pool).await.unwrap()),
+        "and starting to drive again takes the dot with it, leaving the Notice \
+         where it is",
+    );
 }

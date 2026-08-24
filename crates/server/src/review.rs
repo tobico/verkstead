@@ -21,9 +21,9 @@
 //! spend their attention only where there is a decision.
 //!
 //! A review session that ends without asking and without ending well is not a
-//! review that found nothing: it is a review that did not happen. That stops the
-//! run at an Interruption like every other, and retrying it is the review over
-//! again in a session as fresh as the first.
+//! review that found nothing: it is a review that did not happen. That halts the
+//! run like every other stop, and going again is the review over from the start,
+//! in a session as fresh as the first.
 //!
 //! **One agent in one Worktree**, which is what the turns are for. The checks are
 //! being watched at the same time as this runs, and a fix session dispatched
@@ -94,9 +94,9 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
 /// Review it again because the human asked for it, and put the wrap-up's other
 /// half back under watch while we are here.
 ///
-/// The checks stopped being watched when this Interruption was raised — nothing
-/// advances past an open one — so a retry that started only the review would
-/// leave the pull request's checks unwatched for the rest of the wrap-up.
+/// The checks stopped being watched when the run stopped — nothing advances past
+/// that — so a retry that started only the review would leave the pull request's
+/// checks unwatched for the rest of the wrap-up.
 pub(crate) async fn retried(state: AppState, conversation_id: i64) {
     tracing::info!(conversation_id, "the review is being run again");
 
@@ -236,21 +236,7 @@ async fn wanted(state: &AppState, conversation_id: i64) -> bool {
         }
     }
 
-    match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(None) => true,
-        Ok(Some(event_id)) => {
-            tracing::info!(
-                conversation_id,
-                event_id,
-                "the run is blocked on the human, so no review was started"
-            );
-            false
-        }
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            false
-        }
-    }
+    !crate::halts::stopped(state, conversation_id).await
 }
 
 /// Whether the Conversation is still wrapping up, which is the only state a
@@ -285,13 +271,18 @@ async fn settle(state: &AppState, conversation_id: i64) {
 /// human's.
 ///
 /// The evidence is the tail of what the session said, which is where a review
-/// that fell over says why — and the three remedies all mean something: run the
-/// review again, read the branch yourself, or end the run.
+/// that fell over says why — and what to do about it is Resume, read the branch
+/// themselves, or abort.
+///
+/// [`store::Halt::Deliberate`], because a wrap-up that goes on without its
+/// review is a branch nobody read: Verkstead stops rather than pass a session
+/// that crashed off as a clean bill of health, and going again is the human's
+/// press.
 async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Review,
+        store::Halt::Deliberate,
         "reviewing the branch the pull request is on",
         how,
         Some(writing),
@@ -301,7 +292,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review did not happen and the Interruption saying so could not be raised"
+            "a review did not happen and the halt saying so could not be recorded"
         );
     }
 }

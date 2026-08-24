@@ -8,8 +8,8 @@
 //!
 //! **Outside the pipeline in every sense.** No state changes on account of one.
 //! A Done Conversation stays Done and does not re-enter wrapping when the
-//! session commits; an open Interruption stays open, with *blocked on you* still
-//! on it, because the Remedies are the only thing that settles one. What a
+//! session commits; a halt stays where it is, with *blocked on you* still on it,
+//! because starting to drive again is the only thing that clears one. What a
 //! Manual Task leaves behind is its instruction on the record, whatever its
 //! session printed, and whatever that committed — all of which land as the
 //! ordinary Events they land as everywhere else.
@@ -163,12 +163,9 @@ pub(crate) async fn submit(
 /// ends up having done is on the Timeline — what it printed, what it asked, what
 /// it committed — and the Conversation is exactly where it was.
 ///
-/// The one exception is a session that ended badly, which stops at an
-/// Interruption like every other session that ended badly — see [`stop`]. That
-/// is deliberately not a message: the human submits from a phone and walks away,
-/// so *blocked on you* and the push it fires are the only things that reach
-/// them, and Retry is the only way to have another go without typing the
-/// instruction out again.
+/// The one exception is a session that ended badly, which halts like every other
+/// session that ended badly — see [`stop`]. The human submits from a phone and
+/// walks away, so *blocked on you* and the Notice under it are what reach them.
 ///
 /// What it does end with, either way, is the check for a Conversation nothing
 /// is driving — see [`crate::stalls::sweep`]. Nothing is relaunched by it: the
@@ -214,33 +211,35 @@ async fn follow(state: AppState, conversation_id: i64, mut session: Session, tur
     crate::stalls::sweep(&state).await;
 }
 
-/// Put a manual session that fell over on the Timeline for the human to answer.
+/// Put a manual session that fell over on the Timeline for the human to read.
 ///
-/// The ordinary Interruption with the ordinary three Remedies: the evidence is
-/// gathered the way every other one's is, and *take over manually* and *abort*
-/// mean exactly what they mean everywhere — nothing reverts, resets or stashes,
-/// and the Worktree is left as the session left it.
+/// The ordinary halt with the ordinary Notice: the evidence is gathered the way
+/// every other one's is, and nothing reverts, resets or stashes — the Worktree
+/// is left exactly as the session left it.
 ///
-/// Nothing is refused for. By the time this runs the session is gone, and an
-/// Interruption that could not be raised is a manual task that failed with
-/// nothing saying so — which is a thing to see in the log, and the same thing
-/// either way.
+/// [`store::Halt::Deliberate`]. The human typed the instruction and walked away,
+/// so a restart running it again on its own would be a machine repeating an act
+/// of theirs unasked; whether it goes again is theirs to say.
+///
+/// Nothing is refused for. By the time this runs the session is gone, and a halt
+/// that could not be recorded is a manual task that failed with nothing saying
+/// so — which is a thing to see in the log, and the same thing either way.
 async fn stop(state: &AppState, conversation_id: i64, writing: i64, how: &str) {
-    let raised = crate::interruptions::raise(
+    let halted = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Manual,
+        store::Halt::Deliberate,
         "doing what the manual task said",
         how,
         Some(writing),
     )
     .await;
 
-    if let Err(error) = raised {
+    if let Err(error) = halted {
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a manual task failed and the Interruption saying so could not be raised"
+            "a manual task failed and the halt saying so could not be recorded"
         );
     }
 }

@@ -268,9 +268,9 @@ pub(crate) struct Session {
 
 /// How a session ended, as whoever was driving it hears.
 ///
-/// The distinction the Interruptions turn on: [`Ended::Stopped`] is a session
-/// Verkstead put an end to because its step had landed, and every other variant
-/// is a session that stopped without being asked to.
+/// The distinction the halts turn on: [`Ended::Stopped`] is a session Verkstead
+/// put an end to because its step had landed, and every other variant is a
+/// session that stopped without being asked to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Ended {
     /// Ran to the end and exited cleanly. Which is not the same as *did the
@@ -292,8 +292,8 @@ pub(crate) enum Ended {
 }
 
 impl Ended {
-    /// The sentence an Interruption's evidence records, or `None` where the
-    /// session ended the way it was meant to.
+    /// The sentence a halt's Notice records, or `None` where the session ended
+    /// the way it was meant to.
     ///
     /// One place decides what each way of ending is *called*, so the words the
     /// human reads on the Timeline and the words the log used are the same
@@ -308,12 +308,12 @@ impl Ended {
 
     /// Whether Verkstead is what ended it.
     ///
-    /// The one way of ending that is never an Interruption, whatever the Worktree
-    /// then says. Everything else a driver sees is a session that stopped without
-    /// being asked to, and the human is owed the choice about it; this is the
-    /// human having already made one — they aborted the Conversation — or the
-    /// step having landed. Raising an Interruption about it would be asking them
-    /// what to do about the thing they just did.
+    /// The one way of ending that never halts, whatever the Worktree then says.
+    /// Everything else a driver sees is a session that stopped without being
+    /// asked to, and the human is owed the telling about it; this is the human
+    /// having already stopped it themselves — they aborted the Conversation — or
+    /// the step having landed. Halting over it would be telling them driving had
+    /// stopped, about the thing they just stopped.
     pub(crate) fn on_purpose(&self) -> bool {
         matches!(self, Self::Stopped)
     }
@@ -874,8 +874,8 @@ impl Sessions {
                     });
 
                     // Last of all, for the reason the drop it replaced was last:
-                    // whoever is driving acts on this — it raises Interruptions
-                    // and launches the next step — and everything above has to
+                    // whoever is driving acts on this — it halts the run or
+                    // launches the next step — and everything above has to
                     // have happened by then. Chief among them the final sweep of
                     // the branch, because a session's last act is usually a
                     // commit and a driver told *over* before it landed would be
@@ -1076,7 +1076,7 @@ struct Printing {
 /// Conversation being watched and not the list of them.
 ///
 /// What comes back is how it ended, which is what whoever is driving decides
-/// between carrying on and raising an Interruption by.
+/// between carrying on and halting by.
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,

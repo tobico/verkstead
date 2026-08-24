@@ -27,10 +27,10 @@
 //! unattended.
 //!
 //! A `gh` that cannot answer — absent, not logged in, no PR on the branch —
-//! leaves the Conversation where it is with the reason on the Timeline, as an
-//! Interruption. That is the honest shape of it: the run has stopped, Verkstead
+//! halts, leaving the Conversation where it is with the reason on the Timeline
+//! as a Notice. That is the honest shape of it: the run has stopped, Verkstead
 //! cannot resolve it, and what to do about it is the human's — install `gh`, log
-//! in, open the PR by hand and retry.
+//! in, or open the PR by hand, and resume.
 
 use std::path::PathBuf;
 
@@ -43,9 +43,9 @@ use crate::store;
 /// Find the pull request `conversation_id`'s last session opened, and move the
 /// Conversation on to wrapping it up.
 ///
-/// `writing` is the Timeline Event that session printed into, so that an
-/// Interruption raised here carries the tail of what it last said — which is
-/// usually where the reason it opened nothing is written down.
+/// `writing` is the Timeline Event that session printed into, so that a halt
+/// written here carries the tail of what it last said — which is usually where
+/// the reason it opened nothing is written down.
 ///
 /// Nothing is refused for and nothing is returned: this runs at the end of an
 /// unattended run with nobody watching, and what it has to say it says on the
@@ -224,15 +224,18 @@ pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
 
 /// Leave the Conversation where it is, with the reason on the Timeline.
 ///
-/// An Interruption rather than a line of its own, because that is exactly what
-/// this is: a run that has stopped on something Verkstead cannot resolve itself.
-/// The three remedies all mean something here — retry once `gh` is logged in,
-/// take over and open the PR by hand, or abort the run.
+/// A halt rather than a line of its own, because that is exactly what this is: a
+/// run that has stopped on something Verkstead cannot resolve itself. Resume
+/// once `gh` is logged in, or open the pull request by hand, or abort the run.
+///
+/// [`store::Halt::Deliberate`]: the finish step ran and left no pull request, so
+/// what is wrong is out here rather than in a driver that went away, and a
+/// restart looking again would find the same missing thing.
 async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Option<i64>) {
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Finish,
+        store::Halt::Deliberate,
         "finding the pull request the finish step opened",
         why,
         writing,
@@ -242,7 +245,7 @@ async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Opt
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a finish step left no pull request and the Interruption saying so could not be raised"
+            "a finish step left no pull request and the halt saying so could not be recorded"
         );
     }
 }

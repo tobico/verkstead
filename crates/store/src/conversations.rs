@@ -912,9 +912,11 @@ async fn started(
 /// - A **Question Set with no Response and no archiving** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - An **open Interruption**, which is a run stopped on a choice only they can
-///   make. Read off the table rather than off the Timeline, so the whole list
-///   costs one query.
+/// - A **halt**, which is a Conversation nothing is driving any more and which
+///   goes again only when the human says so. Read off the table rather than off
+///   the Timeline, so the whole list costs one query.
+/// - An **open Interruption**, which is a halt as a Verkstead of before recorded
+///   one. Kept here until the stored ones are migrated into Notices.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -937,6 +939,9 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                           AND NOT EXISTS (
                               SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
                           )
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM halts h WHERE h.conversation_id = c.id
                     )
                     OR EXISTS (
                         SELECT 1 FROM interruptions i

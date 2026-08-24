@@ -19,7 +19,7 @@ stops push nothing.
 ## Tasks
 
 - [x] 01: A stall halts into a Notice — [details](01-stall-halts-into-a-notice.md)
-- [ ] 02: Every stop is a halt — [details](02-every-stop-is-a-halt.md)
+- [x] 02: Every stop is a halt — [details](02-every-stop-is-a-halt.md)
 - [ ] 03: A halt reaches the phone — [details](03-halt-reaches-the-phone.md)
 - [ ] 04: Resume — [details](04-resume.md)
 - [ ] 05: Resume rebuilds a broken worktree — [details](05-resume-rebuilds-a-broken-worktree.md)

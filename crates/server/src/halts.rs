@@ -28,6 +28,57 @@ use crate::AppState;
 use crate::repos::git;
 use crate::store;
 
+/// Whether driving has already stopped, which is what nothing may advance past.
+///
+/// Asked wherever a session is about to be launched — the runner between steps,
+/// and each of the wrap-up's watchers before it dispatches — so that a
+/// Conversation the human has to press Resume on does not quietly get another
+/// agent spent on it. The one halt per Conversation makes a second stop
+/// impossible; this makes a session behind the first one impossible too.
+///
+/// An Interruption a Verkstead of before left open counts, until the migration
+/// rewrites the stored ones. It says the same thing about the same Conversation,
+/// and a run that carried on past one because it was recorded the old way would
+/// be the very failure both of them exist to stop.
+///
+/// A store that will not answer reads as *stopped*, which is the right way round
+/// for the one thing this decides: what is on the other side of it is launching
+/// an agent, and something that could not tell whether the run had stopped
+/// should wait rather than spend an account guessing.
+pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
+    match store::halted(&state.pool, conversation_id).await {
+        Ok(Some(halted)) => {
+            tracing::info!(
+                conversation_id,
+                event_id = halted.event_id,
+                "driving has stopped, so nothing was launched"
+            );
+            return true;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether driving had stopped failed");
+            return true;
+        }
+    }
+
+    match store::open_interruption(&state.pool, conversation_id).await {
+        Ok(Some(event_id)) => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the run is blocked on an Interruption of before, so nothing was launched"
+            );
+            true
+        }
+        Ok(None) => false,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a run was blocked failed");
+            true
+        }
+    }
+}
+
 /// How much of what git made of the Worktree to keep.
 ///
 /// A session that went wrong mid-refactor can leave hundreds of paths pending,

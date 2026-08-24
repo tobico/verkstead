@@ -27,11 +27,11 @@
 //! the clock. A session that keeps talking is never killed blind.
 //!
 //! A step whose session ends without landing it stops the run where it is, and
-//! what it stops at is an Interruption: the evidence goes on the Timeline and the
-//! human picks a remedy — see [`crate::interruptions`]. The run does not go round
-//! again while one is open, which is checked here as well as enforced by the
-//! store's index, because the check the runner makes is the one that decides
-//! whether to spend an account on a step nobody has looked at yet.
+//! what it stops at is a **halt**: the Conversation records that nothing is
+//! driving it any more, and a Notice carrying the evidence goes on the Timeline
+//! — see [`crate::halts`]. The run does not go round again from there; getting
+//! going is a press of Resume, because a runner that relaunched a step nothing
+//! had moved would spend an account on the same failure with nobody watching.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -209,32 +209,6 @@ impl Step {
         }
     }
 
-    /// The step as an Interruption records it — which is what a retry launches
-    /// again.
-    ///
-    /// Which task it was is not part of it, and need not be: a retry runs the
-    /// fork that reads `.tasks/` and takes the lowest number left, which is the
-    /// same answer the run was already working from.
-    ///
-    /// [`Step::Nothing`] is not a step a session was launched for, so it can
-    /// never be one an Interruption is raised about — it is the answer that ends
-    /// the run rather than one that runs anything.
-    fn stored(&self) -> Option<store::Step> {
-        match self {
-            Step::Planning => Some(store::Step::Planning),
-            Step::PlanningStage => Some(store::Step::Stage),
-            // Recorded as the inline run it was about to prime, because that is
-            // what a retry has to launch. There is nobody left holding the
-            // grilling to write a handoff a second time — a retried tail runs
-            // fresh, on the Brief and whatever the human wrote beside the retry.
-            Step::Handoff(_) => Some(store::Step::Inline),
-            Step::Task(_) => Some(store::Step::Task),
-            Step::Finish => Some(store::Step::Finish),
-            Step::Staging(_) => Some(store::Step::Roadmap),
-            Step::Nothing => None,
-        }
-    }
-
     /// What the step was, in the words the Timeline draws.
     ///
     /// The sentence rather than the word above it: the two are read by different
@@ -263,7 +237,7 @@ fn todo() -> PathBuf {
 /// The same three pairings the followers below are built on — an inline pick ends
 /// on the handoff, a task list on the backlog, a roadmap on the roadmap — asked
 /// for without a session to follow. What wants them that way is the run that has
-/// *lost* its session: an Interruption has to name the step the Conversation was
+/// *lost* its session: the Notice has to name the step the Conversation was
 /// waiting on, and there is nobody left to read it off.
 ///
 /// `None` is a Conversation whose base commit could not be read, which is the one
@@ -325,30 +299,24 @@ pub(crate) async fn follow_the_tail(
 /// otherwise sit grilling for ever, watched by nothing and waiting on an artifact
 /// nobody is writing.
 ///
-/// So it stops the way every other step that lost its session stops: the
-/// Interruption goes on the Timeline with the tail it was waiting on, and the
-/// human picks a remedy. Retrying runs that tail again in a fresh session — which
-/// for all three is exactly what [`retry`] already launches.
+/// So it stops the way every other step that lost its session stops: a halt, and
+/// a Notice on the Timeline naming the tail it was waiting on.
+/// [`store::Halt::Circumstance`], because that is exactly what a restart is —
+/// nobody decided this run should stop, and a Verkstead coming back up is free
+/// to write the artifact after all.
 ///
 /// No session to read a last word off, so the evidence carries the other facts
 /// alone. What the session said before the restart is on the Timeline above the
-/// Interruption either way, as its own Event.
+/// Notice either way, as its own Event.
 pub(crate) async fn nobody_writing(state: &AppState, conversation_id: i64, direction: Direction) {
     let Some(step) = tail(state, conversation_id, direction).await else {
-        return;
-    };
-
-    // Every tail is a step that runs, so every one of them is a step an
-    // Interruption can be raised about. [`Step::Nothing`] is the only one that is
-    // not, and [`tail`] never answers it.
-    let Some(stored) = step.stored() else {
         return;
     };
 
     stop(
         state,
         conversation_id,
-        stored,
+        store::Halt::Circumstance,
         &step.what(),
         "the session that was writing it is gone",
         None,
@@ -378,8 +346,8 @@ pub(crate) async fn nobody_writing(state: &AppState, conversation_id: i64, direc
 /// Conversation that has gone, or a step whose session ended without landing it.
 /// Idle rather than looping — a runner that relaunched a session for a step
 /// nothing had moved would be a machine spending an account on the same failure
-/// over and over, with nobody watching. What it leaves behind for the human is an
-/// Interruption, which is where the run picks up again if they retry.
+/// over and over, with nobody watching. What it leaves behind for the human is a
+/// halt, and the Notice saying what stopped.
 ///
 /// `driving` is the registration that says this Conversation is being driven,
 /// taken by whoever armed the watcher or pressed the retry rather than here —
@@ -795,11 +763,11 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
         }
 
         // Asked before anything is launched, because that is what *the run does
-        // not advance past an Interruption* means: the store's index makes two
-        // open ones impossible, and this makes the second session impossible. A
-        // run whose step landed while an older Interruption was still open would
-        // otherwise carry on with the human still being asked about it.
-        if stopped(&state, conversation_id).await {
+        // not advance past a halt* means: the halts table makes a second stop
+        // impossible, and this makes the session behind the first one impossible.
+        // A run whose step landed while the Conversation was already halted would
+        // otherwise carry on past a stop nobody has started it again from.
+        if crate::halts::stopped(&state, conversation_id).await {
             return;
         }
 
@@ -840,11 +808,9 @@ async fn carry_on(state: AppState, conversation_id: i64, _driving: Driving) {
 /// accounts the Conversation fixed separately and a session cannot change the
 /// one it is running as, which is the whole reason the handoff exists.
 ///
-/// A session that goes quiet without writing one stops at an Interruption, the
-/// way every other step does. What a retry launches then is the implementation
-/// itself: the grilling that would have written the handoff is the session that
-/// just ended without one, so a retried tail runs on the Brief and the human's
-/// note — see [`Step::stored`].
+/// A session that goes quiet without writing one halts, the way every other step
+/// does: nothing is driving the Conversation and a Notice says so, and starting
+/// it again is Resume's.
 ///
 /// The registration is held across all of it — the watch, the move, and the run
 /// on the other side of it — so there is no moment between the handoff landing
@@ -872,8 +838,8 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     follow_inline(state, conversation_id, session, driving).await
 }
 
-/// See an inline implementation session out, and stop the run at an Interruption
-/// if it ends having landed nothing.
+/// See an inline implementation session out, and halt the run if it ends having
+/// landed nothing.
 ///
 /// The whole of the work in one session, so there is no next step to launch and
 /// nothing to poll a Worktree for: what says an inline session did anything is
@@ -953,15 +919,15 @@ async fn follow_inline(
         // case a status could not have caught.
         (None, false) => "the session ended without committing anything".to_owned(),
         // Ended badly, whether or not it got some of the way: the human is owed
-        // the choice either way, and what it committed is on the Timeline above
-        // the Interruption for them to read.
+        // the telling either way, and what it committed is on the Timeline above
+        // the Notice for them to read.
         (Some(badly), _) => badly,
     };
 
     stop(
         &state,
         conversation_id,
-        store::Step::Inline,
+        store::Halt::Deliberate,
         "implementing the work inline",
         &how,
         Some(event_id),
@@ -1015,9 +981,8 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// the commit the branch came off, which is what says a roadmap on it is one this
 /// branch wrote — see [`Landing::Roadmap`].
 ///
-/// A session that ends without writing one stops the run at an Interruption, the
-/// way every other step does, and the human's remedies mean what they always
-/// mean.
+/// A session that ends without writing one halts the run, the way every other
+/// step does.
 async fn follow_roadmap(
     state: AppState,
     conversation_id: i64,
@@ -1047,8 +1012,8 @@ async fn follow_roadmap(
 /// one — so the session is ended only once it has printed nothing for the grace
 /// period, with anything it prints putting the whole grace back on the clock.
 ///
-/// Nothing is refused for and no Interruption is raised. A fix session that ends
-/// having done nothing is not by itself something to ask the human about: what
+/// Nothing is refused for and nothing halts. A fix session that ends having done
+/// nothing is not by itself something to stop over: what
 /// wrap-up is watching is the check, and the human is asked once the machine has
 /// had its two goes at it — see [`crate::checks`].
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
@@ -1112,7 +1077,7 @@ pub(crate) enum Reviewed {
     /// It ended without asking anything, and not well. Which is not a review
     /// that found nothing — this is a review that did not happen.
     Stopped {
-        /// How it ended, in the words an Interruption records.
+        /// How it ended, in the words the Notice records.
         how: String,
 
         /// The Timeline Event it was printing into.
@@ -1135,8 +1100,8 @@ pub(crate) enum Reviewed {
 ///
 /// A session that ends without asking is read off how it ended, exactly as an
 /// inline run is: cleanly means it found nothing, and anything else means the
-/// review did not happen. Nothing is refused for and no Interruption is raised
-/// here — what to do about each of those is [`crate::review`]'s.
+/// review did not happen. Nothing is refused for and nothing halts here — what
+/// to do about each of those is [`crate::review`]'s.
 pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
     let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing, "").await else {
         return Reviewed::Nothing;
@@ -1283,55 +1248,37 @@ async fn committed_and_quiet(
     }
 }
 
-/// Whether an Interruption is already holding this run up.
+/// Stop the run: record the halt and put what stopped on the Timeline.
 ///
-/// A store that will not answer reads as *stopped*, which is the right way round
-/// for the one thing this decides: what is on the other side of it is launching
-/// an agent, and a runner that could not tell whether the human was still being
-/// asked something should wait rather than spend an account guessing.
-async fn stopped(state: &AppState, conversation_id: i64) -> bool {
-    match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(Some(event_id)) => {
-            tracing::info!(
-                conversation_id,
-                event_id,
-                "the run is blocked on the human, so nothing was launched"
-            );
-            true
-        }
-        Ok(None) => false,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a run was blocked failed");
-            true
-        }
-    }
-}
-
-/// Stop the run: put what went wrong on the Timeline for the human to answer.
+/// `halt` is whether anybody chose to stop, which is the one thing a restart has
+/// to know. A step whose session ended without landing it is
+/// [`store::Halt::Deliberate`] — Verkstead pulled the brake, and it does not
+/// spend an account on the same failure again unasked. A step whose session a
+/// restart took away is [`store::Halt::Circumstance`]: nothing decided anything,
+/// so starting it again is putting things back rather than overriding a
+/// decision.
 ///
 /// `writing` is the Timeline Event the session that failed was printing into, and
 /// `None` where there is no session left to read one off — a restart, which kills
 /// every session it had and leaves the Conversation's row behind.
 ///
 /// Nothing is refused for. By the time this runs the session is gone and the step
-/// has not landed, and an Interruption that could not be raised is a run stopped
-/// with nothing saying so — which is a thing to see in the log, and the same
-/// thing either way: the runner returns.
+/// has not landed, and a halt that could not be recorded is a run stopped with
+/// nothing saying so — which is a thing to see in the log, and the same thing
+/// either way: the runner returns.
 async fn stop(
     state: &AppState,
     conversation_id: i64,
-    step: store::Step,
+    halt: store::Halt,
     what: &str,
     how: &str,
     writing: Option<i64>,
 ) {
-    if let Err(error) =
-        crate::interruptions::raise(state, conversation_id, step, what, how, writing).await
-    {
+    if let Err(error) = crate::halts::halt(state, conversation_id, halt, what, how, writing).await {
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a run stopped and the Interruption saying so could not be raised"
+            "a run stopped and the halt saying so could not be recorded"
         );
     }
 }
@@ -1342,13 +1289,13 @@ async fn stop(
 /// `None` is a session that is over with its step not done. That is a crash, a
 /// hang given up on, or an agent that stopped short — which of them is not
 /// something to guess at here, and none of them is a reason to launch the same
-/// step again on its own. The run stops at an Interruption, and it is the human
-/// who decides whether the step gets another run.
+/// step again on its own. The run halts, and it is the human who decides whether
+/// the step gets another run.
 ///
 /// `Some` is the Timeline Event the session printed into. The step landed, and
 /// what comes after it may still want the session's own last words — the finish
-/// step's does, because an Interruption raised about what the finish left behind
-/// is answered from them.
+/// step's does, because a halt over what the finish left behind is explained from
+/// them.
 async fn see_out(
     state: &AppState,
     conversation_id: i64,
@@ -1357,9 +1304,7 @@ async fn see_out(
 ) -> Option<i64> {
     let event_id = session.event_id;
 
-    let (Some(landing), Some(stored)) = (step.landing(), step.stored()) else {
-        return None;
-    };
+    let landing = step.landing()?;
 
     let worktree = worktree(state, conversation_id).await?;
 
@@ -1434,7 +1379,7 @@ async fn see_out(
     stop(
         state,
         conversation_id,
-        stored,
+        store::Halt::Deliberate,
         &step.what(),
         &how,
         Some(event_id),

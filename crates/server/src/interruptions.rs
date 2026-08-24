@@ -1,89 +1,25 @@
-//! Where an unattended run stops, and what the human does about it.
+//! What the human does about an Interruption a Verkstead of before raised.
 //!
-//! An Interruption is something Verkstead noticed and cannot resolve itself: a
-//! session that exited badly, or one that ended having landed nothing. Roadrunner
-//! asked this over askance because nobody was at its terminal; here the Timeline
-//! *is* where the human looks, so the same question is GUI-native — the Event
-//! carries the evidence and offers the three remedies, and the Conversation
-//! carries *blocked on you* until one is chosen.
+//! Nothing raises one any more: where a run stops, it halts and a Notice says
+//! why — see [`crate::halts`]. What is left here is the settling, and it is left
+//! for the Interruptions already on Timelines, which still carry their card and
+//! their three remedies until the migration rewrites them into Notices.
 //!
-//! Two halves, and they are deliberately far apart in time. [`raise`] gathers the
-//! evidence at the moment the run stopped, because all of it moves on: a Worktree
-//! is a directory the human also has, and a session's output belongs to a process
-//! that has gone. [`settle`] runs whenever the human gets to it, which may be the
-//! next morning, and acts on what they chose.
+//! [`settle`] runs whenever the human gets to it, which may be the next morning,
+//! and acts on what they chose.
 //!
 //! Nothing here reverts, resets or stashes anything. In every case the repository
 //! is left exactly as the session left it — that is what makes *take over
 //! manually* a remedy at all, and it is why aborting from here does not remove
 //! the Worktree the way aborting a Conversation from its menu does: the human is
 //! being handed the wreckage on purpose.
-//!
-//! Usage limits — an account exhausting its window mid-run — are not detected
-//! here. That is its own stage.
 
 use anyhow::Result;
 use verkstead_render::{Remedy, RemedySettled};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::halts::{session_tail, worktree_status};
 use crate::store;
-
-/// Stop the run: gather what went wrong and put it on the Timeline.
-///
-/// `writing` is the Timeline Event the failed session was printing into, which is
-/// where the tail comes from. `None` where there was no session to read — a step
-/// nothing could be launched for — and the evidence then carries the other three
-/// facts alone.
-///
-/// The Event it became, or `None` where nothing was raised. Neither way of
-/// getting `None` is a failure: a Conversation that already has one open is a run
-/// that has already stopped, and the first Interruption is the one the human is
-/// being asked about. A Conversation that has gone has nobody left to ask.
-pub(crate) async fn raise(
-    state: &AppState,
-    conversation_id: i64,
-    step: store::Step,
-    what: &str,
-    how: &str,
-    writing: Option<i64>,
-) -> Result<Option<i64>> {
-    let evidence = store::Evidence {
-        step,
-        what: what.to_owned(),
-        how: how.to_owned(),
-        git_status: worktree_status(state, conversation_id).await,
-        tail: session_tail(state, conversation_id, writing).await,
-    };
-
-    let raised = store::record_interruption(&state.pool, conversation_id, &evidence).await?;
-
-    match raised {
-        Some(event_id) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                step = ?step,
-                how,
-                "a run stopped, so the Conversation is blocked on the human"
-            );
-
-            // The Timeline has something on it that is waiting on the human, and
-            // an open page should say so without being reloaded.
-            state.nudges.announce(Nudge::Conversation {
-                conversation: conversation_id,
-            });
-        }
-        None => tracing::info!(
-            conversation_id,
-            how,
-            "a run stopped where one had stopped already, so the first Interruption stands"
-        ),
-    }
-
-    Ok(raised)
-}
 
 /// Take the human's remedy: record it, then do it.
 ///

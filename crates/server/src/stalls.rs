@@ -252,8 +252,8 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String,
 /// — the sentence the Timeline draws above how it ended.
 ///
 /// Read off the state, because for a stall the state is the whole of what says
-/// it. Every other Interruption names a step a session was launched for; this
-/// one names the thing nobody was doing.
+/// it. Every other halt names a step a session was launched for; this one names
+/// the thing nobody was doing.
 ///
 /// The three states nothing drives never reach here — [`sweep`] leaves them
 /// alone, and [`crate::drivers::Drivers::driven`] is where that is decided — so

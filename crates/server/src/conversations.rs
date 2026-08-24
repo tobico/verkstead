@@ -100,9 +100,9 @@ pub(crate) async fn start_adopting(
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has recorded the pick. What a session that could not be picked up
-/// leaves behind is something to see in the log, and no more than that. An
-/// Interruption is raised about a session that ran and went wrong — see
-/// [`crate::interruptions`] — and this is not one.
+/// leaves behind is something to see in the log, and no more than that. A halt
+/// is written about a run that stopped — see [`crate::halts`] — and this is not
+/// one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
     set_id: i64,
@@ -172,8 +172,7 @@ pub(crate) async fn settle_a_proposal(
     if !write_the_artifact(state, conversation_id, picked).await {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
-        // there is nothing here to raise an Interruption about — no session ran
-        // and went wrong.
+        // there is nothing here to halt over — no session ran and went wrong.
         tracing::error!(
             conversation_id,
             ?picked,
@@ -246,19 +245,19 @@ async fn write_the_artifact(state: &AppState, id: i64, direction: Direction) -> 
 /// a restarted server has no sessions at all — and *here* that is a run which has
 /// stopped rather than something to note and carry on from, because a session
 /// really was writing the artifact until this restart killed it. So what this
-/// leaves on each Timeline is an Interruption naming the tail the Conversation
-/// was waiting on, which the human can retry into a fresh session or take over —
-/// see [`crate::runner::nobody_writing`].
+/// leaves on each Timeline is a halt, with a Notice naming the tail the
+/// Conversation was waiting on — see [`crate::runner::nobody_writing`]. Of the
+/// kind nobody chose, a restart being nobody's decision.
 ///
-/// Raising one twice is not raising two: the store keeps one open Interruption
-/// per Conversation, so a server restarted again over the same Conversation
-/// leaves the first standing.
+/// Halting one twice is not halting two: the store keeps one halt per
+/// Conversation, so a server restarted again over the same Conversation leaves
+/// the first standing.
 ///
 /// The task is handed back rather than let go, for the reason
 /// [`crate::wrapping::resume`]'s is: the stall sweep calls a grilling with no
 /// session undriven, and every one of these is exactly that until this has said
-/// what it has to say about it. A sweep that looked first would raise its own
-/// Interruption over the top of the better one. See [`crate::stalls::sweeping`].
+/// what it has to say about it. A sweep that looked first would write its own
+/// halt over the top of the better one. See [`crate::stalls::sweeping`].
 #[must_use = "the sweep waits for the grillings to be looked over before it \
               judges whether anything is driving them"]
 pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
@@ -498,9 +497,10 @@ pub(crate) async fn set_base_commit(
 /// would be an agent nobody could see or stop. It is also the one part of this
 /// that failing does not refuse — the branch is made, the Brief is frozen, and a
 /// session that would not start is logged, leaving a Conversation that is
-/// grilling with a Timeline that says so and no session on it. Not an
-/// Interruption either: a grilling is attended, and those are for the unattended
-/// runs a human is not watching.
+/// grilling with a Timeline that says so and no session on it. Not a halt
+/// either: the human is at the button they have just pressed, and what a halt is
+/// for is telling them about a run that stopped while nobody was watching. The
+/// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,

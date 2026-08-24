@@ -15,9 +15,9 @@
 //! what it committed on the Timeline.
 //!
 //! **Two attempts, then it stops asking the machine and starts asking the
-//! human.** A check that is still red after [`ATTEMPTS`] fix sessions raises an
-//! Interruption and nothing further is dispatched for it: the human reads which
-//! checks failed and what the last session said, and picks a remedy. The count
+//! human.** A check that is still red after [`ATTEMPTS`] fix sessions halts the
+//! run and nothing further is dispatched for it: the human reads which checks
+//! failed and what the last session said, off the Notice. The count
 //! is per check rather than per Conversation — a suite where one job fails and
 //! is fixed and then a different one fails has not spent its attempts — and it
 //! is kept in the store, so a restarted server does not start the counting
@@ -38,7 +38,7 @@ use crate::store;
 ///
 /// Two, which is one automatic go and one more after it did not work. A third
 /// would be a machine spending an account on the same failure with nobody
-/// watching, which is the whole thing an Interruption exists instead of.
+/// watching, which is the whole thing halting exists instead of.
 const ATTEMPTS: i64 = 2;
 
 /// Watch `conversation_id`'s checks until it stops wrapping up.
@@ -52,9 +52,9 @@ const ATTEMPTS: i64 = 2;
 /// Nothing here is refused for. This runs unattended with nobody watching, and
 /// what it has to say it says on the Timeline or in the log.
 pub(crate) async fn watch(state: AppState, conversation_id: i64) {
-    // The Timeline Event the last fix session printed into, so that an
-    // Interruption raised here carries the tail of what it said — which is where
-    // the reason it could not fix the check is usually written down.
+    // The Timeline Event the last fix session printed into, so that a halt
+    // written here carries the tail of what it said — which is where the reason
+    // it could not fix the check is usually written down.
     let mut writing = None;
 
     loop {
@@ -129,15 +129,10 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
     }
 
     // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past an Interruption* means no session is launched while the
-    // human is still being asked something. Including the one raised here.
-    match store::open_interruption(&state.pool, conversation_id).await {
-        Ok(Some(_)) => return Watching::Done("the run is blocked on the human"),
-        Ok(None) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether a wrap-up was blocked failed");
-            return Watching::Again(writing);
-        }
+    // not advance past a halt* means no session is launched while the human is
+    // the only thing that can start one. Including the halt written here.
+    if crate::halts::stopped(state, conversation_id).await {
+        return Watching::Done("driving has stopped");
     }
 
     let opened = match store::pull_request(&state.pool, conversation_id).await {
@@ -286,11 +281,16 @@ async fn fix(
     Watching::Again(said.or(writing))
 }
 
-/// Stop asking the machine: put what failed on the Timeline for the human.
+/// Stop asking the machine: halt, and put what failed on the Timeline.
 ///
-/// The evidence is what makes the choice answerable without opening a terminal —
+/// The evidence is what makes the stop readable without opening a terminal —
 /// which checks failed, where their runs are, and the tail of what the last fix
-/// session said, which [`crate::interruptions::raise`] reads off `writing`.
+/// session said, which [`crate::halts::halt`] reads off `writing`.
+///
+/// [`store::Halt::Deliberate`]: every fix session the branch was allowed has
+/// been spent, and Verkstead stopping there is a decision. A restart that
+/// started the fixing over would spend them all again on checks that are still
+/// red for whatever reason they were red the first time.
 async fn ask(
     state: &AppState,
     conversation_id: i64,
@@ -306,10 +306,10 @@ async fn ask(
         listed(failed),
     );
 
-    if let Err(error) = crate::interruptions::raise(
+    if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Checks,
+        store::Halt::Deliberate,
         "getting the pull request's checks green again",
         &how,
         writing,
@@ -319,7 +319,7 @@ async fn ask(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "the checks would not go green and the Interruption saying so could not be raised"
+            "the checks would not go green and the halt saying so could not be recorded"
         );
     }
 
