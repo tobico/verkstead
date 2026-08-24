@@ -2451,6 +2451,9 @@ main:has(.workbench) {
   min-height: 0;
   padding: 0.5rem;
   overflow: auto;
+  /* A grid scrolled to its end stops there rather than handing the rest of the
+     gesture out to the pane and the page behind it. */
+  overscroll-behavior: contain;
   background: #000;
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
@@ -2878,10 +2881,21 @@ main:has(.workbench) {
        at. */
     grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
     height: 100dvh;
+    /* And nothing inside it may make the document taller than that. The frame
+       is the window's height here, so anything standing past the bottom of it
+       is a pane that has got its own height wrong — and left unclipped that
+       becomes page to scroll, which pushes the whole workbench off the screen
+       once the pane the human is reading runs out of its own. Clipped, the
+       mistake stays inside the pane it was made in. */
+    overflow: hidden;
   }
 
   .pane {
     overflow-y: auto;
+    /* A pane scrolled to its end stops there. Left to itself the browser hands
+       the rest of the gesture to the document, which is the same page-under-
+       the-panes scroll by another route. */
+    overscroll-behavior: contain;
   }
 
   .workbench > .conversations-pane {
@@ -2957,15 +2971,31 @@ main:has(.workbench) {
    scrolls like everything else this pane holds, which is what switching back to
    it puts back.
 
-   The window's height at every width: above the first breakpoint the grid has
-   already given the pane exactly that, and below it the pane is the whole page
-   with nothing standing above it. And the room a scrolling pane leaves under
-   its last line goes, because a pane that does not scroll has no use for it. */
+   Below the first breakpoint the pane is the whole page with nothing standing
+   above it, so the window's height is the height it wants and `100dvh` says so.
+   Above it, the pane is a cell of a frame that is already exactly that tall, and
+   the height comes from the row instead — the same number by a different route,
+   and asking the viewport twice is what put blank page under the workbench: two
+   resolutions of one `dvh` that disagree by a pixel leave the pane standing past
+   the bottom of the frame, and that pixel is document to scroll.
+
+   And the room a scrolling pane leaves under its last line goes, because a pane
+   that does not scroll has no use for it. */
 .workbench > .details-pane:has(.screen) {
   flex-direction: column;
   height: 100dvh;
   padding-bottom: 1.25rem;
   overflow: hidden;
+}
+
+/* Said after the rule it takes the height back off, which is the only place it
+   could win — and `auto` rather than a length, because the row is what is being
+   handed the job and stretching an item to its row is what a grid does by
+   itself. It is how every other pane here is already the height it is. */
+@media (min-width: 60rem) {
+  .workbench > .details-pane:has(.screen) {
+    height: auto;
+  }
 }
 
 .workbench > .details-pane:has(.screen) > :not(.screen) {
