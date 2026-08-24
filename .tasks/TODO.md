@@ -18,7 +18,7 @@ onto them, and timeline presentation put straight.
 - [x] 07: Redraw the grilling threshold — [details](07-grilling-threshold.md)
 - [x] 08: Remember pairings per repo — [details](08-pairing-memory.md)
 - [x] 09: One menu component, one shadow — [details](09-menu-component.md)
-- [ ] 10: Settings behind an ellipsis menu — [details](10-settings-menu.md)
+- [x] 10: Settings behind an ellipsis menu — [details](10-settings-menu.md)
 - [ ] 11: A modal component, proven on profiles — [details](11-modal-profiles.md)
 - [ ] 12: The remaining settings modals — [details](12-settings-modals.md)
 - [ ] 13: Timeline rows put straight — [details](13-timeline-rows.md)

@@ -387,24 +387,16 @@ textarea::placeholder {
   color: #b3382c;
 }
 
-/* Where else there is to go, in the same slot on every page: back out of a Set,
-   and out to the one page everything is configured on. */
+/* The way back out of a page, in the same slot on every one of them. The way
+   *on* to the settings was here too until it went into the ⋯ at the head of the
+   conversations — see `.workbench-actions` — and nothing is left that puts two
+   of these on a line. */
 
-.back,
-.to-settings {
+.back {
   display: inline-block;
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
   text-decoration: none;
-}
-
-/* The slot laid out for more than one of them, which is the conversations
-   sidebar alone — and it held three until the Repos and the Profiles were
-   folded onto the settings page. */
-.elsewhere {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 1.25rem;
 }
 
 /* Registering a repo: a path typed, and the button that sends it. The label
@@ -1027,7 +1019,8 @@ main:has(.workbench) {
 /* Every row of every menu: drawn as the text it is rather than as a control,
    because a menu of buttons that looked like buttons would read as a form to
    fill in. */
-.menu-drop button {
+.menu-drop button,
+.menu-drop a[role="menuitem"] {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -1035,6 +1028,7 @@ main:has(.workbench) {
   padding: 0.4rem 0.6rem;
   font: inherit;
   color: inherit;
+  text-decoration: none;
   text-align: start;
   background: transparent;
   border: 0;
@@ -1043,13 +1037,35 @@ main:has(.workbench) {
 }
 
 .menu-drop button:hover,
-.menu-drop button:focus-visible {
+.menu-drop button:focus-visible,
+.menu-drop a[role="menuitem"]:hover,
+.menu-drop a[role="menuitem"]:focus-visible {
   background: var(--paper);
 }
 
 .menu-drop button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+/* The ⋯ trigger, of which there are two: what can be done to the Conversation
+   being read, and what there is beyond the conversations at all. Both sit at the
+   right edge of a pane's header beside the thing that header names, and a mark
+   is what fits there — so they are painted here, once, and the pair of them
+   cannot drift apart. */
+.workbench-actions > .menu-trigger,
+.conversation-actions > .menu-trigger {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+.workbench-actions > .menu-trigger[aria-expanded="true"],
+.conversation-actions > .menu-trigger[aria-expanded="true"] {
+  color: var(--ink);
 }
 
 /* A run of rows kept apart from the rest by a rule, where pressing one of them
@@ -1065,6 +1081,12 @@ main:has(.workbench) {
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
   color: var(--ink-soft);
+}
+
+/* Wider than the one word in it, so it reads as a menu with room for the next
+   entry rather than as a label that happened to appear under the mark. */
+.workbench-actions > .menu-drop {
+  min-width: 9rem;
 }
 
 /* Starting a conversation: which repo the work is in, and nothing else — the
@@ -2863,21 +2885,10 @@ main:has(.workbench) {
 
 /* What can be done to the conversation as a whole. A menu rather than a button,
    because aborting throws a worktree away and the header is somewhere the
-   cursor passes on the way to everything else. */
-.conversation-actions > .menu-trigger {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
+   cursor passes on the way to everything else. Its trigger is the ⋯ painted up
+   with the sidebar's; what is its own is the drop.
 
-.conversation-actions > .menu-trigger[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* Room for a sentence about what aborting takes away, which is more than a row
+   Room for a sentence about what aborting takes away, which is more than a row
    of a menu holds — so this one is padded as a card rather than as a list. */
 .conversation-actions > .menu-drop {
   width: 17rem;

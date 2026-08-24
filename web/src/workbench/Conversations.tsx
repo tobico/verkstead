@@ -18,8 +18,8 @@
 //! they can change while it is still drafting.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
-//! workbench has the root: the Repos and the Agent Profiles are a line at the
-//! bottom of it rather than a page of their own to find.
+//! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
+//! the head of the pane rather than a page of their own to find.
 
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
@@ -69,6 +69,7 @@ export function Conversations(props: {
           <img src="/icons/verkstead.svg" alt="" />
           Verkstead
         </h1>
+        <WorkbenchActions />
       </div>
 
       <NewConversation open={props.open} />
@@ -101,18 +102,45 @@ export function Conversations(props: {
           )}
         </Match>
       </Switch>
-
-      {/* The rest of Verkstead, which is one page: the Repos and the Agent
-          Profiles a Conversation is settled against, and what Verkstead itself
-          has been told. What is waiting on the human is not there — a Question
-          Set is reached through the Conversation it was asked from, which is
-          the list above. */}
-      <nav class="elsewhere">
-        <A class="to-settings" href="/settings">
-          Settings →
-        </A>
-      </nav>
     </>
+  );
+}
+
+/// The rest of Verkstead, which is one page: the Repos and the Agent Profiles a
+/// Conversation is settled against, and what Verkstead itself has been told.
+/// What is waiting on the human is not there — a Question Set is reached
+/// through the Conversation it was asked from, which is the list this sits over.
+///
+/// A ⋯ at the head of the pane rather than the link that used to sit at its
+/// foot. That foot is under the conversations, and the conversations are the one
+/// part of the pane with no end: a long enough list and the way out to the
+/// settings was somewhere the human had to scroll to find. Up here it is where
+/// the ⋯ at the top of a Conversation is, drawn through the same component and
+/// painted by the same rule — and the two of them mean the same thing in their
+/// two places, which is *what there is about this pane that is not in it*.
+///
+/// A menu for one entry, because the entry is what is behind it rather than what
+/// it is: the next thing that is about the workbench as a whole goes in beside
+/// Settings rather than beside the wordmark.
+///
+/// A link rather than a button, and the only row of any menu that is one: the
+/// settings are a page of their own, so this is going somewhere in the way that
+/// opening a Conversation is not. Nothing here has to shut the menu — the
+/// navigation takes the whole sidebar with it.
+function WorkbenchActions(): JSX.Element {
+  return (
+    <Menu
+      class="workbench-actions"
+      label="Workbench actions"
+      name="Workbench actions"
+      trigger="⋯"
+    >
+      {() => (
+        <A role="menuitem" href="/settings">
+          Settings
+        </A>
+      )}
+    </Menu>
   );
 }
 

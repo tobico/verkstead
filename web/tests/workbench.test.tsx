@@ -160,6 +160,15 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, ".conversation-actions > .menu-drop");
 }
 
+/// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
+/// the trigger, and wait for what it drops.
+async function openWorkbenchActions(
+  container: ParentNode,
+): Promise<HTMLElement> {
+  fireEvent.click(await drawn(container, ".workbench-actions > .menu-trigger"));
+  return drawn(container, ".workbench-actions > .menu-drop");
+}
+
 /// Drop the new-conversation menu, which is where both ways of starting one
 /// live: press the button, and wait for what it drops.
 async function openNewConversation(
@@ -282,16 +291,40 @@ describe("the workbench", () => {
 
   /// The sidebar is where the rest of Verkstead is reached from, now that the
   /// workbench has the root — and the rest of Verkstead is one page, since the
-  /// Repos and the Agent Profiles were folded onto the settings page.
-  it("reaches the rest of Verkstead from the sidebar", async () => {
+  /// Repos and the Agent Profiles were folded onto the settings page. Behind the
+  /// ⋯ at the head of the pane, where the Conversation's own ⋯ is, rather than
+  /// under a list with no end to it.
+  it("reaches the rest of Verkstead from the sidebar's menu", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    const drop = await openWorkbenchActions(container);
+    expect(
+      [...drop.querySelectorAll("a")].map((to) => to.getAttribute("href")),
+    ).toEqual(["/settings"]);
+
+    // A row that goes somewhere rather than one that does something, so pressing
+    // it takes the whole sidebar with it and nothing here has to shut the menu.
+    const settings = screen.getByText("Settings");
+    expect(settings.getAttribute("role")).toBe("menuitem");
+    fireEvent.click(settings);
+    await waitFor(() => expect(history.get()).toBe("/settings"));
+  });
+
+  /// Nothing of it until it is pressed, which is the point of putting it there:
+  /// the head of the pane gives up a mark's worth of room and no more.
+  it("keeps the way out of the workbench behind that menu", async () => {
     theWorkbench();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    const elsewhere = container.querySelector(".elsewhere")!;
     expect(
-      [...elsewhere.querySelectorAll("a")].map((to) => to.getAttribute("href")),
-    ).toEqual(["/settings"]);
+      container.querySelector(".workbench-actions > .menu-drop"),
+    ).toBeNull();
+    expect(screen.queryByText("Settings")).toBeNull();
+    // And the link that used to sit under the conversations is gone with it.
+    expect(container.querySelector(".elsewhere")).toBeNull();
   });
 
   /// The menu still opens with nothing to start a conversation in — and what is

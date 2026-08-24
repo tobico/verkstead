@@ -152,6 +152,18 @@ describe("a dropdown menu", () => {
   });
 });
 
+/// The two ⋯ triggers — the sidebar's and the Conversation's — are one rule
+/// rather than one each, for the same reason: they sit in the same place in
+/// their two pane headers and mean the same thing there, so a change to one of
+/// them is a change to both.
+describe("the ⋯ at the head of a pane", () => {
+  it("is painted once for the two places there is one", () => {
+    expect(stylesheet).toContain(
+      ".workbench-actions > .menu-trigger,\n.conversation-actions > .menu-trigger {",
+    );
+  });
+});
+
 /// What one rule declares, read off the stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
 function block(selector: string): string {
@@ -162,9 +174,9 @@ function block(selector: string): string {
   return stylesheet.slice(at, stylesheet.indexOf("\n}", at));
 }
 
-/// One shadow rather than three, which is the visible half of there being one
-/// menu: a menu is drawn over whatever the human was reading, and it should be
-/// plain which of the two is in front.
+/// One shadow rather than one apiece, which is the visible half of there being
+/// one menu: a menu is drawn over whatever the human was reading, and it should
+/// be plain which of the two is in front.
 describe("what every menu is drawn with", () => {
   it("stands off the page by the one shared shadow", () => {
     expect(block(".menu-drop")).toContain("box-shadow: var(--lift);");
@@ -181,6 +193,7 @@ describe("what every menu is drawn with", () => {
   it("leaves no menu a shadow of its own", () => {
     for (const menu of [
       ".new-conversation > .menu-drop",
+      ".workbench-actions > .menu-drop",
       ".conversation-actions > .menu-drop",
       ".standing > .menu-drop",
     ]) {
