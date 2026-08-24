@@ -3173,6 +3173,33 @@ describe("watching a live session's screen", () => {
     );
   });
 
+  /// And it renders what the session wrote in the case the session wrote it in.
+  /// The badge that says a row is live is styled by that word alone, and the
+  /// Screen marks itself with the same one — a bare `.live` rule matches the
+  /// Screen too, and `text-transform` inherits all the way down into the rows
+  /// xterm builds.
+  it("leaves a live terminal's text in its own case", async () => {
+    watching();
+    const { container, socket } = await watched();
+
+    socket.says(PAINTED);
+
+    const screen = await drawn(container, ".details-pane .screen");
+    expect(screen.classList).toContain("live");
+
+    // The badge keeps its capitals, and asks for them where badges are.
+    expect(stylesheet).toContain(
+      ".event-head .live {\n" +
+        "  font-size: 0.8rem;\n" +
+        "  font-weight: 600;\n" +
+        "  text-transform: uppercase;\n",
+    );
+
+    // And nothing asks for them by the word alone, here or anywhere else: a
+    // state class standing on its own matches every element that carries it.
+    expect(stylesheet).not.toMatch(/(^|\n)\.live[\s,{]/);
+  });
+
   /// And the grid of a session that has ended does not carry it: nothing will
   /// resize that one, so scrolling is the only way to the rest of it.
   it("leaves the grid of an ended session scrolling", async () => {

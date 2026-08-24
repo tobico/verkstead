@@ -11,7 +11,7 @@ onto them, and timeline presentation put straight.
 
 - [x] 01: Fix the dropped conversation switch — [details](01-conversation-switch.md)
 - [x] 02: Fix the page growing under the panes — [details](02-pane-overflow.md)
-- [ ] 03: Fix the all-caps screen — [details](03-all-caps-screen.md)
+- [x] 03: Fix the all-caps screen — [details](03-all-caps-screen.md)
 - [ ] 04: Speed up the first diff — [details](04-first-diff-speed.md)
 - [ ] 05: Autosave the branch, drop the saved indicator — [details](05-branch-autosave.md)
 - [ ] 06: Base commit as a branch dropdown — [details](06-base-branch-dropdown.md)

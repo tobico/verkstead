@@ -1930,8 +1930,12 @@ main:has(.workbench) {
    `RUNNING` is a Timeline nobody reads. The colour the accent already is,
    because what a badge like this ordinarily says is that something is happening
    here rather than that something is wrong — and the Interruption, which means
-   the opposite, says so by overriding it below. */
-.live {
+   the opposite, says so by overriding it below.
+
+   Said inside the head it is a badge in, rather than by the word alone: a live
+   Screen marks itself `live` too, and a bare rule would put the capitals
+   through xterm's whole grid. */
+.event-head .live {
   font-size: 0.8rem;
   font-weight: 600;
   text-transform: uppercase;
