@@ -11,7 +11,7 @@ disappearing.
 
 ## Tasks
 
-- [ ] 01: The wrap-up session fixes what was approved, itself — [details](01-session-fixes-inline.md)
+- [x] 01: The wrap-up session fixes what was approved, itself — [details](01-session-fixes-inline.md)
 - [ ] 02: Approved fixes cannot be silently dropped — [details](02-no-dropped-fixes.md)
 - [ ] 03: The review reads the pull request's comments — [details](03-comments-join-review.md)
 - [ ] 04: Comment batches propose before they fix — [details](04-responding-skill.md)

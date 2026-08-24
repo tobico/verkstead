@@ -1100,17 +1100,13 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
 /// What a review session left behind.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Reviewed {
-    /// It put its findings to the human. The Set is on the Timeline, and what
-    /// becomes of each finding is theirs to say.
-    Asked,
+    /// It saw itself out: it read the branch, put what it found to the human,
+    /// landed what they accepted, and ended. A review that found nothing worth
+    /// raising ends the same way, having said so as the last thing it printed.
+    Done,
 
-    /// It ended, cleanly, having asked nothing at all: the review found nothing
-    /// worth raising. What it thought is the last thing it printed, which is on
-    /// the Timeline as its own Event.
-    FoundNothing,
-
-    /// It ended without asking anything, and not well. Which is not a review
-    /// that found nothing — this is a review that did not happen.
+    /// It ended, and not well. Which is not a review with nothing left to do —
+    /// this is a review that did not finish.
     Stopped {
         /// How it ended, in the words an Interruption records.
         how: String,
@@ -1126,52 +1122,31 @@ pub(crate) enum Reviewed {
 
 /// Run the one review session a wrap-up gets, and wait until it is over.
 ///
-/// Ended on **asked**, where a fix session is ended on committed: a review
-/// reports by putting its findings to the human, and the ask is the one report it
-/// cannot half make. There is no grace period after it, unlike every other
-/// session here — `verkstead ask` blocks until the human answers, so a review
-/// that has asked is a session doing nothing but wait, and what it is waiting for
-/// is not its to act on.
+/// **Ended by itself**, which is the one session here that is. Every other
+/// reports through the repository and is ended on what landed plus quiet; this
+/// one puts its findings to the human in the middle of its work and has the rest
+/// of that work to do afterwards, so what says it is finished is it finishing.
+/// `verkstead ask` blocks for as long as they take to answer, and a session
+/// waiting on that is one working rather than one stuck — so nothing here reads
+/// the wait as an ending, and the Turn the caller is holding keeps the Worktree
+/// this session's across the whole of it.
 ///
-/// A session that ends without asking is read off how it ended, exactly as an
-/// inline run is: cleanly means it found nothing, and anything else means the
-/// review did not happen. Nothing is refused for and no Interruption is raised
-/// here — what to do about each of those is [`crate::review`]'s.
+/// How it ended is read exactly as an inline run's is: cleanly means it did what
+/// it was sent to do, and anything else means it did not. Nothing is refused for
+/// and no Interruption is raised here — what to do about either of those is
+/// [`crate::review`]'s.
 pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
     let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing, "").await else {
         return Reviewed::Nothing;
     };
 
     let event_id = session.event_id;
-    let pace = state.sessions.pace();
-
-    let ended = tokio::select! {
-        ended = session.ended() => Some(ended),
-        _ = asked(state, conversation_id, pace) => None,
-    };
-
-    let Some(ended) = ended else {
-        tracing::info!(
-            conversation_id,
-            event_id,
-            "the review has put its findings to the human, so its session is being ended",
-        );
-
-        state.sessions.end(conversation_id).await;
-        return Reviewed::Asked;
-    };
+    let ended = session.ended().await;
 
     // The session is over — and if the human has its keyboard, that is all that
     // has happened. What the review left is judged once they hand back, not
     // before.
     state.sessions.until_handed_back(conversation_id).await;
-
-    // Asking may have been its last act — the CLI is a process of its own, and a
-    // Set can land as the session around it goes — so the Timeline is asked once
-    // more before this is read as a review that raised nothing.
-    if asked_already(state, conversation_id).await {
-        return Reviewed::Asked;
-    }
 
     // Verkstead ended it, which here means the human aborted the Conversation out
     // from under the wrap-up. There is nothing to ask them about: they have just
@@ -1190,46 +1165,7 @@ pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
             how,
             writing: event_id,
         },
-        None => Reviewed::FoundNothing,
-    }
-}
-
-/// Wait until the review's Set is on the Timeline.
-///
-/// The store rather than anything of the session's, for the reason a fix
-/// session's commits are read there: the Set arrives through Verkstead itself,
-/// and a Set carrying findings *is* the review's — see
-/// [`store::review_asked`].
-async fn asked(state: &AppState, conversation_id: i64, pace: Pace) {
-    loop {
-        tokio::time::sleep(pace.poll).await;
-
-        if !asked_already(state, conversation_id).await {
-            continue;
-        }
-
-        // And nobody at its keyboard, which is the gate a backlog step's ending
-        // asks in the same place — see [`landed_and_quiet`]. A review session
-        // the human is typing into is one Verkstead ends nothing of, findings
-        // put or not.
-        if state.sessions.holding(conversation_id).is_none() {
-            return;
-        }
-
-        state.sessions.until_handed_back(conversation_id).await;
-    }
-}
-
-/// Whether it has. A store that will not answer reads as *not yet*, which is the
-/// right way round for the one thing this decides: a session is ended on the
-/// strength of it.
-async fn asked_already(state: &AppState, conversation_id: i64) -> bool {
-    match store::review_asked(&state.pool, conversation_id).await {
-        Ok(asked) => asked.is_some(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading whether the review had asked failed");
-            false
-        }
+        None => Reviewed::Done,
     }
 }
 

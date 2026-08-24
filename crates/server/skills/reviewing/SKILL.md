@@ -1,11 +1,12 @@
 ---
 name: reviewing
-description: Review a branch that is already on a pull request and raise what it finds as one Question Set. Use when a session has been dispatched to review work, and changes none of it.
+description: Review a branch that is already on a pull request, propose the fixes it needs as one Question Set, and land the ones the human accepts. Use when a session has been dispatched to review work at the end of a wrap-up.
 ---
 
-Review the branch this worktree is on, and raise what you find for the human to
-decide about. **You review and you do not fix.** Nothing you find is changed by
-this session.
+Review the branch this worktree is on, put what you find to the human, and fix
+what they accept. **You propose, and then you fix what was agreed to.** Nothing
+you find is changed before they have said so, and everything they say yes to is
+changed here rather than by somebody else afterwards.
 
 You are the first thing to see this work whole. The sessions that wrote it each
 saw one task and none of them saw the branch, and you have none of their
@@ -51,17 +52,14 @@ done differently, a name you would have picked, a refactor nobody asked for —
 these cost a human a decision each and buy nothing. **If you would not defend it
 in a review, do not raise it.**
 
-## 3. Change nothing
+## 3. Change nothing yet
 
-No edits, no commits, no pushes, no `gh` command that writes anything. Leave the
-worktree exactly as you found it.
+No edits, no commits, no pushes, no `gh` command that writes anything — not
+until the human has answered. Fixing your own findings before they have seen
+them is deciding in their place, and the whole point of the Set is that the
+decision is theirs.
 
-Fixing is a different session's job. What you raise, the human accepts or
-declines, and each finding they accept is dispatched as its own fix session with
-your words as its brief — so a finding has to stand up on its own, without you
-there to explain it.
-
-## 4. Raise it as one Question Set
+## 4. Propose it as one Question Set
 
 One Set, one Question per finding, and a `review` block that tells Verkstead
 which Option means *fix it*:
@@ -71,8 +69,9 @@ title: Review of the rate limiter branch
 preface: |
   Three things worth a decision. Everything else looks right to me.
 
-  Answering **fix it** dispatches a session for that one finding alone;
-  **leave it** dispatches nothing and I will not raise it again.
+  Answering **fix it** has me fix it here, before I push; **leave it** and I
+  will not raise it again. Anything you write beside an answer is part of what
+  I do about it.
 questions:
   - label: Q1
     text: |
@@ -115,10 +114,10 @@ review:
   one meaning fix it and one meaning leave it. Recommend the one you would take.
 - **The Question is what the human reads**, on a phone, deciding. Write it as
   prose that says what is wrong and why it matters — not as a patch.
-- **`what` is what the fix session is told**, and it is the only thing it gets
-  from you. Write it for a competent agent that has not read the diff: the file,
-  the cause, and what *done* would look like. The human's own words come with
-  it, so it never has to guess what they meant by yes.
+- **`what` is the work the answer authorises.** It is what you come back to when
+  the answers arrive, and the only account of the finding anything other than you
+  would have — so write it for a competent agent that has not read the diff: the
+  file, the cause, and what *done* would look like.
 - **`fix` names the Option that means fix it** — `Q1.1` for a Question's,
   `Q1a.1` for a Sub-question's. It has to be an Option your Set actually offers,
   or the Set is refused: nothing else turns a finding into work.
@@ -130,15 +129,103 @@ review:
   a sitting's worth of decisions is a review that should raise the ones that
   matter.
 
-Then put it through `verkstead ask` and let it block. **The answers are not
-yours to wait for**: Verkstead takes the Set from here, dispatches a session for
-each finding they accept, and ends this one. You will not see the Response, and
-there is nothing you would do with it.
+Then put it through `verkstead ask`, **as a background command**: it blocks
+until they answer, and that may be hours — they are on a phone rather than at
+this terminal.
+
+**The answers are yours to wait for.** Nothing ends this session when the Set
+lands and nobody else is dispatched to act on it: what becomes of your findings
+happens here. So there is nothing to do while you wait. Do not start on what you
+have only proposed, and do not take your own recommendations.
 
 If the ask itself fails — the server unreachable, any non-zero exit that is not
 a refused Set — say so and stop. Never decide on their behalf.
 
-## 5. A review that finds nothing
+## 5. Fix what they accepted
+
+The Response is the whole of what you act on. Read all of it, the `comment` on
+the Set included, before you touch anything: it is about the Set as a whole and
+may reframe the answers above it.
+
+- **A finding is accepted only where they picked the Option you named as fix
+  it.** Anything else is not a yes: the other Option, an answer in their own
+  words instead of a pick, a question left open.
+- **What they wrote beside a yes is part of the instruction.** "Yes, but leave
+  the public signature alone" changes what you do, and it is the reason their
+  words come back to you at all.
+- **A finding they declined is over.** Do not fix it, do not fix half of it, and
+  do not raise it again.
+- **Unanswered is not a yes.** Leave it as declined. Where it is one you
+  genuinely cannot leave — the correctness bug the rest of the branch turns on —
+  go back with one short Set about that alone and wait as before.
+
+Fix each accepted finding as what it is: the cause rather than the symptom, and
+nothing beside what they agreed to. Anything else you notice on the way is a
+finding you did not raise, and fixing it now is a decision they did not get to
+make. Then run the repository's tests and make sure what you did works before it
+goes anywhere.
+
+## 6. Commit it and push it
+
+**Nothing waits on approval.** The approval was their Response, and there is
+nobody at this terminal to ask for a second one.
+
+One commit per finding, so each reads against the decision that asked for it:
+
+    git add -A
+    git commit -m "fix: <the finding, and what you did about it>"
+
+Then push once, when the last of them is in:
+
+    git push
+
+Push, unlike most sessions here: this branch is already on a pull request, and a
+fix that stays local is one nobody can see and nothing re-runs. The push is what
+puts the commits in front of the checks again.
+
+### What the message body says
+
+A commit that delivers work — code, tests or documentation the work asked for —
+carries a summary as its message body. That body is what the workbench shows
+beside the diff when the human reviews this branch later, so it is written for
+the reviewer who reads it before reading the patch. Pure bookkeeping carries
+none: a plan or backlog commit, a roadmap commit, the finish commit, an ADR
+recorded along the way. A commit still counts as delivering work when a task
+file's deletion rides along with the code.
+
+- **The diagram first**, whenever the diff is more than three changed lines.
+  The glance comes before the reading, so it goes above the prose. Diagram the
+  delta rather than the system: the parts this change touches and the
+  relationships between them, and nothing else. Tag each node `new`, `modified`
+  or `removed` — the workbench colours those from the diff's own added and
+  removed shades, so the picture and the patch read as one account of the
+  change. Around ten nodes, so that it reads on a phone.
+- **The prose after it** — what you built and how it hangs together.
+
+Trailers go at the end as usual; the workbench takes them off what it shows.
+
+    feat: share the rate limiter's count between instances
+
+    ```mermaid
+    flowchart LR
+      api[POST /v1/messages] --> limiter[Rate limiter]
+      limiter --> counter[(Redis counter)]
+      api --> throttle[In-process throttle]
+
+      class limiter,counter new
+      class api modified
+      class throttle removed
+    ```
+
+    The counter moves out of the process, so every instance counts against the
+    same window, and the in-process throttle it replaces goes away.
+
+Do not open a pull request, do not touch any other branch, and do not merge
+anything. The pull request exists, and merging is the human's act.
+
+Then say what you fixed and what you left, and stop.
+
+## 7. A review that finds nothing
 
 Ask nothing. **Say plainly, as the last thing you print, that you reviewed the
 branch and found nothing worth raising** — that line is what the human sees on
@@ -148,3 +235,7 @@ A Set with no findings in it is a row for them to dismiss, and the point of this
 phase is to spend their attention only where there is a decision. Finding
 nothing is a fine outcome; inventing a finding so that something happened is
 not.
+
+The same holds at the other end: a review whose every finding was declined has
+nothing to commit, and committing nothing is the right end to it. Say what you
+raised and what they left, and stop.

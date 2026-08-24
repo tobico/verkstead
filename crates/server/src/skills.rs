@@ -440,7 +440,7 @@ mod tests {
     const SUMMARY_BLOCK: &str = "### What the message body says";
     const SUMMARY_BLOCK_END: &str = "the in-process throttle it replaces goes away.\n";
 
-    /// The block as one skill carries it, cut out so that the four can be held
+    /// The block as one skill carries it, cut out so that the five can be held
     /// against each other.
     fn summary_block(name: &str) -> String {
         let text = skill(name);
@@ -1266,20 +1266,22 @@ mod tests {
         );
     }
 
-    /// The one thing the reviewing skill has to be, and the one thing it has to
-    /// not be: it reads the branch and it changes none of it.
+    /// What the reviewing skill has to be, now that the session it runs is the
+    /// whole of a wrap-up: it reads the branch, it proposes, and it lands what
+    /// was agreed to.
     #[test]
-    fn the_reviewing_skill_reviews_and_does_not_fix() {
+    fn the_reviewing_skill_proposes_and_then_fixes() {
         let reviewing = skill("reviewing/SKILL.md");
 
         assert!(
-            reviewing.contains("do not fix"),
-            "nothing it finds is changed by this session: {reviewing}"
+            reviewing.contains("You propose, and then you fix what was agreed to"),
+            "nothing is changed before the human has said so, and everything they \
+             accepted is changed here: {reviewing}"
         );
         assert!(
-            !reviewing.contains("git commit") && !reviewing.contains("git push"),
-            "and it lands nothing: this is the one session here that commits nothing at \
-             all — {reviewing}"
+            reviewing.contains("git commit") && reviewing.contains("git push"),
+            "which means this session lands its own work, unlike the review this \
+             replaced — {reviewing}"
         );
         assert!(
             reviewing.contains("gh pr diff"),
@@ -1287,9 +1289,8 @@ mod tests {
         );
     }
 
-    /// How the findings reach the human, which is the whole of what this session
-    /// produces: one Set, a Question per finding, and the block that says which
-    /// Answer to each means fix it.
+    /// The half of it the human decides: one Set, a Question per finding, and the
+    /// block that says which Answer to each means fix it.
     #[test]
     fn the_reviewing_skill_says_how_a_finding_becomes_work() {
         let reviewing = skill("reviewing/SKILL.md");
@@ -1305,16 +1306,37 @@ mod tests {
              {reviewing}"
         );
         assert!(
-            reviewing.contains("`what` is what the fix session is told"),
-            "the finding carries its own words for whoever fixes it: {reviewing}"
-        );
-        assert!(
             reviewing.contains("verkstead guide") && reviewing.contains("verkstead ask"),
             "put through the CLI like every other Set: {reviewing}"
         );
         assert!(
             !reviewing.contains("proposal:"),
             "and carrying no proposal: this runs long after a grilling ended — {reviewing}"
+        );
+    }
+
+    /// The other half: the session waits for the answers rather than being ended
+    /// on the ask, and what it does with them is what the human wrote.
+    #[test]
+    fn the_reviewing_skill_waits_for_the_answers_and_acts_on_what_they_said() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("The answers are yours to wait for"),
+            "nothing ends this session on the ask and nobody else is dispatched: \
+             {reviewing}"
+        );
+        assert!(
+            reviewing.contains("background command"),
+            "so the ask that blocks for hours is run as one: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("part of the instruction"),
+            "what they wrote beside a yes changes what is done about it: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("declined is over"),
+            "and a finding they declined is left alone: {reviewing}"
         );
     }
 
@@ -1354,7 +1376,8 @@ mod tests {
         );
         assert!(
             !prompt.contains(ADDRESSING) && !prompt.contains(NEXT_TASK),
-            "and nothing sends this session to change anything: {prompt:?}"
+            "and no other skill is named: what this session does once it has reviewed \
+             is the reviewing skill's own — {prompt:?}"
         );
     }
 
@@ -1553,8 +1576,8 @@ mod tests {
 
     /// The workbench shows a commit's message body beside its diff, and nothing
     /// else tells a session to write one — so every skill that commits work has
-    /// to say it. One wording across the four, because four wordings would be
-    /// four things to keep true and the human reads them as one convention.
+    /// to say it. One wording across the five, because five wordings would be
+    /// five things to keep true and the human reads them as one convention.
     #[test]
     fn every_skill_that_commits_work_asks_for_the_commits_summary() {
         let block = summary_block("next-task/SKILL.md");
@@ -1563,6 +1586,7 @@ mod tests {
             "implementing/SKILL.md",
             "manual-task/SKILL.md",
             "addressing/SKILL.md",
+            "reviewing/SKILL.md",
         ] {
             assert_eq!(
                 summary_block(name),

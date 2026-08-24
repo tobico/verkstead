@@ -11,9 +11,9 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON, WaitingOn,
-    addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation,
-    open_database, pick_direction, record_addressed_comments, record_fix_attempt,
+    Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn, addressed_comments,
+    ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation, load_response,
+    load_set, open_database, pick_direction, record_addressed_comments, record_fix_attempt,
     record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
     start_conversation, start_grilling, submit_response, timeline, unsettle_wrap_up,
     wrap_up_settled,
@@ -373,13 +373,19 @@ review:
     .unwrap()
 }
 
-/// Answering the review is what settles it, and what the human accepted is
-/// handed back as work to dispatch.
+/// Answering the review moves nothing at all.
 ///
-/// The findings come back in the order the review raised them rather than the
-/// order they were answered in: that is the order it thought about them.
+/// The session that raised the findings is still running, waiting on exactly
+/// this Response: it fixes what was accepted and pushes, and its ending cleanly
+/// is what settles the review. A store that settled it here would call the
+/// review over at the moment the decisions were made rather than the moment they
+/// were carried out.
+///
+/// What the Answers *are* is left where they can be read again — on the Set,
+/// beside the findings they answer — because that is what a wrap-up whose
+/// session died before its push has to be re-dispatched from.
 #[tokio::test]
-async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
+async fn answering_the_review_settles_nothing_and_leaves_the_answers_on_the_set() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
@@ -402,107 +408,40 @@ async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
     .await
     .unwrap();
 
-    let Submission::Accepted(taken) = taken else {
+    let Submission::Accepted(_) = taken else {
         panic!("the Response resolves the Set, so it should be taken: {taken:?}");
     };
 
-    assert_eq!(
-        taken.reviewed,
-        Some(Reviewed::Answered {
-            conversation_id: id,
-            fixing: vec![Fixing {
-                what: "Reset the counter as the window rolls.".to_owned(),
-                said: "Keep the signature.".to_owned(),
-            }],
-        }),
-        "the accepted finding is work, with what they said alongside it; the declined \
-         one is nothing at all",
-    );
-
     assert!(
-        wrap_up_settled(&pool, id)
+        !wrap_up_settled(&pool, id)
             .await
             .unwrap()
             .contains(&WaitingOn::Review),
-        "and the review has stopped being something wrap-up waits on",
+        "the review is still what wrap-up is waiting on: its session has the answers \
+         and the fixing to do",
     );
-}
 
-/// A review the human declined every finding of is an answered review, not an
-/// unanswered one: they read it and decided, which is the whole of what wrap-up
-/// was waiting for.
-#[tokio::test]
-async fn a_review_answered_with_nothing_to_fix_is_still_answered() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = wrapping(&pool).await;
+    // And the two halves a safety net would need, on the Set and its Response.
+    let set = load_set(&pool, asked.id).await.unwrap().unwrap().set;
+    let response = load_response(&pool, asked.id)
+        .await
+        .unwrap()
+        .expect("the Response was just stored")
+        .response;
+    let findings = &set
+        .review
+        .expect("the block the review asked with")
+        .findings;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
-
-    let taken = submit_response(
-        &pool,
-        &Settlements::new(8),
-        asked.id,
-        &verkstead_schema::Response::from_yaml(
-            "answers:\n  - label: Q1\n    selected: 2\n  - label: Q2\n    unanswered: true\n",
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let Submission::Accepted(taken) = taken else {
-        panic!("the Response resolves the Set: {taken:?}");
-    };
-
-    assert_eq!(
-        taken.reviewed,
-        Some(Reviewed::Answered {
-            conversation_id: id,
-            fixing: Vec::new(),
-        }),
-        "nothing to dispatch",
-    );
     assert!(
-        wrap_up_settled(&pool, id)
-            .await
-            .unwrap()
-            .contains(&WaitingOn::Review),
-        "and the review is over either way",
+        findings[0].accepted(&response) && !findings[1].accepted(&response),
+        "which finding they said to fix is readable off the Set afterwards",
     );
-}
-
-/// An ordinary Set is not the review's, however it is answered — otherwise every
-/// question an agent asked during a wrap-up would settle it.
-#[tokio::test]
-async fn answering_an_ordinary_set_settles_no_review() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = wrapping(&pool).await;
-
-    let ordinary = verkstead_schema::QuestionSet {
-        review: None,
-        ..reviewing()
-    };
-
-    let asked = ask(&pool, id, &ordinary).await.unwrap().unwrap();
-
-    let taken = submit_response(
-        &pool,
-        &Settlements::new(8),
-        asked.id,
-        &verkstead_schema::Response::from_yaml(
-            "answers:\n  - label: Q1\n    selected: 1\n  - label: Q2\n    selected: 1\n",
-        )
-        .unwrap(),
-    )
-    .await
-    .unwrap();
-
-    let Submission::Accepted(taken) = taken else {
-        panic!("the Response resolves the Set: {taken:?}");
-    };
-
-    assert_eq!(taken.reviewed, None);
-    assert_eq!(wrap_up_settled(&pool, id).await.unwrap(), Vec::new());
+    assert_eq!(
+        findings[0].said(&response),
+        "Keep the signature.",
+        "and so is what they said when they said it",
+    );
 }
 
 /// Which Set the review is on is read off the Sets themselves, so that nothing
