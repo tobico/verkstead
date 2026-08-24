@@ -34,10 +34,11 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createMemo,
   createSignal,
+  on,
   onCleanup,
-  onMount,
   type JSX,
 } from "solid-js";
 
@@ -63,10 +64,10 @@ const SUMMARY = "commit-summary";
 /// What the commit said about itself, put in the page and — where it holds one
 /// — drawn.
 ///
-/// Its own component so that the drawing is mounted with the summary rather than
-/// with the pane: the summary arrives with the fetch, and a pane that reached for
-/// the renderer on its own mount would be reaching before there was anything to
-/// draw over.
+/// Its own component so that the drawing is worked out from the summary rather
+/// than from the pane: the summary arrives with the fetch, and a pane that
+/// reached for the renderer on its own mount would be reaching before there was
+/// anything to draw over.
 ///
 /// The renderer is turned loose on this block alone rather than on the document,
 /// because a Set's page can be open behind the workbench and its Diagrams are its
@@ -74,16 +75,31 @@ const SUMMARY = "commit-summary";
 function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
   let block!: HTMLElement;
 
-  // Once, on mount, as the Set page does it: whether there is a Diagram here is
-  // a fact about the summary this pane fetched, and a commit cannot change — so
-  // a second pass would find every source block already drawn over.
-  onMount(() => {
-    if (!props.diagrams) {
-      return;
-    }
+  // On the summary that is in the block, rather than on this component's mount:
+  // opening a second commit is not a second mount. Neither the `Show` this sits
+  // under nor the `Match` holding the whole pane is keyed, so the next commit's
+  // markup is assigned into the block of the component the first one built — and
+  // a draw hung on `onMount` would have happened once, leaving the server's
+  // source block standing where the second commit's Diagram belongs.
+  //
+  // Following the HTML rather than the commit, because the HTML is the thing
+  // being drawn over: assigning it is a render effect, and those are all through
+  // before the first of these runs.
+  createEffect(
+    on(
+      () => props.html,
+      () => {
+        if (!props.diagrams) {
+          return;
+        }
 
-    onCleanup(drawDiagrams({ root: block }));
-  });
+        // Stopped when the next summary arrives as much as when the pane goes: a
+        // drawing nobody stopped is still watching the colour scheme, and would
+        // go on redrawing nodes this block no longer holds.
+        onCleanup(drawDiagrams({ root: block }));
+      },
+    ),
+  );
 
   return (
     <section

@@ -77,7 +77,7 @@ import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json"
 /// drew — that is `diagrams.test.ts`. Mocked either way, so that nothing here
 /// loads megabytes of mermaid.
 const drawing = vi.hoisted(() =>
-  vi.fn((_how?: { root?: ParentNode }) => () => {}),
+  vi.fn((_how?: { root?: ParentNode }) => vi.fn()),
 );
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
 
@@ -3792,8 +3792,20 @@ const SUMMARISED: CommitPane = {
   diagrams: true,
 };
 
+/// The other commit on that timeline, summarised in its turn: what the pane is
+/// handed when the human reads one commit and then the next.
+const SUMMARISED_TOO: CommitPane = {
+  ...COMMIT_PANE,
+  summary:
+    '<p>A queue per repository.</p>\n<div class="wide"><pre class="mermaid">flowchart LR\n  work --&gt; queue --&gt; runner\n</pre></div>',
+  diagrams: true,
+};
+
 /// Where the details pane fetches it from.
 const DIFF_OF_IT = `/api/ui/conversations/${BUILDING.id}/commit/${COMMITS[0]!.id}`;
+
+/// And where it fetches the other one, for the tests that open both.
+const DIFF_OF_THE_OTHER = `/api/ui/conversations/${BUILDING.id}/commit/${COMMITS[1]!.id}`;
 
 /// The workbench with that conversation open and its commits to hand.
 function theCommits(...answers: Parameters<typeof serving>) {
@@ -4006,6 +4018,68 @@ describe("a commit on the timeline", () => {
 
     await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
     expect(drawing.mock.calls[0]![0]).toEqual({ root: summary });
+  });
+
+  /// And draws it again for the next commit opened, which is not a second mount:
+  /// the pane is not rebuilt per commit, so the second summary's markup lands in
+  /// the block the first one was drawn in.
+  ///
+  /// Read three commits deep on purpose. The first switch is masked — the second
+  /// commit is still being fetched for a tick, and a pane with no summary yet
+  /// takes the block out of the page and puts a fresh one back — but a commit the
+  /// cache already holds comes back with no such gap, and that is the one a
+  /// drawing hung on the mount would never follow.
+  it("draws the Diagram again for each commit the pane is switched to", async () => {
+    theBuilding(
+      {},
+      whenever(DIFF_OF_IT, json(SUMMARISED)),
+      whenever(DIFF_OF_THE_OTHER, json(SUMMARISED_TOO)),
+    );
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, ".timeline-event > .commit");
+
+    /// The card for one of the two, which is the only way to tell them apart on
+    /// the timeline.
+    const card = (subject: string) =>
+      [...container.querySelectorAll(".timeline-event > .commit")].find(
+        (row) => row.querySelector(".subject")!.textContent === subject,
+      )!;
+
+    /// The summary block once it is holding the commit that was clicked, rather
+    /// than the one before it: which commit the pane is showing is exactly what
+    /// this test is about, so waiting for the block alone would prove nothing.
+    const showing = (words: string) =>
+      waitFor(() => {
+        const block = container.querySelector(".details-pane .commit-summary");
+        if (!block?.textContent?.includes(words)) {
+          throw new Error(`the pane is not showing ${words} yet`);
+        }
+        return block;
+      });
+
+    fireEvent.click(card(COMMITS[0]!.subject));
+    const first = await showing("A bucket per account.");
+    await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
+    expect(drawing.mock.calls[0]![0]).toEqual({ root: first });
+
+    fireEvent.click(card(COMMITS[1]!.subject));
+    const second = await showing("A queue per repository.");
+    await waitFor(() => expect(drawing).toHaveBeenCalledTimes(2));
+    expect(drawing.mock.calls[1]![0]).toEqual({ root: second });
+
+    // Back to the first, which the cache still holds and hands back whole.
+    fireEvent.click(card(COMMITS[0]!.subject));
+    const again = await showing("A bucket per account.");
+    await waitFor(() => expect(drawing).toHaveBeenCalledTimes(3));
+    expect(drawing.mock.calls[2]![0]).toEqual({ root: again });
+
+    // And every drawing before the one on the page was stopped: each is watching
+    // the colour scheme, and one nobody took down redraws nodes the block has
+    // since let go of.
+    expect(drawing.mock.results[0]!.value).toHaveBeenCalledOnce();
+    expect(drawing.mock.results[1]!.value).toHaveBeenCalledOnce();
+    expect(drawing.mock.results[2]!.value).not.toHaveBeenCalled();
   });
 
   /// Which is every other commit: mermaid is megabytes, and a pane with nothing
