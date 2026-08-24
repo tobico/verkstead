@@ -27,6 +27,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod captures;
 mod commits;
 mod conversations;
+mod halts;
 mod interruptions;
 mod profiles;
 mod pull_requests;
@@ -48,6 +49,7 @@ pub use conversations::{
     start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
+pub use halts::{Halt, Halted, clear_halt, halt, halted};
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
     record_interruption, settle_interruption,
@@ -556,6 +558,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // reason — and off the Conversations too, which is what makes one commit
     // per Conversation a rule the database keeps.
     commits::apply_schema(pool).await?;
+
+    // And that driving has stopped, which hangs off the Conversations alone: a
+    // halt is how things are rather than something that happened, and what did
+    // happen is the Notice it points at.
+    halts::apply_schema(pool).await?;
 
     // And where a run stopped, which hangs off the Timelines for the same reason
     // again — and off the Conversations too, which is what makes *one open

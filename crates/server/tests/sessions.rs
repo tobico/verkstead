@@ -46,9 +46,9 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Remedy,
-    RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
-    Turn, Watching,
+    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
+    Remedy, RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent,
+    TranscriptView, Turn, Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
@@ -352,6 +352,24 @@ impl Grilling {
             .await
     }
 
+    /// Wait until driving has halted, and hand back the Notice saying why.
+    ///
+    /// The last one on the Timeline: a Conversation collects notices over a long
+    /// run — a stage adopted, a roadmap finished — and what a halt writes is the
+    /// newest thing Verkstead had to say.
+    async fn halted(&self) -> NoticeEvent {
+        self.until(|view| said(view).last().map(|notice| (*notice).clone()))
+            .await
+    }
+
+    /// And start driving it again the way task 04's Resume will: the halt taken
+    /// away, and nothing else touched.
+    async fn drive_again(&self) {
+        let pool = open_database(&self.database).await.unwrap();
+
+        verkstead_store::clear_halt(&pool, self.id).await.unwrap();
+    }
+
     /// Wait until there is a session running, and hand back the Event it is
     /// printing into — which is what a Screen is watched by.
     async fn running(&self) -> i64 {
@@ -491,34 +509,6 @@ questions:
         recommended: true
       - n: 2
         text: Split the migration out
-"#;
-
-/// A round of grilling that came back: what the session asked before it died,
-/// and what a relaunched one has to be told rather than ask again.
-const ASKED_ALREADY: &str = r#"
-title: How the limiter counts
-questions:
-  - label: Q1
-    text: Per key or per address?
-    options:
-      - n: 1
-        text: Per key
-      - n: 2
-        text: Per address
-"#;
-
-/// And one that did not: the Set the session was still waiting on when it went,
-/// which nothing is reading any more.
-const LEFT_HANGING: &str = r#"
-title: What happens when it trips
-questions:
-  - label: Q2
-    text: How long should a client be locked out?
-    options:
-      - n: 1
-        text: A minute
-      - n: 2
-        text: Until the window rolls over
 "#;
 
 /// How fast these run the backlog: fast enough that a test spends its time
@@ -2480,6 +2470,10 @@ async fn a_restarted_server_stops_the_tail_it_can_no_longer_watch() {
         "and the reason is the restart, in words",
     );
 
+    // And the sweep halts it a moment later, because nothing is driving a
+    // Conversation whose session has gone. The two arrive together only until
+    // task 02 moves this raising site over to a halt of its own.
+    let halted = fixture.halted().await;
     let view = fixture.view().await;
 
     assert_eq!(
@@ -2489,8 +2483,9 @@ async fn a_restarted_server_stops_the_tail_it_can_no_longer_watch() {
     );
     assert_eq!(
         view.blocked_on,
-        Some(stopped.id),
-        "what is waiting is the human, which is what an Interruption is for",
+        Some(halted.id),
+        "what is waiting is the human, and the badge points at what stops the run \
+         now — the halt, and the Notice saying what it was",
     );
     assert_eq!(
         stopped.settled, None,
@@ -5381,10 +5376,18 @@ async fn said_by(fixture: &Grilling) -> String {
 
 /// What Verkstead has said on a Timeline on its own account.
 fn notices(view: &ConversationView) -> Vec<String> {
+    said(view)
+        .into_iter()
+        .map(|notice| notice.html.clone())
+        .collect()
+}
+
+/// The same, as the Events they are — which is what a badge points at.
+fn said(view: &ConversationView) -> Vec<&NoticeEvent> {
     view.timeline
         .iter()
         .filter_map(|event| match event {
-            TimelineEvent::Notice(notice) => Some(notice.html.clone()),
+            TimelineEvent::Notice(notice) => Some(notice),
             _ => None,
         })
         .collect()
@@ -7455,10 +7458,16 @@ async fn a_manual_session_that_fell_over_asks_the_human_what_to_do_about_it() {
     );
 
     let view = fixture.view().await;
-    assert_eq!(
-        view.blocked_on,
-        Some(stopped.id),
-        "the Conversation is blocked on the human, and says which Event it is blocked on",
+
+    // Whichever of the two got there first: the Interruption the bad exit
+    // raised, or the halt the sweep writes about a Conversation nothing is
+    // driving as the manual session ends. Both are the run stopped on the
+    // human, and they arrive together only until task 02 moves this raising
+    // site over to a halt of its own.
+    assert!(
+        view.blocked_on.is_some(),
+        "the Conversation is blocked on the human, and says which Event it is \
+         blocked on",
     );
     assert_eq!(
         view.state,
@@ -7655,41 +7664,42 @@ async fn a_manual_task_that_committed_nothing_is_not_something_to_ask_about() {
 /// The grilling session here has printed and exited, which is exactly the shape
 /// of the bug this is for: the Conversation still says it is being grilled,
 /// nothing is grilling it, and nothing on the page offers the human anything.
-/// What the sweep raises is an ordinary Interruption, so the ordinary Remedies
-/// become the way back out.
+/// What the sweep records is a halt, and what it says about it is an ordinary
+/// Notice — so the badge has something to point at and the human has something
+/// to read.
 #[tokio::test]
-async fn a_conversation_nothing_is_driving_is_asked_about_while_the_server_runs() {
+async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
     let fixture = grilling_swept(r#"printf 'the grilling has nothing to say\n'"#).await;
 
     fixture.quiet().await;
 
-    let stalled = fixture.stopped().await;
+    let stalled = fixture.halted().await;
 
-    assert_eq!(
-        stalled.what, "grilling the work",
-        "what ought to have been happening, which for a stall is what the state says",
-    );
-    assert_eq!(
-        stalled.how,
-        "nothing is driving it: no session is running, and nothing is left to start one",
-        "and nothing failed, because nothing was ever launched",
+    assert!(
+        stalled.html.contains("Grilling the work"),
+        "what ought to have been happening, which for a stall is what the state \
+         says: {:?}",
+        stalled.html,
     );
     assert!(
-        stalled.tail.contains("the grilling has nothing to say"),
-        "with the last thing anything said, which is where the reason usually is: {:?}",
-        stalled.tail,
+        stalled.html.contains(
+            "nothing is driving it: no session is running, and nothing is left to start one"
+        ),
+        "and nothing failed, because nothing was ever launched: {:?}",
+        stalled.html,
     );
-    assert_eq!(
-        stalled.settled, None,
-        "nobody has answered it, which is what makes it a question",
-    );
-
     let view = fixture.view().await;
+
     assert_eq!(
         view.blocked_on,
         Some(stalled.id),
         "so the Conversation is blocked on the human, which is the whole point: a \
          stall is precisely the condition that had no badge on it",
+    );
+    assert_eq!(
+        interruptions(&view),
+        Vec::<&InterruptionEvent>::new(),
+        "and nothing was raised for anybody to settle: a stop is a halt now",
     );
     assert_eq!(
         view.state,
@@ -7698,19 +7708,19 @@ async fn a_conversation_nothing_is_driving_is_asked_about_while_the_server_runs(
          in rather than a state of its own",
     );
 
-    // Long enough for many more sweeps. At most one Interruption is open per
-    // Conversation, and a stall that goes on standing still is the same stall.
+    // Long enough for many more sweeps. A Conversation is halted once, and a
+    // stall that goes on standing still is the same stall.
     tokio::time::sleep(SWEEPING.stalls * 8).await;
 
     assert_eq!(
-        interruptions(&fixture.view().await).len(),
+        notices(&fixture.view().await).len(),
         1,
-        "a Conversation standing still for a while is one thing to answer, not one \
+        "a Conversation standing still for a while is one thing to read, not one \
          a minute",
     );
 }
 
-/// And a Conversation left mid-run by a server that stopped flags as it comes
+/// And a Conversation left mid-run by a server that stopped halts as it comes
 /// back.
 ///
 /// The case the sweep matters most for. No driver survives the process, so a
@@ -7718,41 +7728,67 @@ async fn a_conversation_nothing_is_driving_is_asked_about_while_the_server_runs(
 /// and means every Conversation nothing takes up again is one nothing is
 /// driving.
 #[tokio::test]
-async fn a_conversation_a_stopped_server_left_mid_run_flags_as_it_comes_back() {
+async fn a_conversation_a_stopped_server_left_mid_run_halts_as_it_comes_back() {
     let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
 
     fixture.quiet().await;
 
-    assert_eq!(
-        interruptions(&fixture.view().await),
-        Vec::<&InterruptionEvent>::new(),
+    assert!(
+        notices(&fixture.view().await).is_empty(),
         "the server it started on sweeps too slowly to have looked, which is what \
          makes the restart the thing being tested",
     );
 
     let _restarted = fixture.restarted("true", PULL_REQUEST).await;
 
-    let stalled = fixture.stopped().await;
+    let stalled = fixture.halted().await;
 
-    assert_eq!(stalled.what, "grilling the work");
-    assert_eq!(stalled.settled, None);
+    assert!(
+        stalled.html.contains("Grilling the work"),
+        "{:?}",
+        stalled.html,
+    );
+    assert!(
+        stalled.html.contains("the grilling has nothing to say"),
+        "with the last thing the session that is gone said, which is where the \
+         reason usually is: {:?}",
+        stalled.html,
+    );
+    assert_eq!(fixture.view().await.blocked_on, Some(stalled.id));
+
+    // And the halt is what that badge hangs on: taking it away — which is what
+    // starting to drive again does — takes the badge with it, while what stopped
+    // it stays on the record.
+    fixture.drive_again().await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on, None,
+        "nothing is waiting on the human once the Conversation is being driven again",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "and the Notice stays where it is: it is a stop that really happened",
+    );
 }
 
 /// A state nothing is supposed to be driving is never one standing still.
 ///
 /// Draft and Direction are waiting on the human, Done is finished and Aborted is
-/// stopped. A sweep that flagged those would be asking the human about every
+/// stopped. A sweep that halted those would be telling the human about every
 /// Conversation they have ever had.
 #[tokio::test]
-async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_asked_about() {
+async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_halted() {
     let fixture = grilling_swept(r#"printf 'the grilling has nothing to say\n'"#).await;
 
     fixture.quiet().await;
-    fixture.stopped().await;
+    fixture.halted().await;
 
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
 
-    let settled = interruptions(&fixture.view().await).len();
+    let said = notices(&fixture.view().await).len();
 
     // Long enough for many sweeps over a Conversation that has stopped.
     tokio::time::sleep(SWEEPING.stalls * 8).await;
@@ -7765,10 +7801,10 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_asked_about()
         "the work stopped where it was, which is not the same as standing still in it",
     );
     assert_eq!(
-        interruptions(&view).len(),
-        settled,
-        "so nothing more was raised about it: {:?}",
-        interruptions(&view),
+        notices(&view).len(),
+        said,
+        "so nothing more was said about it: {:?}",
+        notices(&view),
     );
 }
 
@@ -7777,8 +7813,8 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_asked_about()
 ///
 /// The human set it going by hand because the work was standing still. What they
 /// want to know when it stops is whether it is standing still again — and they
-/// submitted from a phone and walked away, so being asked is the only thing that
-/// reaches them.
+/// submitted from a phone and walked away, so what is written down is the only
+/// thing that reaches them.
 #[tokio::test]
 async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_now() {
     let fixture = grilling(
@@ -7803,10 +7839,9 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
         .as_ref()
         .expect("both Pairings are fixed before grilling starts");
 
-    assert_eq!(
-        interruptions(&view),
-        Vec::<&InterruptionEvent>::new(),
-        "this server sweeps too slowly to have looked, so what raises anything here \
+    assert!(
+        notices(&view).is_empty(),
+        "this server sweeps too slowly to have looked, so what stops anything here \
          is the manual task ending",
     );
 
@@ -7817,12 +7852,13 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
         ManualTaskStarted::Started,
     );
 
-    let stalled = fixture.stopped().await;
+    let stalled = fixture.halted().await;
 
-    assert_eq!(
-        stalled.what, "grilling the work",
+    assert!(
+        stalled.html.contains("Grilling the work"),
         "about the Conversation standing still rather than about the manual task, \
-         which did what it was asked",
+         which did what it was asked: {:?}",
+        stalled.html,
     );
 
     let view = fixture.view().await;
@@ -7838,20 +7874,15 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
     );
 }
 
-/// Retry on a stall means *start driving it again*, and what that is, is the
-/// state's to say: an inline run is one session, so what it is, is a fresh one.
+/// An inline run that lands its work and exits leaves nothing driving the
+/// Conversation, and the halt says what it was that nobody was doing.
 ///
-/// The note is the whole point of the remedy taking one — a dead session leaves
-/// half-done work behind, and "the counter is written, do the middleware" is
-/// only worth typing if it reaches the agent that can act on it — so what this
-/// reads back is the relaunched session's own prompt.
-///
-/// And then it stalls again, which is the other half of what a relaunch has to
-/// leave behind: the session lands its work, nothing follows it, and the
-/// Conversation is standing still once more. A relaunch that registered no
-/// driver would have made the second one undetectable.
+/// The other half of what a stall's evidence is for. The Conversation says it is
+/// implementing, so that is what the Notice opens with — and the Worktree it
+/// stopped in is read as it stands, which is how the human sees at a glance what
+/// the session left behind.
 #[tokio::test]
-async fn retrying_a_stalled_inline_run_starts_a_fresh_session_told_what_the_human_wrote() {
+async fn an_inline_run_nothing_followed_halts_saying_what_it_was_doing() {
     let fixture = grilling_swept(
         r#"
         case "$1" in
@@ -7861,10 +7892,11 @@ async fn retrying_a_stalled_inline_run_starts_a_fresh_session_told_what_the_huma
             sleep 300
             ;;
         *)
-            printf 'prompt was: %s\n' "$2"
+            printf 'the limiter is in, the middleware is not\n'
             printf 'a limiter\n' >> limiter.md
             git add limiter.md
             git commit --quiet -m 'feat: rate limiting'
+            printf 'and a note to self\n' > notes.md
             ;;
         esac
         "#,
@@ -7878,199 +7910,37 @@ async fn retrying_a_stalled_inline_run_starts_a_fresh_session_told_what_the_huma
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    // The session committed its work and exited, so nothing was left to ask the
-    // human about — and nothing was left driving the Conversation either, which
-    // is the stall.
-    let stalled = fixture.stopped().await;
-
-    assert_eq!(
-        stalled.what, "implementing the work",
-        "the Conversation says it is implementing and nothing is: {stalled:?}",
-    );
-
-    let before = outputs(&fixture.view().await).len();
-
-    assert_eq!(
-        fixture
-            .settle(
-                stalled.id,
-                "Retry",
-                "the counter is written, do the middleware"
-            )
-            .await,
-        RemedySettled::Settled,
-    );
-
-    let relaunched = fixture
-        .until(|view| {
-            let running = outputs(view);
-            (running.len() > before).then(|| running[before].id)
-        })
-        .await;
-
-    let said = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id == relaunched && output.lines > 1)
-                .map(|output| output.id)
-        })
-        .await;
-
-    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+    // The session committed its work and exited, so nothing was left to say
+    // anything about — and nothing was left driving the Conversation either,
+    // which is the stall.
+    let stalled = fixture.halted().await;
 
     assert!(
-        printed.contains("the counter is written, do the middleware"),
-        "what the human wrote reaches the agent that can act on it: {printed:?}",
+        stalled.html.contains("Implementing the work"),
+        "the Conversation says it is implementing and nothing is: {:?}",
+        stalled.html,
     );
     assert!(
-        printed.contains("~/.claude/skills/implementing/SKILL.md"),
-        "and it is the inline run started again, which is what the state said: {printed:?}",
+        stalled.html.contains("notes.md"),
+        "with what git makes of the Worktree it stopped in: {:?}",
+        stalled.html,
     );
-
-    let again = stopped_again(&fixture, stalled.id).await;
-
-    assert_eq!(
-        again.what, "implementing the work",
-        "the relaunched session landed its work and nothing followed it, so the \
-         Conversation is standing still again — and being asked about again",
-    );
-
-    let settled = interruptions(&fixture.view().await)
-        .into_iter()
-        .find(|stopped| stopped.id == stalled.id)
-        .and_then(|stopped| stopped.settled.clone())
-        .expect("the first stall was answered");
-
-    assert_eq!(settled.remedy, Remedy::Retry);
-    assert_eq!(
-        settled.note, "the counter is written, do the middleware",
-        "the first stall is settled, which is what leaves room for the second",
-    );
+    assert_eq!(fixture.view().await.blocked_on, Some(stalled.id));
 }
 
-/// And on a backlog run it means the runner picks the backlog up again, reading
-/// what is next off `.tasks/` exactly as it always does.
+/// And a wrap-up nothing is watching halts as one, in the words wrapping up
+/// uses.
 ///
-/// What is next is the repository's to say and has not changed on account of
-/// nothing having been running: the task whose session died is still there, so
-/// that is the task the relaunched session is started on.
-///
-/// Taking over manually is what leaves this Conversation standing still — the
-/// human said they would do it themselves and then did not — which is the
-/// ordinary way a run in a live server ends up with nothing driving it.
-#[tokio::test]
-async fn retrying_a_stalled_backlog_run_takes_the_next_task_off_the_repository() {
-    let fixture = grilling_swept(
-        r#"
-        case "$1" in
-        claude-grilling-5)
-            mkdir -p .tasks
-            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
-            printf '# 01. Count the requests\n' > .tasks/01-count.md
-            git add .tasks
-            git commit --quiet -m 'chore: plan the rate limiter'
-            printf 'the backlog is written\n'
-            sleep 300
-            ;;
-        *)
-            if [ ! -f TRIED ]; then
-                printf 'once\n' > TRIED
-                printf 'this task is beyond me\n'
-                exit 1
-            else
-                printf 'prompt was: %s\n' "$2"
-                sleep 300
-            fi
-            ;;
-        esac
-        "#,
-    )
-    .await;
-
-    fixture
-        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
-        .await;
-
-    let set = fixture.ask(PROPOSING).await;
-    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
-
-    let died = fixture.stopped().await;
-
-    assert_eq!(
-        died.what, "the task in .tasks/01-count.md",
-        "the run stopped at the task whose session died: {died:?}",
-    );
-    assert_eq!(
-        fixture.settle(died.id, "TakeOver", "").await,
-        RemedySettled::Settled
-    );
-
-    // Verkstead has stopped driving and the human has not started: the run is
-    // over with the work half done and nothing on the page to press, which is
-    // exactly what the sweep is for.
-    let stalled = stopped_again(&fixture, died.id).await;
-
-    assert_eq!(stalled.what, "implementing the work");
-
-    let before = outputs(&fixture.view().await).len();
-
-    assert_eq!(
-        fixture
-            .settle(stalled.id, "Retry", "the counter belongs in its own module")
-            .await,
-        RemedySettled::Settled,
-    );
-
-    let relaunched = fixture
-        .until(|view| {
-            let running = outputs(view);
-            (running.len() > before).then(|| running[before].id)
-        })
-        .await;
-
-    let said = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id == relaunched && output.lines > 1)
-                .map(|output| output.id)
-        })
-        .await;
-
-    let printed = fixture.capture(said).await.replace("\r\n", "\n");
-
-    assert!(
-        printed.contains("~/.claude/skills/next-task/SKILL.md"),
-        "the run picks the backlog up again, which is the fork that reads it: {printed:?}",
-    );
-    assert!(
-        printed.contains("the counter belongs in its own module"),
-        "told what the human wrote alongside the retry: {printed:?}",
-    );
-
-    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
-
-    assert!(
-        worktree.join(".tasks/01-count.md").exists(),
-        "and it is the same task, because nothing reverted anything",
-    );
-}
-
-/// And on a wrap-up it means the watchers started again — the set of them, the
-/// way a restarting server takes an interrupted wrap-up up again.
-///
-/// A wrap-up starts no session of its own, so there is nothing here to read a
-/// prompt back off: what says it is being driven again is that the pull request
-/// gets asked about, the branch gets read, and the Conversation reaches the end
-/// of wrapping up on its own.
+/// The third of the driven states, and the one that has nothing to read a
+/// session's last words off: a wrap-up starts no session of its own, so what the
+/// human is told is the state it stopped in and the Worktree it stopped over.
 ///
 /// The condition is arranged rather than provoked. Every route into Wrapping
 /// starts the watchers, so the only way to have a wrap-up nothing is watching is
 /// to make the move the way the store makes it and leave them unstarted — which
 /// is precisely what a wrap-up whose watchers have all died looks like.
 #[tokio::test]
-async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
+async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     let fixture = grilling_asking(
         r#"
         case "$2" in
@@ -8126,155 +7996,23 @@ async fn retrying_a_stalled_wrap_up_starts_watching_the_pull_request_again() {
         ManualTaskStarted::Started,
     );
 
-    let stalled = fixture.stopped().await;
-
-    assert_eq!(
-        stalled.what, "wrapping the work up",
-        "the Conversation says it is wrapping up and nothing is watching it: {stalled:?}",
-    );
-
-    assert_eq!(
-        fixture
-            .settle(stalled.id, "Retry", "have another look at it")
-            .await,
-        RemedySettled::Settled,
-    );
-
-    // The whole of a wrap-up, run again from nothing: the checks asked about and
-    // green, the branch read and nothing raised, and nothing said on the pull
-    // request left outstanding.
-    fixture
-        .until(|view| (view.state == Lifecycle::Done).then_some(()))
-        .await;
-
-    assert_eq!(
-        interruptions(&fixture.view().await).len(),
-        1,
-        "and the stall was the only thing anybody was asked about: {:?}",
-        interruptions(&fixture.view().await),
-    );
-}
-
-/// And on a grilling it means a fresh grilling, because there is nothing else
-/// it could mean: an interview lives in the session having it, and that session
-/// is gone.
-///
-/// What survives it is what the human already answered, which is on the
-/// Timeline — so the relaunched session is primed with the Brief it always had
-/// and a digest of every Set that came back, and does not open by asking again
-/// what was settled yesterday.
-///
-/// And the Set the dead session left open is archived on the way past. Nothing
-/// is waiting on that Answer any more, so leaving it open would be the human
-/// answering into nothing.
-#[tokio::test]
-async fn retrying_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_settled() {
-    let fixture = grilling_swept(r#"printf 'prompt was: %s\n' "$2""#).await;
-
-    fixture.quiet().await;
-
-    // What the dead session got through before it went: one Set answered, and
-    // one still hanging with nobody left to read the Answer.
-    let answered = fixture.ask(ASKED_ALREADY).await;
-
-    assert_eq!(
-        fixture
-            .respond(
-                answered,
-                serde_json::json!([
-                    { "label": "Q1", "selected": 1, "free_text": "and burst on top of it" }
-                ]),
-            )
-            .await,
-        Submitted::Accepted,
-    );
-
-    let orphan = fixture.ask(LEFT_HANGING).await;
-
-    let stalled = fixture.stopped().await;
-
-    assert_eq!(
-        stalled.what, "grilling the work",
-        "the Conversation says it is being grilled and nothing is: {stalled:?}",
-    );
-
-    let before = outputs(&fixture.view().await).len();
-
-    assert_eq!(
-        fixture
-            .settle(stalled.id, "Retry", "start from the storage question")
-            .await,
-        RemedySettled::Settled,
-    );
-
-    let relaunched = fixture
-        .until(|view| {
-            let running = outputs(view);
-            (running.len() > before).then(|| running[before].id)
-        })
-        .await;
-
-    let said = fixture
-        .until(|view| {
-            outputs(view)
-                .into_iter()
-                .find(|output| output.id == relaunched && output.lines > 1)
-                .map(|output| output.id)
-        })
-        .await;
-
-    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+    let stalled = fixture.halted().await;
 
     assert!(
-        printed.contains("~/.claude/skills/grilling/SKILL.md"),
-        "a grilling started again is a grilling: {printed:?}",
-    );
-    assert!(
-        printed.contains("The API has none."),
-        "on the Brief it was always about: {printed:?}",
-    );
-    assert!(
-        printed.contains("Per key — and burst on top of it"),
-        "and told what the human already settled, so it does not ask again: {printed:?}",
-    );
-    assert!(
-        !printed.contains("How long should a client be locked out"),
-        "the Set nobody answered said nothing, so nothing of it is quoted: {printed:?}",
-    );
-    assert!(
-        printed.contains("start from the storage question"),
-        "with what they wrote beside the Retry last of all: {printed:?}",
+        stalled.html.contains("Wrapping the work up"),
+        "the Conversation says it is wrapping up and nothing is watching it: {:?}",
+        stalled.html,
     );
 
-    let hanging = sets(&fixture.view().await)
-        .into_iter()
-        .find(|asked| asked.set_id == orphan)
-        .expect("the Set the dead session left open is on the Timeline")
-        .standing
-        .clone();
+    let view = fixture.view().await;
 
-    assert!(
-        matches!(hanging, verkstead_render::Standing::ArchivedUnanswered(_)),
-        "and nothing is left for the human to answer into: {hanging:?}",
+    assert_eq!(view.blocked_on, Some(stalled.id));
+    assert_eq!(
+        interruptions(&view),
+        Vec::<&InterruptionEvent>::new(),
+        "and nothing was raised for anybody to settle: {:?}",
+        interruptions(&view),
     );
-}
-
-/// Wait until something other than `answered` has stopped the run, and hand back
-/// what it stopped at.
-///
-/// A Conversation that stalls twice is answered twice, and the second answer is
-/// the interesting one: at most one Interruption is open at a time, so a second
-/// one existing at all is what says the first was settled and the Conversation
-/// went on to stand still again.
-async fn stopped_again(fixture: &Grilling, answered: i64) -> InterruptionEvent {
-    fixture
-        .until(|view| {
-            interruptions(view)
-                .into_iter()
-                .find(|stopped| stopped.id != answered)
-                .cloned()
-        })
-        .await
 }
 
 /// Move a Conversation into Wrapping the way its finish step's pull request

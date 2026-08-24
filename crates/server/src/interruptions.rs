@@ -22,30 +22,13 @@
 //! Usage limits — an account exhausting its window mid-run — are not detected
 //! here. That is its own stage.
 
-use std::path::Path;
-
 use anyhow::Result;
 use verkstead_render::{Remedy, RemedySettled};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
-use crate::repos::git;
+use crate::halts::{session_tail, worktree_status};
 use crate::store;
-
-/// How much of what git made of the Worktree to keep.
-///
-/// A session that went wrong mid-refactor can leave hundreds of paths pending,
-/// and this is read on a phone. Forty is more than enough to see *what kind of
-/// mess* — which is the question the evidence is answering — and what is dropped
-/// is said rather than silently cut.
-const STATUS_LINES: usize = 40;
-
-/// And how much of what the session last said.
-///
-/// The tail rather than the whole: what went wrong is at the end, and the whole
-/// of it is on the Timeline already as the session's own Event, one row up from
-/// this one.
-const TAIL_LINES: usize = 40;
 
 /// Stop the run: gather what went wrong and put it on the Timeline.
 ///
@@ -100,123 +83,6 @@ pub(crate) async fn raise(
     }
 
     Ok(raised)
-}
-
-/// What git makes of the Conversation's Worktree, as `git status` says it.
-///
-/// Read now and kept, for the reason a commit's summary is kept: this is a
-/// reading of a directory at the moment it went wrong, and the directory moves on
-/// — not least because *take over manually* hands it to the human to work in.
-///
-/// Empty where there is nothing to say: a Conversation with no Worktree left, a
-/// repository that will not answer, or a Worktree with nothing pending in it —
-/// which is itself worth seeing, since it means the session left no work behind.
-async fn worktree_status(state: &AppState, conversation_id: i64) -> String {
-    let worktree = match store::load_conversation(&state.pool, conversation_id).await {
-        Ok(Some(conversation)) => conversation.worktree,
-        Ok(None) => None,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading a Conversation to ask git about failed");
-            None
-        }
-    };
-
-    let Some(worktree) = worktree else {
-        return String::new();
-    };
-
-    let said = tokio::task::spawn_blocking(move || status(&worktree)).await;
-
-    match said {
-        Ok(said) => said,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking git about a Worktree failed");
-            String::new()
-        }
-    }
-}
-
-/// The same, blocking: `git status` short, capped, and honest about the cap.
-///
-/// `--short --branch` rather than `--porcelain`, because this is read by a human
-/// rather than parsed — the branch line is the first thing worth knowing about a
-/// Worktree a run stopped in. Through [`git`], so it passes `--no-optional-locks`
-/// like every other read here: the session may have died holding `index.lock`,
-/// and a reader that waited on one would gather no evidence at all.
-fn status(worktree: &Path) -> String {
-    let Some(said) = git(worktree, &["status", "--short", "--branch"]) else {
-        return String::new();
-    };
-
-    shorten(&said, STATUS_LINES, "path")
-}
-
-/// The tail of what the failed session said, for the human reading the
-/// Interruption on a phone.
-///
-/// The agent's own prose off its Transcript where it kept one. That is the
-/// evidence somebody wants: an agent that gave up says why in a sentence, and
-/// the terminal underneath that sentence is a display of it — boxes, colours and
-/// a status bar — that says the same thing at ten times the length.
-///
-/// The Capture where there is no Transcript, tidied of the terminal's own
-/// sequences. That is every session on a backend keeping no log, and for those
-/// it is the whole record rather than a lesser one.
-///
-/// Empty where there is nothing to read at all: a step nothing could be launched
-/// for, or a session that went without a word.
-async fn session_tail(state: &AppState, conversation_id: i64, writing: Option<i64>) -> String {
-    let Some(event_id) = writing else {
-        return String::new();
-    };
-
-    match store::transcript(&state.pool, conversation_id, event_id).await {
-        Ok(Some(lines)) => {
-            let said = verkstead_render::statements(&lines);
-
-            if !said.is_empty() {
-                // A blank line between statements, because that is what they
-                // are: an agent's turns are paragraphs of markdown and running
-                // two of them together would read as one.
-                return shorten(&said.join("\n\n"), TAIL_LINES, "line");
-            }
-        }
-        Ok(None) => return String::new(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, event_id, "reading a failed session's Transcript failed");
-        }
-    }
-
-    match store::capture(&state.pool, conversation_id, event_id).await {
-        Ok(Some(capture)) => crate::capture::tail(&capture, TAIL_LINES),
-        Ok(None) => String::new(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, event_id, "reading what a failed session said failed");
-            String::new()
-        }
-    }
-}
-
-/// The last `keep` lines of `said`, with a line above them saying what was left
-/// out.
-///
-/// Said rather than silently cut. Evidence the human cannot tell is partial is
-/// worse than less of it: a status showing forty paths reads as *forty paths
-/// changed* unless it says otherwise.
-fn shorten(said: &str, keep: usize, what: &str) -> String {
-    let lines: Vec<&str> = said.lines().collect();
-
-    if lines.len() <= keep {
-        return lines.join("\n");
-    }
-
-    let dropped = lines.len() - keep;
-    let plural = if dropped == 1 { "" } else { "s" };
-
-    std::iter::once(format!("… and {dropped} earlier {what}{plural}"))
-        .chain(lines[dropped..].iter().map(|line| (*line).to_owned()))
-        .collect::<Vec<String>>()
-        .join("\n")
 }
 
 /// Take the human's remedy: record it, then do it.
@@ -333,55 +199,4 @@ async fn abort(state: &AppState, conversation_id: i64) -> Result<()> {
     });
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Evidence the human cannot tell is partial is worse than less of it, so
-    /// what was left out is said rather than silently cut.
-    #[test]
-    fn a_long_status_keeps_its_end_and_says_what_it_dropped() {
-        let said: String = (1..=45).map(|n| format!(" M file{n}.rs\n")).collect();
-
-        let shortened = shorten(&said, STATUS_LINES, "path");
-        let lines: Vec<&str> = shortened.lines().collect();
-
-        assert_eq!(
-            lines.len(),
-            STATUS_LINES + 1,
-            "the cap, and one line saying what is missing",
-        );
-        assert_eq!(lines[0], "… and 5 earlier paths");
-        assert_eq!(
-            lines[1], " M file6.rs",
-            "the end of it is what is kept: the last thing that happened",
-        );
-        assert_eq!(lines[STATUS_LINES], " M file45.rs");
-    }
-
-    /// The ordinary case, which is nearly every one: a session that stopped
-    /// having touched a handful of files.
-    #[test]
-    fn a_short_status_is_left_exactly_as_git_said_it() {
-        let said = "## rate-limiting\n M crates/limiter/src/lib.rs\n?? notes.md\n";
-
-        assert_eq!(
-            shorten(said, STATUS_LINES, "path"),
-            "## rate-limiting\n M crates/limiter/src/lib.rs\n?? notes.md",
-        );
-    }
-
-    /// One dropped line is one path, not one paths.
-    #[test]
-    fn what_was_dropped_is_counted_in_words_that_agree() {
-        let said: String = (1..=STATUS_LINES + 1).map(|n| format!("{n}\n")).collect();
-
-        assert!(
-            shorten(&said, STATUS_LINES, "path").starts_with("… and 1 earlier path\n"),
-            "{}",
-            shorten(&said, STATUS_LINES, "path"),
-        );
-    }
 }

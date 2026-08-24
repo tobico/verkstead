@@ -35,3 +35,18 @@ task 08.
       second press refuses as already driven.
 - [ ] The menu shows Resume exactly when the Conversation is in a driven
       state and undriven.
+
+## What task 01 left here
+
+Two end-to-end tests went when the stall stopped raising Interruptions, because
+nothing could arrange what they were about any more. Resume is what they become:
+
+- `retrying_a_stalled_backlog_run_takes_the_next_task_off_the_repository` — the
+  next task read off `.tasks/` after a session died and the human took over.
+- `retrying_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_settled`
+  — a fresh grilling on the Brief and the digest, with the Set the dead session
+  left open archived on the way past. It used two Question Set constants,
+  `ASKED_ALREADY` and `LEFT_HANGING`, which went with it.
+
+The halts of all three lifecycles are covered already, so what these need is the
+press and what it starts.

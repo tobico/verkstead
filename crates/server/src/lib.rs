@@ -29,6 +29,7 @@ mod followers;
 pub mod github;
 /// Grilling a Conversation again, where the session that was grilling it died.
 mod grillings;
+mod halts;
 /// Where a Conversation's handoff document is written, and how it reaches the
 /// Timeline.
 ///

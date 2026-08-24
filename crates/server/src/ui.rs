@@ -654,18 +654,31 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         _ => None,
     });
 
+    // And whether driving has stopped, which is the same question asked of the
+    // state rather than of the record: a halt says the Conversation is stopped
+    // now, and the Notice it points at says what stopped and why.
+    let halted = match store::halted(&state.pool, id).await {
+        Ok(halted) => halted.map(|halted| halted.event_id),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation had stopped failed");
+            None
+        }
+    };
+
     // And what the human has taken the keyboard of, which is the other thing the
     // work can be stopped on and the one that is nowhere on the Timeline: a Hold
     // leaves no Event, because the Timeline records the work rather than the
     // watching. Read off the running server, which is the only thing that knows.
     let held = state.sessions.holding(id);
 
-    // The badge points at whichever of the two is in force, and at the Hold
-    // first. The two cannot really be open together — an Interruption is raised
-    // about a session that is over, and nothing raises one behind a Hold — and
-    // where they somehow are, the keyboard is the thing the human is holding
-    // right now.
-    let blocked_on = held.or(stopped_at);
+    // The badge points at whichever of the three is in force, and at the Hold
+    // first. No two of them can really be open together — a halt and an
+    // Interruption are both raised about a session that is over, and nothing
+    // raises either behind a Hold — and where they somehow are, the keyboard is
+    // the thing the human is holding right now. The Interruption is last of the
+    // three because it is the one being taken away: what stops a run now is a
+    // halt, and an open one left on a Timeline is a Verkstead of before.
+    let blocked_on = held.or(halted).or(stopped_at);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as

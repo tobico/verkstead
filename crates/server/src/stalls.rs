@@ -1,30 +1,23 @@
-//! The check that finds a Conversation nothing is driving, and gives the human
-//! something to do about it.
+//! The check that finds a Conversation nothing is driving, and writes down that
+//! it has stopped.
 //!
 //! **Stalled** is three things at once: the state is Grilling, Implementing or
 //! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
-//! it has no open Interruption. Each of the three is doing work. The state is
+//! it is not halted already. Each of the three is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
 //! the human, Done finished and Aborted stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
 //! — a wrapping Conversation idles for days under live watchers and is perfectly
-//! healthy, and so are the gaps between an unattended run's steps. And an open
-//! Interruption is already the human being asked, so a Conversation that has one
-//! is a Conversation that has been told.
+//! healthy, and so are the gaps between an unattended run's steps. And a halt is
+//! already the record of a Conversation that stopped, so one that has one is one
+//! that has been written down.
 //!
-//! What it raises is an ordinary Interruption, because that is exactly what a
-//! stall is: something Verkstead noticed about an unattended run and cannot
-//! resolve itself. The difference is only in what it is evidence *of*. Every
-//! other one is raised by a session that went wrong, and this one is raised
-//! about a session that is not there — so nothing failed, nothing exited, and
-//! the evidence reads as a report of a Conversation standing still.
-//!
-//! **What the Remedies mean here.** *Take over manually* and *Abort* mean
-//! exactly what they mean everywhere — Verkstead stops driving, or the run ends
-//! where it stands. Retry is the one that has to be read differently: every
-//! other Interruption names the step a session was launched for, and this one
-//! names no session at all, so what to start again is decided from the state the
-//! Conversation is in. See [`retried`].
+//! What it records is a **halt** — see [`crate::halts`] — of the kind nobody
+//! chose: a stall is a driver that went away rather than a decision anybody
+//! took, so a restarting server is free to start the work again unasked. The
+//! Notice beside it reads as a report of a Conversation standing still rather
+//! than of a session that failed, because nothing failed and nothing exited:
+//! there was no session there at all.
 //!
 //! **When it looks.** At startup, every [`crate::Pace::stalls`] while the server
 //! runs, and the moment a Manual Task's session ends. Startup is the one that
@@ -79,8 +72,7 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     });
 }
 
-/// One look over every Conversation: raise an Interruption on each one that has
-/// stalled.
+/// One look over every Conversation: halt each one that has stalled.
 ///
 /// Called on its own the moment a Manual Task's session ends, which is the one
 /// time a stall is worth noticing without waiting for the next sweep: the human
@@ -113,16 +105,16 @@ pub(crate) async fn sweep(state: &AppState) {
         }
 
         // Asked before the evidence is gathered rather than left to
-        // [`store::record_interruption`] to refuse, which would answer the same
-        // way: gathering it is a `git status` on a Worktree and a Timeline read,
-        // and a Conversation that already has one open is not one to spend
-        // either on. It is also not stalled — being asked about is the half of a
-        // stall that is missing.
-        match store::open_interruption(&state.pool, conversation.id).await {
+        // [`store::halt`] to refuse, which would answer the same way: gathering
+        // it is a `git status` on a Worktree and a Timeline read, and a
+        // Conversation already halted is not one to spend either on. It is also
+        // not stalled — being written down is the half of a stall that is
+        // missing.
+        match store::halted(&state.pool, conversation.id).await {
             Ok(Some(_)) => continue,
             Ok(None) => {}
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation was already stopped failed");
+                tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation had already stopped failed");
                 continue;
             }
         }
@@ -131,12 +123,17 @@ pub(crate) async fn sweep(state: &AppState) {
     }
 }
 
-/// Put a stalled Conversation on its own Timeline for the human to answer.
+/// Halt a stalled Conversation, and say so on its own Timeline.
 ///
 /// The evidence is the ordinary evidence with nothing invented to fill it: the
 /// state it is in, that nothing was driving it, what git makes of the Worktree,
 /// and the tail of whatever the last session to run said — which is usually the
 /// reason there is no session running now.
+///
+/// [`store::Halt::Circumstance`], because that is what a stall is: nobody
+/// decided to stop, a driver went away. What that buys is a restart free to
+/// start the work again without asking — a deliberate halt is the one that
+/// waits for a press.
 async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     tracing::warn!(
         conversation_id,
@@ -144,27 +141,32 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
         "nothing is driving a Conversation that says it is being worked on",
     );
 
-    let raised = crate::interruptions::raise(
+    let halted = crate::halts::halt(
         state,
         conversation_id,
-        store::Step::Stalled,
+        store::Halt::Circumstance,
         driving(lifecycle),
         "nothing is driving it: no session is running, and nothing is left to start one",
         said_last(state, conversation_id).await,
     )
     .await;
 
-    if let Err(error) = raised {
+    if let Err(error) = halted {
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a Conversation has stalled and the Interruption saying so could not be raised"
+            "a Conversation has stalled and the halt saying so could not be recorded"
         );
     }
 }
 
 /// Start driving the Conversation again, because the human pressed Retry on the
 /// stall that said nothing was.
+///
+/// For the stalls already on Timelines, and only those: the sweep halts now
+/// rather than raising anything, so what reaches this is a Conversation that was
+/// stopped by a Verkstead of before — which still has a card, a sheet and a
+/// press behind it until they are taken away.
 ///
 /// The one Retry that is not a step run again. Every other Interruption is
 /// raised by a session launched for something, so the record names what to
