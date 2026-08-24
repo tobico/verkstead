@@ -1300,7 +1300,7 @@ async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
         return Json(Resumed::NoSuchConversation).into_response();
     };
 
-    match crate::resume::resume(&state, id).await {
+    match crate::resume::resume(&state, id, crate::resume::Resuming::Pressed).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");

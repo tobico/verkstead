@@ -28,15 +28,44 @@
 //! spawn reads the record again for itself — where an agent is about to be let
 //! loose is the one thing that must not be guessed at, and a spawn is a moment
 //! later.
+//!
+//! **And a restart presses it for itself.** No driver survives the process, so a
+//! server coming up holds a page full of Conversations nothing is driving, and
+//! every one of them wants exactly what the button does. So it does it unasked,
+//! on each in turn — see [`at_startup`]. What it leaves alone is a halt somebody
+//! decided on, that being the one kind waiting for a press rather than for a
+//! server.
 
 use verkstead_render::Resumed;
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
-use crate::store::{self, Lifecycle};
+use crate::store::{self, Halt, Lifecycle};
+
+/// Who asked for the run to start again.
+///
+/// One thing turns on it, and only one: the fix attempts a wrapping
+/// Conversation's checks have already spent. A human who has read what stopped
+/// and pressed Resume is asking for another go, so the counters are forgotten;
+/// a server coming back up has read nothing and asked for nothing, and an
+/// attempt spent before the restart is one it must not spend again — see
+/// [`crate::checks`]. Everything else about the recompute is the same either
+/// way, which is the whole point of there being one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Resuming {
+    /// The human pressed the button.
+    Pressed,
+
+    /// A server came up over a Conversation the last one was driving.
+    Restarted,
+}
 
 /// Press Resume: recompute what should be driving this Conversation, clear the
 /// halt, and start it.
+///
+/// `resuming` is who pressed it — the human, or a server coming up over a
+/// Conversation the last one was driving. The recompute is the same for both, and
+/// [`Resuming`] says what the one difference is.
 ///
 /// The registration is taken here rather than by whatever is spawned, and that
 /// is the whole reason the two are separate: the launch is the slow part, and
@@ -49,7 +78,11 @@ use crate::store::{self, Lifecycle};
 /// run does not advance past a halt — see [`crate::halts::stopped`] — so a
 /// driver launched over one would find the Conversation stopped and launch
 /// nothing.
-pub(crate) async fn resume(state: &AppState, conversation_id: i64) -> anyhow::Result<Resumed> {
+pub(crate) async fn resume(
+    state: &AppState,
+    conversation_id: i64,
+    resuming: Resuming,
+) -> anyhow::Result<Resumed> {
     let Some(conversation) = store::load_conversation(&state.pool, conversation_id).await? else {
         return Ok(Resumed::NoSuchConversation);
     };
@@ -195,17 +228,31 @@ pub(crate) async fn resume(state: &AppState, conversation_id: i64) -> anyhow::Re
         Lifecycle::Wrapping => {
             clear(state, conversation_id).await?;
 
-            let state = state.clone();
+            match resuming {
+                Resuming::Pressed => {
+                    let state = state.clone();
 
-            tokio::spawn(async move {
-                // Held until the four watchers have registrations of their own,
-                // which is what [`crate::wrapping::watching`] takes as it spawns
-                // them: dropping first would leave a moment where a sweep could
-                // find the Conversation undriven all over again.
-                let _driving = driving;
+                    tokio::spawn(async move {
+                        // Held until the four watchers have registrations of
+                        // their own, which is what
+                        // [`crate::wrapping::watching`] takes as it spawns them:
+                        // dropping first would leave a moment where a sweep
+                        // could find the Conversation undriven all over again.
+                        let _driving = driving;
 
-                crate::checks::retried(state, conversation_id).await;
-            });
+                        crate::checks::retried(state, conversation_id).await;
+                    });
+                }
+                // The same four watchers with the counters left standing — see
+                // [`Resuming`]. Registered before this one is let go, each of
+                // the four taking a registration of its own as it is spawned,
+                // which is the handover the press makes by holding its across
+                // the spawn.
+                Resuming::Restarted => {
+                    crate::wrapping::watching(state, conversation_id);
+                    drop(driving);
+                }
+            }
         }
 
         // Refused above, where the refusal belongs: before the halt is read and
@@ -219,10 +266,186 @@ pub(crate) async fn resume(state: &AppState, conversation_id: i64) -> anyhow::Re
     tracing::info!(
         conversation_id,
         state = ?conversation.state,
-        "the human pressed Resume, so the Conversation is being driven again"
+        ?resuming,
+        "the Conversation is being driven again"
     );
 
     Ok(Resumed::Resumed)
+}
+
+/// Start driving again everything a restart left, which is what a server does as
+/// it comes up.
+///
+/// The whole of what a restart is: no driver survives the process, so every
+/// Conversation the last server was driving is one nothing is driving now — a
+/// grilling whose session was killed, a backlog between tasks, a wrap-up whose
+/// watchers went with the process. Each of them gets the recompute the button
+/// gives, and starts driving again with nobody asked. There is nothing for a
+/// human to press here: a restart is not a decision anybody took, and a
+/// Conversation left standing still because Verkstead was upgraded is one that
+/// would wait for however long it took somebody to notice.
+///
+/// **Except where somebody decided to stop.** A [`Halt::Deliberate`] is Verkstead
+/// or the human pulling the brake — the checks that would not go green, a finish
+/// step with no pull request, a Stop pressed from the menu — and a server coming
+/// back up is no reason to think differently about any of them. Those keep their
+/// badge and wait for the press. A [`Halt::Circumstance`] is the other half of
+/// the same record: nobody chose it, so it is taken up here.
+///
+/// A refusal is written down rather than logged, because a Conversation that
+/// cannot be started is exactly the one somebody has to look at: it halts, with
+/// the refusal as its Notice — see [`refused`].
+///
+/// The task is handed back rather than let go, because the stall sweep waits for
+/// it: every Conversation here is undriven until this has taken it up, and a
+/// sweep that looked first would call each of them stalled. See
+/// [`crate::stalls::sweeping`].
+#[must_use = "the sweep waits for what a restart takes up before it judges \
+              whether anything is driving it"]
+pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
+    let state = state.clone();
+
+    tokio::spawn(async move {
+        let conversations = match store::conversations(&state.pool).await {
+            Ok(conversations) => conversations,
+            Err(error) => {
+                tracing::error!(error = ?error, "listing the Conversations a restart left failed");
+                return;
+            }
+        };
+
+        for conversation in conversations {
+            if !matches!(
+                conversation.state,
+                Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
+            ) {
+                continue;
+            }
+
+            match waiting_for_a_press(&state, conversation.id).await {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = conversation.id, "reading whether a Conversation was waiting on the human failed");
+                    continue;
+                }
+            }
+
+            tracing::info!(
+                conversation_id = conversation.id,
+                state = ?conversation.state,
+                "a restart left a Conversation with nothing driving it, so it is being driven again",
+            );
+
+            match resume(&state, conversation.id, Resuming::Restarted).await {
+                Ok(Resumed::Resumed) => {}
+                Ok(refusal) => refused(&state, conversation.id, conversation.state, refusal).await,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = conversation.id, "starting to drive a Conversation a restart left failed");
+                }
+            }
+        }
+    })
+}
+
+/// Whether this Conversation is stopped in a way only the human can undo, which
+/// is the one thing a restart leaves alone.
+///
+/// Two records say it. A [`Halt::Deliberate`] is the current one — somebody
+/// decided, so nothing here decides otherwise. An Interruption a Verkstead of
+/// before left open is the same statement written the old way, and it counts
+/// until the migration rewrites the stored ones: a restart that drove past one
+/// would be driving past the very thing the human is looking at. See
+/// [`crate::halts::stopped`], which is the same pair of questions asked in front
+/// of a launch.
+async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::Result<bool> {
+    if let Some(halted) = store::halted(&state.pool, conversation_id).await? {
+        return Ok(halted.halt == Halt::Deliberate);
+    }
+
+    Ok(store::open_interruption(&state.pool, conversation_id)
+        .await?
+        .is_some())
+}
+
+/// Halt a Conversation a restart could not start anything for, with the refusal
+/// as its Notice.
+///
+/// A refusal at startup has nobody in front of it: the press answers the browser
+/// that is holding a request open, and this answers nothing at all. So it goes
+/// where the human will find it — the Timeline, in the words the button would
+/// have used — and the Conversation stops rather than being swept a minute later
+/// under *nothing is driving it*, which is the same Conversation described by
+/// something that knows less.
+///
+/// [`Halt::Deliberate`], which is what it is: Verkstead looked at this
+/// Conversation and decided nothing could be started for it. Nothing but the
+/// human can change that, so the next restart leaves it alone rather than
+/// refusing all over again — and it reaches a phone, a Conversation nothing will
+/// ever pick up unasked being exactly the kind worth being told about.
+///
+/// A Conversation already halted keeps the halt it has: [`crate::halts::halt`]
+/// writes one halt per Conversation, and the first Notice is the one that
+/// explains it.
+async fn refused(state: &AppState, conversation_id: i64, lifecycle: Lifecycle, refusal: Resumed) {
+    let Some(why) = why(refusal) else {
+        tracing::info!(
+            conversation_id,
+            ?refusal,
+            "a Conversation moved on before a restart could take it up, so nothing was written",
+        );
+        return;
+    };
+
+    let halted = crate::halts::halt(
+        state,
+        conversation_id,
+        Halt::Deliberate,
+        crate::stalls::driving(lifecycle),
+        &format!("nothing could be started for it as the server came back up: {why}"),
+        crate::stalls::said_last(state, conversation_id).await,
+    )
+    .await;
+
+    if let Err(error) = halted {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            ?refusal,
+            "nothing could be started for a Conversation and the halt saying so could not be recorded"
+        );
+    }
+}
+
+/// Each refusal in the words the Notice says it in, or `None` where there is
+/// nothing to write down.
+///
+/// The three that answer `None` are not refusals about the work at all: the
+/// Conversation went, or moved out of a driven state, or something took it up
+/// between the listing and the resuming. Whatever did that has already said so,
+/// and a halt about it would be a stop nobody could act on.
+///
+/// The rest are the words the button's own refusals use, said as the reason half
+/// of a Notice — see the viewer's `RESUME_REFUSAL` for the same list put to
+/// somebody who is looking at the page.
+fn why(refusal: Resumed) -> Option<&'static str> {
+    Some(match refusal {
+        Resumed::Resumed => return None,
+        Resumed::NoSuchConversation | Resumed::NotDriven | Resumed::AlreadyDriven => return None,
+        Resumed::NowhereToWork => "there is no Worktree on the record to work in",
+        Resumed::WorktreeRefused => {
+            "its Worktree is not one any more, and git would not make it again from the branch"
+        }
+        Resumed::NoDirection => "nothing on the record says how the work is being built",
+        Resumed::NothingToWork => {
+            "there is nothing left in `.tasks/` to work — the backlog was never written, \
+             or it is finished with"
+        }
+        Resumed::NoGrillingPairing => "the grilling Profile and model it runs under have gone",
+        Resumed::NoImplementationPairing => {
+            "the implementation Profile and model the work runs under have gone"
+        }
+    })
 }
 
 /// Take the halt away, and tell the open pages the badge has gone.

@@ -2436,21 +2436,22 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
     );
 }
 
-/// A server restarted between the pick and the artifact.
+/// A server restarted between the pick and the artifact grills the work again.
 ///
 /// The pick is a row and survives; the grilling session that would have written
-/// the artifact was a process and did not. So the watcher is armed again from the
-/// stored latest pick, finds nothing to arm it on, and halts the run where it is
-/// — the Notice naming the tail the Conversation was waiting on.
+/// the artifact was a process and did not. Nobody decided that, so nothing is
+/// raised about it: the restart presses Resume for itself, and what Resume means
+/// on a Conversation that is grilling is a fresh grilling — the same Brief, and a
+/// digest of what the dead interview already settled.
 ///
-/// Of the kind nobody chose. A restart is not a decision anybody took, so what
-/// this leaves behind is a Conversation a later Verkstead is free to pick up
-/// unasked rather than one waiting on a press.
+/// Which is the whole of what this replaces. A restart used to leave a halt with
+/// the tail named on it and wait for somebody to press a button about a
+/// Conversation nothing had chosen to stop.
 ///
 /// A second server over the same database, which is what a restart is here: what
 /// a pick armed lives in the process that armed it.
 #[tokio::test]
-async fn a_restarted_server_halts_the_tail_it_can_no_longer_watch() {
+async fn a_restarted_server_grills_the_work_again_rather_than_raising_anything() {
     let fixture = grilling(
         r#"
         printf 'the grilling is running\n'
@@ -2472,58 +2473,57 @@ async fn a_restarted_server_halts_the_tail_it_can_no_longer_watch() {
          anything",
     );
 
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    let before = outputs(&fixture.view().await).len();
 
-    let halted = fixture.halted().await;
+    let _restarted = fixture
+        .restarted(r#"printf 'prompt was: %s\n' "$2""#, PULL_REQUEST)
+        .await;
+
+    // The session the second server started, with nobody having pressed
+    // anything: a restart takes up everything the last one was driving.
+    let grilling_again = fixture
+        .until(|view| {
+            let sessions = outputs(view);
+            (sessions.len() > before).then(|| sessions[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == grilling_again && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
 
     assert!(
-        halted
-            .html
-            .contains("Breaking the work down into a backlog"),
-        "the tail it was waiting on is named as the pick asked for it: {:?}",
-        halted.html,
+        printed.contains("~/.claude/skills/grilling/SKILL.md"),
+        "a grilling started again is a grilling: {printed:?}",
     );
     assert!(
-        halted
-            .html
-            .contains("the session that was writing it is gone"),
-        "and the reason is the restart, in words — rather than the sweep's \
-         *nothing is driving it*, which is the same Conversation described by \
-         something that knows less: {:?}",
-        halted.html,
-    );
-    assert_eq!(
-        fixture.chosen().await,
-        Halt::Circumstance,
-        "nobody decided this run should stop, so a Verkstead coming back up may \
-         write the artifact after all",
+        printed.contains("The API has none."),
+        "on the Brief it was always about: {printed:?}",
     );
 
     let view = fixture.view().await;
 
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing was written about the session the restart killed: {:?}",
+        notices(&view),
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "nothing is waiting on the human, because nothing is waiting at all",
+    );
     assert_eq!(
         view.state,
         Lifecycle::Grilling,
-        "nothing moved: no artifact landed, and a stopped run moves nothing either",
-    );
-    assert_eq!(
-        view.blocked_on,
-        Some(halted.id),
-        "what is waiting is the human, and the badge points at what stops the run \
-         — the halt, and the Notice saying what it was",
-    );
-
-    // Long enough for the sweep every server runs as it comes up to have looked
-    // at this Conversation, which is a grilling with no session and so a stall
-    // by every rule there is.
-    tokio::time::sleep(BRISKLY.grace * 4).await;
-
-    assert_eq!(
-        notices(&fixture.view().await).len(),
-        1,
-        "and it leaves it alone: a Conversation is halted once, and the first \
-         Notice — the one that knows it was the restart — is the one that \
-         explains it",
+        "which is where a fresh grilling leaves it: an interview that has to be \
+         had again is still the interview",
     );
 }
 
@@ -6811,29 +6811,52 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
 ///
 /// A stall is a driver that went away rather than a decision anybody took, so a
 /// Verkstead coming back is free to start the work again unasked — and waking a
-/// phone about a run that is about to carry on by itself is a notification that
-/// asks for nothing. The Notice is still written, because the Timeline is the
-/// record either way.
+/// phone about a run that a restart will carry on by itself is a notification
+/// that asks for nothing. The Notice is still written, because the Timeline is
+/// the record either way.
 ///
-/// The devices go on the list before the restart, which is what makes them the
-/// same devices: a subscription is a row in the database, and the server that
-/// comes back reads the same one.
+/// The stall is found by the sweep a finished manual task asks for, which is the
+/// one trigger with a moment in it: the device goes on the list first, and the
+/// press is what makes anything look.
 #[tokio::test]
 async fn a_stop_nobody_chose_tells_nobody() {
-    let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            printf 'the retries are still capped at five\n'
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
 
     fixture.quiet().await;
 
     let (service, taken) = push_service().await;
     fixture.subscribe(&Device::new(&service, "phone")).await;
 
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_pairing
+        .as_ref()
+        .expect("both Pairings are fixed before grilling starts");
+
     assert!(
-        notices(&fixture.view().await).is_empty(),
-        "the server it started on sweeps too slowly to have looked, which is what \
-         makes the restart the thing being tested",
+        notices(&view).is_empty(),
+        "this server sweeps too slowly to have looked, so what finds the stall \
+         here is the manual task ending",
     );
 
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    assert_eq!(
+        fixture
+            .manual("Check whether the retries are still capped.", profile)
+            .await,
+        ManualTaskStarted::Started,
+    );
 
     fixture.halted().await;
 
@@ -7422,15 +7445,21 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
     );
 }
 
-/// And a Conversation left mid-run by a server that stopped halts as it comes
-/// back.
+/// And a Conversation left mid-run by a server that stopped is not one the sweep
+/// ever gets to.
 ///
-/// The case the sweep matters most for. No driver survives the process, so a
-/// restarted server holds no registrations at all — which is the truth about it,
-/// and means every Conversation nothing takes up again is one nothing is
-/// driving.
+/// The case the sweep would matter most for, if the restart did not answer it
+/// first. No driver survives the process, so a restarted server holds no
+/// registrations at all — which is the truth about it, and would make every
+/// Conversation it was left driving a stall. What puts that right is the
+/// restart's own resume, and the sweep waits for it: it runs as soon as that is
+/// done, and finds every Conversation it took up being driven.
+///
+/// So there is nothing to read afterwards, which is the assertion. A Notice here
+/// would be a Conversation told it had stopped a moment after being started
+/// again.
 #[tokio::test]
-async fn a_conversation_a_stopped_server_left_mid_run_halts_as_it_comes_back() {
+async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the_sweep_looks() {
     let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
 
     fixture.quiet().await;
@@ -7441,38 +7470,34 @@ async fn a_conversation_a_stopped_server_left_mid_run_halts_as_it_comes_back() {
          makes the restart the thing being tested",
     );
 
-    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+    let before = outputs(&fixture.view().await).len();
 
-    let stalled = fixture.halted().await;
+    let _restarted = fixture
+        .restarted(
+            r#"
+            printf 'the grilling is running again\n'
+            sleep 300
+            "#,
+            PULL_REQUEST,
+        )
+        .await;
 
-    assert!(
-        stalled.html.contains("Grilling the work"),
-        "{:?}",
-        stalled.html,
-    );
-    assert!(
-        stalled.html.contains("the grilling has nothing to say"),
-        "with the last thing the session that is gone said, which is where the \
-         reason usually is: {:?}",
-        stalled.html,
-    );
-    assert_eq!(fixture.view().await.blocked_on, Some(stalled.id));
-
-    // And the halt is what that badge hangs on: taking it away — which is what
-    // starting to drive again does — takes the badge with it, while what stopped
-    // it stays on the record.
-    fixture.drive_again().await;
+    // The sweep the second server runs the moment its resume is done has looked
+    // by the time there is a session, that being the slower of the two.
+    fixture
+        .until(|view| (outputs(view).len() > before).then_some(()))
+        .await;
 
     let view = fixture.view().await;
 
-    assert_eq!(
-        view.blocked_on, None,
-        "nothing is waiting on the human once the Conversation is being driven again",
+    assert!(
+        notices(&view).is_empty(),
+        "nothing was written about a Conversation that is being worked on: {:?}",
+        notices(&view),
     );
     assert_eq!(
-        notices(&view).len(),
-        1,
-        "and the Notice stays where it is: it is a stop that really happened",
+        view.blocked_on, None,
+        "and nothing is waiting on the human, because nothing had to ask them",
     );
 }
 
@@ -8299,5 +8324,374 @@ while [ ! -f {gate} ]; do sleep 0.05; done
         Lifecycle::Grilling,
         "which is a state something ought to be driving, and is what makes a \
          Conversation with nothing driving it worth offering the press on",
+    );
+}
+
+/// A backlog run a restart interrupted carries on, with nobody having pressed
+/// anything.
+///
+/// The Conversation is mid-task when the server goes: the step is not landed, the
+/// session working it dies with the process, and nothing decided any of that. So
+/// the second server reads `.tasks/` exactly as the run itself does and starts a
+/// fresh session on the task that is still there — which is what a human pressing
+/// Resume would have got, arrived at without the human.
+///
+/// The first server never halts it, which is what makes this about the restart:
+/// its session goes on printing, so the run it is driving is perfectly healthy
+/// right up to the moment the process would have gone.
+#[tokio::test]
+async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            while :; do
+                printf 'still working on the task\n'
+                sleep 0.2
+            done
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The task's own session, which is the run this restart interrupts.
+    fixture
+        .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
+        .await;
+
+    let before = fixture
+        .until(|view| (outputs(view).len() > 1).then(|| outputs(view).len()))
+        .await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "nothing has stopped: the run is being driven, which is what makes this \
+         about the restart and not about a halt",
+    );
+
+    // Which stays, as the session it replaces did: what is being asked about is
+    // the restart taking the run up, and a session that printed and left would
+    // be a step nothing landed — an ordinary halt, and a different question.
+    let _restarted = fixture
+        .restarted(
+            r#"
+            printf 'prompt was: %s\n' "$2"
+            sleep 300
+            "#,
+            PULL_REQUEST,
+        )
+        .await;
+
+    let taken_up = fixture
+        .until(|view| {
+            let sessions = outputs(view);
+            (sessions.len() > before).then(|| sessions[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == taken_up && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the backlog is picked up again, which is the fork that reads it: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "and the run is where it was: a restart puts things back rather than \
+         moving anything on",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "with nothing waiting on the human, because nobody had to be asked",
+    );
+}
+
+/// A Conversation somebody decided to stop stays stopped across a restart.
+///
+/// The one thing the startup resume leaves alone, and the whole reason a halt
+/// records whether anybody chose it. A step whose session ended without landing
+/// it is Verkstead pulling the brake: it does not spend an account on the same
+/// failure again unasked, and a server coming back up is no reason to think
+/// differently about that.
+///
+/// So the badge is still there and the Notice is still the one that explained it —
+/// and no session was launched, which is the half a badge cannot say.
+#[tokio::test]
+async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'this task is beyond me\n'
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let halted = fixture.halted().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "a step whose session ended without landing it is Verkstead pulling the \
+         brake, which is the kind of stop a restart may not overrule",
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    // Long enough for the second server to have taken up everything it was going
+    // to, and for the sweep that follows it to have looked as well.
+    tokio::time::sleep(BRISKLY.grace * 4).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        before,
+        "no session was launched: a deliberate halt is waiting for a press, and \
+         a restart is not one",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(halted.id),
+        "the badge is intact, and still points at the Notice that explained it",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "and the halt is the same halt, not one written over the top of it",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "with nothing added beside it: {:?}",
+        notices(&view),
+    );
+}
+
+/// A halt nobody chose is taken up by the next server unasked, badge and all.
+///
+/// The other half of the pair: a stall is a driver that went away rather than a
+/// decision, so a server coming back is free to start the work again — and the
+/// halt goes with it, because nothing is stopped any more. The Notice stays where
+/// it is: it is a stop that really happened.
+///
+/// The stall is the one a finished manual task's sweep finds, so that this server
+/// looks exactly once — a second sweep while the next server is driving the
+/// Conversation would be a fixture halting what the test is watching.
+#[tokio::test]
+async fn a_halt_nobody_chose_is_driven_again_by_the_next_server() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *manual-task/SKILL.md*)
+            printf 'the retries are still capped at five\n'
+            ;;
+        *)
+            printf 'the grilling has nothing to say\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    let view = fixture.view().await;
+    let profile = view
+        .implementation_pairing
+        .as_ref()
+        .expect("both Pairings are fixed before grilling starts");
+
+    assert_eq!(
+        fixture
+            .manual("Check whether the retries are still capped.", profile)
+            .await,
+        ManualTaskStarted::Started,
+    );
+
+    let stalled = fixture.halted().await;
+
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Circumstance,
+        "nobody decided this run should stop, which is what makes it a restart's \
+         to pick up",
+    );
+    assert_eq!(fixture.view().await.blocked_on, Some(stalled.id));
+
+    let before = outputs(&fixture.view().await).len();
+
+    let _restarted = fixture
+        .restarted(
+            r#"
+            printf 'prompt was: %s\n' "$2"
+            sleep 300
+            "#,
+            PULL_REQUEST,
+        )
+        .await;
+
+    let taken_up = fixture
+        .until(|view| {
+            let sessions = outputs(view);
+            (sessions.len() > before).then(|| sessions[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == taken_up && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/grilling/SKILL.md")
+            && printed.contains("The API has none."),
+        "a fresh grilling on the Brief, which is what the button would have \
+         started: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.blocked_on, None,
+        "the halt is gone with the press that was never needed: nothing is waiting \
+         on the human once the Conversation is being driven again",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "and the Notice stays where it is: {:?}",
+        notices(&view),
+    );
+}
+
+/// A restart that can start nothing for a Conversation says so on the Timeline
+/// and stops there.
+///
+/// The refusal has nobody in front of it — a press answers the browser holding
+/// the request open, and a server coming up answers nothing at all — so it goes
+/// where the human will find it, in the words the button would have used. A
+/// Conversation nothing can be started for is exactly the one somebody has to
+/// look at, and *nothing is driving it* from the sweep a minute later is the same
+/// Conversation described by something that knows less.
+///
+/// A finish step whose pull request `gh` could not find is the plainest way to
+/// have one: the backlog is worked through and taken away, the Conversation is
+/// still implementing, and there is nothing left in `.tasks/` to read a step off.
+/// The halt it left is taken away first, which is the human having pressed Resume
+/// on it before the restart — what is being asked about here is the restart's own
+/// refusal rather than a halt it would have left alone.
+#[tokio::test]
+async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline() {
+    let fixture = grilling_asking(A_BACKLOG_OF_ONE, NO_PULL_REQUEST).await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture.halted().await;
+
+    let before = notices(&fixture.view().await).len();
+
+    fixture.drive_again().await;
+
+    let _restarted = fixture.restarted("true", PULL_REQUEST).await;
+
+    let refused = fixture
+        .until(|view| {
+            let said = notices(view);
+            (said.len() > before).then(|| said[before].clone())
+        })
+        .await;
+
+    assert!(
+        refused.contains("Implementing the work"),
+        "what nobody could be started for is named as the run it was: {refused:?}",
+    );
+    assert!(
+        refused.contains("nothing could be started for it as the server came back up"),
+        "and the restart is what could not start it: {refused:?}",
+    );
+    assert!(
+        refused.contains("there is nothing left in <code>.tasks/</code> to work"),
+        "in the words the press refuses in, rather than the sweep's: {refused:?}",
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "Verkstead looked and decided nothing could be started, and nothing but \
+         the human can change that — so the next restart leaves it alone",
+    );
+
+    // Long enough for the sweep the second server runs to have looked as well.
+    tokio::time::sleep(BRISKLY.grace * 4).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        notices(&view).len(),
+        before + 1,
+        "one halt and one Notice, rather than a sweep writing its own over the \
+         top of it: {:?}",
+        notices(&view),
+    );
+    assert!(
+        view.blocked_on.is_some(),
+        "and the human is what it is waiting on",
     );
 }

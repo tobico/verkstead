@@ -232,27 +232,6 @@ fn todo() -> PathBuf {
     Path::new(BACKLOG).join(TODO)
 }
 
-/// The tail a picked direction asks for, as the step that watches for it.
-///
-/// The same three pairings the followers below are built on — an inline pick ends
-/// on the handoff, a task list on the backlog, a roadmap on the roadmap — asked
-/// for without a session to follow. What wants them that way is the run that has
-/// *lost* its session: the Notice has to name the step the Conversation was
-/// waiting on, and there is nobody left to read it off.
-///
-/// `None` is a Conversation whose base commit could not be read, which is the one
-/// fact of the three that has to be fetched — see [`Landing::Roadmap`] for why a
-/// roadmap is watched for against the commit the branch came off.
-async fn tail(state: &AppState, conversation_id: i64, direction: Direction) -> Option<Step> {
-    Some(match direction {
-        Direction::Inline => Step::Handoff(
-            crate::handoffs::Handoffs::under(&state.data_dir).document(conversation_id),
-        ),
-        Direction::TaskList => Step::Planning,
-        Direction::Roadmap => Step::Staging(base(state, conversation_id).await?),
-    })
-}
-
 /// Follow the grilling session as it writes what the pick asked for.
 ///
 /// Nothing is launched: the session is the one that proposed, idling on the
@@ -289,39 +268,6 @@ pub(crate) async fn follow_the_tail(
         Direction::TaskList => follow_breakdown(state, conversation_id, session, driving).await,
         Direction::Roadmap => follow_staging(state, conversation_id, session, driving).await,
     }
-}
-
-/// Stop the run where a pick found nobody to write what it asked for.
-///
-/// Which is what a restart leaves behind: the pick is a row and survives, and the
-/// grilling session that would have gone on to write the artifact was a process
-/// and did not — see [`crate::conversations::resume`]. The Conversation would
-/// otherwise sit grilling for ever, watched by nothing and waiting on an artifact
-/// nobody is writing.
-///
-/// So it stops the way every other step that lost its session stops: a halt, and
-/// a Notice on the Timeline naming the tail it was waiting on.
-/// [`store::Halt::Circumstance`], because that is exactly what a restart is —
-/// nobody decided this run should stop, and a Verkstead coming back up is free
-/// to write the artifact after all.
-///
-/// No session to read a last word off, so the evidence carries the other facts
-/// alone. What the session said before the restart is on the Timeline above the
-/// Notice either way, as its own Event.
-pub(crate) async fn nobody_writing(state: &AppState, conversation_id: i64, direction: Direction) {
-    let Some(step) = tail(state, conversation_id, direction).await else {
-        return;
-    };
-
-    stop(
-        state,
-        conversation_id,
-        store::Halt::Circumstance,
-        &step.what(),
-        "the session that was writing it is gone",
-        None,
-    )
-    .await;
 }
 
 /// Work `conversation_id`'s backlog to empty, starting from the session that is

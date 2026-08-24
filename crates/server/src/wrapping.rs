@@ -138,11 +138,12 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// watched, its comments read, its branch reviewed where nobody has read it yet,
 /// and the rule that ends the whole thing waiting to be true.
 ///
-/// One place that says what a wrap-up *is*, because four things start one and all
-/// four have to start the whole of it: the finish step opening the pull request,
-/// a server coming back up over a Conversation it left wrapping, and either of
-/// the two Interruptions being retried — each of which stopped the rest too,
-/// since nothing advances past an open one.
+/// One place that says what a wrap-up *is*, because everything that starts one
+/// has to start the whole of it: the finish step opening the pull request, a
+/// Resume pressed on a wrap-up that halted, a server coming back up over a
+/// Conversation it left wrapping — see [`crate::resume`] for both of those — and
+/// either of the two Interruptions of before being retried, each of which stopped
+/// the rest too, since nothing advances past an open one.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
 /// them twice is not starting two of anything: a review that has already asked
@@ -179,47 +180,6 @@ where
 
         watching.await;
     });
-}
-
-/// Start watching every Conversation that was already wrapping up, and say when
-/// it is done.
-///
-/// What a restarting server does. A pull request goes on being built while
-/// Verkstead is down, and a review is a session that does not survive the process
-/// that started it — so a server that came back up and watched nothing would
-/// leave a Conversation wrapping for ever with nobody having said so.
-///
-/// The task is handed back rather than let go, because something waits on it:
-/// the stall sweep judges a Conversation by whether anything is registered as
-/// driving it, and every wrap-up taken up here registers as it is started — so a
-/// sweep that looked first would call every one of them stalled. See
-/// [`crate::stalls::sweeping`].
-#[must_use = "the sweep waits for the wrap-ups to be taken up before it judges \
-              whether anything is driving them"]
-pub(crate) fn resume(state: &AppState) -> tokio::task::JoinHandle<()> {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        let conversations = match store::conversations(&state.pool).await {
-            Ok(conversations) => conversations,
-            Err(error) => {
-                tracing::error!(error = ?error, "listing the Conversations to resume wrapping up failed");
-                return;
-            }
-        };
-
-        for conversation in conversations
-            .into_iter()
-            .filter(|conversation| conversation.state == store::Lifecycle::Wrapping)
-        {
-            tracing::info!(
-                conversation_id = conversation.id,
-                "a Conversation was left wrapping up, so its wrap-up is taken up again",
-            );
-
-            watching(&state, conversation.id);
-        }
-    })
 }
 
 /// Leave the Conversation where it is, with the reason on the Timeline.

@@ -21,11 +21,11 @@
 //!
 //! **When it looks.** At startup, every [`crate::Pace::stalls`] while the server
 //! runs, and the moment a Manual Task's session ends. Startup is the one that
-//! matters most: no driver survives the process, so a server coming back holds
-//! no registrations at all, and every Conversation it left mid-run is one
-//! nothing is driving until something takes it up again. The paths that do take
-//! them up run first — see [`sweeping`] — so what is left over when the sweep
-//! looks is what genuinely has nobody.
+//! matters least, and deliberately: no driver survives the process, so a server
+//! coming back holds no registrations at all — and what puts that right is the
+//! restart's own resume, which runs first and takes up everything it can. See
+//! [`crate::resume::at_startup`] and [`sweeping`], which waits for it. What is
+//! left over when the sweep looks is what genuinely has nobody.
 
 use std::time::Duration;
 
@@ -48,12 +48,11 @@ pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
 /// soon as `resumed` is done, and every [`crate::Pace::stalls`] after that.
 ///
 /// `resumed` is whatever the startup takes up again before anything is judged —
-/// the wrap-ups a restarting server carries on watching, which register as it
-/// goes, and the grillings it looks over for a pick left unwatched. Waited for
-/// rather than raced, because the two answer the same question from opposite
-/// ends: a Conversation left mid-run has nothing driving it for exactly as long
-/// as it takes to take it up again, and a sweep that got there first would call
-/// every healthy one of them stalled.
+/// the restart's own resume over every Conversation it was left driving, which
+/// registers as it goes. Waited for rather than raced, because the two answer the
+/// same question from opposite ends: a Conversation left mid-run has nothing
+/// driving it for exactly as long as it takes to take it up again, and a sweep
+/// that got there first would call every healthy one of them stalled.
 pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
     let state = state.clone();
 
@@ -259,7 +258,11 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64, note: String,
 /// alone, and [`crate::drivers::Drivers::driven`] is where that is decided — so
 /// what they answer is only ever read by a database somebody has been in by
 /// hand.
-fn driving(lifecycle: Lifecycle) -> &'static str {
+///
+/// Shared with [`crate::resume::refused`], which is the same sentence about the
+/// same Conversation: what nobody was doing, said as a startup resume gives up on
+/// starting it.
+pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
     match lifecycle {
         Lifecycle::Grilling => "grilling the work",
         Lifecycle::Implementing => "implementing the work",
@@ -279,8 +282,9 @@ fn driving(lifecycle: Lifecycle) -> &'static str {
 ///
 /// A Timeline read per stalled Conversation, which is a read per Conversation
 /// nothing is driving rather than per Conversation — the sweep asks this only
-/// once it has one to raise about.
-async fn said_last(state: &AppState, conversation_id: i64) -> Option<i64> {
+/// once it has one to raise about. [`crate::resume::refused`] asks it on the same
+/// terms, having likewise found one to halt about.
+pub(crate) async fn said_last(state: &AppState, conversation_id: i64) -> Option<i64> {
     let timeline = match store::timeline(&state.pool, conversation_id).await {
         Ok(timeline) => timeline,
         Err(error) => {

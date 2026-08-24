@@ -425,16 +425,14 @@ fn routed(
         data_dir,
     };
 
-    // Before anything is served, because both are about what was already
-    // happening rather than about anything a request will start: a Conversation
-    // left wrapping up by a server that stopped has a pull request GitHub has
-    // gone on building, and a Conversation left grilling on a pick was waiting
-    // on an artifact from a session that stopped with the server. Nobody but
-    // these is going to look at either.
-    let resumed = vec![wrapping::resume(&state), conversations::resume(&state)];
+    // Before anything is served, because it is about what was already happening
+    // rather than about anything a request will start: every Conversation the
+    // last server was driving is one nothing is driving now, and nobody but this
+    // is going to look at any of them — see [`resume::at_startup`].
+    let resumed = vec![resume::at_startup(&state)];
 
-    // And then, once both are done, the check for the Conversations nothing took
-    // up: a restart holds no driver registrations at all, so what is still
+    // And then, once that is done, the check for the Conversations it could not
+    // take up: a restart holds no driver registrations at all, so what is still
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
