@@ -15,9 +15,10 @@
 //! is what makes a page safe against a server newer than itself.
 //!
 //! It arrives two ways, and they are not alternatives. The server's stream is
-//! instant while the page is alive but dies when iOS suspends the PWA; the
-//! service worker relays every push it is woken by, which survives exactly that
-//! suspension but needs notifications on and Apple's delivery to happen at all.
+//! instant while the page is being looked at — it is held only then, see
+//! [`overTheStream`] — but dies when iOS suspends the PWA; the service worker
+//! relays every push it is woken by, which survives exactly that suspension but
+//! needs notifications on and Apple's delivery to happen at all.
 //! What the worker relays says nothing at all — a push is a rare, human-facing
 //! moment, and reading everything back at one is no waste worth typing a kind
 //! for.
@@ -62,7 +63,8 @@ export function listenForNudges(queries: QueryClient): () => void {
   };
 }
 
-/// Hold the server's stream open, looking again at every Nudge down it.
+/// Hold the server's stream open while the page is being looked at, looking
+/// again at every Nudge down it.
 ///
 /// The reconnect is a Nudge in itself, and the widest one there is. A stream
 /// comes back from a suspended PWA or a restarted server knowing nothing about
@@ -70,6 +72,21 @@ export function listenForNudges(queries: QueryClient): () => void {
 /// read back off the server rather than replayed down the wire. That the first
 /// open is not treated the same way is the one distinction drawn here — the
 /// page has only just read the world it is opening this over.
+///
+/// **And it is let go of the moment the page is hidden.** A stream is a
+/// connection held for as long as the page lives, and a browser gives one origin
+/// six of them over HTTP/1.1 — so the sixth Verkstead left open in a tab is the
+/// one that pins the last of them, and from there every read the page in front
+/// of the human makes waits for a connection that nothing is going to give back.
+/// A background tab has no use for the news anyway: [`onComingBack`] reads the
+/// world back whole the moment it is looked at again, which is exactly what a
+/// page that was not listening needs. So the stream belongs to the page being
+/// read rather than to every page open, and the connection goes back when the
+/// human looks away.
+///
+/// Which is also why coming back is not treated as a reconnect: the stream
+/// opening again is this, not a connection that dropped, and the catch-up it
+/// would ask for is the one [`onComingBack`] is already making.
 function overTheStream(queries: QueryClient): () => void {
   // Absent in a browser without server-sent events, which loses the fast path
   // and nothing else: coming back to the page is still a read of everything.
@@ -77,23 +94,58 @@ function overTheStream(queries: QueryClient): () => void {
     return () => {};
   }
 
-  const stream = new EventSource(STREAM);
-
+  let stream: EventSource | undefined;
   let established = false;
-  stream.addEventListener("open", () => {
-    if (established) {
-      lookAgain(queries);
+
+  const listen = () => {
+    if (stream) {
+      return;
     }
-    established = true;
-  });
 
-  // Named, so that whatever else may one day come down this stream is not
-  // mistaken for a Nudge by a page too old to know about it.
-  stream.addEventListener("nudge", (event) =>
-    lookAgainAt(queries, whatMoved((event as MessageEvent<unknown>).data)),
-  );
+    const opened = new EventSource(STREAM);
+    stream = opened;
 
-  return () => stream.close();
+    opened.addEventListener("open", () => {
+      if (established) {
+        lookAgain(queries);
+      }
+      established = true;
+    });
+
+    // Named, so that whatever else may one day come down this stream is not
+    // mistaken for a Nudge by a page too old to know about it.
+    opened.addEventListener("nudge", (event) =>
+      lookAgainAt(queries, whatMoved((event as MessageEvent<unknown>).data)),
+    );
+  };
+
+  /// Give the connection back. `established` goes with it, so that the stream
+  /// opening for the page being looked at again is the first open it is rather
+  /// than a reconnect — see above.
+  const letGo = () => {
+    stream?.close();
+    stream = undefined;
+    established = false;
+  };
+
+  const following = () => {
+    if (document.visibilityState === "visible") {
+      listen();
+    } else {
+      letGo();
+    }
+  };
+
+  // Listened for before [`onComingBack`]'s, so a page coming back is listening
+  // again before it reads: a Nudge landing between the two would otherwise be
+  // one nothing heard and the read it followed had already been made.
+  document.addEventListener("visibilitychange", following);
+  following();
+
+  return () => {
+    document.removeEventListener("visibilitychange", following);
+    letGo();
+  };
 }
 
 /// What the server said moved, or `null` where this page could not make a Nudge

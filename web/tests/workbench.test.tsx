@@ -2356,6 +2356,76 @@ describe("a session's output on the timeline", () => {
     expect(typing.readOnly).toBe(true);
   });
 
+  /// A Transcript is the whole of what a session said, and on a session that has
+  /// been talking for an hour that is half a megabyte of it. Read for a tab that
+  /// is not showing, it is a wait the human spends on a document nobody asked
+  /// for — and it is spent in front of the pane they did ask for, because a
+  /// browser gives one origin six connections and the reads queue behind each
+  /// other.
+  ///
+  /// Asked of the held session, because that is the one that opens on the Screen
+  /// without a click: what is being proved is that the record is never read at
+  /// all, rather than that it is not read twice.
+  it("does not read the transcript while the screen is what is showing", async () => {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+
+    const fetching = theHeld(true);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    (await attached()).says(PAINTED);
+    await drawn(container, ".details-pane .screen .xterm-rows");
+
+    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(0);
+    // And the Capture with it, which is the read the Transcript's own answer
+    // would have decided.
+    expect(askedFor(fetching, CAPTURE_OF_IT)).toBe(0);
+  });
+
+  /// And it is read the moment it is asked for, which is what makes the reading
+  /// above something the pane put off rather than something it dropped.
+  it("reads the transcript when the reader switches back to it", async () => {
+    const fetching = theSpeaking();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    await drawn(container, ".details-pane .turn.prose");
+    const first = askedFor(fetching, TRANSCRIPT_OF_IT);
+
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    await drawn(container, ".details-pane .screen");
+
+    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+
+    await waitFor(() => drawn(container, ".details-pane .turn.prose"));
+    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThanOrEqual(first);
+  });
+
+  /// An empty black rectangle is what a terminal that has failed looks like, so
+  /// a Screen that has not been painted yet says which of the two it is. What
+  /// makes this worth a line of its own is that nothing else on the pane does:
+  /// the terminal is made by the first repaint, so before one there is not even
+  /// a grid to be empty.
+  it("says it is waiting until a grid has been painted", async () => {
+    Attached.opened = [];
+    vi.stubGlobal("WebSocket", Attached);
+    theGrillingOutput({ running: true });
+
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+
+    const said = await drawn(container, ".details-pane .screen .read-only");
+    expect(said.textContent).toContain("Waiting");
+
+    (await attached()).says(PAINTED);
+
+    // And says what it is once there is something to say it about.
+    await waitFor(() => expect(said.textContent).toContain("Watching"));
+  });
+
   /// And what it shows instead wherever there is a Transcript: the conversation
   /// the session was having, rather than the bytes it happened to draw.
   it("shows the conversation where the session left one", async () => {

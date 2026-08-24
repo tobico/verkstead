@@ -86,6 +86,20 @@ export function Output(props: {
   // quietly missing its ending.
   const over = !props.output.running;
 
+  /// Which of the two records is showing.
+  ///
+  /// The Transcript to begin with, because it is what a reader usually came for:
+  /// what the session *said*. The Screen is how it looked while it said it, and
+  /// it is a click away rather than a scroll away.
+  ///
+  /// Except on the session whose keyboard the human has taken, which opens on
+  /// the Screen. That is what the *blocked on you* badge points at and what
+  /// handing back is pressed on — a Hold that opened behind the other tab would
+  /// be one the human had to go looking for.
+  const [showing, setShowing] = createSignal<"transcript" | "screen">(
+    props.conversation.held === props.output.id ? "screen" : "transcript",
+  );
+
   /// The record as far as this pane has read it, and whose it is.
   ///
   /// Kept beside the query rather than read back out of it, because what the
@@ -99,6 +113,17 @@ export function Output(props: {
     // The Event is in the key, so opening another session's output is another
     // query rather than the same one showing the wrong session for a moment.
     queryKey: ["transcript", props.conversation.id, props.output.id],
+
+    // And only while it is the record being read. A Transcript is the whole of
+    // what a session said — half a megabyte of it on a session that has been
+    // talking for an hour — and the Screen beside it is a terminal somebody is
+    // waiting to see. Read for a tab that is not showing, it is that wait spent
+    // on a document nobody asked for.
+    //
+    // Which makes switching back to it a read, and that is what it should be:
+    // the record is what the reader has just asked for, and the pane says it is
+    // loading while it comes.
+    enabled: showing() === "transcript",
 
     // Only what the session has said since this pane last looked, which while
     // it is talking is a line or two against an hour of them (ADR 0009). The
@@ -169,20 +194,6 @@ export function Output(props: {
     // alone on the reads that added nothing.
     freshness: over ? "static" : { reconcile: "id" },
   }));
-
-  /// Which of the two records is showing.
-  ///
-  /// The Transcript to begin with, because it is what a reader usually came for:
-  /// what the session *said*. The Screen is how it looked while it said it, and
-  /// it is a click away rather than a scroll away.
-  ///
-  /// Except on the session whose keyboard the human has taken, which opens on
-  /// the Screen. That is what the *blocked on you* badge points at and what
-  /// handing back is pressed on — a Hold that opened behind the other tab would
-  /// be one the human had to go looking for.
-  const [showing, setShowing] = createSignal<"transcript" | "screen">(
-    props.conversation.held === props.output.id ? "screen" : "transcript",
-  );
 
   /// The two labels themselves, so the mark under the pressed one can be put
   /// where that one is.
