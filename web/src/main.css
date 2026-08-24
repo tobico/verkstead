@@ -45,6 +45,14 @@
   --tok-name: #2f6f8f;
   --tok-support: #6b5aa0;
 
+  /* What a dropdown menu stands off the page by. One shadow rather than three,
+     and a strong one: a menu is drawn over whatever the human was reading, and
+     against a card of the same paper the border alone was not enough to say
+     which of the two was in front. Two layers, because a single soft one reads
+     as a smudge — the tight one is the edge, the wide one is the lift. */
+  --lift:
+    0 0.75rem 2rem rgb(0 0 0 / 22%), 0 0.15rem 0.4rem rgb(0 0 0 / 14%);
+
   color-scheme: light dark;
 }
 
@@ -79,6 +87,11 @@
     --tok-keyword: #e08aa6;
     --tok-name: #86bcd8;
     --tok-support: #b6a8e0;
+
+    /* Deeper, because a shadow this faint is invisible on paper this dark: the
+       same two layers, carrying the weight the light-mode pair carries. */
+    --lift:
+      0 0.75rem 2rem rgb(0 0 0 / 55%), 0 0.15rem 0.4rem rgb(0 0 0 / 40%);
   }
 }
 
@@ -964,70 +977,57 @@ main:has(.workbench) {
   flex-basis: 100%;
 }
 
-/* Starting a conversation: which repo the work is in, and nothing else — the
-   branch name is prefilled by the server and the brief is written in the
-   timeline. One decision, so one press: the button is the whole of the form,
-   and the menu it drops is the anchor everything below hangs from. */
-.new-conversation {
+/* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
+   chrome is here and only the paint is each menu's own: they hang the same way,
+   they are dismissed the same way, and they stand off the page by the same
+   shadow, which is what says a menu is in front of what it covers.
+
+   The anchor everything below hangs from. */
+.menu {
   position: relative;
-  margin-bottom: 1.5rem;
 }
 
-/* The width of the pane, because it is the pane's one action and the menu comes
-   down the width of it. The mark is pushed to the far end, where a dropdown's
-   is. */
-.new-conversation-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 1rem;
+/* The trigger keeps almost nothing of its own: what one of these looks like is
+   the caller's, and they look nothing like each other — a full-width button, a
+   pill, an ellipsis. Only the two things every one of them is. */
+.menu-trigger {
   font: inherit;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
   cursor: pointer;
 }
 
-.new-conversation-trigger:disabled {
+.menu-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
 /* What a press away from the open menu lands on, so that it lands on nothing
-   else: the sidebar is a list of things to open, and a stray press that opened
-   one would take the human off the page they were still deciding about.
-   Invisible, as the Set's own menu backdrop is — a menu is not in front of the
-   page the way a dialog is. */
-.new-conversation-backdrop {
+   else: a stray press that opened a conversation, or answered a question, is
+   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
+   is not in front of the page the way a dialog is, it is only on top of it. */
+.menu-backdrop {
   position: fixed;
   inset: 0;
   z-index: 2;
 }
 
-/* The menu, hung under the button and as wide as it. Over the list rather than
-   in the flow above it, so opening it does not push the conversations down —
-   which is the whole of what the notices under the old box were doing. */
-.new-conversation-menu {
+/* The menu itself, hung under the trigger's far end. Over the page rather than
+   in the flow of it, so opening one does not move what it was opened from. */
+.menu-drop {
   position: absolute;
   top: calc(100% + 0.3rem);
   right: 0;
-  left: 0;
   z-index: 3;
   padding: 0.3rem;
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
+  box-shadow: var(--lift);
 }
 
-/* Every row of it, whichever group it is in: drawn as the text it is rather
-   than as a control, because a menu of buttons that looked like buttons would
-   read as a form to fill in. */
-.new-conversation-menu button {
+/* Every row of every menu: drawn as the text it is rather than as a control,
+   because a menu of buttons that looked like buttons would read as a form to
+   fill in. */
+.menu-drop button {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
@@ -1042,30 +1042,61 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.new-conversation-menu button:hover,
-.new-conversation-menu button:focus-visible {
+.menu-drop button:hover,
+.menu-drop button:focus-visible {
   background: var(--paper);
 }
 
-.new-conversation-menu button:disabled {
+.menu-drop button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
 
-/* The roadmaps, kept apart from the repos by a rule: pressing one starts a
-   different kind of conversation, and a menu that ran the two together would be
-   offering fifteen equal things. */
-.new-conversation-menu .menu-group {
+/* A run of rows kept apart from the rest by a rule, where pressing one of them
+   does a different kind of thing than pressing the others. */
+.menu-drop .menu-group {
   margin-top: 0.3rem;
   padding-top: 0.3rem;
   border-top: 1px solid var(--edge);
 }
 
-.new-conversation-menu .menu-heading {
+.menu-drop .menu-heading {
   margin: 0;
   padding: 0.25rem 0.6rem;
   font-size: 0.8rem;
   color: var(--ink-soft);
+}
+
+/* Starting a conversation: which repo the work is in, and nothing else — the
+   branch name is prefilled by the server and the brief is written in the
+   timeline. One decision, so one press: the button is the whole of the form,
+   and the menu it drops is the anchor everything below hangs from. */
+.new-conversation {
+  margin-bottom: 1.5rem;
+}
+
+/* The width of the pane, because it is the pane's one action and the menu comes
+   down the width of it. The mark is pushed to the far end, where a dropdown's
+   is. */
+.new-conversation > .menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+}
+
+/* As wide as the button it came down from, and over the list rather than in the
+   flow above it: opening it does not push the conversations down, which is the
+   whole of what the notices under the old box were doing. */
+.new-conversation > .menu-drop {
+  left: 0;
 }
 
 /* The roadmap's name over the stage that would be started, because on a phone
@@ -1084,7 +1115,7 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-.new-conversation-menu .empty {
+.new-conversation .empty {
   margin: 0;
   padding: 0.4rem 0.6rem;
   font-size: 0.9rem;
@@ -2833,56 +2864,42 @@ main:has(.workbench) {
 /* What can be done to the conversation as a whole. A menu rather than a button,
    because aborting throws a worktree away and the header is somewhere the
    cursor passes on the way to everything else. */
-.conversation-actions {
-  position: relative;
-}
-
-.conversation-actions summary {
-  list-style: none;
+.conversation-actions > .menu-trigger {
   padding: 0 0.4rem;
   font-size: 1.1rem;
   line-height: 1;
   color: var(--ink-soft);
-  cursor: pointer;
+  background: none;
+  border: 0;
 }
 
-.conversation-actions summary::-webkit-details-marker {
-  display: none;
-}
-
-.conversation-actions[open] summary {
+.conversation-actions > .menu-trigger[aria-expanded="true"] {
   color: var(--ink);
 }
 
-/* Over the timeline rather than in the flow of the header, so opening the menu
-   does not move the title it hangs off. */
-.conversation-actions .menu {
-  position: absolute;
-  top: 1.75rem;
-  right: 0;
-  z-index: 1;
+/* Room for a sentence about what aborting takes away, which is more than a row
+   of a menu holds — so this one is padded as a card rather than as a list. */
+.conversation-actions > .menu-drop {
   width: 17rem;
   padding: 0.75rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
 }
 
+/* The one danger button in the UI, so it keeps its outline where every other
+   row of a menu has none. */
 .conversation-actions .abort {
+  display: inline-block;
+  width: auto;
   padding: 0.4rem 0.8rem;
-  font: inherit;
   font-weight: 600;
   color: #b3382c;
   background: none;
   border: 1px solid #b3382c;
   border-radius: 0.4rem;
-  cursor: pointer;
 }
 
-.conversation-actions .abort:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
+.conversation-actions .abort:hover,
+.conversation-actions .abort:focus-visible {
+  background: var(--paper);
 }
 
 .conversation-actions .note,
@@ -4263,33 +4280,28 @@ div.meta .error {
 
 /* How a waiting Set stands, at the far end of the provenance line: the badge
    is the title of a small menu, and the way to close the Set if no agent ever
-   comes back for it is inside. The anchor the menu hangs from. */
-
-.standing {
-  position: relative;
-}
+   comes back for it is inside. */
 
 /* The badge as a pill, with the mark that says it opens: quiet, because
    waiting is the ordinary state — the outline is only what says this one is
    pressable, where the words around it are not. The word that colours it is
    the Liveness itself, exactly as on a list row. */
-.standing-trigger {
+.standing > .menu-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.7rem;
-  font: inherit;
   font-size: 0.85rem;
   color: var(--ink-soft);
   background: transparent;
   border: 1px solid var(--edge);
   border-radius: 999px;
-  cursor: pointer;
 }
 
-.standing-trigger:disabled {
+/* Waiting on the archive rather than refusing the press, which is the one
+   disabled trigger here that is not a *no*. */
+.standing > .menu-trigger:disabled {
   cursor: progress;
-  opacity: 0.65;
 }
 
 /* Which way the menu will go, and no part of what the badge says. */
@@ -4297,50 +4309,21 @@ div.meta .error {
   color: var(--ink-soft);
 }
 
-/* What a tap away from the open menu lands on, so that it lands on nothing
-   else: on a page whose whole purpose is answering carefully, a stray tap that
-   answers something is not a small thing. Invisible, unlike the bar's wash —
-   a menu one item long is not in front of the page the way the whole list
-   is. */
-.standing-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-}
-
-/* The menu, hung under the badge's end of the line. */
-.standing-actions {
-  position: absolute;
-  top: calc(100% + 0.3rem);
-  right: 0;
-  z-index: 3;
+/* One row, so it is as wide as its own words rather than as wide as anything. */
+.standing > .menu-drop {
   min-width: max-content;
   padding: 0.25rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.5rem;
 }
 
 /* Quiet, and quieter than accept-all: archiving is almost never the right thing
    to do to a Set, and the one time it is, the human came here for it. It is not
    a danger button either — nothing is destroyed, the Set is filed. */
-.standing-actions .archive {
-  display: block;
-  width: 100%;
+.standing .archive {
   padding: 0.4rem 0.7rem;
-  font: inherit;
   font-size: 0.85rem;
-  text-align: left;
   white-space: nowrap;
   color: var(--ink-soft);
-  background: transparent;
-  border: 0;
   border-radius: 0.35rem;
-  cursor: pointer;
-}
-
-.standing-actions .archive:hover {
-  background: var(--paper);
 }
 
 .questions,

@@ -10,8 +10,9 @@
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
-import { Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { Show, createMemo, createSignal } from "solid-js";
 
+import { Menu } from "../Menu";
 import { archiveSet } from "../api/client";
 import type { Archived, Liveness } from "../api/types";
 import { clearDraft } from "./sheet";
@@ -39,16 +40,20 @@ export const ARCHIVE_WARNING =
 /// The badge, and the one thing to do about a Set nobody is coming back for,
 /// folded behind it as a menu. Drawn on the provenance line, which the
 /// stylesheet puts it at the far end of.
+///
+/// The menu itself is the [`Menu`](../Menu.tsx) every dropdown here is: the
+/// badge is what it drops from, and archiving is the whole of what it drops.
 export function Standing(props: {
   id: number;
   liveness: Liveness;
 }): JSX.Element {
-  // `true` while the menu hangs open under the badge.
-  const [open, setOpen] = createSignal(false);
-
   // `true` while the human is being asked to confirm. Nothing is archived until
   // they answer it.
   const [confirming, setConfirming] = createSignal(false);
+
+  // The menu's own way to shut, held here so the row can take the menu back on
+  // its way to the confirmation.
+  let shut = (): void => {};
 
   const queries = useQueryClient();
 
@@ -81,60 +86,40 @@ export function Standing(props: {
     unarchived(archive.data, archive.error as Error | null),
   );
 
-  // The way out that needs no aim: a menu drawn over the page has to be
-  // dismissible from the keyboard. The other way — tapping the page — is the
-  // backdrop's, so the tap taking the menu back cannot also press something on
-  // the page underneath.
-  const escape = (ev: KeyboardEvent) => {
-    if (ev.key === "Escape") {
-      setOpen(false);
-    }
-  };
-
-  document.addEventListener("keydown", escape);
-  onCleanup(() => document.removeEventListener("keydown", escape));
-
   return (
     <>
-      <span class="standing">
-        <button
-          type="button"
-          class="standing-trigger"
-          aria-expanded={open() ? "true" : "false"}
-          aria-controls="standing-actions"
-          aria-haspopup="menu"
-          disabled={archive.isPending}
-          onClick={() => setOpen(!open())}
-        >
-          <span class={`liveness ${props.liveness}`}>
-            {archive.isPending ? "Archiving…" : BADGE[props.liveness]}
-          </span>
-          {/* Which way the menu will go, and no part of what the badge says. */}
-          <span class="standing-mark" aria-hidden="true">
-            ▾
-          </span>
-        </button>
-        <Show when={open()}>
-          <div
-            class="standing-backdrop"
-            aria-hidden="true"
-            onClick={() => setOpen(false)}
-          />
-          <div class="standing-actions" id="standing-actions" role="menu">
-            <button
-              type="button"
-              role="menuitem"
-              class="archive"
-              onClick={() => {
-                setOpen(false);
-                setConfirming(true);
-              }}
-            >
-              Archive unanswered
-            </button>
-          </div>
-        </Show>
-      </span>
+      <Menu
+        class="standing"
+        name="How this Set stands"
+        disabled={archive.isPending}
+        closer={(close) => (shut = close)}
+        trigger={
+          <>
+            <span class={`liveness ${props.liveness}`}>
+              {archive.isPending ? "Archiving…" : BADGE[props.liveness]}
+            </span>
+            {/* Which way the menu will go, and no part of what the badge
+                says. */}
+            <span class="standing-mark" aria-hidden="true">
+              ▾
+            </span>
+          </>
+        }
+      >
+        {() => (
+          <button
+            type="button"
+            role="menuitem"
+            class="archive"
+            onClick={() => {
+              shut();
+              setConfirming(true);
+            }}
+          >
+            Archive unanswered
+          </button>
+        )}
+      </Menu>
       <Show when={failed()}>{(said) => <span class="error">{said()}</span>}</Show>
       {/* The one irreversible thing on the page, so it is asked about in as many
           words — including that it cannot be undone, which is what tells this

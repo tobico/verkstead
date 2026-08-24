@@ -153,18 +153,11 @@ function frame(container: ParentNode): HTMLElement {
   return container.querySelector(".workbench")!;
 }
 
-/// Open the conversation's action menu, the way a click on its summary does.
-///
-/// `details` opens itself natively, which jsdom does not do for a synthetic
-/// click — so the state is set and the toggle it would have fired is fired.
-async function openActions(container: ParentNode): Promise<void> {
-  const menu = await drawn<HTMLDetailsElement>(
-    container,
-    ".conversation-actions",
-  );
-
-  menu.open = true;
-  fireEvent(menu, new Event("toggle"));
+/// Open the conversation's action menu: press the trigger, and wait for what it
+/// drops.
+async function openActions(container: ParentNode): Promise<HTMLElement> {
+  fireEvent.click(await drawn(container, ".conversation-actions > .menu-trigger"));
+  return drawn(container, ".conversation-actions > .menu-drop");
 }
 
 /// Drop the new-conversation menu, which is where both ways of starting one
@@ -172,8 +165,8 @@ async function openActions(container: ParentNode): Promise<void> {
 async function openNewConversation(
   container: ParentNode,
 ): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, ".new-conversation-trigger"));
-  return drawn(container, ".new-conversation-menu");
+  fireEvent.click(await drawn(container, ".new-conversation > .menu-trigger"));
+  return drawn(container, ".new-conversation > .menu-drop");
 }
 
 /// The repos in that menu, in the order they are offered — waited for, because
@@ -612,9 +605,9 @@ describe("the new conversation menu", () => {
   it("keeps the repos out of the sidebar until the button is pressed", async () => {
     theWorkbench();
     const { container } = mount();
-    await drawn(container, ".new-conversation-trigger");
+    await drawn(container, ".new-conversation > .menu-trigger");
 
-    expect(container.querySelector(".new-conversation-menu")).toBeNull();
+    expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull();
   });
 
   it("closes once a repo has been chosen", async () => {
@@ -625,7 +618,7 @@ describe("the new conversation menu", () => {
     fireEvent.click((await repoRows(container))[0]!);
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
+      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
     );
   });
 
@@ -639,10 +632,10 @@ describe("the new conversation menu", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
+      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
     );
     expect(document.activeElement).toBe(
-      container.querySelector(".new-conversation-trigger"),
+      container.querySelector(".new-conversation > .menu-trigger"),
     );
   });
 
@@ -653,10 +646,10 @@ describe("the new conversation menu", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    fireEvent.click(await drawn(container, ".new-conversation-backdrop"));
+    fireEvent.click(await drawn(container, ".new-conversation > .menu-backdrop"));
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation-menu")).toBeNull(),
+      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
     );
   });
 
@@ -688,7 +681,7 @@ describe("the new conversation menu", () => {
 
     fireEvent.click((await repoRows(container))[0]!);
 
-    const said = await drawn(container, ".new-conversation-menu .error");
+    const said = await drawn(container, ".new-conversation > .menu-drop .error");
     expect(said.textContent).toContain("down");
   });
 });
@@ -3664,14 +3657,13 @@ describe("aborting a conversation", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const menu = await drawn<HTMLDetailsElement>(
-      container,
-      ".conversation-actions",
-    );
+    await drawn(container, ".conversation-actions > .menu-trigger");
 
-    // Closed, so nothing in it can be reached without opening it first — which
-    // is the whole of what standing a destructive action behind a menu means.
-    expect(menu.open).toBe(false);
+    // Closed, so nothing in it is on the page at all — which is the whole of
+    // what standing a destructive action behind a menu means.
+    expect(container.querySelector(".abort")).toBeNull();
+
+    const menu = await openActions(container);
     expect(menu.querySelector(".abort")).toBeTruthy();
     expect(container.querySelector(".pane-head .abort")).toBe(
       menu.querySelector(".abort"),
@@ -4613,7 +4605,7 @@ describe("the pinned task list", () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
-    const menu = await drawn(container, ".conversation-actions .menu");
+    const menu = await openActions(container);
 
     // Both are inside the one stuck block, so which is over which is settled
     // between them rather than against the record.

@@ -76,6 +76,7 @@ import type {
   TaskListEvent,
   TimelineEvent,
 } from "../api/types";
+import { Menu } from "../Menu";
 import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
@@ -1346,13 +1347,16 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 ///
 /// A menu rather than a button, because aborting throws a worktree away and the
 /// header is somewhere the human's cursor passes on the way to everything else.
-/// Native `details`/`summary`, so it opens, closes and reaches the keyboard
-/// without any of that being this component's to get right.
+/// The [`Menu`](../Menu.tsx) every dropdown here is, so it opens, closes and
+/// reaches the keyboard without any of that being this component's to get right.
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const [open, setOpen] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
+
+  // The menu's own way to shut, held here because what closes this one is the
+  // abort coming back rather than the press that sent it.
+  let shut = (): void => {};
 
   const abort = useMutation(() => ({
     mutationFn: () => abortConversation(props.conversation.id),
@@ -1364,47 +1368,51 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 
       // Aborted or already aborted: what was asked for holds either way.
       setRefused(null);
-      setOpen(false);
+      shut();
       void queries.invalidateQueries({ queryKey: ["conversation"] });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
     },
   }));
 
   return (
-    <details
+    <Menu
       class="conversation-actions"
-      open={open()}
-      onToggle={(ev) => setOpen(ev.currentTarget.open)}
+      label="Conversation actions"
+      name="Conversation actions"
+      closer={(close) => (shut = close)}
+      trigger="⋯"
     >
-      <summary aria-label="Conversation actions">⋯</summary>
-      <div class="menu">
-        <Show
-          when={props.conversation.state !== "Aborted"}
-          fallback={<p class="note">This conversation has been aborted.</p>}
-        >
-          <button
-            type="button"
-            class="abort"
-            disabled={abort.isPending}
-            onClick={() => abort.mutate()}
+      {() => (
+        <>
+          <Show
+            when={props.conversation.state !== "Aborted"}
+            fallback={<p class="note">This conversation has been aborted.</p>}
           >
-            {abort.isPending ? "Aborting…" : "Abort conversation"}
-          </button>
-          <p class="note">
-            Removes the worktree. The branch stays where it is.
-          </p>
-        </Show>
+            <button
+              type="button"
+              role="menuitem"
+              class="abort"
+              disabled={abort.isPending}
+              onClick={() => abort.mutate()}
+            >
+              {abort.isPending ? "Aborting…" : "Abort conversation"}
+            </button>
+            <p class="note">
+              Removes the worktree. The branch stays where it is.
+            </p>
+          </Show>
 
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
-        </Show>
-        <Show when={abort.isError}>
-          <p class="error">
-            The conversation could not be aborted: {abort.error?.message}
-          </p>
-        </Show>
-      </div>
-    </details>
+          <Show when={refused()}>
+            {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+          </Show>
+          <Show when={abort.isError}>
+            <p class="error">
+              The conversation could not be aborted: {abort.error?.message}
+            </p>
+          </Show>
+        </>
+      )}
+    </Menu>
   );
 }
 
