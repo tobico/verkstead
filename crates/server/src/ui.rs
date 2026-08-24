@@ -761,7 +761,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Commit(commit) => verkstead_render::commit_event(
                         event.id,
                         event.at,
-                        verkstead_render::CommitSummary {
+                        verkstead_render::CommitRecord {
                             sha: commit.sha,
                             subject: commit.subject,
                             files: commit.files,

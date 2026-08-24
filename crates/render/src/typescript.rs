@@ -122,7 +122,7 @@ fn the_viewers_types_are_written_from_these() {
     // so it is the outcome alone.
     HandedBack::export_all(&config).unwrap();
 
-    // And what a session committed. The summary rides on the Timeline too; the
+    // And what a session committed. The snippet rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
     CommitPane::export_all(&config).unwrap();

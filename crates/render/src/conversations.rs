@@ -1285,7 +1285,7 @@ pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
 /// Timeline is made. The snippet is rendered on the way through, which is the
 /// one thing here there is anything to render — a summary of nothing but a
 /// Diagram comes out empty, and a card with nothing to say says nothing.
-pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent {
+pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent {
     TimelineEvent::Commit(CommitEvent {
         id,
         at,
@@ -1310,7 +1310,7 @@ pub fn commit_event(id: i64, at: String, commit: CommitSummary) -> TimelineEvent
 /// numbers and a subject, and a call with those in the wrong order would
 /// compile.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitSummary {
+pub struct CommitRecord {
     pub sha: String,
     pub subject: String,
     pub files: i64,

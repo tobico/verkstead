@@ -33,7 +33,7 @@ pub use answering::{Archived, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
-    BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitSummary, ConversationAborted,
+    BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, HandoffEvent,
     InterruptionEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted, ManualTaskSubmission,
     MovedEvent, NewAdoption, NewConversation, NoticeEvent, PinnedEvent, ProposalView,
