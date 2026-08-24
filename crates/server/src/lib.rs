@@ -549,6 +549,13 @@ pub async fn run(config: Config) -> Result<()> {
         .await
         .with_context(|| format!("binding {}", config.listen))?;
 
+    // The syntax definitions built on a blocking thread while the server comes
+    // up, rather than under the first Diff somebody opens. Nothing waits on it:
+    // it is spawned and left, so serving starts when the bind does, and a
+    // request that arrives before it finishes simply waits where it would have
+    // waited anyway.
+    tokio::task::spawn_blocking(verkstead_render::warm_highlighter);
+
     tracing::info!(
         listen = %config.listen,
         data_dir = %data_dir.display(),

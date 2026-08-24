@@ -225,7 +225,22 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 
     // Everything the agent wrote, rendered — which is the whole of what is left
     // to do, and none of it this crate's.
-    let view: SetView = verkstead_render::set_view(stored.id, conversation, stored.set, standing);
+    //
+    // On the blocking pool, for the Diff inside it: a Set is asked with the whole
+    // of a dirty working tree attached, and parsing and colouring that is not
+    // work to do on an async worker thread while other requests wait behind it.
+    let view = tokio::task::spawn_blocking(move || {
+        verkstead_render::set_view(stored.id, conversation, stored.set, standing)
+    })
+    .await;
+
+    let view: SetView = match view {
+        Ok(view) => view,
+        Err(error) => {
+            tracing::error!(error = ?error, set_id = id, "rendering a Question Set failed");
+            return unavailable("the Question Set could not be read");
+        }
+    };
 
     Json(view).into_response()
 }
@@ -996,10 +1011,19 @@ async fn commit_diff(
         }
     };
 
-    let patch = match tokio::task::spawn_blocking(move || crate::commits::patch(&repo, &commit.sha))
-        .await
-    {
-        Ok(patch) => patch,
+    // Read and rendered in the one blocking task. Parsing a patch and colouring
+    // every line of it is as much work as running the `git` that produced it, and
+    // an async worker thread is the wrong place for either: a large diff run
+    // inline here would hold up every other request sharing that thread.
+    let rendered = tokio::task::spawn_blocking(move || {
+        crate::commits::patch(&repo, &commit.sha)
+            .as_deref()
+            .map(verkstead_render::commit_diff)
+    })
+    .await;
+
+    let rendered = match rendered {
+        Ok(rendered) => rendered,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "reading a commit's diff failed");
             return unavailable("the commit could not be read");
@@ -1009,11 +1033,11 @@ async fn commit_diff(
     // A commit the repository will not say anything about is one that has gone —
     // collected, or on a branch somebody rewrote. There is nothing to draw a pane
     // about, which is what a 404 means everywhere else here.
-    let Some(patch) = patch else {
+    let Some(rendered) = rendered else {
         return no_such_commit();
     };
 
-    Json(verkstead_render::commit_diff(&patch)).into_response()
+    Json(rendered).into_response()
 }
 
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
