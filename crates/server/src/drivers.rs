@@ -50,7 +50,7 @@ use crate::store::Lifecycle;
 ///
 /// A count rather than a flag, because a wrap-up is four tasks at once and any
 /// one of them still going is a wrap-up still being driven — and because a
-/// retried Interruption starts a second set over the top of the first without
+/// Resume starts a second set over the top of the first without
 /// stopping it. Counting is what keeps the first of them to finish from taking
 /// the whole Conversation off the register.
 #[derive(Clone, Default)]
@@ -243,7 +243,7 @@ mod tests {
 
     /// A wrap-up is four tasks at once and each of them ends in its own time, so
     /// a Conversation is driven while any one of them is left. Which is also
-    /// what a retried Interruption needs: it starts a second set over the top of
+    /// what Resume needs: it starts a second set over the top of
     /// the first without stopping it.
     #[test]
     fn a_conversation_is_driven_while_any_one_of_its_drivers_is_left() {

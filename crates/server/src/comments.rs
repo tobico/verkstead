@@ -47,8 +47,8 @@ use crate::store;
 /// wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or a run stopped at an Interruption. Idle rather than looping, for the
-/// checks watcher's reason — nothing advances past an open Interruption, and a
+/// gone, or driving that halted. Idle rather than looping, for the checks
+/// watcher's reason — nothing advances past a halt, and a
 /// watcher that dispatched sessions behind one would be working on a run the
 /// human has stopped.
 ///

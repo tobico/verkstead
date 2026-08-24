@@ -1,10 +1,9 @@
 //! A Conversation's Timeline: everything that has happened to it, in order.
 //!
 //! The kinds of Event so far — the Brief, a move, what a session printed, a
-//! Question Set, the handoff, and the commits a
-//! session lands on the branch — drawn as a list of Events rather than as a
-//! Brief with a list under it. The stages after this one put interruptions on
-//! the same list.
+//! Question Set, the handoff, the Notices Verkstead writes on its own account,
+//! and the commits a session lands on the branch — drawn as a list of Events
+//! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
 //! now, the stage list and the PR as those stages arrive. They are not on the
@@ -86,7 +85,6 @@ import { useReading } from "../freshness";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
-import { Interruption } from "./Interruption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
 
@@ -470,18 +468,6 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
-                <Match when={"Interruption" in event && event.Interruption}>
-                  {(stopped) => (
-                    <Interruption
-                      stopped={stopped()}
-                      selected={props.selected === stopped().id}
-                      open={() => {
-                        props.select(stopped().id);
-                        props.details();
-                      }}
-                    />
-                  )}
-                </Match>
               </Switch>
             </li>
           )}
@@ -525,8 +511,8 @@ export function Timeline(props: {
 ///
 /// It carries nothing. What to start is recomputed from the conversation's state
 /// and its branch at the moment of the press, which is the whole point of one
-/// button rather than a remedy per way of stopping — steering the work is what
-/// the manual task below is for.
+/// button rather than one per way of stopping — steering the work is what the
+/// manual task below is for.
 function Resume(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
@@ -584,7 +570,7 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// drafting nor aborted, and no session is registered for it. That is the
 /// literal rule and it is deliberate: the gaps between an unattended run's
 /// steps, a wrapping lull, a grilling waiting on a pick, a finished
-/// conversation and a run stopped on an interruption all show it, because the
+/// conversation and a conversation that has halted all show it, because the
 /// point of it is to get a stuck conversation moving. After a server restart
 /// nothing is running anywhere, so it shows everywhere, and that is wanted too.
 ///
@@ -665,8 +651,7 @@ function ManualTaskComposer(props: {
 
         <label for="manual-task">What should the agent do?</label>
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`, which the brief's field and an interruption's note use for
-            the same reason. */}
+            `.grow`, which the brief's field uses for the same reason. */}
         <div class="grow" data-value={instruction()}>
           <textarea
             id="manual-task"

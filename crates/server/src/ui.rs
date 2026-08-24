@@ -31,9 +31,9 @@ use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationStopped, ConversationView, Cursor, GrillingStarted, HandedBack,
     Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
-    RepoEntry, Resumed, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
-    Subscribed, Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed, Subscription,
+    TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -126,19 +126,10 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
         //
-        // And what the human does about a run that stopped. Per Event rather
-        // than per Conversation, because that is what is being answered: the
-        // Timeline is where the question was put, and a route that took only
-        // the Conversation would answer whichever Interruption happened to be
-        // open when it arrived.
-        .route(
-            "/api/ui/conversations/{id}/interruption/{event}",
-            post(settle_interruption),
-        )
         // And what the human sets going by hand, wherever nothing is running.
-        // Per Conversation rather than per Event, unlike settling an
-        // Interruption: a Manual Task answers nothing on the Timeline — it is a
-        // new thing to do, and the Event it becomes is written by this.
+        // Per Conversation rather than per Event, unlike a Set: a Manual Task
+        // answers nothing on the Timeline — it is a new thing to do, and the
+        // Event it becomes is written by this.
         .route(
             "/api/ui/conversations/{id}/manual-task",
             post(start_manual_task),
@@ -655,20 +646,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ),
     };
 
-    // What the work has stopped on, read off the Timeline for the reason the
-    // Brief is: it is already here. The store's index makes at
-    // most one open, so the last one that is unsettled is the one — and it is
-    // the *only* one, which is what makes *the run stops here* a fact rather
-    // than a promise.
-    let stopped_at = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Interruption(interruption) if interruption.settled.is_none() => {
-            Some(event.id)
-        }
-        _ => None,
-    });
-
-    // And whether driving has stopped, which is the same question asked of the
-    // state rather than of the record: a halt says the Conversation is stopped
+    // Whether driving has stopped: a halt says the Conversation is stopped
     // now, and the Notice it points at says what stopped and why.
     let halted = match store::halted(&state.pool, id).await {
         Ok(halted) => halted.map(|halted| halted.event_id),
@@ -697,14 +675,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // watching. Read off the running server, which is the only thing that knows.
     let held = state.sessions.holding(id);
 
-    // The badge points at whichever of the three is in force, and at the Hold
-    // first. No two of them can really be open together — a halt and an
-    // Interruption are both raised about a session that is over, and nothing
-    // raises either behind a Hold — and where they somehow are, the keyboard is
-    // the thing the human is holding right now. The Interruption is last of the
-    // three because it is the one being taken away: what stops a run now is a
-    // halt, and an open one left on a Timeline is a Verkstead of before.
-    let blocked_on = held.or(halted).or(stopped_at);
+    // The badge points at whichever of the two is in force, and at the Hold
+    // first. The two cannot really be open together — nothing halts behind a
+    // Hold — and where they somehow are, the keyboard is the thing the human is
+    // holding right now.
+    let blocked_on = held.or(halted);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -806,22 +781,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             deletions: commit.deletions,
                         },
                     ),
-                    // Whole, evidence and all, unlike the three above it. The
-                    // evidence was bounded when it was gathered — see the server's
-                    // `interruptions` module — and the remedies are chosen against
-                    // it, so a page that had to fetch it separately could draw the
-                    // buttons before it could say what they were for.
-                    store::Event::Interruption(interruption) => {
-                        verkstead_render::interruption_event(
-                            event.id,
-                            event.at,
-                            stopped(*interruption),
-                        )
-                    }
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
                     // back — and the one nobody wrote for a human to press
-                    // anything about.
+                    // anything about. What a halt's Notice says is what stopped,
+                    // why, and the evidence — see [`crate::halts`], which writes
+                    // the markdown.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
                     }
@@ -1237,39 +1202,6 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/interruption/{event}` — what the human is
-/// doing about a run that stopped.
-///
-/// One press for the choice and the doing: retry
-/// launches a fresh session for the same step, taking whatever was written
-/// alongside; take over stops Verkstead driving; abort ends the run. In every
-/// case the repository is left as the session left it.
-///
-/// `AlreadySettled` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the human answers from whichever device is to
-/// hand, and the second press of a button is something to say in words rather
-/// than something to retry.
-async fn settle_interruption(
-    State(state): State<AppState>,
-    Path((id, event)): Path<(String, String)>,
-    Json(choice): Json<RemedyChoice>,
-) -> HttpResponse {
-    // Two ids out of a URL a human may have typed, read as permissively as every
-    // other pair here: neither of them naming a number cannot name an
-    // Interruption.
-    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
-        return Json(RemedySettled::NoSuchInterruption).into_response();
-    };
-
-    match crate::interruptions::settle(&state, id, event, choice.remedy, &choice.note).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "settling an Interruption failed");
-            unavailable("the interruption could not be settled")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
 ///
 /// The instruction goes on the Timeline and a one-off session starts on it under
@@ -1380,8 +1312,8 @@ async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// The only way one ends. Nothing here judges anything: what the human left is
 /// judged by whichever driver was waiting at the gate, by the ordinary
 /// end-of-session rules — the Step's commit landed so the run goes on, or it did
-/// not and there is an Interruption. Handing back is what lets that question be
-/// asked, not what answers it.
+/// not and driving halts. Handing back is what lets that question be asked, not
+/// what answers it.
 ///
 /// Refused for nothing. A Conversation that is not held is one already handed
 /// back, which is the same answer arriving twice rather than a mistake.
@@ -1509,39 +1441,6 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
-    }
-}
-
-/// An Interruption as the viewer receives it: the evidence, and how it was
-/// settled if it was.
-///
-/// The one Event whose whole self rides on the Timeline. Held to the viewer's
-/// vocabulary here, as a lifecycle state is, because the two enums are the same
-/// three remedies said in two crates that do not depend on each other.
-fn stopped(interruption: store::Interruption) -> verkstead_render::Stopped {
-    verkstead_render::Stopped {
-        what: interruption.evidence.what,
-        how: interruption.evidence.how,
-        git_status: interruption.evidence.git_status,
-        tail: interruption.evidence.tail,
-        settled: interruption
-            .settled
-            .map(|settled| verkstead_render::RemedyTaken {
-                remedy: remedy(settled.remedy),
-                note: settled.note,
-                at: settled.at,
-            }),
-    }
-}
-
-/// The store's word for a remedy as the viewer receives it, the other way round
-/// from [`crate::interruptions`]'s: this is what was chosen, and that is what to
-/// choose.
-fn remedy(remedy: store::Remedy) -> verkstead_render::Remedy {
-    match remedy {
-        store::Remedy::Retry => verkstead_render::Remedy::Retry,
-        store::Remedy::TakeOver => verkstead_render::Remedy::TakeOver,
-        store::Remedy::Abort => verkstead_render::Remedy::Abort,
     }
 }
 

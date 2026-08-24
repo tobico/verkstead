@@ -470,7 +470,7 @@ working: boolean,
 idle: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
- * left open, or a run stopped on an Interruption.
+ * left open, or driving that has halted.
  *
  * Folded from every source before it leaves, so the viewer holds no list of
  * them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -616,8 +616,8 @@ blocked_on: number | null,
  *
  * Beside `blocked_on` rather than folded into it, though a Hold sets that
  * too. What the badge says is *the work has stopped and it is your move*,
- * and what this says is *which move* — where an Interruption is answered
- * with a Remedy, a Hold is answered by handing the keyboard back.
+ * and what this says is *which move* — where a halt is answered by pressing
+ * Resume, a Hold is answered by handing the keyboard back.
  *
  * Never on the Timeline, however long it lasts: the Timeline records the
  * work rather than the watching. This is a fact about now, read off the
@@ -711,46 +711,6 @@ at: string,
  * agent markdown on this wire is.
  */
 html: string, };
-
-/**
- * A run that stopped, as the Timeline shows it: what went wrong, what the
- * evidence was, and how the human settled it.
- *
- * The evidence is a reading of a Worktree and a session at the moment they went
- * wrong, taken then and kept — both move on, and a git status read when the page
- * looked would be a status of whatever happened next.
- */
-export type InterruptionEvent = { id: number, 
-/**
- * When the run stopped, RFC 3339.
- */
-at: string, 
-/**
- * Which step failed, in words — "task 03 of the backlog".
- */
-what: string, 
-/**
- * How it ended: the exit status, or that it ended without landing anything.
- */
-how: string, 
-/**
- * What git made of the Worktree, as `git status` said it. Empty where the
- * repository would not answer, or where there was nothing pending.
- */
-git_status: string, 
-/**
- * The tail of what the session said: its own prose off the Transcript, or
- * what it printed with the terminal's control sequences taken out where it
- * kept no log. The tail and not the whole: what went wrong is at the end,
- * and the whole of it is on the Timeline already as the session's own
- * Event. Empty where it said nothing at all.
- */
-tail: string, 
-/**
- * How the human settled it, or `null` while it is still open — which is the
- * state the run is stopped in, and what the remedies are drawn for.
- */
-settled: RemedyTaken | null, };
 
 /**
  * Where a Conversation has got to.
@@ -1239,48 +1199,6 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
- * One of the three things the human can do about an Interruption.
- *
- * Roadrunner's remedies and roadrunner's meanings. In every case the repository
- * is left as the session left it: none of the three reverts, resets or stashes
- * anything.
- */
-export type Remedy = "Retry" | "TakeOver" | "Abort";
-
-/**
- * The remedy the human is choosing, and what they want said alongside it.
- */
-export type RemedyChoice = { remedy: Remedy, 
-/**
- * What to tell the fresh session, for a retry. Carried for the other two as
- * well and recorded either way: a human who wrote why they were taking over
- * has said something worth keeping on the record, even though nothing reads
- * it back to an agent.
- */
-note: string, };
-
-/**
- * What became of choosing one.
- */
-export type RemedySettled = "Settled" | "NoSuchInterruption" | "AlreadySettled";
-
-/**
- * How an Interruption was settled: which remedy, whatever the human wrote
- * alongside it, and when.
- */
-export type RemedyTaken = { remedy: Remedy, 
-/**
- * What the human wrote alongside the choice — "try again but leave the
- * migration alone". Empty where they wrote nothing, which is the ordinary
- * case for the two remedies that launch nothing.
- */
-note: string, 
-/**
- * When they chose, RFC 3339.
- */
-at: string, };
-
-/**
  * One row of the Repo list.
  *
  * The path is the resolved one the server recorded rather than whatever was
@@ -1621,7 +1539,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.

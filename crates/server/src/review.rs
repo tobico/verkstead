@@ -91,18 +91,6 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     }
 }
 
-/// Review it again because the human asked for it, and put the wrap-up's other
-/// half back under watch while we are here.
-///
-/// The checks stopped being watched when the run stopped — nothing advances past
-/// that — so a retry that started only the review would leave the pull request's
-/// checks unwatched for the rest of the wrap-up.
-pub(crate) async fn retried(state: AppState, conversation_id: i64) {
-    tracing::info!(conversation_id, "the review is being run again");
-
-    crate::wrapping::watching(&state, conversation_id);
-}
-
 /// Dispatch a session for each finding the human accepted.
 ///
 /// Spawned rather than awaited: this is called from the endpoint that takes their
@@ -170,10 +158,10 @@ async fn fix(state: AppState, conversation_id: i64, fixing: Vec<store::Fixing>) 
 /// What the fix session is told: the finding as the review wrote it for whoever
 /// would fix it, and whatever the human said when they agreed.
 ///
-/// Their words last, under the finding rather than over it, for the reason a
-/// retry note goes under the documents: the finding says what is wrong, and this
-/// says what they thought about it. "Yes, but leave the public signature alone"
-/// is only worth writing if it reaches the session that can act on it.
+/// Their words last, under the finding rather than over it: the finding says
+/// what is wrong, and this says what they thought about it. "Yes, but leave the
+/// public signature alone" is only worth writing if it reaches the session that
+/// can act on it.
 fn feedback(finding: &store::Fixing) -> String {
     let mut told = format!(
         "The review of this branch raised this, and the human has said to fix it.\n\n{}\n",
@@ -194,8 +182,8 @@ fn feedback(finding: &store::Fixing) -> String {
 ///
 /// Four ways there is not, and none of them is a failure: the Conversation has
 /// stopped wrapping up, the review has already asked, the review has already
-/// settled, or the run is blocked on the human — the same rule the runner and the
-/// checks watcher keep, that nothing is launched while an Interruption is open.
+/// settled, or driving has stopped — the same rule the runner and the checks
+/// watcher keep, that nothing is launched behind a halt.
 ///
 /// A store that will not answer reads as *no*, which is the right way round for
 /// the one thing this decides: on the other side of it is an agent being let

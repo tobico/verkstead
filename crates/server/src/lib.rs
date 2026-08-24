@@ -38,7 +38,6 @@ mod halts;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod hold;
-mod interruptions;
 mod manual;
 mod nudge;
 mod profiles;

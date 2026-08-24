@@ -49,10 +49,6 @@ const GRILLING: &str = "~/.claude/skills/grilling/SKILL.md";
 /// The implementation skill's, the same way.
 const IMPLEMENTING: &str = "~/.claude/skills/implementing/SKILL.md";
 
-/// And the breakdown skill's — Verkstead's fork of to-tasks, which is what the
-/// task-list direction runs instead of building anything itself.
-const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
-
 /// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
 /// roadmap direction runs instead of building anything itself.
 const STAGING: &str = "~/.claude/skills/staging/SKILL.md";
@@ -217,33 +213,15 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
     )
 }
 
-/// What a retried task-list tail is started on: the Brief, under the line that
-/// sends the agent into the breakdown skill.
+/// What a roadmap Conversation's own work is started on where Resume launches it:
+/// the Brief, under the line that sends the agent into the staging fork.
 ///
-/// One document rather than two, unlike the sessions that build. A task list
-/// writes no handoff — the backlog *is* what the grilling settled, committed to
-/// the branch — so there is never one for this to carry. The ordinary way into
-/// the breakdown is the grilling session reading on with the whole thread still
-/// in its context and no prompt sent at all; this is the retry, which grounds
-/// itself in the Brief, the repository, and whatever the human wrote when they
-/// asked for the tail to be run again.
-pub(crate) fn breaking_down(brief: &str) -> String {
-    on_the_documents(
-        &format!(
-            "Read {BREAKING_DOWN} and break the work described below into tasks, the way it says."
-        ),
-        brief,
-        None,
-    )
-}
-
-/// What a retried roadmap tail is started on: the Brief again, under the line
-/// that sends the agent into the staging fork.
-///
-/// One document for the reason the breakdown gets one, one level up: the stage
-/// briefs are what the grilling settled, and nothing crosses out of this
-/// Conversation that has to be told anything else. The ordinary way in is the
-/// grilling session reading on; this is the retry.
+/// One document rather than two, unlike the sessions that build. A roadmap
+/// writes no handoff — the stage briefs are what the grilling settled, committed
+/// to the branch — so there is never one for this to carry. The ordinary way in
+/// is the grilling session reading on with the whole thread still in its context
+/// and no prompt sent at all; this is Resume, which grounds itself in the Brief
+/// and the repository.
 pub(crate) fn staging(brief: &str) -> String {
     on_the_documents(
         &format!(
@@ -382,29 +360,6 @@ pub(crate) fn manual_task(instruction: &str) -> String {
     )
 }
 
-/// The same prompt, with what the human said when they asked for the step to be
-/// tried again.
-///
-/// Written under the documents rather than over them, because it is the newest
-/// thing said and the least general: the Brief and the handoff describe the work,
-/// and this describes what to do differently this time. "Try again but leave the
-/// migration alone" is only worth writing if it reaches whatever can act on it,
-/// and the prompt is the one thing a session is certain to read.
-///
-/// A retry with nothing written alongside is the prompt unchanged. The ordinary
-/// remedy is a human who has read the evidence and thinks the step is worth
-/// another run as it stands, and a heading over an empty note would be the
-/// session told that something had been said.
-pub(crate) fn retrying(prompt: &str, note: &str) -> String {
-    let note = note.trim();
-
-    if note.is_empty() {
-        return prompt.to_owned();
-    }
-
-    format!("{prompt}\n# What I said when I asked you to try this again\n\n{note}\n")
-}
-
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
@@ -424,6 +379,14 @@ fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String
 
 #[cfg(test)]
 mod tests {
+    /// The breakdown skill's path — Verkstead's fork of to-tasks, which is what
+    /// the task-list direction runs instead of building anything itself.
+    ///
+    /// The one mount path no prompt here names. Nothing launches a session into
+    /// the breakdown: the grilling session reads on into it, in the grilling
+    /// skill's own words, so what this is for is holding that promise to a test.
+    const BREAKING_DOWN: &str = "~/.claude/skills/breaking-down/SKILL.md";
+
     use super::*;
 
     /// What the skill is read as, whichever way this build carries it.
@@ -711,27 +674,23 @@ mod tests {
         );
     }
 
-    /// Two sessions can be reading this: the grilling one carrying on from the
-    /// pick, and a fresh one launched because that tail was retried. They differ
-    /// in what the reader has to ground itself in — its own conversation, or the
-    /// Brief and the repository — so the skill has to say both.
+    /// One session reads this, and the skill says which: the grilling one,
+    /// carrying on from the pick with everything it settled still in its
+    /// context. Nothing else launches a breakdown, so a skill that offered a
+    /// second way in would be describing a session nobody starts.
     #[test]
-    fn the_breakdown_skill_works_from_both_ways_in() {
+    fn the_breakdown_skill_is_read_by_the_grilling_session_carrying_on() {
         let breaking_down = skill("breaking-down/SKILL.md");
 
         assert!(
-            breaking_down.contains("the grilling session, reading on"),
-            "the ordinary way in is the session that settled the work carrying on: \
+            breaking_down.contains("reading on"),
+            "the way in is the session that settled the work carrying on: \
              {breaking_down}"
         );
         assert!(
-            breaking_down.contains("a fresh session"),
-            "and the other is a retried tail: {breaking_down}"
-        );
-        assert!(
-            breaking_down.contains("there is no handoff document"),
-            "which is grounded in the Brief, the repository and the retry note — a \
-             task list writes no handoff for it to have been handed: {breaking_down}"
+            breaking_down.contains("no handoff document"),
+            "and there is nothing else for it to have been handed — a task list \
+             writes no handoff: {breaking_down}"
         );
     }
 
@@ -862,12 +821,12 @@ mod tests {
         );
         assert!(
             staging.contains("a fresh session"),
-            "and the other is a retried tail: {staging}"
+            "and the other is the one Resume launches: {staging}"
         );
         assert!(
-            staging.contains("there is no handoff document"),
-            "which is grounded in the Brief, the repository and the retry note — a \
-             roadmap writes no handoff for it to have been handed: {staging}"
+            staging.contains("no handoff document"),
+            "which is grounded in the Brief and the repository — a roadmap writes \
+             no handoff for it to have been handed: {staging}"
         );
     }
 
@@ -1367,30 +1326,6 @@ mod tests {
         assert!(
             !prompt.contains("What the grilling settled"),
             "nothing is said about a document that was never written: {prompt:?}"
-        );
-    }
-
-    /// The Brief, into the other skill. What differs is the line above it, which
-    /// is the whole of what sends a session one way or the other.
-    #[test]
-    fn a_breakdown_session_is_started_on_the_brief_inside_the_fork() {
-        let prompt = breaking_down("# Rate limiting\n\nThe API has none.\n");
-
-        assert!(
-            prompt.contains(BREAKING_DOWN),
-            "the fork is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(IMPLEMENTING),
-            "and nothing sends this session to build the work instead: {prompt:?}"
-        );
-        assert!(
-            prompt.contains("The API has none."),
-            "the Brief goes in whole: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("What the grilling settled"),
-            "and nothing is said about a document a task list never has: {prompt:?}"
         );
     }
 

@@ -80,7 +80,7 @@ pub struct ConversationEntry {
     pub idle: bool,
 
     /// Whether something about this Conversation is waiting on the human: an ask
-    /// left open, or a run stopped on an Interruption.
+    /// left open, or driving that has halted.
     ///
     /// Folded from every source before it leaves, so the viewer holds no list of
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -300,8 +300,8 @@ pub struct ConversationView {
     ///
     /// Beside `blocked_on` rather than folded into it, though a Hold sets that
     /// too. What the badge says is *the work has stopped and it is your move*,
-    /// and what this says is *which move* — where an Interruption is answered
-    /// with a Remedy, a Hold is answered by handing the keyboard back.
+    /// and what this says is *which move* — where a halt is answered by pressing
+    /// Resume, a Hold is answered by handing the keyboard back.
     ///
     /// Never on the Timeline, however long it lasts: the Timeline records the
     /// work rather than the watching. This is a fact about now, read off the
@@ -403,18 +403,6 @@ pub enum TimelineEvent {
     /// same reason.
     Commit(CommitEvent),
 
-    /// A run that stopped: what Verkstead noticed, the evidence it gathered, and
-    /// the three remedies — offered on the Event itself, because the Timeline is
-    /// where the human looks.
-    ///
-    /// The one kind of Event that carries its whole self rather than a summary
-    /// with the rest behind a fetch. Its evidence is four short strings, gathered
-    /// once and bounded when it was — see [`InterruptionEvent::tail`] — where a
-    /// Capture and a diff are megabytes. A second request for what the
-    /// remedies are being chosen against would be a page that could draw the
-    /// buttons before it could say what they were for.
-    Interruption(InterruptionEvent),
-
     /// Something Verkstead did on its own account, rendered inline like the
     /// Brief — and for the same reason: it is a sentence to read, and there is
     /// nothing of it a details pane would show.
@@ -433,107 +421,6 @@ pub enum TimelineEvent {
     /// committed — so this is the instruction alone, which is the part of a
     /// Manual Task nothing else on the Timeline records.
     ManualTask(ManualTaskEvent),
-}
-
-/// One of the three things the human can do about an Interruption.
-///
-/// Roadrunner's remedies and roadrunner's meanings. In every case the repository
-/// is left as the session left it: none of the three reverts, resets or stashes
-/// anything.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum Remedy {
-    /// Run the step again in a fresh session, told whatever the human wrote
-    /// alongside.
-    Retry,
-
-    /// Verkstead stops driving, so the human can take the step on themselves.
-    TakeOver,
-
-    /// The run ends here.
-    Abort,
-}
-
-/// A run that stopped, as the Timeline shows it: what went wrong, what the
-/// evidence was, and how the human settled it.
-///
-/// The evidence is a reading of a Worktree and a session at the moment they went
-/// wrong, taken then and kept — both move on, and a git status read when the page
-/// looked would be a status of whatever happened next.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct InterruptionEvent {
-    pub id: i64,
-
-    /// When the run stopped, RFC 3339.
-    pub at: String,
-
-    /// Which step failed, in words — "task 03 of the backlog".
-    pub what: String,
-
-    /// How it ended: the exit status, or that it ended without landing anything.
-    pub how: String,
-
-    /// What git made of the Worktree, as `git status` said it. Empty where the
-    /// repository would not answer, or where there was nothing pending.
-    pub git_status: String,
-
-    /// The tail of what the session said: its own prose off the Transcript, or
-    /// what it printed with the terminal's control sequences taken out where it
-    /// kept no log. The tail and not the whole: what went wrong is at the end,
-    /// and the whole of it is on the Timeline already as the session's own
-    /// Event. Empty where it said nothing at all.
-    pub tail: String,
-
-    /// How the human settled it, or `null` while it is still open — which is the
-    /// state the run is stopped in, and what the remedies are drawn for.
-    pub settled: Option<RemedyTaken>,
-}
-
-/// How an Interruption was settled: which remedy, whatever the human wrote
-/// alongside it, and when.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct RemedyTaken {
-    pub remedy: Remedy,
-
-    /// What the human wrote alongside the choice — "try again but leave the
-    /// migration alone". Empty where they wrote nothing, which is the ordinary
-    /// case for the two remedies that launch nothing.
-    pub note: String,
-
-    /// When they chose, RFC 3339.
-    pub at: String,
-}
-
-/// The remedy the human is choosing, and what they want said alongside it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct RemedyChoice {
-    pub remedy: Remedy,
-
-    /// What to tell the fresh session, for a retry. Carried for the other two as
-    /// well and recorded either way: a human who wrote why they were taking over
-    /// has said something worth keeping on the record, even though nothing reads
-    /// it back to an agent.
-    pub note: String,
-}
-
-/// What became of choosing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum RemedySettled {
-    /// Recorded, and the remedy has been acted on.
-    Settled,
-
-    /// This Conversation has no such Interruption — an Event id that belongs to
-    /// another Conversation names nothing.
-    NoSuchInterruption,
-
-    /// It was settled before this arrived — from another device, or by a second
-    /// press. Not an error and not something to act on twice: the first choice
-    /// stands.
-    AlreadySettled,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -1389,37 +1276,6 @@ pub struct Comment {
     pub author: String,
     pub at: String,
     pub markdown: String,
-}
-
-/// A run that stopped, as an Event. Nothing to render — the evidence is four
-/// strings read off a Worktree and a terminal, and neither git status nor a
-/// session's last words are markdown — and here beside the rest for the reason a
-/// move is: one place knows how a Timeline is made.
-pub fn interruption_event(id: i64, at: String, stopped: Stopped) -> TimelineEvent {
-    TimelineEvent::Interruption(InterruptionEvent {
-        id,
-        at,
-        what: stopped.what,
-        how: stopped.how,
-        git_status: stopped.git_status,
-        tail: stopped.tail,
-        settled: stopped.settled,
-    })
-}
-
-/// What the caller of [`interruption_event`] hands over: the Interruption as the
-/// store holds it.
-///
-/// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than five parameters, because four of them are strings
-/// and a call with those in the wrong order would compile.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stopped {
-    pub what: String,
-    pub how: String,
-    pub git_status: String,
-    pub tail: String,
-    pub settled: Option<RemedyTaken>,
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

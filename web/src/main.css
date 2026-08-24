@@ -1195,11 +1195,11 @@ main:has(.workbench) {
   border-radius: 50%;
 }
 
-/* Something is waiting on the human: an ask left open, a run stopped on an
-   Interruption, or a direction to choose. The ember, filled — the one mark
-   that is about them rather than about the work, and the reason it is the
-   accent rather than the `--stopped` red is that not one of the three is
-   anything going wrong. */
+/* Something is waiting on the human: an ask left open, driving that has
+   halted, or a direction to choose. The ember, filled — the one mark that is
+   about them rather than about the work, and the reason it is the accent rather
+   than the `--stopped` red is that not one of the three is anything going
+   wrong. */
 .mark.waiting {
   background: var(--accent);
 }
@@ -1925,12 +1925,11 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-/* A liveness said in words, which is now the Interruption's badge alone: a
+/* A liveness said in words, which is the unanswered Set's badge alone: a
    session's own is the mark above, because a Timeline of rows shouting
    `RUNNING` is a Timeline nobody reads. The colour the accent already is,
-   because what a badge like this ordinarily says is that something is happening
-   here rather than that something is wrong — and the Interruption, which means
-   the opposite, says so by overriding it below. */
+   because what a badge like this says is that something is waiting on the human
+   here rather than that something is wrong. */
 .live {
   font-size: 0.8rem;
   font-weight: 600;
@@ -2130,190 +2129,6 @@ main:has(.workbench) {
 .commit-summary .subject {
   margin: 0;
   font-weight: 600;
-}
-
-/* A run that stopped. A button, as a question set and a session's output are,
-   and for the same reason: the whole of it — the evidence, and the three
-   remedies — is in the details pane, and this is how it is opened. It used to
-   carry the remedies itself, which is why it used to be a card with controls
-   in it rather than a card that could be pressed. */
-.timeline-event > .interruption {
-  display: block;
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.timeline-event > .interruption.selected {
-  border-color: var(--accent);
-}
-
-/* One nobody has answered is the other thing on a timeline that is asking for
-   something, so it is marked the way a waiting question set is — the border
-   alone, and in the colour that means stopped rather than the one that means
-   happening. */
-.timeline-event > .interruption.open {
-  border-color: var(--stopped);
-}
-
-.interruption .event-head {
-  justify-content: flex-start;
-}
-
-/* What this event is, in the place a card that could hold a heading puts one.
-   A span rather than an `h2`: the card is a button now, and a button holds
-   phrasing. */
-.interruption .event-kind {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-/* Not `.live`, which is the accent and means something is happening here. This
-   means the opposite: nothing is happening, and it is waiting on you. */
-.interruption .event-head .live {
-  color: var(--stopped);
-}
-
-/* Which step failed, and how it ended. The first reads as the heading of the
-   thing that went wrong; the second is the machine's own account of it. Blocks
-   on the card as much as in the pane, though on the card they are the spans a
-   button may hold. */
-.interruption .what,
-.interruption-summary .what {
-  display: block;
-  margin: 0;
-  font-weight: 600;
-}
-
-.interruption .how,
-.interruption-summary .how {
-  display: block;
-  margin: 0.15rem 0 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* What was decided, once it has been. The badge goes and this stays: a run that
-   was retried and stopped again has both stops on the record, each saying what
-   was chosen. The name of it and nothing else — what was written alongside is
-   on the sheet the card opens, with the rest of the record. */
-.interruption .settled {
-  display: block;
-  margin: 0.75rem 0 0;
-  font-weight: 600;
-}
-
-/* The evidence, in the details pane: what git made of the worktree, and the tail
-   of what the session said. Preformatted, because neither is markdown and the
-   columns are the whole of what makes a status readable — and scrolled sideways
-   rather than wrapped, for the same reason. */
-.interruption-summary {
-  margin: 0 0 1rem;
-}
-
-.evidence {
-  margin-bottom: 1.5rem;
-}
-
-.evidence .git-status,
-.evidence .tail {
-  margin: 0;
-  padding: 0.75rem;
-  overflow-x: auto;
-  background: var(--code-wash);
-  border-radius: 0.4rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-
-.evidence .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* And under the evidence, the sheet the interruption is settled on: the three
-   remedies as option rows, the note beside them, and one submit. The rows, the
-   field and the button are the answering idiom and are styled with it — see the
-   chooser rules further down, and `.grow` and `.submit` above. What is here is
-   what is the remedies' own.
-
-   Ending the run is the one of the three that cannot be taken back, so it does
-   not look like the other two. */
-.remedy-pick .remedy.Abort label {
-  border-color: var(--stopped);
-}
-
-.remedy-pick .remedy.Abort label .remedy-name {
-  color: var(--stopped);
-}
-
-/* The one thing true of all three, said once under them rather than three times
-   over — and above the field and the submit, because it is part of what is being
-   decided rather than a footnote to it. */
-.remedy-pick .left-as-it-is {
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* What the human wants on the record about the decision. Labelled rather than
-   left to a placeholder, unlike a Set's comment box: there is no postscript
-   above it to say what it is for. */
-.remedy-pick .remedy-note {
-  margin-top: 1.5rem;
-}
-
-.remedy-pick .remedy-note > label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* The record of the same decision: no radios to draw, so the rows are read
-   rather than pressed and the chosen one carries the mark itself. */
-.remedy-pick.decided .remedy {
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
-
-.remedy-pick.decided .remedy.chosen {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.remedy-pick.decided .remedy-name {
-  font-weight: 600;
-}
-
-/* What was turned down fades behind what was taken, as an unchosen Option
-   does. */
-.remedy-pick.decided .remedy:not(.chosen) {
-  color: var(--ink-soft);
-}
-
-.remedy-pick.decided .remedy .note {
-  margin-left: 0;
-}
-
-/* Written by a human in a textarea, so their line breaks are part of what they
-   said — the rule an answered Set's own words get. */
-.remedy-pick.decided .note-said {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-}
-
-.remedy-pick.decided .remedy-note h2 {
-  margin: 0 0 0.4rem;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--ink-soft);
 }
 
 /* What the conversation has stopped on, said where the conversation is named. A
@@ -4574,28 +4389,21 @@ div.meta .error {
   padding: 0;
 }
 
-/* The two choosers drawn as option rows: the direction one, injected under the
-   Questions of a Set that carried a proposal, and the three remedies an
-   interruption is settled by in the workbench's details pane. One idiom and one
-   set of rules, because they are the one gesture — pick a row, write what goes
-   with it, then submit — and a second copy would drift into a second thing that
-   only looked alike.
+/* The chooser drawn as option rows: the direction one, injected under the
+   Questions of a Set that carried a proposal.
 
-   The direction chooser is drawn as a Question is drawn, because that is what it
-   is: the agent's argument is the ask, labelled and floated by the `.ask` rules
-   above — the box it is in wears that class, so there is nothing to set for it
-   here — and the three under it are a radio group where the recommendation is
-   marked with the same ★ and nothing is picked until it is picked. What is its
-   own is the line at the foot saying what picking does, this being the one
-   control on the page whose meaning is not in its label. What is the remedies'
-   own is with the interruption, up where the rest of that event is styled. */
-.direction-pick,
-.remedy-pick {
+   Drawn as a Question is drawn, because that is what it is: the agent's argument
+   is the ask, labelled and floated by the `.ask` rules above — the box it is in
+   wears that class, so there is nothing to set for it here — and the three under
+   it are a radio group where the recommendation is marked with the same ★ and
+   nothing is picked until it is picked. What is its own is the line at the foot
+   saying what picking does, this being the one control on the page whose meaning
+   is not in its label. */
+.direction-pick {
   margin-top: 1.5rem;
 }
 
-.direction-pick .directions,
-.remedy-pick .remedies {
+.direction-pick .directions {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -4604,8 +4412,7 @@ div.meta .error {
   gap: 0.4rem;
 }
 
-.direction-pick .direction label,
-.remedy-pick .remedy label {
+.direction-pick .direction label {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
@@ -4614,21 +4421,18 @@ div.meta .error {
   border-radius: 0.4rem;
 }
 
-.direction-pick .direction input,
-.remedy-pick .remedy input {
+.direction-pick .direction input {
   flex: none;
   margin: 0;
   accent-color: var(--accent);
 }
 
-.direction-pick .direction label:has(input:checked),
-.remedy-pick .remedy label:has(input:checked) {
+.direction-pick .direction label:has(input:checked) {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.direction-pick .direction label:has(input:focus-visible),
-.remedy-pick .remedy label:has(input:focus-visible) {
+.direction-pick .direction label:has(input:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -4642,8 +4446,7 @@ div.meta .error {
 /* What the row means, under the name of it. Indented to the name rather than to
    the radio, so the three read as three names with notes and not as six
    lines. */
-.direction-pick .note,
-.remedy-pick .remedy .note {
+.direction-pick .note {
   margin: 0.2rem 0 0 2rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -4674,8 +4477,7 @@ div.meta .error {
 
 /* Out of the layout and still in the document, for the reason an Option's is —
    see `.ask.decided .chose`. */
-.direction-pick.decided .chose,
-.remedy-pick.decided .chose {
+.direction-pick.decided .chose {
   position: absolute;
   width: 1px;
   height: 1px;

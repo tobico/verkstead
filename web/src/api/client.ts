@@ -31,8 +31,6 @@ import type {
   PullRequestDetails,
   PushKey,
   Registered,
-  Remedy,
-  RemedySettled,
   RepoEntry,
   Response as Decided,
   Resumed,
@@ -312,29 +310,6 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
 /// rules, which is the server's to do and not this side's.
 export function handBack(id: number): Promise<HandedBack> {
   return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
-}
-
-/// Say what to do about a run that stopped: run the step again, take it on
-/// manually, or end the run.
-///
-/// One press for the choice and the doing. The note
-/// is what a retried session is told alongside — "try again but leave the
-/// migration alone" — and is sent for the other two as well: a human who wrote
-/// why they were taking over has said something worth keeping on the record.
-///
-/// In every case the repo is left as the session left it. None of the three
-/// reverts, resets or stashes anything, which is what makes taking over a remedy
-/// at all.
-export function settleInterruption(
-  id: number,
-  event: number,
-  remedy: Remedy,
-  note: string,
-): Promise<RemedySettled> {
-  return post<RemedySettled>(
-    `/api/ui/conversations/${id}/interruption/${event}`,
-    { remedy, note },
-  );
 }
 
 /// Set a manual task going: this one instruction, under the pairing picked

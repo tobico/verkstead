@@ -1,6 +1,6 @@
 ---
 name: breaking-down
-description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list — read on from the grilling that settled it, or in a fresh session primed with the Brief.
+description: Break settled work into a sequential .tasks/ backlog. Use when a Conversation's direction is to build from a task list — read on from the grilling that settled it.
 ---
 
 Break the settled work into sequential task files under `.tasks/`, and commit
@@ -17,8 +17,6 @@ to switch to, and no other plan in flight to check for.
 
 ## Where the agreement is
 
-Two ways in, differing only in where what was settled is written down.
-
 **You are the grilling session, reading on.** The human picked `task-list` on
 your closing Set, and the agreement is this conversation — you are the one who
 settled it. Trust your own context over any summary of it, and read what they
@@ -26,15 +24,9 @@ wrote beside the pick as part of what the backlog has to answer to. Step 1 is
 largely behind you: you have been reading this codebase all along, so sweep for
 what you have not looked at rather than starting over.
 
-**You are a fresh session.** The grilling that settled this work is over and its
-context is gone: the earlier attempt at this breakdown ended without one, and
-the human asked for it to be run again. The prompt carries the Brief and
-whatever they wrote alongside the retry, and there is no handoff document — what
-you have besides those is the repository. Ground the plan in it thoroughly
-before you draft anything, and put what you cannot settle from it to the human
-in the Set below rather than guessing.
-
-Either way, the direction is settled and the breakdown is what is left.
+There is no handoff document, and there is nothing else to read the agreement
+off: a task list writes no handoff, because the backlog *is* what the grilling
+settled. The direction is settled and the breakdown is what is left.
 
 ## 1. Ground the plan in the code
 

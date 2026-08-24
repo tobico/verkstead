@@ -47,7 +47,6 @@ import type {
   CommitEvent,
   ConversationView,
   HandoffEvent,
-  InterruptionEvent,
   ManualTaskEvent,
   PullRequestEvent,
   QuestionSetEvent,
@@ -57,7 +56,6 @@ import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
-import { Interrupted } from "./Interruption";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
@@ -85,7 +83,6 @@ type Opened =
   | { output: AgentOutputEvent }
   | { asked: QuestionSetEvent }
   | { commit: CommitEvent }
-  | { stopped: InterruptionEvent }
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
@@ -99,7 +96,6 @@ function which(
   | AgentOutputEvent
   | QuestionSetEvent
   | CommitEvent
-  | InterruptionEvent
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
@@ -112,9 +108,6 @@ function which(
   }
   if ("commit" in open) {
     return open.commit;
-  }
-  if ("stopped" in open) {
-    return open.stopped;
   }
   if ("brief" in open) {
     return open.brief;
@@ -137,10 +130,6 @@ function setIn(open: Opened): QuestionSetEvent | undefined {
 
 function commitIn(open: Opened): CommitEvent | undefined {
   return "commit" in open ? open.commit : undefined;
-}
-
-function stoppedIn(open: Opened): InterruptionEvent | undefined {
-  return "stopped" in open ? open.stopped : undefined;
 }
 
 function pullRequestIn(open: Opened): PullRequestEvent | undefined {
@@ -340,10 +329,9 @@ export function Workbench(): JSX.Element {
   /// self to show. An id whose Event has gone leaves the pane empty, which is
   /// what it is when nothing is open at all.
   ///
-  /// Eight kinds have one: a session's output, whose full self is its
+  /// Seven kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
-  /// as; a commit, whose full self is its diff; an interruption, whose full
-  /// self is the evidence it was raised with; the pull request, whose full
+  /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; and the three documents — the
   /// Brief, the handoff and a Manual Task's instruction — whose full self is
   /// the markdown their card shows five lines of. The kind travels with it,
@@ -370,9 +358,6 @@ export function Workbench(): JSX.Element {
         }
         if ("Commit" in entry) {
           return { commit: entry.Commit };
-        }
-        if ("Interruption" in entry) {
-          return { stopped: entry.Interruption };
         }
         if ("Brief" in entry) {
           return { brief: entry.Brief };
@@ -528,16 +513,6 @@ export function Workbench(): JSX.Element {
                       <Commit
                         conversation={conversation()}
                         commit={commit()}
-                        back={() => setPane("timeline")}
-                        close={close}
-                      />
-                    )}
-                  </Match>
-                  <Match when={stoppedIn(open())}>
-                    {(stopped) => (
-                      <Interrupted
-                        conversation={conversation()}
-                        stopped={stopped()}
                         back={() => setPane("timeline")}
                         close={close}
                       />

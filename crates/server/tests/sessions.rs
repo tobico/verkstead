@@ -45,10 +45,10 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
-    ConversationStopped, ConversationView, GrillingStarted, HandedBack, InterruptionEvent,
-    Lifecycle, ManualTaskEvent, ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved,
-    PullRequestEvent, Registered, Resumed, Shown, Size, Started, Submitted, TaskListEvent,
-    TimelineEvent, TranscriptView, Turn, Watching,
+    ConversationStopped, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskEvent,
+    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
+    Resumed, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
+    Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
@@ -1038,19 +1038,6 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::QuestionSet(asked) => Some(asked),
-            _ => None,
-        })
-        .collect()
-}
-
-/// The Interruptions on a Timeline, of which there are never any: nothing raises
-/// one, and what a Timeline says about a run that stopped is a Notice. Kept for
-/// the tests that assert exactly that, until the stored ones are migrated.
-fn interruptions(view: &ConversationView) -> Vec<&InterruptionEvent> {
-    view.timeline
-        .iter()
-        .filter_map(|event| match event {
-            TimelineEvent::Interruption(stopped) => Some(stopped),
             _ => None,
         })
         .collect()
@@ -4799,12 +4786,6 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
         Lifecycle::Implementing,
         "blocked on you is a badge on an active state, never a state of its own",
     );
-    assert_eq!(
-        interruptions(&view),
-        Vec::<&InterruptionEvent>::new(),
-        "and nothing was raised for anybody to settle: a stop is a halt now",
-    );
-
     assert!(
         worktree.join("limiter.md").exists(),
         "and the repo is left exactly as the session left it",
@@ -7751,11 +7732,6 @@ async fn a_conversation_nothing_is_driving_is_halted_while_the_server_runs() {
          stall is precisely the condition that had no badge on it",
     );
     assert_eq!(
-        interruptions(&view),
-        Vec::<&InterruptionEvent>::new(),
-        "and nothing was raised for anybody to settle: a stop is a halt now",
-    );
-    assert_eq!(
         view.state,
         Lifecycle::Grilling,
         "and it is still where it was — a stall is a condition an active state is \
@@ -8063,12 +8039,6 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     let view = fixture.view().await;
 
     assert_eq!(view.blocked_on, Some(stalled.id));
-    assert_eq!(
-        interruptions(&view),
-        Vec::<&InterruptionEvent>::new(),
-        "and nothing was raised for anybody to settle: {:?}",
-        interruptions(&view),
-    );
 }
 
 /// Move a Conversation into Wrapping the way its finish step's pull request
@@ -8315,7 +8285,7 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
 /// Resume on a wrap-up that stopped at a red check watches it again from no
 /// attempts spent.
 ///
-/// The fix counters go first, exactly as the old Retry took them: the human has
+/// The fix counters go first: the human has
 /// read what stopped and asked for another go, and a count left standing would
 /// be a watcher that halted again on its next poll without dispatching anything.
 /// A third fix session is what says they were forgotten — two is every one the

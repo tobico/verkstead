@@ -22,9 +22,9 @@ use crate::{
     ConversationEntry, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
     ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
     ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Resumed, Screen,
-    SetView, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed,
-    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -131,13 +131,6 @@ fn the_viewers_types_are_written_from_these() {
     // as a pinned Event — a number, a title and a URL; what is *on* it is its
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
-
-    // What the human does about a run that stopped. The Interruption itself
-    // rides on the Timeline whole, evidence and all — it is the one Event with
-    // nothing behind a second fetch — so this is the choice going back and how
-    // it was answered.
-    RemedyChoice::export_all(&config).unwrap();
-    RemedySettled::export_all(&config).unwrap();
 
     // What the human sets going by hand at the end of a Timeline, and every way
     // of being refused it. The instruction's own Event rides on the

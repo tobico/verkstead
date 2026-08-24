@@ -1,7 +1,7 @@
 //! Start driving a Conversation again: one press, and what it recomputes.
 //!
-//! **One standing way in.** Not a remedy taken on the Event that stopped the
-//! run, and not a step run again: Resume asks what *ought* to be running now,
+//! **One standing way in.** Not something answered on the Event that stopped
+//! the run, and not a step run again: Resume asks what *ought* to be running now,
 //! from the lifecycle the Conversation is in and what the branch has written,
 //! and starts that. Which is why it is offered on a Conversation that is merely
 //! undriven as much as on one that has halted — a run with nothing behind it is
@@ -176,7 +176,6 @@ pub(crate) async fn resume(
             tokio::spawn(crate::grillings::again(
                 state.clone(),
                 conversation_id,
-                String::new(),
                 driving,
             ));
         }
@@ -211,7 +210,6 @@ pub(crate) async fn resume(
             tokio::spawn(crate::runner::implementing_again(
                 state.clone(),
                 conversation_id,
-                String::new(),
                 driving,
             ));
         }
@@ -224,7 +222,7 @@ pub(crate) async fn resume(
         // The fix attempts are forgotten first: the human has read what stopped
         // and asked for another go, and a count left standing would be a watcher
         // that halted again on its next poll without dispatching anything. See
-        // [`crate::checks::retried`].
+        // [`crate::checks::afresh`].
         Lifecycle::Wrapping => {
             clear(state, conversation_id).await?;
 
@@ -240,7 +238,7 @@ pub(crate) async fn resume(
                         // could find the Conversation undriven all over again.
                         let _driving = driving;
 
-                        crate::checks::retried(state, conversation_id).await;
+                        crate::checks::afresh(state, conversation_id).await;
                     });
                 }
                 // The same four watchers with the counters left standing — see
@@ -351,21 +349,13 @@ pub(crate) fn at_startup(state: &AppState) -> tokio::task::JoinHandle<()> {
 /// Whether this Conversation is stopped in a way only the human can undo, which
 /// is the one thing a restart leaves alone.
 ///
-/// Two records say it. A [`Halt::Deliberate`] is the current one — somebody
-/// decided, so nothing here decides otherwise. An Interruption a Verkstead of
-/// before left open is the same statement written the old way, and it counts
-/// until the migration rewrites the stored ones: a restart that drove past one
-/// would be driving past the very thing the human is looking at. See
-/// [`crate::halts::stopped`], which is the same pair of questions asked in front
-/// of a launch.
+/// A [`Halt::Deliberate`] is what says it: somebody decided, so nothing here
+/// decides otherwise. See [`crate::halts::stopped`], which asks the same
+/// question in front of a launch.
 async fn waiting_for_a_press(state: &AppState, conversation_id: i64) -> anyhow::Result<bool> {
-    if let Some(halted) = store::halted(&state.pool, conversation_id).await? {
-        return Ok(halted.halt == Halt::Deliberate);
-    }
-
-    Ok(store::open_interruption(&state.pool, conversation_id)
+    Ok(store::halted(&state.pool, conversation_id)
         .await?
-        .is_some())
+        .is_some_and(|halted| halted.halt == Halt::Deliberate))
 }
 
 /// Halt a Conversation a restart could not start anything for, with the refusal
@@ -480,7 +470,7 @@ async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
 /// press cannot come to different answers about it. It is deliberately the
 /// smaller half of what [`resume`] asks — everything else is a refusal the human
 /// gets to read, and a button that hid itself rather than saying *the backlog
-/// has gone* would leave them exactly as stuck as an interruption did.
+/// has gone* would leave them exactly as stuck as the run stopping did.
 pub(crate) fn ready(
     state: &AppState,
     conversation_id: i64,

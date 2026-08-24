@@ -142,7 +142,7 @@ pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Opti
 /// has to start the whole of it: the finish step opening the pull request, a
 /// Resume pressed on a wrap-up that halted, a server coming back up over a
 /// Conversation it left wrapping — see [`crate::resume`] for both of those — and
-/// either of the two Interruptions of before being retried, each of which stopped
+/// Resume being pressed on a halted wrap-up, which stopped
 /// the rest too, since nothing advances past an open one.
 ///
 /// Each of them decides for itself whether there is anything to do, so starting
@@ -164,9 +164,9 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64) {
 /// any one of the four is still going, and each of them ends in its own time —
 /// the review once it has asked, the rest once the Conversation stops wrapping
 /// up. Counted rather than flagged, so a second set started over the top of the
-/// first — which is what retrying either of the wrap-up's Interruptions does —
-/// does not have the first of them to finish taking the Conversation off the
-/// register. See [`crate::drivers`].
+/// first — which is what Resume on a halted wrap-up does — does not have the
+/// first of them to finish taking the Conversation off the register. See
+/// [`crate::drivers`].
 fn driving<W, F>(state: &AppState, conversation_id: i64, watcher: W)
 where
     W: FnOnce(AppState, i64) -> F,

@@ -44,7 +44,7 @@ const ATTEMPTS: i64 = 2;
 /// Watch `conversation_id`'s checks until it stops wrapping up.
 ///
 /// Returns when there is nothing left to watch: the Conversation has moved on or
-/// gone, or a run stopped at an Interruption. Idle rather than looping, for the
+/// gone, or driving that halted. Idle rather than looping, for the
 /// runner's reason — a watcher that kept dispatching sessions at a check nothing
 /// was going to fix would be spending an account on the same failure over and
 /// over.
@@ -77,11 +77,11 @@ pub(crate) async fn watch(state: AppState, conversation_id: i64) {
 /// Forget what a Conversation's checks have already been tried, and watch them
 /// again.
 ///
-/// What a retried checks Interruption does. The attempts go first: the human has
-/// read the evidence and asked for another go, and a count left standing would be
-/// a watcher that raised the same Interruption on its next poll without
-/// dispatching anything.
-pub(crate) async fn retried(state: AppState, conversation_id: i64) {
+/// What Resume does to a Conversation that halted on its checks. The attempts
+/// go first: the human has read the Notice of what stopped and asked for another
+/// go, and a count left standing would be a watcher that halted all over again on
+/// its next poll without dispatching anything.
+pub(crate) async fn afresh(state: AppState, conversation_id: i64) {
     if let Err(error) = store::forget_fix_attempts(&state.pool, conversation_id).await {
         tracing::error!(error = ?error, conversation_id, "forgetting what a Conversation's checks had been given failed");
         return;
@@ -93,10 +93,9 @@ pub(crate) async fn retried(state: AppState, conversation_id: i64) {
     );
 
     // The whole wrap-up rather than the checks alone: the review stopped being
-    // run when this Interruption was raised, because nothing advances past an
-    // open one, and a Conversation that came back with its checks watched and
-    // nobody reading its branch would wait on a review that was never going to
-    // happen.
+    // run when the halt was written, because nothing advances past one, and a
+    // Conversation that came back with its checks watched and nobody reading its
+    // branch would wait on a review that was never going to happen.
     crate::wrapping::watching(&state, conversation_id);
 }
 

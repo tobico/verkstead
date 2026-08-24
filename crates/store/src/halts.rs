@@ -48,7 +48,7 @@ pub enum Halt {
 impl Halt {
     /// The word the column holds. Lowercase and spelled out, so a database
     /// opened by hand says something.
-    fn stored(self) -> &'static str {
+    pub(crate) fn stored(self) -> &'static str {
         match self {
             Self::Deliberate => "deliberate",
             Self::Circumstance => "circumstance",

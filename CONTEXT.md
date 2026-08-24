@@ -115,28 +115,30 @@ _Avoid_: feed, log, history, activity stream
 
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
-commit, a task list, a stage list, a PR, an interruption, a Notice. Each shows a
-summary in the
+commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
 **Notice**:
 The one kind of Event Verkstead writes on its own account: which Stage it
-started and where that Stage's branch went, or that a roadmap has no Stage left
-to run. No agent wrote it and nobody pressed anything for it, and there is
-nothing to do about one — where an Interruption is a question left open, a
-Notice is a decision already taken. It is what running unattended owes the
-human: a decision made while nobody was watching is one they have to be able to
-read afterwards.
+started and where that Stage's branch went, that a roadmap has no Stage left to
+run, or — as a **stop Notice** — what stopped driving, why, and what the
+evidence was. No agent wrote it and nobody pressed anything for it. It is what
+running unattended owes the human: a decision made while nobody was watching is
+one they have to be able to read afterwards.
+
+Nothing to do about one, however much it says. A Notice is written after the
+fact and stays on the record for ever; what a stopped run is waiting on is the
+**Halt** beside it, and what answers that is **Resume**.
 _Avoid_: log line, info event, message, alert
 
 **Transcript**:
 The session's own record of its conversation — the agent's prose, its tool
 use, its reasoning, and what was put to it — kept word for word as the agent's
-backend wrote it, and rendered readable in the details pane. What summaries
-and Interruption evidence draw from, falling back to the Capture when a
-session left none.
+backend wrote it, and rendered readable in the details pane. What summaries and a
+stop Notice's evidence draw from, falling back to the Capture when a session
+left none.
 _Avoid_: messages, chat log, session log (the backend's file, not Verkstead's
 record), transcript-as-bytes (that is the Capture)
 
@@ -165,9 +167,9 @@ end-of-session rules judge whatever the human left. Its one job is stopping
 Verkstead ending a session out from under somebody who is deliberately
 intervening — so the mouse never takes one: a session whose interface tracks
 the mouse gets every move, click and scroll over its Screen, held or not, and
-a cursor crossing a pane is not an intervention. Distinct from the *Take over
-manually* Remedy, which is Verkstead stepping aside for good.
-_Avoid_: takeover (the Remedy's word), pause, manual mode, lock
+a cursor crossing a pane is not an intervention. Distinct from a **Halt**,
+which is Verkstead having stopped driving rather than being asked to wait.
+_Avoid_: takeover, pause, manual mode, lock
 
 **Agent Profile**:
 A named coding-agent account Verkstead can run a session under: a claude home
@@ -273,12 +275,12 @@ _Avoid_: handover document, context dump, summary, notes
 **Step**:
 One piece of unattended work a session is launched for and ended after: a task
 of a Conversation's backlog, the finish that follows the last task, an inline
-implementation, which is the whole of the work in one Step, or a planning tail
-retried in a fresh session — the ordinary breakdown or staging is the grilling
-session's own tail rather than a Step, and becomes one only when retried. What is next is read from the Repo and nowhere else — the
-lowest-numbered task file left in `.tasks/`, or `TODO.md` on its own — so the
-Steps are the backlog's, and Verkstead keeps no list of its own to disagree with
-it.
+implementation, which is the whole of the work in one Step, or the staging a
+**Resume** launches — the breakdown, and the staging that ran the ordinary way,
+are the grilling session's own tail rather than a Step. What is next is read
+from the Repo and nowhere else — the lowest-numbered task file left in
+`.tasks/`, or `TODO.md` on its own — so the Steps are the backlog's, and
+Verkstead keeps no list of its own to disagree with it.
 
 A Step is **done** when the file it turns on has gone from the Worktree *and* the
 commit removing it has landed. A session reports through the repository, being an
@@ -335,31 +337,58 @@ dismiss one by, a roadmap's score being the repository's to keep: an unwanted
 notice is silenced there, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
-**Interruption**:
-Something Verkstead detected about an unattended run and cannot resolve itself: a
-session that exited badly, one that ended having landed nothing, or one a restart
-took away with its Step still owed. It is an Event on the Timeline like any
-other, and what makes it different is that it is **open** — the run does not
-advance past one, and its Conversation carries *blocked on you* until a Remedy is
-chosen. At most one is open per Conversation.
+**Halt**:
+That Verkstead has stopped driving a Conversation. Durable state on the
+Conversation rather than something that happened — the thing that happened is
+the **stop Notice** beside it, which says what stopped, why, and what the
+evidence was. At most one per Conversation: a Conversation that is stopped is
+stopped once, and a second stop noticed against one already halted is the same
+stop arriving twice.
 
-It carries the **evidence**, which is what makes the choice answerable without
-opening a terminal: which Step failed, how it ended, what git made of the
-Worktree, and the tail of what the session last said. All four are read at the
-moment the run stopped and kept, because all four move on.
-_Avoid_: error, failure, crash, incident, alert
+Nothing advances past one. Every launch asks first, so a Conversation waiting
+on **Resume** never quietly gets another agent spent on it, and its card
+carries *blocked on you* until the halt is cleared. Nothing about a halt
+reverts, resets or stashes anything: the repository is left exactly as the
+session left it, which is what makes taking the Worktree on by hand possible at
+all.
 
-**Remedy**:
-One of the three things the human can do about an Interruption. **Retry** runs
-the Step again in a fresh session, told whatever they wrote alongside — so "try
-again but leave that one alone" reaches the agent that can act on it. **Take over
-manually** stops Verkstead driving, so the human can take the Step on themselves.
-**Abort** ends the run.
+**Deliberate** or by **circumstance**, which is the one thing a restart has to
+know. Verkstead pulling the brake — a session that fell over, checks that would
+not go green, a finish Step that left no pull request — and the human pressing
+**Stop** are both deliberate, and a restarting server leaves them alone. A
+driver a restart or a crash took away is circumstance: nobody decided anything,
+so the next server up carries the work on unasked. A deliberate halt Verkstead
+decided on is also pushed to the human's devices; one nobody chose is not, a
+restart being free to pick it up, and neither is the human's own Stop, they
+being the one person a notification would be telling their own news.
+_Avoid_: interruption, error, failure, crash, incident, alert, block
 
-In every case the repository is left exactly as the session left it: no Remedy
-reverts, resets or stashes anything, which is what makes taking over one at all.
-Aborting from here therefore keeps the Worktree, unlike aborting a Conversation.
-_Avoid_: action, resolution, fix, recovery option
+**Resume**:
+The one way a stopped Conversation gets going again, standing in the start-work
+menu wherever there is driving to start. It recomputes what *ought* to be
+running now — from the lifecycle the Conversation is in and what its branch has
+written — and starts that, rather than running again whatever it was that
+stopped. A halt may be answered the next morning, and the Conversation moves on
+in the meantime.
+
+It carries nothing. Steering the work is what a **Manual Task** is for, so
+there is no note to write and one button rather than one per way of stopping.
+It is never silent either: either something starts, which the Timeline says by
+itself, or the press is refused by name and the page says which — the backlog
+that has gone, the Pairing that has, the Worktree that is nowhere. A Worktree
+the record names and git does not is made again from the branch rather than
+refused on.
+
+Offered on a Conversation that is merely undriven as much as on one that has
+halted, a run with nothing behind it being the same condition however it got
+there. **And a restart presses it for itself**, on every Conversation it was
+left driving — except the halts somebody decided on, which are the ones waiting
+for a person.
+
+Beside it in the Conversation's own menu, the two ways to stop: **Stop**, which
+lets whatever is running now reach its own end and halts before the next
+launch, and **Force stop**, which ends the session where it stands.
+_Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 
 **Manual Task**:
 A free-text instruction the human types at the end of a Conversation's Timeline,
@@ -370,7 +399,7 @@ out of one. The escape hatch: the way to get work moving by hand when the
 pipeline is not driving it.
 
 Outside the pipeline in every sense that matters. It moves the Conversation into
-no state and out of none, closes no open Interruption, and reopens nothing a Done
+no state and out of none, clears no **Halt**, and reopens nothing a Done
 Conversation settled; what it leaves behind is its instruction on the record,
 what its session printed, and whatever that committed. The Pairing picked is for
 that submission alone and never becomes the Conversation's — the composer starts
@@ -379,34 +408,36 @@ on the Conversation's implementation Pairing and otherwise asks for a pick.
 Ended on quiet with no Question Set of its own still open, there being no done
 file to end it by — so a session idling on a Blocking Ask is left where it is.
 
-One whose session exits badly stops at an Interruption, with the usual three
-Remedies: the human submits from a phone and walks away, so being asked is the
-only thing that reaches them. Retry runs the same instruction again, read back
-off the Timeline, under the Conversation's implementation Pairing. One that
-exits cleanly having committed nothing raises nothing — an instruction may
-legitimately change nothing.
+One whose session exits badly **halts**, with the stop Notice saying so: the
+human submits from a phone and walks away, so being told is the only thing that
+reaches them. A finished one leaves the Conversation stopped either way —
+nothing takes the pipeline up again on the strength of a Manual Task, and what
+does is **Resume**. One that exits cleanly having committed nothing halts too,
+an instruction that legitimately changed nothing being indistinguishable from
+one that could not.
 _Avoid_: step (the unattended unit a done file ends), task (a backlog's), hold,
-take over (the Remedy), errand, manual step
+take over, errand, manual step
 
 **Stalled**:
 A Conversation in a driven state — Grilling, Implementing or Wrapping — with
-nothing registered as driving it and no open Interruption. Nothing is moving the
-work and nothing is asking the human to, so there is nothing they can do about
-it: the case a Manual Task is the escape hatch for, and the one condition
-Verkstead has to notice on its own account. A condition an active state can be
-in rather than a state of its own — the Conversation is still Grilling or
-Implementing or Wrapping, and that is the half of it that is wrong.
+nothing registered as driving it and no **Halt** written down. Nothing is moving
+the work and nothing is saying so, which is the one condition Verkstead has to
+notice on its own account. A condition an active state can be in rather than a
+state of its own — the Conversation is still Grilling or Implementing or
+Wrapping, and that is the half of it that is wrong.
 
-The condition rather than the answer to it. A sweep raises an Interruption where
-it finds one, and the ordinary Remedies are the way back out from there.
+The condition rather than the record of it. A sweep looks every minute and
+**halts** what it finds, by circumstance rather than by anybody's decision, so
+what the human sees is a Conversation stopped with a Notice on it and a Resume
+to press — and what a restart sees is one it may take up unasked.
 
 Judged by whether a driver — a grilling session, the watcher a Pick armed on
 one, a runner loop, a wrap-up's watchers — is registered, rather than by how
 long nothing has happened. Wrapping idles for days under live watchers and is
 perfectly healthy; so are the gaps between an unattended run's Steps. Draft,
 Done and Aborted are never stalled, nothing being supposed to drive them.
-_Avoid_: blocked on you (the badge a stall is precisely without), interruption
-(what a stall raises, not what it is), state, stuck, hung, idle
+_Avoid_: blocked on you (the badge a stall is precisely without), halt (what a
+stall becomes, not what it is), state, stuck, hung, idle
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
