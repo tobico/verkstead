@@ -1554,10 +1554,15 @@ main:has(.workbench) {
   font-size: 0.9rem;
 }
 
-/* The number the entry answers to, as the list writes it. Monospaced so the
-   column reads straight down whatever the numbers are. */
+/* The number the entry answers to, as the list writes it, at the far end of the
+   row — `☐ Some task            01`. Monospaced so the column reads straight
+   down whatever the numbers are, and held against that edge by the margin the
+   heading's `progress` uses, so the title keeps whatever width it needs and
+   never has to be as wide as the row. */
 .pinned .task-list .n,
 .pinned .stage-list .n {
+  margin-left: auto;
+  flex: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -2172,11 +2177,16 @@ main:has(.workbench) {
 /* One exchange. A two-column grid rather than an indent on the answer, so the
    width the label is given is stated once and both lines are measured against
    it: the question text and the answer text start on the same edge however wide
-   a label like `Q12a` turns out to be. */
+   a label like `Q12a` turns out to be.
+
+   `minmax(0, 1fr)` rather than `1fr`, because a track at its automatic minimum
+   is as wide as the longest thing in it: the texts below truncate, and a track
+   that refused to be narrower than a whole question would leave them nothing to
+   truncate inside. */
 .question-set .asked .ask {
   --asked-label: 2.6rem;
   display: grid;
-  grid-template-columns: var(--asked-label) 1fr;
+  grid-template-columns: var(--asked-label) minmax(0, 1fr);
   padding: 0.15rem 0;
 }
 
@@ -2190,10 +2200,26 @@ main:has(.workbench) {
 }
 
 /* Both texts in the second column: the question beside the label, the answer on
-   the row under it and so clear of the label without being told a width. */
+   the row under it and so clear of the label without being told a width.
+
+   A line each, cut off with an ellipsis. The card is the summary and the whole
+   of the Set is a press away, so a question that ran to a paragraph would push
+   the rest of the interview off the pane. Blocks, because these are spans — a
+   button holds phrasing — and an inline box has no line to ellipsize. */
 .question-set .asked .question,
 .question-set .asked .answer {
   grid-column: 2;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The question in the heavier weight: it is what the exchange is about, and the
+   answer under it is read against it. */
+.question-set .asked .question {
+  font-weight: 600;
 }
 
 .question-set .asked .answer {

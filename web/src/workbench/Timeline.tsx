@@ -937,8 +937,11 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
           {(task) => (
             <li classList={{ done: task.done }}>
               <Box done={task.done} />
-              <span class="n">{task.number}</span>
               <span class="what">{task.title}</span>
+              {/* At the far end of the row, where it is out of the way of the
+                  reading: what a backlog is scanned for is which titles are
+                  left, and a number is what one is quoted by afterwards. */}
+              <span class="n">{task.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, so a list read aloud or copied out still says
                   which tasks are finished. */}
@@ -978,8 +981,10 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
           {(stage) => (
             <li classList={{ done: stage.done }}>
               <Box done={stage.done} />
-              <span class="n">{stage.number}</span>
               <span class="what">{stage.title}</span>
+              {/* At the far end of the row, as a task's is, and for the reason
+                  a task's is. */}
+              <span class="n">{stage.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, for the reason a task's does: a list read aloud
                   or copied out still says which stages are finished. */}
@@ -1144,10 +1149,10 @@ function AgentOutput(props: {
 /// far enough to clear the label, so the two texts share a left edge and the
 /// card reads down rather than across.
 ///
-/// Every pair is drawn — a long Set earns a long card. Nothing is clamped here
-/// the way a document card is: a document has a first paragraph that stands for
-/// the rest of it, and a Set that showed four of its questions would be a Set
-/// with questions hidden in it.
+/// Every pair is drawn — a long Set earns a long card. No document card's clamp
+/// here, which would keep four of the questions and hide the rest: what is cut
+/// is each line rather than the list, so every question is on the card and the
+/// long ones end in an ellipsis. The whole of any of them is a press away.
 ///
 /// A button, as a session's output is, and for the same reason: the whole
 /// document is in the details pane, and this is how it is opened.

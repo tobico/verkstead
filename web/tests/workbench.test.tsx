@@ -3846,6 +3846,38 @@ describe("a question set on the timeline", () => {
     ).toEqual(ANSWERED_SET.rows.map((row) => row.nested));
   });
 
+  /// A line each, whatever was asked and whatever came back. The card is the
+  /// summary of the Set and the whole of it is a press away, so a question that
+  /// ran to a paragraph would push the rest of the interview off the pane.
+  /// jsdom lays nothing out, so the rules are what is read.
+  it("holds each question and each answer to one truncated line", async () => {
+    expect(stylesheet).toContain(
+      ".question-set .asked .question,\n" +
+        ".question-set .asked .answer {\n" +
+        "  grid-column: 2;\n" +
+        "  min-width: 0;\n" +
+        "  display: block;\n" +
+        "  overflow: hidden;\n" +
+        "  white-space: nowrap;\n" +
+        "  text-overflow: ellipsis;\n" +
+        "}",
+    );
+
+    // And the track they sit in has to be allowed to be narrower than its
+    // longest word, or there is nothing for the ellipsis to happen in.
+    expect(stylesheet).toContain(
+      "  grid-template-columns: var(--asked-label) minmax(0, 1fr);",
+    );
+  });
+
+  /// The question is what the exchange is about, and the answer under it is
+  /// read against it.
+  it("sets the question in bold and the answer under it plainly", async () => {
+    expect(stylesheet).toContain(
+      ".question-set .asked .question {\n  font-weight: 600;\n}",
+    );
+  });
+
   it("says which set it is, so a timeline of rounds reads as a conversation", async () => {
     theGrillingSets();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -4576,6 +4608,34 @@ describe("the pinned task list", () => {
     );
   });
 
+  /// `[ ] Some task            01`: the box and the title lead, and the number
+  /// is at the far end of the row, out of the way of the reading.
+  it("puts the number at the right edge of each row", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, ".pinned .task-list");
+
+    // The order of the row is the order it reads in: nothing is moved by the
+    // stylesheet that the document does not already say.
+    expect(
+      [...list.querySelectorAll(".tasks li")].map((row) =>
+        [...row.children]
+          .map((part) => part.className)
+          .filter((name) => name !== "state"),
+      ),
+    ).toEqual(BACKLOG.tasks.map(() => ["box", "what", "n"]));
+
+    // And what holds it against that edge, which jsdom lays out no more than it
+    // does the rest.
+    expect(stylesheet).toContain(
+      ".pinned .task-list .n,\n" +
+        ".pinned .stage-list .n {\n" +
+        "  margin-left: auto;\n" +
+        "  flex: none;",
+    );
+  });
+
   it("says what the backlog is and how far through it the work is", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
@@ -4708,6 +4768,22 @@ describe("the pinned stage list", () => {
         row.querySelector(".what")!.textContent,
       ]),
     ).toEqual(ROADMAP.stages.map((stage) => [stage.number, stage.title]));
+  });
+
+  /// The roadmap's rows read the way the backlog's do, number at the far end.
+  it("puts the number at the right edge of each row", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const list = await drawn(container, ".pinned .stage-list");
+
+    expect(
+      [...list.querySelectorAll(".stages li")].map((row) =>
+        [...row.children]
+          .map((part) => part.className)
+          .filter((name) => name !== "state"),
+      ),
+    ).toEqual(ROADMAP.stages.map(() => ["box", "what", "n"]));
   });
 
   it("says which stages are checked", async () => {

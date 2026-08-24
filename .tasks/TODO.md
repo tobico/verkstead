@@ -21,5 +21,5 @@ onto them, and timeline presentation put straight.
 - [x] 10: Settings behind an ellipsis menu — [details](10-settings-menu.md)
 - [x] 11: A modal component, proven on profiles — [details](11-modal-profiles.md)
 - [x] 12: The remaining settings modals — [details](12-settings-modals.md)
-- [ ] 13: Timeline rows put straight — [details](13-timeline-rows.md)
+- [x] 13: Timeline rows put straight — [details](13-timeline-rows.md)
 - [ ] 14: The Direction section squared away — [details](14-direction-section.md)
