@@ -174,11 +174,11 @@ async fn what_a_check_has_already_been_given_survives_a_restart() {
     );
 }
 
-/// What a retried Interruption does. The human has read the evidence and asked
-/// for another go, and a count left standing would be a watcher that raised the
-/// same Interruption on its next poll without dispatching anything.
+/// What Resume does. The human has read the Notice of what stopped and asked
+/// for another go, and a count left standing would be a watcher that halted all
+/// over again on its next poll without dispatching anything.
 #[tokio::test]
-async fn a_retry_gives_every_check_its_attempts_back() {
+async fn resuming_gives_every_check_its_attempts_back() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 

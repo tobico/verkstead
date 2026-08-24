@@ -1727,31 +1727,32 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And the same Conversation with its run stopped, which is the one shape a
-    // viewer test cannot reach any other way: an Interruption is raised by a
-    // session dying, and there are no sessions here. Recorded after the fixture
-    // above is written, so the two are the same backlog before and after it went
-    // wrong.
-    store::record_interruption(
+    // And the same Conversation with its driving halted, which is the one shape a
+    // viewer test cannot reach any other way: a halt is written by a session
+    // dying, and there are no sessions here. Recorded after the fixture above is
+    // written, so the two are the same backlog before and after it went wrong.
+    //
+    // The Notice is written here rather than by the server's own `halts`, which
+    // is what composes one from the evidence it gathers — this is an integration
+    // test, and what it needs is a Timeline of the right shape.
+    store::halt(
         &pool,
         tasked,
-        &store::Evidence {
-            step: store::Step::Task,
-            what: "the task in .tasks/03-commit-events.md".to_owned(),
-            how: "the session exited with status 1".to_owned(),
-            git_status: "## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n"
-                .to_owned(),
-            tail: "error[E0432]: unresolved import `crate::sweep`\n  --> crates/store/src/commits.rs:9:5\n\
-                   error: could not compile `verkstead-store` (lib) due to 1 previous error"
-                .to_owned(),
-        },
+        store::Halt::Deliberate,
+        "**The task in .tasks/03-commit-events.md** stopped.\n\n\
+         the session exited with status 1\n\n\
+         ### The worktree\n\n\
+         \x20   ## task-runner\n    \x20M crates/store/src/commits.rs\n    ?? crates/store/src/sweep.rs\n\n\
+         ### What the last session said\n\n\
+         \x20   error[E0432]: unresolved import `crate::sweep`\n    \x20 --> crates/store/src/commits.rs:9:5\n\
+         \x20   error: could not compile `verkstead-store` (lib) due to 1 previous error\n",
     )
     .await
     .unwrap()
     .unwrap();
 
     write(
-        "conversation-interrupted.json",
+        "conversation-halted.json",
         &pin_worktree(
             &pin_health(&pin_timeline(
                 &get(&app, &format!("/api/ui/conversations/{tasked}")).await,

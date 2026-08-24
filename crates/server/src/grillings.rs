@@ -36,24 +36,24 @@ use crate::store;
 /// to ask it again, and this is what tells it that it may.
 const LEFT_OPEN: &str = "_Left open._";
 
-/// Grill the work again, because the human pressed Retry on the stall that said
-/// nothing was.
+/// Grill the work again, because the human pressed Resume on a Conversation
+/// nothing was grilling.
 ///
-/// `note` is what they wrote beside the Remedy, and it reaches the session where
-/// every other retry's note reaches one: last, under everything else — see
-/// [`skills::retrying`].
+/// Nothing is carried from the press: Resume steers nothing, steering the work
+/// being what a Manual Task is for. What the fresh session is given is the Brief
+/// and the digest of what has already been settled, which is the whole of what
+/// survived the interview.
 ///
-/// `driving` is the registration [`crate::runner::retry`] took as the press
-/// arrived, held across the launch and let go once the session is registered.
+/// `driving` is the registration the press took as it arrived, held across the
+/// launch and let go once the session is registered.
 /// What drives a grilling is its session and nothing else — see
 /// [`crate::drivers`] — so this is a handover to the session rather than to a
 /// task of Verkstead's, and it is over the moment there is one.
-pub(crate) async fn again(state: AppState, conversation_id: i64, note: String, driving: Driving) {
-    // Waited for rather than tried for, which is the way round every Remedy
-    // takes it: the human answers an Interruption whenever they get to it, and
-    // nothing is holding a request open on the reply. So whatever is running —
-    // a Manual Task they set going while the work stood still — finishes, and
-    // this goes next rather than killing it mid-sentence.
+pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving) {
+    // Waited for rather than tried for: the human presses Resume whenever they
+    // get to it, and nothing is holding a request open on what it starts. So
+    // whatever is running — a Manual Task they set going while the work stood
+    // still — finishes, and this goes next rather than killing it mid-sentence.
     let _turn = state.sessions.turn(conversation_id).await;
 
     // One read for all three of the things a relaunch needs off the record: the
@@ -71,10 +71,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, note: String, d
 
     orphaned(&state, conversation_id, &timeline).await;
 
-    let prompt = skills::retrying(
-        &skills::grilling_again(&brief(&timeline), &settled(&timeline)),
-        &note,
-    );
+    let prompt = skills::grilling_again(&brief(&timeline), &settled(&timeline));
 
     // Read back here rather than carried from anywhere: a stall may be answered
     // the next morning, and where an agent is about to be let loose is the one
@@ -149,7 +146,7 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, note: String, d
 ///
 /// Nothing is refused for. A Set that will not archive is a Set the human can
 /// archive themselves from the page it is on, and stopping the relaunch over one
-/// would leave the Conversation standing still with the Remedy spent.
+/// would leave the Conversation standing still with the press spent.
 async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::TimelineEvent]) {
     let mut archived = false;
 

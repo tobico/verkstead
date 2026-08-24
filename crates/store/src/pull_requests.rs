@@ -199,7 +199,7 @@ pub async fn pull_request(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 /// The pull request on a Conversation's Timeline, against the Event it is.
 ///
 /// A map of at most one, read on its own rather than joined into the Timeline
-/// query, for the reason an Interruption's is: that query is already at the
+/// query, for the reason a Capture summary's is: that query is already at the
 /// sixteen columns a tuple can be read back as. This one is cheaper still —
 /// there is one PR per Conversation and there is usually none.
 pub(crate) async fn on_timeline(
