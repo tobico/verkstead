@@ -322,15 +322,30 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
 /// is the first thing to see the branch whole, and priming it with the shape the
 /// work was cut into would be handing it the very frame the sessions that wrote
 /// it were each stuck inside.
-pub(crate) fn reviewing(brief: &str, handoff: Option<&str>) -> String {
-    on_the_documents(
+///
+/// `said` is what was written on the pull request before this session started —
+/// the comments whole, in the order they were said in, with where each was said.
+/// It goes *last*, under the documents, where the newest and least general thing
+/// goes in every other prompt here: the documents say what the work is, and this
+/// says what somebody has already said about it. A pull request nobody has
+/// written on carries none of it, rather than a heading saying nothing was said.
+pub(crate) fn reviewing(brief: &str, handoff: Option<&str>, said: Option<&str>) -> String {
+    let prompt = on_the_documents(
         &format!(
             "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
              work described below is what it was meant to be."
         ),
         brief,
         handoff,
-    )
+    );
+
+    match said {
+        Some(said) => format!(
+            "{prompt}\n# What has been said on the pull request\n\n{}\n",
+            said.trim()
+        ),
+        None => prompt,
+    }
 }
 
 /// What a fix session is started on: the feedback to address, under the two
@@ -1340,9 +1355,10 @@ mod tests {
         );
     }
 
-    /// A review that finds nothing asks nothing, and says so where the human is
-    /// already looking: the last line a session prints is what its Timeline row
-    /// shows.
+    /// A review with nothing to raise asks nothing, and says so where the human
+    /// is already looking: the last line a session prints is what its Timeline
+    /// row shows. Nothing to raise is both halves, now that the comments are the
+    /// other source of a decision.
     #[test]
     fn the_reviewing_skill_says_what_to_do_having_found_nothing() {
         let reviewing = skill("reviewing/SKILL.md");
@@ -1355,6 +1371,35 @@ mod tests {
             reviewing.contains("last thing you print"),
             "and what it found is said where the Timeline will show it: {reviewing}"
         );
+        assert!(
+            reviewing.contains("both halves"),
+            "but a branch it would not have touched still proposes about what was \
+             said on it: {reviewing}"
+        );
+    }
+
+    /// The comments are the other half of what a review proposes about, and the
+    /// only session that will ever act on them — so the skill has to say both
+    /// that they are folded into the one Set and that none of them is acted on
+    /// before the human has answered.
+    #[test]
+    fn the_reviewing_skill_folds_the_pull_requests_comments_into_its_one_set() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("What has been said on the pull request"),
+            "the comments are named by the heading they arrive under: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("You are the only session that will act on these"),
+            "nothing else is dispatched about them, so leaving one out answers \
+             nobody: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("still a proposal until they have said yes"),
+            "and a comment is not an instruction: it goes into the Set like every \
+             other finding — {reviewing}"
+        );
     }
 
     /// The review session is put inside the skill the same way every other is,
@@ -1364,6 +1409,7 @@ mod tests {
         let prompt = reviewing(
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
+            None,
         );
 
         assert!(
@@ -1378,6 +1424,33 @@ mod tests {
             !prompt.contains(ADDRESSING) && !prompt.contains(NEXT_TASK),
             "and no other skill is named: what this session does once it has reviewed \
              is the reviewing skill's own — {prompt:?}"
+        );
+        assert!(
+            !prompt.contains("What has been said on the pull request"),
+            "a pull request nobody has written on carries no heading saying so: \
+             {prompt:?}"
+        );
+    }
+
+    /// And what was said on the pull request goes in last, where the newest and
+    /// least general thing goes in every prompt here.
+    #[test]
+    fn a_review_session_is_told_what_was_said_on_the_pull_request_last() {
+        let prompt = reviewing(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            Some("**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round."),
+        );
+
+        assert!(
+            prompt.contains("This is the wrong way round.")
+                && prompt.contains("`src/window.rs` line 12"),
+            "what was said and where, whole: {prompt:?}"
+        );
+        assert!(
+            prompt.find("In-process counter.") < prompt.find("This is the wrong way round."),
+            "under the documents: they say what the work is and this says what \
+             somebody has already said about it — {prompt:?}"
         );
     }
 

@@ -646,6 +646,38 @@ esac
     )
 }
 
+/// The same, except that nothing has been said on the pull request until `after`
+/// is there with something in it.
+///
+/// Which is how a test says *when* a comment landed. Everything already on a pull
+/// request when a wrap-up's review starts is the review's to propose about, so a
+/// test about what a batch session does has to put the comment there afterwards —
+/// and the file the review session writes its prompt into is exactly the moment
+/// it started.
+fn gh_about_once(rollup: &str, after: &Path, said: &str, on_the_diff: &str) -> String {
+    format!(
+        r#"
+if [ -s {after} ]; then said='{said}'; on_the_diff='{on_the_diff}'; else said=; on_the_diff=; fi
+if [ "$1" = api ]; then printf '[%s]' "$on_the_diff"; exit 0; fi
+case "$5" in
+*statusCheckRollup*)
+{rollup}
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[%s],"reviews":[]}}' "$said"
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        after = quoted(after),
+    )
+}
+
 /// A green suite, as [`gh_about`]'s answer about the checks.
 const GREEN: &str = r#"    printf '{"statusCheckRollup":[{"__typename":"CheckRun","name":"Rust","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/tobico/verkstead/actions/runs/1/job/2"}]}'"#;
 
@@ -4454,8 +4486,75 @@ async fn comments_settled(fixture: &Grilling) -> bool {
     settled.contains(&verkstead_server::store::WaitingOn::Comments)
 }
 
-/// What is said on the pull request reaches a session — from all three places a
-/// human writes — and everything said in a minute reaches **one**.
+/// What was already said on the pull request when the wrap-up's review starts is
+/// part of what that session reads — from all three places a human writes — and
+/// nothing is dispatched to act on any of it.
+///
+/// This is the whole of what stops a comment being acted on ungated. The review
+/// is the session that proposes, so what has been said reaches it whole, in the
+/// order it was said in and with where each of it was said, and goes into the one
+/// Set beside the findings it made itself. Recorded as addressed as it is
+/// dispatched, so no batch session is later sent about the same words.
+///
+/// The checks cannot be asked about, which keeps the Conversation wrapping up long
+/// enough to watch nothing happen.
+#[tokio::test]
+async fn what_was_already_said_reaches_the_review_rather_than_a_session_of_its_own() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, TWO_ON_THE_DIFF),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&reviews).await;
+
+    assert!(
+        told.contains("Rename the window field.")
+            && told.contains("And the test that pins it.")
+            && told.contains("Otherwise this reads well."),
+        "everything said in the conversation reached the review: {told}",
+    );
+    assert!(
+        told.contains("This is the wrong way round.")
+            && told.contains("And this one has no home any more."),
+        "and so did what was said on the lines of the diff: {told}",
+    );
+    assert!(
+        told.contains("`src/window.rs` line 12"),
+        "with where it was said, which is half of what it means: {told}",
+    );
+
+    // Written down as the review was dispatched, so what is left unaddressed is
+    // nothing — which is what says no batch session is owed about them.
+    let deadline = Instant::now() + PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "what was said to the review was never recorded as addressed",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls of a pull request with five comments on it.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "and nothing was dispatched to act on any of it: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// A comment that lands while the review's Set is in flight is not folded into
+/// it, and reaches a batch session once the Worktree is free — everything said in
+/// a minute reaching **one**.
 ///
 /// A human writing five times is making one point, and five sessions racing each
 /// other in one Worktree is the thing a batch prevents. So the whole batch goes
@@ -4466,20 +4565,59 @@ async fn comments_settled(fixture: &Grilling) -> bool {
 /// of the diff, which is where a review of code mostly happens: a watcher that
 /// read only the conversation would miss the feedback it most needs to act on.
 #[tokio::test]
-async fn new_comments_dispatch_one_session_between_them_rather_than_one_each() {
+async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
 
+    // Nothing has been said until the review session has written its prompt down,
+    // which is that session inside its sandbox and so the Worktree already taken.
+    let gh = gh_about_once(GREEN, &reviews, THREE_COMMENTS, TWO_ON_THE_DIFF);
+
     let fixture = grilling_spilling(
         spill,
-        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
-        &gh_about(GREEN, THREE_COMMENTS, TWO_ON_THE_DIFF),
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX),
+        &gh,
     )
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&dispatched).await;
+
+    let told = until_written(&reviews).await;
+
+    assert!(
+        !told.contains("Rename the window field."),
+        "a comment said after the review started is not one it was given: {told}",
+    );
+
+    let set = fixture.ask(REVIEW).await;
+
+    // Long enough for many polls of a pull request that now has five comments on
+    // it, while the review still holds the Worktree.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "nothing is dispatched while the review's Set is in flight: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let told = until_written(&dispatched).await;
 
     let deadline = Instant::now() + PATIENCE;
     while !comments_settled(&fixture).await {
@@ -4494,7 +4632,7 @@ async fn new_comments_dispatch_one_session_between_them_rather_than_one_each() {
     // been dispatched for.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    let told = std::fs::read_to_string(&dispatched).unwrap();
+    let told = std::fs::read_to_string(&dispatched).unwrap_or(told);
 
     assert_eq!(
         prompts(&told).len(),
@@ -4536,7 +4674,11 @@ async fn comments_already_dispatched_for_are_not_dispatched_for_again_after_a_re
     let dispatched = spill.path().join("fix-prompts");
 
     let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING);
-    let gh = gh_about(CHECKS_UNANSWERABLE, THREE_COMMENTS, "");
+
+    // Said after the review started, so a batch session is what they reach:
+    // everything already there when it starts is the review's own to propose
+    // about, and there would be nothing dispatched for to write down.
+    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
 
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 

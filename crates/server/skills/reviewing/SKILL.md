@@ -1,6 +1,6 @@
 ---
 name: reviewing
-description: Review a branch that is already on a pull request, propose the fixes it needs as one Question Set, and land the ones the human accepts. Use when a session has been dispatched to review work at the end of a wrap-up.
+description: Review a branch that is already on a pull request, propose the fixes it and its comments need as one Question Set, and land the ones the human accepts. Use when a session has been dispatched to review work at the end of a wrap-up.
 ---
 
 Review the branch this worktree is on, put what you find to the human, and fix
@@ -11,6 +11,11 @@ changed here rather than by somebody else afterwards.
 You are the first thing to see this work whole. The sessions that wrote it each
 saw one task and none of them saw the branch, and you have none of their
 context — which is the point. Read it as somebody who has to live with it.
+
+What you propose about is the branch **and** whatever has already been said on
+its pull request. Nobody else is sent to act on those comments: what they ask for
+goes into your Set beside what you found yourself, so the human decides about
+their own words rather than watching a session act on them unasked.
 
 The branch is already pushed and already has an open pull request. There is
 nothing to create, nothing to switch to, and nothing to open.
@@ -32,7 +37,32 @@ actually follows. The work is meant to look like it belongs here.
 The Brief and the handoff in your prompt say what the work was *for*. Review
 against those rather than against what you would have built.
 
-## 2. What is worth raising
+## 2. Read what has already been said
+
+Where anything had been said on the pull request before you started, it is under
+**What has been said on the pull request** at the end of your prompt: the
+comments whole, in the order they were said in, and where each of them was said.
+A comment left on a line of the diff carries its file and line, which is half of
+what it means.
+
+Read it as what it is — somebody who has read this branch, telling whoever wrote
+it what they think — and go and look at what each one is about before you decide
+what it is asking for.
+
+**You are the only session that will act on these.** Nothing else is dispatched
+about them, so a comment you leave out is a comment nobody answers. Work out what
+each is asking for and carry it into your Set with everything else you found: one
+Question, in your own words, saying what you would do about it. Some ask for a
+change, some are a question you can answer in the Question's own text, and some
+are somebody saying they are happy — that last is nothing to propose, and
+inventing work out of agreement is not answering it.
+
+What you must not do is act on one because it is the human talking. A comment is
+still a proposal until they have said yes to *this* reading of it: the words on a
+pull request are not the same thing as an instruction to a session, and the
+answer to "this is the wrong way round" is a decision they have not made yet.
+
+## 3. What is worth raising
 
 The seams are where this session earns its context. A session per task cannot
 see across tasks, so look hardest at what only shows up from here:
@@ -52,14 +82,14 @@ done differently, a name you would have picked, a refactor nobody asked for —
 these cost a human a decision each and buy nothing. **If you would not defend it
 in a review, do not raise it.**
 
-## 3. Change nothing yet
+## 4. Change nothing yet
 
 No edits, no commits, no pushes, no `gh` command that writes anything — not
 until the human has answered. Fixing your own findings before they have seen
 them is deciding in their place, and the whole point of the Set is that the
 decision is theirs.
 
-## 4. Propose it as one Question Set
+## 5. Propose it as one Question Set
 
 One Set, one Question per finding, and a `review` block that tells Verkstead
 which Option means *fix it*:
@@ -123,6 +153,11 @@ review:
   or the Set is refused: nothing else turns a finding into work.
 - **Every finding in the block is a Question in the Set**, and the block goes on
   one Set and no others. This is the review, not a running commentary.
+- **A comment's fix is a finding like any other**, in the same Set and the same
+  block. Say in the Question which comment it answers and whose it was, so the
+  human can see their own words being taken up — and write `what` for the agent
+  that will do it, which is you: their comment is where it came from and not what
+  it says to do.
 - **Read `verkstead guide` before you write it** — how a Set is labelled, how
   much belongs in one, and the shape it goes over the wire in. It ships inside
   the binary, so nothing else has to be found. A review that has found more than
@@ -141,7 +176,7 @@ have only proposed, and do not take your own recommendations.
 If the ask itself fails — the server unreachable, any non-zero exit that is not
 a refused Set — say so and stop. Never decide on their behalf.
 
-## 5. Fix what they accepted
+## 6. Fix what they accepted
 
 The Response is the whole of what you act on. Read all of it, the `comment` on
 the Set included, before you touch anything: it is about the Set as a whole and
@@ -165,7 +200,7 @@ finding you did not raise, and fixing it now is a decision they did not get to
 make. Then run the repository's tests and make sure what you did works before it
 goes anywhere.
 
-## 6. Commit it and push it
+## 7. Commit it and push it
 
 **Nothing waits on approval.** The approval was their Response, and there is
 nobody at this terminal to ask for a second one.
@@ -225,11 +260,19 @@ anything. The pull request exists, and merging is the human's act.
 
 Then say what you fixed and what you left, and stop.
 
-## 7. A review that finds nothing
+## 8. A review with nothing to raise
 
-Ask nothing. **Say plainly, as the last thing you print, that you reviewed the
-branch and found nothing worth raising** — that line is what the human sees on
-the Timeline — and stop.
+Nothing to raise means both halves: you found nothing yourself, *and* nothing
+said on the pull request asks for anything. Comments you were given are the other
+source of a decision here — a branch you would not have touched, where somebody
+has asked for a change, is a review that proposes about that change alone.
+
+Ask nothing where there is genuinely neither.
+**Say plainly, as the last thing you print, that you reviewed the branch and
+found nothing worth raising** — that line is what the human sees on the
+Timeline — and stop. Say that you read what was said on the pull request too,
+where there was anything to read: it is the only report that any of it was
+looked at.
 
 A Set with no findings in it is a row for them to dismiss, and the point of this
 phase is to spend their attention only where there is a decision. Finding

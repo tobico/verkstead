@@ -1135,8 +1135,17 @@ pub(crate) enum Reviewed {
 /// it was sent to do, and anything else means it did not. Nothing is refused for
 /// and no Interruption is raised here — what to do about either of those is
 /// [`crate::review`]'s.
-pub(crate) async fn review(state: &AppState, conversation_id: i64) -> Reviewed {
-    let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing, "").await else {
+///
+/// `said` is what was written on the pull request before this started, which the
+/// caller reads inside the Turn it is holding and records as addressed — so this
+/// session is the one that proposes about it, and nothing else is sent to.
+pub(crate) async fn review(
+    state: &AppState,
+    conversation_id: i64,
+    said: Option<String>,
+) -> Reviewed {
+    let Some(mut session) = launch(state, conversation_id, Prompt::Reviewing(said), "").await
+    else {
         return Reviewed::Nothing;
     };
 
@@ -1574,8 +1583,9 @@ enum Prompt {
     Addressing(String),
 
     /// The reviewing skill, which the one session a wrap-up starts with runs
-    /// inside.
-    Reviewing,
+    /// inside — carrying whatever was said on the pull request before it started,
+    /// which is the other half of what it has to propose about.
+    Reviewing(Option<String>),
 }
 
 /// Wait for the Conversation's Worktree, and then [`launch`] into it.
@@ -1664,7 +1674,7 @@ async fn launch(
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
-                Prompt::Reviewing => skills::reviewing(&brief, handoff),
+                Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
             };
 
             skills::retrying(&prompt, note)

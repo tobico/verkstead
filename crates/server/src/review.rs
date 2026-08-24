@@ -20,10 +20,20 @@
 //! session per finding would throw all of that away and re-read the diff to get
 //! half of it back.
 //!
-//! A review that finds nothing asks nothing. It says so as the last thing it
-//! prints — which is what the Timeline shows of a session — and ends. A Set with
-//! no findings in it would be a row for the human to dismiss, and the point of
-//! the phase is to spend their attention only where there is a decision.
+//! **What is already on the pull request is part of what it reads.** A human who
+//! commented before the review started has said something about this branch, and
+//! this is the session that reads the branch — so those comments go into its
+//! prompt whole and what they ask for is proposed in the same Set, beside the
+//! findings it made itself. Which is what stops them being acted on ungated: they
+//! are recorded as addressed as this session is dispatched, so no batch session is
+//! later sent to do what nobody agreed to. See [`crate::comments::for_the_review`].
+//!
+//! A review that finds nothing and was given nothing asks nothing. It says so as
+//! the last thing it prints — which is what the Timeline shows of a session — and
+//! ends. A Set with no findings in it would be a row for the human to dismiss,
+//! and the point of the phase is to spend their attention only where there is a
+//! decision. Comments asking for work are that decision's other source: a review
+//! with nothing of its own to raise still proposes about them.
 //!
 //! **The review settles when its session ends cleanly and its fixes have
 //! landed**, which is the one moment everything it was sent to do is certainly
@@ -93,7 +103,14 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
         "the work is on a pull request nobody has read, so a review session is starting"
     );
 
-    match crate::runner::review(&state, conversation_id).await {
+    // Read inside the Turn, which is what makes *what was said before the review
+    // started* a fact rather than a race: nothing can dispatch about a comment
+    // while this holds the Worktree, and one that lands from here on is the next
+    // batch session's. Recorded as addressed as this session is dispatched, so
+    // nothing is later sent to do ungated what the Set is about to propose.
+    let said = crate::comments::for_the_review(&state, conversation_id).await;
+
+    match crate::runner::review(&state, conversation_id, said).await {
         Reviewed::Done => over(&state, conversation_id, None).await,
         Reviewed::Stopped { how, writing } => {
             over(&state, conversation_id, Some((how, writing))).await
