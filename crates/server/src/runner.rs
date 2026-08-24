@@ -1739,6 +1739,15 @@ async fn launch(
         }
     };
 
+    // And whatever the human has since answered on this Conversation's Deferred
+    // Asks that no session has been told about — under everything above, which
+    // is where the newest and least general thing said goes. Here rather than in
+    // `Sessions::start`, because this is where every session that *builds* is
+    // launched from: the two that are not launched here are the two an Answer
+    // must not be spent on — see [`crate::deferrals`].
+    let folding = crate::deferrals::unfolded(&state.pool, conversation_id).await;
+    let prompt = folding.under(&prompt);
+
     // One Worktree holds one agent. Every session a run launches of its own
     // accord follows one this has already ended, but a retry follows one that
     // died — and a register still holding a relay that has not finished unwinding
@@ -1750,7 +1759,16 @@ async fn launch(
         .start(&state.pool, &state.nudges, &conversation, &profile, &prompt)
         .await
     {
-        Ok(session) => session,
+        Ok(session) => {
+            // Once there is a session reading them, and only then: a launch that
+            // came to nothing would otherwise cost the human the one session
+            // their Answers were folded into.
+            if session.is_some() {
+                folding.recorded(&state.pool).await;
+            }
+
+            session
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a task session could not be started");
             None

@@ -279,7 +279,7 @@ fn decided() -> Response {
 /// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
 /// store one — the endpoint above is the same thing with a router in front.
 async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
-    Ok(store::ask(pool, ASKING_FROM, set)
+    Ok(store::ask(pool, ASKING_FROM, set, store::Ask::Blocking)
         .await?
         .expect("the Conversation is there to ask from"))
 }

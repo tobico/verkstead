@@ -19,7 +19,9 @@ mod comments;
 mod commits;
 mod continuing;
 mod conversations;
+mod deferrals;
 mod drivers;
+mod exchanges;
 mod followers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///

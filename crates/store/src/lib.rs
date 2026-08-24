@@ -31,6 +31,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 mod captures;
 mod commits;
 mod conversations;
+mod deferrals;
 mod interruptions;
 mod profiles;
 mod pull_requests;
@@ -52,6 +53,7 @@ pub use conversations::{
     start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
+pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
     record_interruption, settle_interruption,
@@ -82,6 +84,10 @@ pub struct StoredSet {
     pub id: i64,
     pub created_at: String,
     pub set: Asked,
+
+    /// Whether it was a Deferred Ask: stored and returned to, with no session
+    /// idling on the Answer — see [`deferrals`].
+    pub deferred: bool,
 }
 
 /// What a stored Question Set is, as far as this build can read it.
@@ -623,6 +629,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the archivings table")?;
 
+    // Which Sets were asked deferred, and which of those have been folded into a
+    // prompt. It hangs off a Set for the archivings' reason, said again there.
+    deferrals::apply_schema(pool).await?;
+
     // The push identity and the devices subscribed to it, which also generates
     // the keypair when this is the database's first run.
     push::apply_schema(pool).await?;
@@ -679,14 +689,18 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// rather than as a failure: the row is still there and still says what was
 /// asked, and losing the read would be losing the record.
 pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
-    let row: Option<(i64, String, String)> =
-        sqlx::query_as("SELECT id, created_at, body FROM question_sets WHERE id = ?")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .with_context(|| format!("loading Question Set {id}"))?;
+    let row: Option<(i64, String, String, Option<i64>)> = sqlx::query_as(
+        "SELECT q.id, q.created_at, q.body, d.set_id
+         FROM question_sets q
+         LEFT JOIN deferrals d ON d.set_id = q.id
+         WHERE q.id = ?",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("loading Question Set {id}"))?;
 
-    let Some((id, created_at, body)) = row else {
+    let Some((id, created_at, body, deferral)) = row else {
         return Ok(None);
     };
 
@@ -694,6 +708,9 @@ pub async fn load_set(pool: &SqlitePool, id: i64) -> Result<Option<StoredSet>> {
         id,
         created_at,
         set: Asked::read(body),
+        // The row being there is the whole of it: one is written for a Deferred
+        // Ask and none for a blocking one.
+        deferred: deferral.is_some(),
     }))
 }
 

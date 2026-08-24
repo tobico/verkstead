@@ -405,6 +405,29 @@ pub(crate) fn retrying(prompt: &str, note: &str) -> String {
     format!("{prompt}\n# What I said when I asked you to try this again\n\n{note}\n")
 }
 
+/// The same prompt, with the Answers to the Conversation's Deferred Asks that
+/// no session has been told about yet.
+///
+/// Written under the documents, where a retry note is written and for its
+/// reason: the Brief and the handoff describe the work, and this is what the
+/// human has since decided about it — newer than either, and less general. A
+/// Deferred Ask is one whose Answer does not change the work about to be done,
+/// so it reaches the session that does the work after rather than the one that
+/// asked.
+///
+/// Nothing to fold is the prompt unchanged, which is every session of an
+/// ordinary run: a heading over an empty digest would tell one that something
+/// had been decided.
+pub(crate) fn folded(prompt: &str, answers: &str) -> String {
+    let answers = answers.trim();
+
+    if answers.is_empty() {
+        return prompt.to_owned();
+    }
+
+    format!("{prompt}\n# What I have since said about the deferred questions\n\n{answers}\n")
+}
+
 /// The body they are all primed with, under whichever opening line names the
 /// skill.
 fn on_the_documents(opening: &str, brief: &str, handoff: Option<&str>) -> String {
@@ -1526,6 +1549,34 @@ mod tests {
             grilling(brief),
             "nothing is added to the prompt at all",
         );
+    }
+
+    /// The Answers to a Deferred Ask go where the newest and least general
+    /// thing said goes: under the documents, exactly where a retry note goes.
+    #[test]
+    fn deferred_answers_are_folded_under_the_documents() {
+        let prompt = folded(
+            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("**Q9** Which status?\n\n429 Too Many Requests\n"),
+            "and what the human has since decided about it comes last: {prompt:?}"
+        );
+    }
+
+    /// Which is every session of an ordinary run: a heading over an empty digest
+    /// would tell one that something had been decided.
+    #[test]
+    fn a_session_with_nothing_to_fold_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(folded(&prompt, "  \n"), prompt);
     }
 
     /// Installing is what puts them where a sandbox can bind them.

@@ -1614,10 +1614,12 @@ describe("a move on the timeline", () => {
       "brief",
       "moved",
       "agent-output",
-      // The three Sets that session put to the human, in the order it asked
-      // them: the answered one, the one still waiting, and the one whose stored
-      // body this build cannot read — which is a row like any other and in its
-      // own place in the record.
+      // The four Sets that session put to the human, in the order it asked
+      // them: the answered one, the one still waiting, the deferred one that is
+      // also still waiting, and the one whose stored body this build cannot
+      // read — which is a row like any other and in its own place in the
+      // record.
+      "question-set",
       "question-set",
       "question-set",
       "question-set",
@@ -2407,22 +2409,31 @@ describe("a conversation's worktree", () => {
   });
 });
 
-/// The two Question Sets the grilling conversation's session put to the human:
-/// one answered, and one still waiting. Both are needed, because what a row
-/// draws turns on which — and it is the waiting one the human is offered a sheet
-/// for.
+/// The three readable Question Sets the grilling conversation's session put to
+/// the human: one answered, one still waiting on the session that asked it, and
+/// one deferred — waiting too, with nothing standing still until it is
+/// answered. All three are needed, because what a row draws turns on which.
 const ASKED = (() => {
   const found = GRILLING.timeline.flatMap((event) =>
     "QuestionSet" in event ? [event.QuestionSet] : [],
   );
-  if (found.length !== 2) {
-    throw new Error("the fixture should hold an answered Set and a waiting one");
+  if (found.length !== 3) {
+    throw new Error(
+      "the fixture should hold an answered Set, a waiting one and a deferred one",
+    );
   }
   return found;
 })();
 
 const ANSWERED_SET = ASKED.find((asked) => "Answered" in asked.standing)!;
-const WAITING_SET = ASKED.find((asked) => "Waiting" in asked.standing)!;
+
+const WAITING_SET = ASKED.find(
+  (asked) => "Waiting" in asked.standing && asked.standing.Waiting !== "deferred",
+)!;
+
+const DEFERRED_SET = ASKED.find(
+  (asked) => "Waiting" in asked.standing && asked.standing.Waiting === "deferred",
+)!;
 
 /// And the third row a Set gets: the one whose stored body this build cannot
 /// read, which is neither answered nor waiting and is on the record all the
@@ -2505,15 +2516,40 @@ describe("a question set on the timeline", () => {
     await drawn(container, ".question-set");
     const cards = [...container.querySelectorAll(".question-set")];
 
-    // The answered one, the one still waiting, and the unreadable one — which
-    // is waiting on nobody, whatever the record says about it, because nothing
-    // here can put its questions in front of anybody.
+    // The answered one, the one still waiting, the deferred one — which is
+    // waiting too, the human being the one who has not answered either — and
+    // the unreadable one, which is waiting on nobody, whatever the record says
+    // about it, because nothing here can put its questions in front of anybody.
     expect(cards.map((card) => card.classList.contains("waiting"))).toEqual([
       false,
       true,
+      true,
       false,
     ]);
-    expect(screen.getByText("waiting on you")).toBeTruthy();
+    expect(screen.getAllByText("waiting on you")).toHaveLength(2);
+  });
+
+  /// Both are something to answer, so both say so. What the second word adds is
+  /// that no session is standing still until this one is answered — which is
+  /// the difference between a question holding the work up and one the work
+  /// went on without.
+  it("says which of the two waiting sets was deferred", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const cards = [...container.querySelectorAll(".question-set")];
+
+    expect(
+      cards.map((card) => card.querySelector(".deferred") !== null),
+    ).toEqual([false, false, true, false]);
+
+    const deferred = cards[2]!;
+
+    expect(deferred.querySelector(".set-title")!.textContent).toBe(
+      DEFERRED_SET.title,
+    );
+    expect(deferred.querySelector(".deferred")!.textContent).toBe("deferred");
   });
 
   /// A column of blanks would read as a Set that was answered with nothing.

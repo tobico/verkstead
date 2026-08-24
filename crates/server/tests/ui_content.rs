@@ -72,7 +72,7 @@ async fn fresh_app() -> (tempfile::TempDir, SqlitePool, Router) {
 /// Put a Set on [`ASKING_FROM`]'s Timeline, which is the one way there is to
 /// store one.
 async fn put(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
-    Ok(store::ask(pool, ASKING_FROM, set)
+    Ok(store::ask(pool, ASKING_FROM, set, store::Ask::Blocking)
         .await?
         .expect("the Conversation is there to ask from"))
 }
@@ -1669,7 +1669,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let mut asked = full_grammar_set();
     asked.title = "Retry policy for the outbound queue".to_owned();
     asked.branch = Some("outbound-retries".to_owned());
-    let answered = store::ask(&pool, grilling, &asked).await.unwrap().unwrap();
+    let answered = store::ask(&pool, grilling, &asked, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
     store::insert_response(&pool, answered.id, &decided_every_way())
         .await
         .unwrap()
@@ -1685,7 +1688,19 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let mut waiting = full_grammar_set();
     waiting.title = "What a delivery that has failed forty times becomes".to_owned();
     waiting.branch = Some("outbound-retries".to_owned());
-    store::ask(&pool, grilling, &waiting)
+    store::ask(&pool, grilling, &waiting, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // And one waiting that nothing is waiting on: a Deferred Ask, which is the
+    // fourth way a Set reads on a Timeline. It draws as something to answer like
+    // the one above it — because it is — and says which kind of ask it was,
+    // where the blocking one says who is on the other end.
+    let mut deferred = full_grammar_set();
+    deferred.title = "The wording of the give-up notice".to_owned();
+    deferred.branch = Some("outbound-retries".to_owned());
+    store::ask(&pool, grilling, &deferred, store::Ask::Deferred)
         .await
         .unwrap()
         .unwrap();
@@ -1698,7 +1713,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     let mut aged = full_grammar_set();
     aged.title = "How long a dead endpoint holds the queue".to_owned();
     aged.branch = Some("outbound-retries".to_owned());
-    let unreadable = store::ask(&pool, grilling, &aged).await.unwrap().unwrap();
+    let unreadable = store::ask(&pool, grilling, &aged, store::Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     let mut body: serde_json::Value = serde_json::to_value(&aged).unwrap();
     body["proposal"] = serde_json::from_str(RETIRED_PROPOSAL).unwrap();
@@ -1746,7 +1764,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
 
     let proposing = wrap_up_proposal();
-    let proposed = store::ask(&pool, directing, &proposing)
+    let proposed = store::ask(&pool, directing, &proposing, store::Ask::Blocking)
         .await
         .unwrap()
         .unwrap();

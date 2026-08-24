@@ -11,12 +11,12 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON, WaitingOn,
-    addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts, load_conversation,
-    open_database, pick_direction, record_addressed_comments, record_fix_attempt,
-    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
-    start_conversation, start_grilling, submit_response, timeline, unsettle_wrap_up,
-    wrap_up_settled,
+    Ask, Event, Finished, Fixing, Lifecycle, Reviewed, Settlements, Submission, WAITED_ON,
+    WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts, forget_fix_attempts,
+    load_conversation, open_database, pick_direction, record_addressed_comments,
+    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
+    settle_wrap_up, start_conversation, start_grilling, submit_response, timeline,
+    unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -383,7 +383,7 @@ async fn answering_the_review_settles_it_and_hands_back_what_to_fix() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing())
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
         .await
         .unwrap()
         .expect("the Conversation is there to ask from");
@@ -436,7 +436,10 @@ async fn a_review_answered_with_nothing_to_fix_is_still_answered() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     let taken = submit_response(
         &pool,
@@ -483,7 +486,10 @@ async fn answering_an_ordinary_set_settles_no_review() {
         ..reviewing()
     };
 
-    let asked = ask(&pool, id, &ordinary).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &ordinary, Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     let taken = submit_response(
         &pool,
@@ -523,7 +529,10 @@ async fn the_review_is_found_by_the_block_it_carries() {
         review: None,
         ..reviewing()
     };
-    ask(&pool, id, &ordinary).await.unwrap().unwrap();
+    ask(&pool, id, &ordinary, Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         review_asked(&pool, id).await.unwrap(),
@@ -531,7 +540,10 @@ async fn the_review_is_found_by_the_block_it_carries() {
         "and an ordinary Set is not one",
     );
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
 }

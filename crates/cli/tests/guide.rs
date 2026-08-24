@@ -141,6 +141,7 @@ fn the_guide_covers_every_core_area() {
 
     for heading in [
         "## Required topic guides",
+        "## Two kinds of ask",
         "## Question labels",
         "## Pacing",
         "## Authoring the Set",
@@ -532,6 +533,30 @@ fn stands_alone(guide: &str) {
     assert!(
         first_person.is_empty(),
         "the Guide speaks of the human in the third person — found {first_person:?}"
+    );
+}
+
+/// The two kinds of ask, and the one rule that decides between them. An agent
+/// that never reads the flag blocks on everything, which is the whole cost the
+/// deferred kind exists to take off the human.
+#[test]
+fn the_guide_names_both_kinds_of_ask_and_when_to_use_each() {
+    let guide = stdout(&run(&["guide"]));
+    let kinds = section(&guide, "## Two kinds of ask");
+
+    assert!(
+        kinds.contains("verkstead ask --deferred"),
+        "the section should name the flag that defers, got:\n{kinds}"
+    );
+    assert!(
+        kinds.contains("Block only on Questions whose Answers affect the work about to be done"),
+        "and the rule that decides which kind a Question is, in the terms the \
+         design states it in, got:\n{kinds}"
+    );
+    assert!(
+        kinds.contains("folded into the prompt"),
+        "and where a deferred Answer goes, which is the reason it is worth \
+         asking something nothing waits for, got:\n{kinds}"
     );
 }
 

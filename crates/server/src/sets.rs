@@ -7,13 +7,37 @@
 //! the project or the branch it derived. Two Conversations grilling one Repo
 //! would be indistinguishable by either of those.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::Response;
+use serde::Deserialize;
 use verkstead_schema::{ApiError, Nudge, QuestionSet};
 
 use crate::reply::yaml;
 use crate::{AppState, store};
+
+/// Which of the two kinds of ask the session is making, as the query string
+/// carries it: `?deferred=true` for a Deferred Ask, and nothing at all for the
+/// blocking one every ask was until now.
+///
+/// A query parameter rather than a field of the Set, because it is not part of
+/// what was asked: the body is the agent's own words, kept as they were
+/// written, and this is how the CLI was run. It also means an older CLI, which
+/// says nothing, keeps asking exactly as it did.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub(crate) struct Asking {
+    deferred: bool,
+}
+
+impl Asking {
+    fn kind(&self) -> store::Ask {
+        match self.deferred {
+            true => store::Ask::Deferred,
+            false => store::Ask::Blocking,
+        }
+    }
+}
 
 /// `POST /conversations/{conversation}/api/v1/sets` — parse, validate, put it on
 /// that Conversation's Timeline, and answer with the id the waiting agent will
@@ -23,9 +47,16 @@ use crate::{AppState, store};
 /// is a 422 listing every violation, each naming the Question it belongs to. A
 /// Conversation that is not there is a 404: there is nowhere for the Set to land
 /// and nobody who would ever see it.
+///
+/// A Deferred Ask takes this same path and is answered the same way, id and all
+/// — what differs is that nobody opens a wait on the id. So it lands on the
+/// Timeline, leaves the Conversation *blocked on you* and notifies the human's
+/// devices exactly as a blocking one does: both are something to answer, and the
+/// human is not the one who is waiting.
 pub(crate) async fn create_set(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
+    Query(asking): Query<Asking>,
     body: String,
 ) -> Response {
     let set = match QuestionSet::from_yaml(&body) {
@@ -48,7 +79,7 @@ pub(crate) async fn create_set(
         );
     }
 
-    match store::ask(&state.pool, conversation_id, &set).await {
+    match store::ask(&state.pool, conversation_id, &set, asking.kind()).await {
         Ok(Some(created)) => {
             // Behind the answer, never in front of it: the agent hears that its
             // Set is stored the moment it is, and a push service that cannot be

@@ -677,7 +677,8 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
- * currently waiting on it, or nothing is holding a wait any more.
+ * currently waiting on it, whether nothing is holding a wait any more, or
+ * whether nothing ever was.
  *
  * Display state only (ADR-0001). A disconnected Set is still answerable and is
  * never withdrawn on its own — the CLI reconnects through transient drops, and
@@ -686,7 +687,7 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
  * It is a verdict rather than a timestamp because the server has the clock and
  * the registry of held waits; the browser only draws what it is told.
  */
-export type Liveness = "waiting" | "disconnected";
+export type Liveness = "waiting" | "disconnected" | "deferred";
 
 /**
  * A Manual Task as the page receives it: what the human asked for, and when.

@@ -14,7 +14,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
 use support::{REPO_NAME, linked_worktree, repo_with_a_commit};
-use verkstead_schema::{QuestionSet, Response};
+use verkstead_schema::{QuestionSet, Response, SetCreated};
 use verkstead_server::store::{self, StoredSet};
 
 /// Two Questions, one with a Sub-question, so a Response has to cover `Q1`,
@@ -258,6 +258,20 @@ fn ask(server: &Server, dir: &Path, set: &str) -> Child {
     child
 }
 
+/// The same, deferred: the Set goes and the command comes back without waiting.
+fn ask_deferred(server: &Server, dir: &Path, set: &str) -> Child {
+    let mut child = command(server, dir)
+        .arg("--deferred")
+        .spawn()
+        .expect("the verkstead binary should be built for its own tests");
+
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(set.as_bytes()).unwrap();
+    drop(stdin);
+
+    child
+}
+
 /// Start `verkstead ask <file>`, the form the quickstart uses.
 fn ask_file(server: &Server, dir: &Path, file: &Path) -> Child {
     command(server, dir)
@@ -430,6 +444,54 @@ fn a_set_archived_unanswered_ends_the_wait_for_good() {
         stdout(&output).is_empty(),
         "there is no Response to print, got:\n{}",
         stdout(&output)
+    );
+}
+
+/// The whole of what a Deferred Ask is on this end: the Set is stored, the
+/// command is over, and the session it was run from goes on working.
+///
+/// Nothing answers it here, deliberately. The point is that the CLI exits
+/// without one — a test that answered first could not tell an ask that returned
+/// from an ask that was answered very quickly.
+#[test]
+fn a_deferred_ask_returns_as_soon_as_the_set_is_stored() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let output = finished(ask_deferred(&server, tmp.path(), SET));
+    assert!(
+        output.status.success(),
+        "a stored Set is a clean exit, got {:?}",
+        output.status
+    );
+
+    // Which Set it is, and nothing else: there is no Response coming, so what
+    // the agent is owed on stdout is the id the human's Answers will be filed
+    // under.
+    let printed = stdout(&output);
+    let created: SetCreated = serde_saphyr::from_str(&printed)
+        .unwrap_or_else(|error| panic!("stdout should be the stored Set: {error}\n{printed}"));
+
+    assert_eq!(created.id, 1);
+    assert!(
+        Response::from_yaml(&printed).is_err(),
+        "and it is not a Response — no Answers exist yet, got:\n{printed}"
+    );
+    assert!(
+        stderr(&output).is_empty(),
+        "nothing was waited on, so there was nothing to say about waiting, got:\n{}",
+        stderr(&output)
+    );
+
+    // And it is a Set on the record like any other — the human answers it from
+    // the same page, and nothing about the Set itself says how it was sent.
+    let stored = server.stored_set(created.id).expect("the Set was stored");
+    let asked = stored.set.set().expect("it reads back").clone();
+
+    assert_eq!(asked.title, "How should the CLI wait?");
+    assert!(
+        stored.deferred,
+        "and the record beside it says which kind of ask it was"
     );
 }
 

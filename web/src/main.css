@@ -358,8 +358,9 @@ textarea::placeholder {
 
 /* A word rather than a light, because a Set is read on a phone and "agent
    disconnected" has to read as itself without a legend. Waiting is the ordinary
-   state and stays as quiet as the rest of the line; only the Set nobody is
-   listening on speaks up. */
+   state and stays as quiet as the rest of the line; only the Set whose agent has
+   gone speaks up. A Deferred Ask stays quiet too: nobody is waiting on one by
+   design, so there is nothing wrong to point at. */
 .standing .liveness.disconnected {
   color: var(--removed);
   font-weight: 500;
@@ -1690,6 +1691,17 @@ main:has(.workbench) {
 
 .question-set .set-title {
   font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* And which kind of ask it was, beside the fact that it is waiting. Quiet where
+   "waiting on you" is the accent: both want answering, and this says only that
+   no session is standing still until it is. */
+.question-set .deferred {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--ink-soft);
 }
 

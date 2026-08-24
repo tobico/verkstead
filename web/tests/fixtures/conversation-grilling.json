@@ -1,7 +1,7 @@
 {
   "adopting": null,
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
-  "blocked_on": 12,
+  "blocked_on": null,
   "branch": "outbound-retries",
   "direction": null,
   "grilling_profile": {
@@ -173,22 +173,54 @@
       }
     },
     {
-      "UnreadableSet": {
+      "QuestionSet": {
         "at": "2026-08-03T09:07:11.000Z",
         "id": 8,
+        "rows": [
+          {
+            "answer": "",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
         "set_id": 3,
-        "why": "unknown field `accepted_by`, expected `direction` or `rationale` at line 6 column 17"
+        "standing": {
+          "Waiting": "deferred"
+        },
+        "title": "The wording of the give-up notice"
       }
     },
     {
-      "Interruption": {
+      "UnreadableSet": {
         "at": "2026-08-03T09:07:11.000Z",
-        "git_status": "",
-        "how": "nothing is driving it: no session is running, and nothing is left to start one",
-        "id": 12,
-        "settled": null,
-        "tail": "Looking at how the queue is **drained**.",
-        "what": "grilling the work"
+        "id": 9,
+        "set_id": 4,
+        "why": "unknown field `accepted_by`, expected `direction` or `rationale` at line 6 column 17"
       }
     }
   ],

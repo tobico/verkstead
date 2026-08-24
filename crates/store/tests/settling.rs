@@ -11,7 +11,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response, SetCreated};
 use verkstead_store::{
-    Archiving, Event, Settlement, Settlements, Submission, archive_set, ask, conversations,
+    Archiving, Ask, Event, Settlement, Settlements, Submission, archive_set, ask, conversations,
     insert_response, open_database, register_repo, start_conversation, submit_response, timeline,
 };
 
@@ -51,7 +51,7 @@ fn set(title: &str) -> QuestionSet {
 /// The Conversation is made on the first ask and reused after it, so everything
 /// asked here lands on the one Timeline these tests read.
 async fn asked(pool: &SqlitePool, set: &QuestionSet) -> anyhow::Result<SetCreated> {
-    Ok(ask(pool, conversation(pool).await?, set)
+    Ok(ask(pool, conversation(pool).await?, set, Ask::Blocking)
         .await?
         .expect("the Conversation is there to ask from"))
 }

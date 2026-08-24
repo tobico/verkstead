@@ -768,13 +768,28 @@ function AgentOutput(props: {
 /// A Set still waiting says so instead of drawing a column of blanks: nothing
 /// has been decided yet, and an empty answer column would read as a Set that was
 /// answered with nothing.
+///
+/// One still waiting also says which kind of ask it was. Both are something to
+/// answer and both keep the Conversation *blocked on you*, so the row reads the
+/// same either way — what the second word adds is that no session is idling on
+/// this one, which is the difference between a question holding the work up and
+/// a question the work went on without.
 function QuestionSet(props: {
   asked: QuestionSetEvent;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
-  const waiting = () => "Waiting" in props.asked.standing;
-  const archived = () => "ArchivedUnanswered" in props.asked.standing;
+  const standing = () => props.asked.standing;
+  const waiting = () => "Waiting" in standing();
+  const archived = () => "ArchivedUnanswered" in standing();
+
+  /// Whether the Set nobody has answered yet was a Deferred Ask. Read off the
+  /// standing, which is where the fact lives while it matters: an answered Set
+  /// held the work up or did not, and that is over.
+  const deferred = () => {
+    const how = standing();
+    return "Waiting" in how && how.Waiting === "deferred";
+  };
 
   return (
     <button
@@ -789,6 +804,9 @@ function QuestionSet(props: {
         <span class="set-title">{props.asked.title}</span>
         <Show when={waiting()}>
           <span class="live">waiting on you</span>
+        </Show>
+        <Show when={deferred()}>
+          <span class="deferred">deferred</span>
         </Show>
         <Show when={archived()}>
           <span class="closed">closed unanswered</span>

@@ -381,7 +381,7 @@ async fn the_schema_is_applied_to_an_existing_database() {
     let pool = open_database(&path).await.unwrap();
     let set = QuestionSet::from_yaml(VALID_SET).unwrap();
     let conversation = asking_from(&pool).await;
-    let created = store::ask(&pool, conversation, &set)
+    let created = store::ask(&pool, conversation, &set, store::Ask::Blocking)
         .await
         .unwrap()
         .expect("the Conversation is there to ask from");

@@ -87,6 +87,23 @@ describe("the offer to close a Set unanswered", () => {
     expect(badge.textContent).toBe("agent disconnected");
   });
 
+  /// A Deferred Ask has nobody on the other end and never had, so the badge
+  /// says that rather than reporting an agent that has gone. The offer behind
+  /// it is the same offer: the Set is still the human's to close.
+  it("says nobody is waiting on a Set that was deferred", async () => {
+    const { page } = await answering({
+      ...WAITING,
+      standing: { Waiting: "deferred" },
+    });
+
+    const badge = page.querySelector(".standing .liveness")!;
+    expect(badge.className).toBe("liveness deferred");
+    expect(badge.textContent).toBe("no agent waiting");
+
+    reachForArchive(page);
+    expect(page.querySelector(".confirm")).toBeTruthy();
+  });
+
   it("is not offered on a Set that has already settled", async () => {
     const { page } = await answering({
       ...WAITING,

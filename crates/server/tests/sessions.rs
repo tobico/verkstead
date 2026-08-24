@@ -312,6 +312,30 @@ impl Grilling {
         created.id
     }
 
+    /// The same, deferred: what a session sends when it is not going to wait
+    /// for the Answer, which is a query parameter rather than anything in the
+    /// Set — see the server's `sets` module.
+    async fn ask_deferred(&self, yaml: &str) -> i64 {
+        let (status, body) = fetch(
+            &self.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/conversations/{}/api/v1/sets?deferred=true",
+                    self.id
+                ))
+                .header(header::CONTENT_TYPE, "application/yaml")
+                .body(Body::from(yaml.to_owned()))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
+
+        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
+        created.id
+    }
+
     /// Answer it the way the human does, from the browser.
     async fn answer(&self, set_id: i64) -> Submitted {
         post(
@@ -7842,4 +7866,176 @@ async fn wrapping_unwatched(fixture: &Grilling) {
     pool.close().await;
 
     assert_eq!(recorded, verkstead_server::store::Wrapping::Started);
+}
+
+/// A Set the session asked without waiting for it: two Questions, so what comes
+/// back is a decision and something the human wrote in their own words.
+///
+/// Nothing about the Set says it was deferred — that is how it was sent — so
+/// this is an ordinary Set, and the Answers to it are what a later session is
+/// owed.
+const DEFERRED: &str = r#"
+title: The wording of the rate-limit error
+questions:
+  - label: Q9
+    text: Which status should a throttled request get?
+    options:
+      - n: 1
+        text: 429 Too Many Requests
+        recommended: true
+      - n: 2
+        text: 503 Service Unavailable
+"#;
+
+/// A two-task backlog whose sessions write down the prompt they were started on,
+/// somewhere that outlives the worktree.
+///
+/// The prompts are what these tests are about, and a capture would not do: a
+/// prompt is a document, and what is being asked is whether one part of it
+/// reached one session and not the next.
+fn a_backlog_of_two_writing_prompts(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    printf '# 02\n' > .tasks/02-refuse.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: $next"
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// What each session was started on, as the stub above wrote them down: the step
+/// it was working against the whole prompt.
+fn prompts_by_step(written: &Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(written)
+        .unwrap_or_default()
+        .split("===== ")
+        .filter(|block| !block.trim().is_empty())
+        .map(|block| {
+            let (step, prompt) = block.split_once('\n').expect("a step names its prompt");
+            (step.trim().to_owned(), prompt.to_owned())
+        })
+        .collect()
+}
+
+/// The far end of a Deferred Ask: the session that asked it never saw the
+/// Answer, and the next session started on the Conversation opens with it.
+///
+/// Asked during the grilling and answered before the direction is picked, which
+/// is the ordinary shape of one — the Questions the work does not turn on are
+/// exactly the ones a grilling can leave with the human while it gets on. What
+/// this asks is that the Answers reach the first session that builds, and reach
+/// nothing after it: folding is recorded, so the second task session is primed
+/// with the work and not with a decision it has already been told.
+#[tokio::test]
+async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    // The grilling asks something the work does not turn on and carries on
+    // without it, and the human answers it in their own time — here, before the
+    // direction is picked, so that what follows is deterministic.
+    let deferred = fixture.ask_deferred(DEFERRED).await;
+    assert_eq!(
+        fixture
+            .respond(
+                deferred,
+                serde_json::json!([{
+                    "label": "Q9",
+                    "selected": 1,
+                    "free_text": "and say which limit it hit",
+                }])
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    let steps: Vec<&str> = started.iter().map(|(step, _)| step.as_str()).collect();
+
+    assert_eq!(
+        steps,
+        ["01-count.md", "02-refuse.md", "finish"],
+        "a session per step, in order: {started:?}",
+    );
+
+    let (_, first) = &started[0];
+
+    assert!(
+        first.contains("# What I have since said about the deferred questions"),
+        "the first session started after the Answers came back is the one they \
+         belong to: {first:?}",
+    );
+    assert!(
+        first.contains("429 Too Many Requests") && first.contains("and say which limit it hit"),
+        "and it is the exchange itself — the Option picked and what the human \
+         wrote beside it: {first:?}",
+    );
+    assert!(
+        first.contains("# The Brief this started from"),
+        "under the documents the prompt is built from, where the newest and \
+         least general thing said goes: {first:?}",
+    );
+
+    for (step, prompt) in &started[1..] {
+        assert!(
+            !prompt.contains("deferred questions"),
+            "each Answer is folded once: {step} was told again: {prompt:?}",
+        );
+    }
 }

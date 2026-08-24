@@ -344,6 +344,11 @@ pub struct SetOnTimeline {
 
     /// How it was settled, or `None` while it is still waiting on the human.
     pub settlement: Option<super::Settlement>,
+
+    /// Whether it was a Deferred Ask, which is what tells one still waiting on
+    /// the human from a blocking one: both are something to answer, and nothing
+    /// is idling on this one — see [`super::deferrals`].
+    pub deferred: bool,
 }
 
 impl Event {
@@ -1191,6 +1196,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
+    // And which of the Sets above were asked deferred, for the arithmetic again
+    // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than either:
+    // one indexed column, and most Conversations have no deferred Set at all.
+    let deferred = super::deferrals::deferred_on_timeline(pool, conversation_id).await?;
+
     rows.into_iter()
         .map(|row| {
             let (
@@ -1243,6 +1253,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // [`super::Asked`].
                         set: super::Asked::read(body),
                         settlement: settled(set_id, answered_at, answer, archived_at)?,
+                        deferred: deferred.contains(&set_id),
                     })
                 })
                 .transpose()?;
@@ -1316,10 +1327,17 @@ fn settled(
 ///
 /// The Set is expected to have been validated already — the store is not where
 /// the question grammar is enforced.
+///
+/// `ask` is which of the two kinds it is, and the deferral is written in this
+/// same transaction where it is a Deferred Ask: a Set that was stored a moment
+/// before the record of how it was asked is one that reads as blocking for that
+/// moment, and what reads it in that moment is a driver deciding whether a quiet
+/// session is still waiting on an Answer.
 pub async fn ask(
     pool: &SqlitePool,
     conversation_id: i64,
     set: &QuestionSet,
+    ask: super::Ask,
 ) -> Result<Option<SetCreated>> {
     let body = serde_json::to_string(set).context("serialising the Question Set")?;
 
@@ -1362,6 +1380,10 @@ pub async fn ask(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("putting Question Set {id} on the Timeline"))?;
+
+    if ask == super::Ask::Deferred {
+        super::deferrals::defer(&mut tx, id).await?;
+    }
 
     tx.commit().await.context("putting a Question Set")?;
 
@@ -1447,6 +1469,11 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 /// every Set that landed after a session's own Event is that session's. What
 /// asks is the driver of a Manual Task — a session idling on a Blocking Ask
 /// prints nothing for hours, and quiet alone would reap it mid-question.
+///
+/// Blocking Asks alone, for that same reason read the other way: a Deferred Ask
+/// idles nobody, so a session that has gone quiet behind one has finished rather
+/// than being mid-question, and a driver that waited on it would wait for as
+/// long as the human took to answer something nothing was waiting for.
 pub async fn unanswered_set_since(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -1459,8 +1486,9 @@ pub async fn unanswered_set_since(
          JOIN timeline_events e ON e.id = s.event_id
          LEFT JOIN responses r ON r.set_id = q.id
          LEFT JOIN archivings a ON a.set_id = q.id
+         LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ? AND e.id > ?
-           AND r.set_id IS NULL AND a.set_id IS NULL
+           AND r.set_id IS NULL AND a.set_id IS NULL AND d.set_id IS NULL
          ORDER BY q.id
          LIMIT 1",
     )

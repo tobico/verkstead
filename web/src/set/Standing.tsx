@@ -21,9 +21,12 @@ import { clearDraft } from "./sheet";
 ///
 /// Worded about the agent rather than about the connection: what the human
 /// wants to know before answering is whether anyone is still on the other end.
+/// A Deferred Ask answers that outright — nobody, by design — where
+/// "disconnected" would say that somebody had gone.
 export const BADGE: Record<Liveness, string> = {
   waiting: "agent waiting",
   disconnected: "agent disconnected",
+  deferred: "no agent waiting",
 };
 
 /// What the human is asked before a Set is closed unanswered.

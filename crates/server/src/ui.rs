@@ -243,6 +243,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         &state,
         id,
         settlement,
+        stored.deferred,
         &stored.created_at,
         OffsetDateTime::now_utc(),
     );
@@ -259,10 +260,16 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// The Liveness comes out of the registry of held waits, which is the same
 /// registry either way: whichever of the two the human is looking at, it is the
 /// page they act on.
+///
+/// Except for a Deferred Ask, which the registry has nothing to say about: no
+/// wait was ever held on one, so ageing it against the clock would report an
+/// agent that had gone where none was ever there. `deferred` is what the record
+/// says about how it was asked, and it is the whole verdict where it is true.
 fn standing(
     state: &AppState,
     set_id: i64,
     settlement: Option<store::Settlement>,
+    deferred: bool,
     created_at: &str,
     now: OffsetDateTime,
 ) -> Standing {
@@ -276,6 +283,7 @@ fn standing(
         Some(store::Settlement::ArchivedUnanswered(archived)) => {
             Standing::ArchivedUnanswered(archived.archived_at)
         }
+        None if deferred => Standing::Waiting(verkstead_schema::Liveness::Deferred),
         None => Standing::Waiting(state.waits.liveness(set_id, created_at, now)),
     }
 }
@@ -737,8 +745,14 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // the one transaction that puts a Set on a Timeline.
                     store::Event::QuestionSet(asked) => match &asked.set {
                         store::Asked::Set(set) => {
-                            let standing =
-                                standing(&state, asked.set_id, asked.settlement, &event.at, now);
+                            let standing = standing(
+                                &state,
+                                asked.set_id,
+                                asked.settlement,
+                                asked.deferred,
+                                &event.at,
+                                now,
+                            );
 
                             verkstead_render::question_set_event(
                                 event.id,
