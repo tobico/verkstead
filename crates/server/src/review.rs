@@ -63,6 +63,16 @@
 //! Conversation ends the one it already has. So the review waits for the
 //! Worktree and holds it until its session is done, the wait on the human
 //! included, and the checks watcher tries for it and comes back later.
+//!
+//! Which leaves a check that goes red mid-wait with nobody to fix it, so **the
+//! woken session fixes it too**: the reviewing skill has it read the pull
+//! request's own check state once the answers arrive and put right whatever is
+//! failing, beside the findings they accepted and before its push. Queueing it
+//! instead would be a fix session dispatched hours later about a suite nobody had
+//! looked at since. It costs the check none of its two attempts — those are spent
+//! where a session is dispatched, and the watcher never dispatched this one — so
+//! anything still red once the Worktree is free meets the watcher's ordinary
+//! flow, whole. See [`crate::checks`].
 
 use crate::AppState;
 use crate::runner::Reviewed;

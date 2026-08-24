@@ -3321,6 +3321,23 @@ async fn checks_settled(fixture: &Grilling) -> bool {
     settled.contains(&verkstead_server::store::WaitingOn::Checks)
 }
 
+/// How many fix sessions Verkstead has counted against one of this
+/// Conversation's checks.
+///
+/// The count that *two attempts, then ask* is kept by, read the way the watcher
+/// reads it. What a check the review folded into its own session has spent is
+/// nothing: an attempt is counted where a fix session is dispatched, and none is
+/// dispatched into a Worktree the review is holding.
+async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let spent = verkstead_server::store::fix_attempts(&pool, fixture.id, check)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    spent
+}
+
 /// The ordinary way a wrap-up starts: the finish step opened a pull request and
 /// everything GitHub runs against it is green.
 ///
@@ -4509,6 +4526,11 @@ async fn a_review_whose_findings_were_all_declined_settles_by_ending() {
 /// blocks for hours is a session working rather than a Worktree free, and it is
 /// only once that session has fixed what was accepted and gone that the check's
 /// own fix gets its turn.
+///
+/// And it waits having cost the check nothing: an attempt is spent where a fix
+/// session is dispatched, so a suite red for the whole of a wait still has both
+/// of its goes afterwards. What the reviewing skill sends the woken session to do
+/// about the check meanwhile is the fold-in, and no counter here knows about it.
 #[tokio::test]
 async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     let spill = tempfile::tempdir().unwrap();
@@ -4554,6 +4576,13 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
         std::fs::read_to_string(&dispatched).ok(),
     );
 
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        0,
+        "and the check has spent none of its two attempts on the wait: an attempt \
+         is counted where a fix session is dispatched, and nothing was",
+    );
+
     let view = fixture.view().await;
 
     assert!(
@@ -4570,6 +4599,13 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     assert!(
         told.contains("Rust") && told.contains("/actions/runs/1/job/2"),
         "the fix session that was waiting is about the red check: {told}",
+    );
+
+    assert_eq!(
+        attempts_spent(&fixture, "Rust").await,
+        1,
+        "and it is the first of the two, spent here rather than during the wait: \
+         whatever the woken review did about the check cost the counter nothing",
     );
 }
 

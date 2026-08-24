@@ -200,7 +200,39 @@ finding you did not raise, and fixing it now is a decision they did not get to
 make. Then run the repository's tests and make sure what you did works before it
 goes anywhere.
 
-## 7. Commit it and push it
+## 7. Fix whatever the checks have gone red on
+
+You have held this Worktree since before you asked, and you hold it until you
+end: the ask that blocked for hours is a session working rather than a Worktree
+free. So a check that went red while you waited has had nobody sent to it —
+nothing is dispatched into a Worktree something is already working in. It is
+yours, the way the comments are.
+
+Once the answers are in, ask the pull request how its checks are getting on:
+
+    gh pr checks
+
+Whatever is failing, fix it here, alongside the findings they accepted and
+before you push. Go and read what the check actually complained about — its run
+is linked from that output, and the repository says how to run the failing thing
+yourself. A fix written from the name of a job is a guess.
+
+- **There is nothing to propose about a red check.** It is the branch being
+  broken rather than a decision the human has to make: it is not a finding, it
+  does not go into a Set, and it is fixed whether or not they accepted anything
+  else.
+- **A check still running is nothing to do.** Your push starts the suite over
+  anyway, and what is watching the checks reads it then.
+- **The cause rather than the symptom**, and nothing beside it — the same rule
+  the findings are fixed under. A check turned off is not a check fixed.
+- **A red check you cannot fix is worth saying so about** rather than pushing
+  over in silence. Fix what you can, and say which check beat you and what you
+  found: the watcher has its own goes at it once you are done, and your account
+  of it is what the human reads on the Timeline.
+- **Its own commit**, like each finding's, so it reads against the check it was
+  for.
+
+## 8. Commit it and push it
 
 **Nothing waits on approval.** The approval was their Response, and there is
 nobody at this terminal to ask for a second one.
@@ -260,7 +292,7 @@ anything. The pull request exists, and merging is the human's act.
 
 Then say what you fixed and what you left, and stop.
 
-## 8. A review with nothing to raise
+## 9. A review with nothing to raise
 
 Nothing to raise means both halves: you found nothing yourself, *and* nothing
 said on the pull request asks for anything. Comments you were given are the other
@@ -280,5 +312,11 @@ nothing is a fine outcome; inventing a finding so that something happened is
 not.
 
 The same holds at the other end: a review whose every finding was declined has
-nothing to commit, and committing nothing is the right end to it. Say what you
-raised and what they left, and stop.
+nothing of its own to commit, and committing nothing is the right end to it. Say
+what you raised and what they left, and stop.
+
+The checks are the one exception, at both ends. A review that asked nothing was
+never away long enough for one to go red behind it, and hands the Worktree
+straight back to whatever watches them. A review that waited did: a check that
+went red while it waited is yours whatever they decided about your findings, so
+step 7 still runs and what it fixes is still pushed.

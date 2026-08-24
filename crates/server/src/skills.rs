@@ -1437,6 +1437,34 @@ mod tests {
         );
     }
 
+    /// A check that goes red while the review waits on the human has nobody
+    /// dispatched to it — the review is holding the Worktree — so the woken
+    /// session deals with it itself, before its push.
+    #[test]
+    fn the_reviewing_skill_folds_a_red_check_into_the_woken_session() {
+        let reviewing = skill("reviewing/SKILL.md");
+
+        assert!(
+            reviewing.contains("gh pr checks"),
+            "the woken session reads the pull request's own check state: {reviewing}"
+        );
+        assert!(
+            reviewing.find("gh pr checks") < reviewing.find("git push"),
+            "and fixes what is failing before it pushes, so the push is what puts \
+             the fix back in front of the checks — {reviewing}"
+        );
+        assert!(
+            reviewing.contains("nothing to propose about a red check"),
+            "a red check is the branch being broken rather than a decision, so it \
+             never becomes a finding: {reviewing}"
+        );
+        assert!(
+            reviewing.contains("whatever they decided"),
+            "and a review whose every finding was declined still fixes one: \
+             {reviewing}"
+        );
+    }
+
     /// The review session is put inside the skill the same way every other is,
     /// and primed with the two documents that say what the work was *for*.
     #[test]
