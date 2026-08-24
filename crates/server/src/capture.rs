@@ -226,7 +226,7 @@ fn decode(pending: &mut Vec<u8>) -> String {
 /// deliberately: a redraw shorter than what it drew over leaves the tail of the
 /// old text behind on a real terminal, and carrying that into a one-line
 /// summary would be carrying the noise rather than the message.
-fn plain(line: &str) -> String {
+pub(crate) fn plain(line: &str) -> String {
     let mut plain = String::new();
     let mut characters = line.chars().peekable();
 

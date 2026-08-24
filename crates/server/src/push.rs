@@ -1,23 +1,34 @@
-//! Telling the devices that something is waiting for the human.
+//! Telling the devices what happened while nobody was watching.
 //!
-//! Three things are: a Question Set has arrived, a Hold has stood a while with
-//! nobody coming back to it, or driving has halted on something Verkstead
-//! decided to stop for. One push per subscribed device whichever it is,
+//! Two kinds of thing are worth a phone lighting up. **Needs-you**: a Question
+//! Set has arrived, a Hold has stood a while with nobody coming back to it,
+//! driving has halted on something Verkstead decided to stop for, or the account
+//! the run was spending ran out of window. And **milestones**: the work is on a
+//! pull request, a roadmap has moved on to its next stage or run out of stages,
+//! or a Conversation has reached Done. One push per subscribed device in every
+//! case,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
 //! service worker to draw the notification and to know which page to open, and
-//! nothing that would put a Question in a notification the phone shows on a lock
-//! screen.
+//! nothing that would put a Question — or the substance of the work — in a
+//! notification the phone shows on a lock screen.
 //!
-//! Sending happens behind the answer to `POST …/api/v1/sets`, never in front of
+//! What tells one from another is its title, which is why all of them are
+//! written in the same place: see [`News::title`]. A phone that lights up with
+//! the same sentence whatever happened is a phone the human learns to ignore.
+//!
+//! Sending always happens behind the thing it is announcing, never in front of
 //! it. Delivery goes out through the browser vendors' push services, which is
 //! the one place Verkstead reaches the public internet, and none of it is
-//! reliable enough to make an agent's submission depend on: a service that
-//! cannot be reached costs a notification, not the Set.
+//! reliable enough to make the record depend on: a service that cannot be
+//! reached costs a notification, and never the Set, the pull request or the
+//! halt it was about.
 //!
 //! A Hold's push is a reminder and nothing more. It ends no Hold — only the
 //! hand-back does that — and it leaves nothing on the Timeline, which records
-//! the work rather than the watching.
+//! the work rather than the watching. That holds for every push here: each is
+//! sent from the one place that already knows the thing happened, and none of
+//! them writes anything down.
 //!
 //! A halt's push is the opposite: the run has stopped and will not start again
 //! until the human presses Resume, so a silent stop is one they find days late.
@@ -169,87 +180,142 @@ pub(crate) fn when_it_has_stood(state: &AppState, conversation_id: i64, which: W
             return;
         }
 
-        if let Err(error) = remind(&state.pool, conversation_id).await {
-            tracing::error!(
-                conversation_id,
-                error = ?error,
-                "telling the devices about a Hold failed",
-            );
-        }
+        told(&state.pool, conversation_id, News::Waiting);
     });
 }
 
-/// The notice one standing Hold is worth, sent.
+/// What a push about a Conversation is saying.
 ///
-/// Named by the branch, which is what a Conversation is read by — see
-/// [`verkstead_store::ConversationRow`] — with the Repo underneath it, so that a
-/// lock screen says which piece of work the keyboard is still held on.
-async fn remind(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
-    let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
-    else {
-        // Aborted and gone while the wait was on. Nothing is held any more that
-        // there is anything to say about.
-        return Ok(());
-    };
+/// One enum rather than a function each, because nearly all of it is common: a
+/// Conversation to load, a branch to read it by, the Repo underneath and one
+/// push per subscribed device. What differs is the sentence — and that is the
+/// half worth keeping together, since the whole job of a title is to say which
+/// of these it is to somebody glancing at a lock screen.
+#[derive(Debug, Clone)]
+pub(crate) enum News {
+    /// A Hold has stood a while with nobody coming back to the keyboard.
+    Waiting,
 
-    let title = format!("{} is waiting for you", conversation.branch);
+    /// Driving stopped on something Verkstead decided to stop for, and the
+    /// Conversation stays stopped until Resume is pressed — see
+    /// [`crate::halts`]. `stopped` is what ought to have been happening, with
+    /// its first letter up: the same words the Notice opens with, so that the
+    /// phone and the Timeline say the same thing about the same stop.
+    Halted { stopped: String },
 
-    let notice = Notice {
-        path: format!("/conversations/{conversation_id}"),
-        title: &title,
-        project: Some(&conversation.repo.name),
-    };
+    /// The account a run was spending ran out of window, so the run is waiting
+    /// on the human or on the clock — see [`crate::limits`].
+    OutOfWindow {
+        profile: String,
+        resets_at: Option<String>,
+    },
 
-    let notice = serde_json::to_vec(&notice).context("building the push notice")?;
+    /// The work the Conversation was for is on a pull request, and the wrap-up
+    /// has started.
+    OnAPullRequest { number: i64 },
 
-    notify(pool, &format!("the Hold on {conversation_id}"), &notice).await
+    /// The stage after the one that just settled has started, on a Conversation
+    /// of its own — which is this one.
+    StageStarted { label: String, roadmap: String },
+
+    /// A roadmap that has run out of stages: the one that settled was its last.
+    RoadmapComplete { roadmap: String },
+
+    /// The Conversation has reached Done. Verkstead has finished with the work;
+    /// whether it is merged is the human's.
+    Done,
 }
 
-/// Tell the devices that driving has stopped, without making the halt wait for
-/// it.
+impl News {
+    /// The sentence the lock screen shows.
+    ///
+    /// Every title in one place, because the thing they all have to do is be
+    /// told apart from each other at a glance. Two rules hold across the lot of
+    /// them. What a piece of work is read by is its branch — see
+    /// [`verkstead_store::ConversationRow`] — so a title names that, unless it
+    /// has something the human knows the work by better: the account that ran
+    /// out, or the stage of the roadmap. And nothing of the *substance* of the
+    /// work goes in, which is the rule that keeps a Question out of a Set's push.
+    fn title(&self, branch: &str) -> String {
+        match self {
+            News::Waiting => format!("{branch} is waiting for you"),
+            // The step rather than how it went wrong: which part of the run
+            // stopped is what decides whether the human gets up, and the
+            // evidence underneath it is one tap away.
+            News::Halted { stopped } => format!("{stopped} stopped on {branch}"),
+            // The account and when it comes back, because those are the two
+            // things that decide whether the human does anything about it: an
+            // account back in twenty minutes is one to leave alone.
+            News::OutOfWindow {
+                profile,
+                resets_at: Some(resets_at),
+            } => format!("{profile} is out of window until {resets_at}"),
+            News::OutOfWindow {
+                profile,
+                resets_at: None,
+            } => format!("{profile} is out of window"),
+            News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}"),
+            // Read by the stage rather than by the branch: a stage is a
+            // Conversation whose name in the human's head is its number in the
+            // roadmap, and the branch is named after that anyway.
+            News::StageStarted { label, roadmap } => {
+                format!("Stage {label} of the `{roadmap}` roadmap has started")
+            }
+            News::RoadmapComplete { roadmap } => format!("The `{roadmap}` roadmap is complete"),
+            News::Done => format!("{branch} is done"),
+        }
+    }
+
+    /// What the log calls it, where a push could not be sent.
+    fn about(&self) -> &'static str {
+        match self {
+            News::Waiting => "the Hold",
+            News::Halted { .. } => "the halt",
+            News::OutOfWindow { .. } => "the Pause",
+            News::OnAPullRequest { .. } => "the pull request",
+            News::StageStarted { .. } => "the stage that started",
+            News::RoadmapComplete { .. } => "the roadmap that is finished",
+            News::Done => "the work being done",
+        }
+    }
+}
+
+/// Tell every subscribed device something that happened to a Conversation,
+/// without making the thing that happened wait for it.
 ///
-/// Returns as soon as the work is handed to the runtime, for the reason a Set's
-/// [`announce`] does: what the caller is doing is writing down that a run
-/// stopped, and a push service having a bad day must not be able to delay that
-/// or to fail it.
-///
-/// One push per halt, because a Conversation halts once — see
-/// [`verkstead_store::halt`], which is what refuses the second — so this is
-/// only ever reached by the halt that was actually written. A sweep looking
-/// again a minute later at a Conversation standing just as still sends nothing.
-///
-/// `stopped` is what ought to have been happening, with its first letter up:
-/// the same words the Notice opens with, so that the phone and the Timeline say
-/// the same thing about the same stop.
-pub(crate) fn halted(state: &AppState, conversation_id: i64, stopped: &str) {
-    let pool = state.pool.clone();
-    let stopped = stopped.to_owned();
+/// Returns as soon as the work is handed to the runtime, exactly as a Set's push
+/// does: the caller's job is to put the halt, the pull request or the
+/// Pause on the record, and none of this may delay that or fail it. A push
+/// service that cannot be reached costs a notification and nothing else.
+pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
+    let pool = pool.clone();
 
     tokio::spawn(async move {
-        if let Err(error) = tell(&pool, conversation_id, &stopped).await {
+        if let Err(error) = say(&pool, conversation_id, &news).await {
             tracing::error!(
                 conversation_id,
+                about = news.about(),
                 error = ?error,
-                "telling the devices about a halt failed",
+                "telling the devices about a Conversation failed",
             );
         }
     });
 }
 
-/// The notice one halt is worth, sent.
+/// The notice one piece of news is worth, sent.
 ///
-/// Named the way a Hold's reminder is — the branch, with the Repo underneath —
-/// so that a lock screen says which piece of work has stopped as well as what
-/// stopped in it.
-async fn tell(pool: &SqlitePool, conversation_id: i64, stopped: &str) -> Result<()> {
+/// With the Repo underneath the title, so that a lock screen says which piece of
+/// work this is about — that is the one thing that tells two notifications apart
+/// where their titles read alike.
+async fn say(pool: &SqlitePool, conversation_id: i64, news: &News) -> Result<()> {
     let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
     else {
-        // Aborted and gone between the halt and this. Nothing is stopped any
-        // more that there is anything to say about.
+        // Aborted and gone between the thing happening and this being sent.
+        // There is nobody left to tell anything about it.
         return Ok(());
     };
 
-    let title = format!("{stopped} stopped on {}", conversation.branch);
+    let title = news.title(&conversation.branch);
 
     let notice = Notice {
         path: format!("/conversations/{conversation_id}"),
@@ -259,7 +325,12 @@ async fn tell(pool: &SqlitePool, conversation_id: i64, stopped: &str) -> Result<
 
     let notice = serde_json::to_vec(&notice).context("building the push notice")?;
 
-    notify(pool, &format!("the halt on {conversation_id}"), &notice).await
+    notify(
+        pool,
+        &format!("{} on {conversation_id}", news.about()),
+        &notice,
+    )
+    .await
 }
 
 /// Send the notice to every device, and prune the ones the push services have
@@ -442,12 +513,75 @@ fn signed(private_key: &str, claims: &[u8]) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{JWT_HEADER, audience, signed};
+    use super::{JWT_HEADER, News, audience, signed};
     use base64::Engine;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use p256::ecdsa::signature::Verifier;
     use p256::elliptic_curve::rand_core::OsRng;
     use p256::elliptic_curve::sec1::ToEncodedPoint;
+
+    /// Every piece of news, as one Conversation would produce them.
+    fn all() -> Vec<News> {
+        vec![
+            News::Waiting,
+            News::Halted {
+                stopped: "Implementing the work".to_owned(),
+            },
+            News::OutOfWindow {
+                profile: "implementation".to_owned(),
+                resets_at: Some("2026-08-24T05:00:00Z".to_owned()),
+            },
+            News::OutOfWindow {
+                profile: "implementation".to_owned(),
+                resets_at: None,
+            },
+            News::OnAPullRequest { number: 41 },
+            News::StageStarted {
+                label: "01".to_owned(),
+                roadmap: "rate-limiting".to_owned(),
+            },
+            News::RoadmapComplete {
+                roadmap: "rate-limiting".to_owned(),
+            },
+            News::Done,
+        ]
+    }
+
+    /// The whole job of a title is to say which of these it is, to somebody
+    /// glancing at a lock screen with the app shut. Two of them reading alike is
+    /// a phone that says only that *something* happened.
+    #[test]
+    fn no_two_notifications_about_one_conversation_read_alike() {
+        let mut titles: Vec<String> = all()
+            .iter()
+            .map(|news| news.title("rate-limiting"))
+            .collect();
+
+        let said = titles.clone();
+        titles.sort();
+        titles.dedup();
+
+        assert_eq!(
+            titles.len(),
+            said.len(),
+            "two of these read the same: {said:?}"
+        );
+    }
+
+    /// And each of them fits on a lock screen, which is where every one of them
+    /// is read: a title the phone cuts off mid-sentence has thrown away whichever
+    /// half was at the end of it.
+    #[test]
+    fn a_title_is_short_enough_to_be_shown_whole() {
+        for news in all() {
+            let title = news.title("rate-limiting");
+
+            assert!(
+                title.len() <= 80,
+                "a title a lock screen would cut off mid-sentence: {title:?}",
+            );
+        }
+    }
 
     #[test]
     fn a_signature_is_one_a_push_service_can_check_against_the_public_key() {

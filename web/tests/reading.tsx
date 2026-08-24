@@ -11,9 +11,9 @@ import { cleanup, render, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { expect } from "vitest";
 
-import type { AskView, SetView } from "../src/api/types";
+import type { AskView, SetView, UnreadableSet } from "../src/api/types";
 import { SetPage } from "../src/set/SetPage";
-import { json, serving, whenever } from "./serving";
+import { json, reads, serving, whenever } from "./serving";
 
 /// Where a Set leads back to: the Conversation it was asked from. Not this
 /// page's subject, so it is a stand-in — what a test asks is where the way out
@@ -59,8 +59,18 @@ export function mount(id = "1") {
 /// once are two `#preface`s, and an id that names two elements names neither.
 export async function reading(set: SetView): Promise<HTMLElement> {
   cleanup();
-  serving(json(set));
+  serving(json(reads(set)));
   const { container } = mount();
+  await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
+  return container;
+}
+
+/// The same page over a Set this build cannot read, which is the record rather
+/// than the sheet — nothing to fill in and nothing to press.
+export async function unreadably(set: UnreadableSet): Promise<HTMLElement> {
+  cleanup();
+  serving(json({ Unreadable: set }));
+  const { container } = mount(String(set.id));
   await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
   return container;
 }
@@ -88,7 +98,7 @@ export async function answering(
   let standing = set;
 
   const fetching = serving(
-    whenever(`/api/ui/sets/${set.id}`, () => json(standing)()),
+    whenever(`/api/ui/sets/${set.id}`, () => json(reads(standing))()),
     ...answers,
   );
   const { container, history } = mount(String(set.id));

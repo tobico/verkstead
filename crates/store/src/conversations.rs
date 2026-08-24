@@ -58,8 +58,10 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// it was — which is why it is reachable from all of them and leads nowhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
-    /// The brief is being written. Everything about the Conversation is still
-    /// the human's to change.
+    /// The brief of the round it is in is being written. On a first round that
+    /// is everything about the Conversation — the Brief, the branch name and the
+    /// base commit alike; on a reopened one it is the Brief alone, the branch
+    /// having been worked already.
     Draft,
 
     /// A grilling session is running against it.
@@ -71,7 +73,9 @@ pub enum Lifecycle {
     /// The work is on a PR and the wrap-up loop has it.
     Wrapping,
 
-    /// Finished. It can be reopened with a new round.
+    /// Finished. It can be reopened with a new round, which puts it back to
+    /// [`Lifecycle::Draft`] with a Brief of its own to write — see
+    /// [`reopen_conversation`].
     Done,
 
     /// Stopped, from wherever it had got to. The worktree is gone; the branch is
@@ -285,6 +289,15 @@ pub enum Event {
     /// and are fetched when somebody looks.
     PullRequest(super::PullRequest),
 
+    /// A run waiting out an Agent Profile's window: which account ran out, when
+    /// it comes back, and what ended the wait — see [`super::pauses`].
+    ///
+    /// Its body is not in the `body` column either, for the commit's reason:
+    /// what a Pause is, is a row of separate facts. Unboxed, unlike the Question
+    /// Set beside it — three short strings is no more than a Brief carries, and
+    /// nothing here is gathered evidence of a size to make the enum large.
+    Pause(super::Pause),
+
     /// Something Verkstead has to say on its own account: which stage it has
     /// started and where the branch went, or that a roadmap has no stages left
     /// to run.
@@ -328,11 +341,18 @@ pub enum Event {
 pub struct SetOnTimeline {
     pub set_id: i64,
 
-    /// What the agent asked.
-    pub set: QuestionSet,
+    /// What the agent asked — or the stored body where this build can no longer
+    /// read it, which is a row on the Timeline like any other rather than the
+    /// end of reading it. See [`super::Asked`].
+    pub set: super::Asked,
 
     /// How it was settled, or `None` while it is still waiting on the human.
     pub settlement: Option<super::Settlement>,
+
+    /// Whether it was a Deferred Ask, which is what tells one still waiting on
+    /// the human from a blocking one: both are something to answer, and nothing
+    /// is idling on this one — see [`super::deferrals`].
+    pub deferred: bool,
 }
 
 impl Event {
@@ -348,6 +368,7 @@ impl Event {
             Self::Handoff(_) => "handoff",
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
+            Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
         }
@@ -370,6 +391,8 @@ impl Event {
             Self::Commit(_) => "",
             // Nothing either, and for the commit's reason.
             Self::PullRequest(_) => "",
+            // Nothing either, and for the commit's reason again.
+            Self::Pause(_) => "",
             Self::Notice(markdown) => markdown,
             Self::ManualTask(instruction) => instruction,
         }
@@ -382,6 +405,12 @@ impl Event {
     /// without the other is a database somebody has been in by hand — worth
     /// saying rather than reading as a session that printed nothing or a Set
     /// that asked nothing.
+    ///
+    /// One parameter per kind of row that can be joined in, which is what makes
+    /// the list long: they are the Timeline's own columns rather than an
+    /// argument list somebody chose, and gathering them into a struct would be a
+    /// second shape to keep true beside the query that fills it.
+    #[allow(clippy::too_many_arguments)]
     fn read(
         kind: &str,
         body: String,
@@ -389,6 +418,7 @@ impl Event {
         set: Option<SetOnTimeline>,
         commit: Option<super::Commit>,
         pull_request: Option<super::PullRequest>,
+        pause: Option<super::Pause>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -407,6 +437,9 @@ impl Event {
                 pull_request
                     .ok_or_else(|| anyhow!("a pull request Event has no pull request beside it"))?,
             ),
+            super::pauses::PAUSE => {
+                Self::Pause(pause.ok_or_else(|| anyhow!("a Pause Event has no Pause beside it"))?)
+            }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
@@ -526,6 +559,26 @@ pub enum Implementing {
     /// It was not grilling, so there was no grilling for this to end. Nothing
     /// recorded and nothing wrong.
     NotGrilling,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of reopening a finished one.
+///
+/// Reopening twice has no outcome of its own, unlike aborting twice: the first
+/// press leaves the Conversation drafting, and a second finds a state that is
+/// not Done — which is [`Reopening::NotDone`], the round being open already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reopening {
+    /// Reopened: the Conversation is drafting again, with a Brief of its own to
+    /// write and the round boundary on its Timeline.
+    Reopened,
+
+    /// It is not Done, so there is no finished round here to open another
+    /// after. Every other state is somewhere the work has got to, and Aborted
+    /// is off the ladder rather than on it.
+    NotDone,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -895,12 +948,19 @@ async fn started(
     Ok(Some(id))
 }
 
-/// Every Conversation, newest first, and whether each is waiting on the human.
+/// Every Conversation in the order the human put them in, and whether each is
+/// waiting on the human.
 ///
-/// Newest first like the Set lists, and for the same reason: what was started
-/// last is what is being worked on. The design gives the sidebar a manual order
-/// eventually; until there is one, the order a Conversation was started in is
-/// the one order that means anything.
+/// The order is theirs: this is one person's working set, and which piece of
+/// work sits at the top is something they say by dragging a row rather than
+/// something a sort decides — see [`super::place_conversations`], which is where
+/// what they said is kept.
+///
+/// What has never been placed goes above what has, newest first among itself.
+/// A Conversation started a minute ago is the one thing on this list nobody has
+/// had the chance to place, and putting it at the top is both the predictable
+/// answer and the useful one: it arrives where it will be seen, and the hand-made
+/// order underneath it is left exactly as it was.
 ///
 /// `waiting` is an `OR` over the sources, computed here rather than by the
 /// caller, because every one of them is a read of this database and the sidebar
@@ -916,6 +976,11 @@ async fn started(
 /// - A **halt**, which is a Conversation nothing is driving any more and which
 ///   goes again only when the human says so. Read off the table rather than off
 ///   the Timeline, so the whole list costs one query.
+/// - An **open Pause**, which is a run stopped because the account it was
+///   spending is out of window. Read the same way and for the same reason. The
+///   human may not have to do anything about one — the window comes back by
+///   itself — but a run that has stopped is one the sidebar has to say has
+///   stopped.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -942,10 +1007,15 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                     OR EXISTS (
                         SELECT 1 FROM halts h WHERE h.conversation_id = c.id
                     )
+                    OR EXISTS (
+                        SELECT 1 FROM pauses u
+                        WHERE u.conversation_id = c.id AND u.resumed_at IS NULL
+                    )
                 ) AS waiting
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
-         ORDER BY c.id DESC",
+         LEFT JOIN placements m ON m.conversation_id = c.id
+         ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
     )
     .fetch_all(pool)
     .await
@@ -1310,6 +1380,17 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     let mut summaries_of_commits =
         super::commits::summaries_on_timeline(pool, conversation_id).await?;
 
+    // And the Pauses, for the arithmetic again and at the pull request's cost:
+    // an account running out of window is the rare Event, so this is one more
+    // query that nearly always comes back with nothing.
+    let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
+
+    // And which of the Sets above were asked deferred, for the arithmetic again
+    // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than any of
+    // them: one indexed column, and most Conversations have no deferred Set at
+    // all.
+    let deferred = super::deferrals::deferred_on_timeline(pool, conversation_id).await?;
+
     rows.into_iter()
         .map(|row| {
             let (
@@ -1353,10 +1434,13 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 .map(|(set_id, body)| -> Result<SetOnTimeline> {
                     Ok(SetOnTimeline {
                         set_id,
-                        set: serde_json::from_str(&body).with_context(|| {
-                            format!("deserialising stored Question Set {set_id}")
-                        })?,
+                        // Never a failure, whatever the body turns out to hold:
+                        // an unreadable Set is a row of its own and the rest of
+                        // the Timeline is drawn around it — see
+                        // [`super::Asked`].
+                        set: super::Asked::read(body),
                         settlement: settled(set_id, answered_at, answer, archived_at)?,
+                        deferred: deferred.contains(&set_id),
                     })
                 })
                 .transpose()?;
@@ -1365,11 +1449,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
             // one Event and the Events are walked once.
             let summary = summaries.remove(&id);
             let pull_request = pull_requests.remove(&id);
+            let pause = pauses.remove(&id);
 
             Ok(TimelineEvent {
                 id,
                 at,
-                event: Event::read(&kind, body, summary, set, commit, pull_request)?,
+                event: Event::read(&kind, body, summary, set, commit, pull_request, pause)?,
             })
         })
         .collect()
@@ -1422,10 +1507,17 @@ fn settled(
 ///
 /// The Set is expected to have been validated already — the store is not where
 /// the question grammar is enforced.
+///
+/// `ask` is which of the two kinds it is, and the deferral is written in this
+/// same transaction where it is a Deferred Ask: a Set that was stored a moment
+/// before the record of how it was asked is one that reads as blocking for that
+/// moment, and what reads it in that moment is a driver deciding whether a quiet
+/// session is still waiting on an Answer.
 pub async fn ask(
     pool: &SqlitePool,
     conversation_id: i64,
     set: &QuestionSet,
+    ask: super::Ask,
 ) -> Result<Option<SetCreated>> {
     let body = serde_json::to_string(set).context("serialising the Question Set")?;
 
@@ -1468,6 +1560,10 @@ pub async fn ask(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("putting Question Set {id} on the Timeline"))?;
+
+    if ask == super::Ask::Deferred {
+        super::deferrals::defer(&mut tx, id).await?;
+    }
 
     tx.commit().await.context("putting a Question Set")?;
 
@@ -1568,8 +1664,15 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> 
     let mut proposing = Vec::new();
 
     for (set_id, body) in rows {
-        let set: QuestionSet = serde_json::from_str(&body)
-            .with_context(|| format!("reading stored Question Set {set_id}"))?;
+        // A Set this build cannot read is passed over rather than failing the
+        // question: it carries no `review` block anybody here could act on, and
+        // one unreadable body must not be able to tell a Conversation it has no
+        // review when what happened is that a field left the schema.
+        let asked = super::Asked::read(body);
+
+        let Some(set) = asked.set() else {
+            continue;
+        };
 
         if set.review.is_some() {
             proposing.push(set_id);
@@ -1643,7 +1746,10 @@ async fn unlanded_on(pool: &SqlitePool, conversation_id: i64, set_id: i64) -> Re
         return Ok(Vec::new());
     };
 
-    let Some(review) = &stored.set.review else {
+    // A Set this build cannot read carries no findings anybody here could act
+    // on, and passing over it is the whole of what there is to do about one —
+    // see [`super::Asked`].
+    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
         return Ok(Vec::new());
     };
 
@@ -1682,7 +1788,9 @@ pub async fn split_out(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fi
         return Ok(Vec::new());
     };
 
-    let Some(review) = &stored.set.review else {
+    // Passed over where this build cannot read the body, for [`unlanded_on`]'s
+    // reason.
+    let Some(review) = stored.set.set().and_then(|set| set.review.as_ref()) else {
         return Ok(Vec::new());
     };
 
@@ -1749,6 +1857,11 @@ async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &st
 /// every Set that landed after a session's own Event is that session's. What
 /// asks is the driver of a Manual Task — a session idling on a Blocking Ask
 /// prints nothing for hours, and quiet alone would reap it mid-question.
+///
+/// Blocking Asks alone, for that same reason read the other way: a Deferred Ask
+/// idles nobody, so a session that has gone quiet behind one has finished rather
+/// than being mid-question, and a driver that waited on it would wait for as
+/// long as the human took to answer something nothing was waiting for.
 pub async fn unanswered_set_since(
     pool: &SqlitePool,
     conversation_id: i64,
@@ -1761,8 +1874,9 @@ pub async fn unanswered_set_since(
          JOIN timeline_events e ON e.id = s.event_id
          LEFT JOIN responses r ON r.set_id = q.id
          LEFT JOIN archivings a ON a.set_id = q.id
+         LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ? AND e.id > ?
-           AND r.set_id IS NULL AND a.set_id IS NULL
+           AND r.set_id IS NULL AND a.set_id IS NULL AND d.set_id IS NULL
          ORDER BY q.id
          LIMIT 1",
     )
@@ -1804,13 +1918,14 @@ pub async fn asked_from(pool: &SqlitePool, set_id: i64) -> Result<Option<i64>> {
     Ok(found.map(|(id,)| id))
 }
 
-/// Rewrite a drafting Conversation's Brief.
+/// Rewrite the Brief of the round a drafting Conversation is in.
 ///
-/// The Brief Event is edited in place rather than added to: while a Conversation
-/// is drafting there is one Brief and this is it. The frozen-Brief rule the
-/// design states — a reopened round adds a new Brief rather than editing the old
-/// one — is the drafting guard here, keeping its half of the bargain from the
-/// start.
+/// The Brief Event is edited in place rather than added to, and it is the
+/// *newest* of them: the frozen-Brief rule the design states — a reopened round
+/// adds a new Brief rather than editing the old one — makes every Brief but the
+/// last one a record of a round that has been built, and the drafting guard is
+/// what keeps this to the round nobody has grilled yet. A Conversation on its
+/// first round has one Brief, and the newest is it.
 pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
@@ -1818,7 +1933,11 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 
     sqlx::query(
         "UPDATE timeline_events SET body = ?
-         WHERE conversation_id = ? AND kind = ?",
+         WHERE id = (
+             SELECT id FROM timeline_events
+             WHERE conversation_id = ? AND kind = ?
+             ORDER BY id DESC LIMIT 1
+         )",
     )
     .bind(markdown)
     .bind(id)
@@ -1834,9 +1953,17 @@ pub async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Result<Ed
 ///
 /// Whether the name is one git would take is decided above the store, where git
 /// itself is asked — this records what it is given.
+///
+/// Refused once the branch has been made, which drafting alone no longer says:
+/// a reopened round is drafting again on a branch that has been worked — see
+/// [`branch_made`].
 pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET branch = ? WHERE id = ?")
@@ -1855,9 +1982,17 @@ pub async fn rename_branch(pool: &SqlitePool, id: i64, branch: &str) -> Result<E
 /// `None` is the ordinary case and not a cleared field: the design says the base
 /// commit is the default branch's tip *at grill start*, so while drafting there
 /// is no value to hold — only whether the human has overridden the rule.
+///
+/// Refused once the branch has been made, for [`rename_branch`]'s reason: the rule
+/// resolved to a commit when the work branched, and a reopened round carries on
+/// from what was built rather than branching again.
 pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -> Result<Edited> {
     if let Some(refusal) = not_drafting(pool, id).await? {
         return Ok(refusal);
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Edited::NotDrafting);
     }
 
     sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
@@ -1892,6 +2027,28 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
         Lifecycle::Draft => None,
         _ => Some(Edited::NotDrafting),
     })
+}
+
+/// Whether this Conversation's branch has been made already.
+///
+/// The worktree row is what says so: it is written when the branch and the
+/// checkout are made, and forgotten only by aborting. Drafting used to answer
+/// this on its own — a Conversation was drafting exactly until its branch
+/// existed — and a reopened round is the case that separated the two: it is
+/// drafting a second Brief on a branch that has already been worked.
+///
+/// Which is why the branch name and the base commit are refused off this as
+/// well as off the state. The Brief is not: writing the new round's Brief is
+/// the whole of what reopening is for.
+async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM worktrees WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("looking for the worktree of Conversation {id}"))?;
+
+    Ok(row.is_some())
 }
 
 /// Record that a Conversation has started grilling: what it branched from, where
@@ -1947,12 +2104,18 @@ pub async fn start_grilling(
     .await
     .with_context(|| format!("moving Conversation {id} to grilling"))?;
 
-    sqlx::query("INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)")
-        .bind(id)
-        .bind(worktree)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+    // Written over whatever is there, because a second round has one already: a
+    // reopened Conversation is drafting on the checkout it was reopened with, and
+    // this writes the same path back — see [`reopen_conversation`].
+    sqlx::query(
+        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+    )
+    .bind(id)
+    .bind(worktree)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the worktree of Conversation {id}"))?;
 
     moved(&mut tx, id, Lifecycle::Grilling).await?;
 
@@ -2013,6 +2176,94 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
     tx.commit().await.context("aborting a Conversation")?;
 
     Ok(Aborting::Aborted)
+}
+
+/// Record that a finished Conversation has been reopened: it is drafting a
+/// second Brief, on the branch the first round was built on.
+///
+/// Done is the one state this is reachable from. Aborted is off the ladder and
+/// stays there, and every other state is somewhere the work has got to — there
+/// is nothing to reopen about work that is still going on.
+///
+/// **The frozen Brief is left exactly where it is and a new one is added.** That
+/// is the whole rule the design states: the first Brief is what the first round
+/// was built from, and a Timeline that had lost it would have lost why the work
+/// is the shape it is. What [`save_brief`] writes from here on is the new one.
+///
+/// The move is written first and the Brief after it, which is reading order: the
+/// move is where the round boundary falls, and the Brief under it belongs to the
+/// round that starts there.
+///
+/// The worktree is recorded rather than made, as [`start_grilling`] records one:
+/// the directory is the server's to keep or to check out again before this is
+/// called. Written over whatever was there, because a Conversation that had one
+/// keeps it and one whose directory had gone gets it back in the same place.
+///
+/// One transaction, for [`start_grilling`]'s reason: a Conversation left saying
+/// `done` with a second Brief on its Timeline would be one nothing could grill
+/// and nothing would tidy.
+pub async fn reopen_conversation(pool: &SqlitePool, id: i64, worktree: &Path) -> Result<Reopening> {
+    let worktree = super::repos::text(worktree)?;
+
+    let mut tx = pool.begin().await.context("reopening a Conversation")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Reopening::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Done {
+        return Ok(Reopening::NotDone);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Draft.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to drafting"))?;
+
+    sqlx::query(
+        "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+         ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+    )
+    .bind(id)
+    .bind(worktree)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+
+    // The round before this one is over and its bookkeeping goes with it, so
+    // that the wrap-up of the round starting here waits on the same things from
+    // nothing — see [`super::wrap_up::forget_the_round`].
+    super::wrap_up::forget_the_round(&mut tx, id).await?;
+
+    moved(&mut tx, id, Lifecycle::Draft).await?;
+
+    // Empty, because the new round has not been written yet — exactly as the
+    // first Brief is empty from the moment there is a Conversation. It is a
+    // second Event and never an edit of the first: what the first round was
+    // built from stays on the record beside it.
+    let brief = Event::Brief(String::new());
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+    )
+    .bind(id)
+    .bind(brief.kind())
+    .bind(brief.body())
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("writing the new round's Brief of Conversation {id}"))?;
+
+    tx.commit().await.context("reopening a Conversation")?;
+
+    Ok(Reopening::Reopened)
 }
 
 /// Record the direction the human picked on a wrap-up proposal: it is the

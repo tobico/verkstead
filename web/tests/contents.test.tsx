@@ -16,17 +16,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
 import { reading, texts } from "./reading";
+import { readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 import archived from "./fixtures/set-archived.json" with { type: "json" };
 
-const WAITING = answering as SetView;
+const WAITING = readable(answering);
 
 /// The two settled standings, each given the Diff the waiting fixture carries:
 /// a Set is read for what it asked about however it stands, so the nav has the
 /// same work to do on all three.
-const ANSWERED: SetView = { ...(answered as SetView), diff: WAITING.diff };
-const ARCHIVED: SetView = { ...(archived as SetView), diff: WAITING.diff };
+const ANSWERED: SetView = { ...readable(answered), diff: WAITING.diff };
+const ARCHIVED: SetView = { ...readable(archived), diff: WAITING.diff };
 
 /// A Set with neither of the two sections a Set can be without.
 const BARE: SetView = { ...WAITING, preface_html: null, diff: null };

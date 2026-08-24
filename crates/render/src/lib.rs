@@ -33,16 +33,18 @@ pub use answering::{Archived, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved,
-    Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
-    ConversationEntry, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
-    HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted, ManualTaskSubmission, MovedEvent,
-    NewAdoption, NewConversation, NoticeEvent, PinnedEvent, ProposalView, PullRequestComment,
+    By, Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
+    ConversationEntry, ConversationReopened, ConversationStopped, ConversationView,
+    GrillingStarted, HandedBack, HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted,
+    ManualTaskSubmission, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,
+    PauseEnded, PauseEvent, PauseResumed, PinnedEvent, ProposalView, PullRequestComment,
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     Resumed, Screen, SetRow, Shown, Size, StageEntry, StageListEvent, Started, TaskEntry,
-    TaskListEvent, TimelineEvent, Watching, Worktree, agent_output_event, brief_event,
-    commit_event, commit_pane, handoff_event, manual_task_event, moved_event, notice_event,
-    proposal_view, pull_request_details, pull_request_event, question_set_event, stage_list_event,
-    task_list_event,
+    TaskListEvent, TimelineEvent, UnreadableSetEvent, Waiting, Watching, Worktree,
+    agent_output_event, brief_event, commit_event, commit_pane, handoff_event, manual_task_event,
+    moved_event, notice_event, pause_event, proposal_view, pull_request_details,
+    pull_request_event, question_set_event, stage_list_event, task_list_event,
+    unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
@@ -58,7 +60,10 @@ pub use transcript::{
     statements, transcript_after, transcript_view, turns,
 };
 pub use update::UpdateNotice;
-pub use view::{Answered, AskView, DiffView, OptionView, QuestionView, SetView, Standing};
+pub use view::{
+    Answered, AskView, DiffView, OptionView, QuestionView, SetReading, SetView, Standing,
+    UnreadableSet,
+};
 
 pub mod diff;
 pub mod markdown;

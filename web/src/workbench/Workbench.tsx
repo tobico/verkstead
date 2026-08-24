@@ -56,6 +56,7 @@ import type {
   ManualTaskEvent,
   PullRequestEvent,
   QuestionSetEvent,
+  UnreadableSetEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Asked } from "./Asked";
@@ -87,7 +88,7 @@ export type Pane = "conversations" | "timeline" | "details";
 /// Event itself.
 type Opened =
   | { output: AgentOutputEvent }
-  | { asked: QuestionSetEvent }
+  | { asked: QuestionSetEvent | UnreadableSetEvent }
   | { commit: CommitEvent }
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
@@ -101,6 +102,7 @@ function which(
 ):
   | AgentOutputEvent
   | QuestionSetEvent
+  | UnreadableSetEvent
   | CommitEvent
   | PullRequestEvent
   | BriefEvent
@@ -130,7 +132,7 @@ function outputIn(open: Opened): AgentOutputEvent | undefined {
   return "output" in open ? open.output : undefined;
 }
 
-function setIn(open: Opened): QuestionSetEvent | undefined {
+function setIn(open: Opened): QuestionSetEvent | UnreadableSetEvent | undefined {
   return "asked" in open ? open.asked : undefined;
 }
 
@@ -476,6 +478,12 @@ function Reading(props: {
         }
         if ("QuestionSet" in entry) {
           return { asked: entry.QuestionSet };
+        }
+        // The same pane, because it is the same Set reached the same way: what
+        // comes back from the fetch is what says whether this build could read
+        // the stored body.
+        if ("UnreadableSet" in entry) {
+          return { asked: entry.UnreadableSet };
         }
         if ("Commit" in entry) {
           return { commit: entry.Commit };

@@ -19,7 +19,7 @@
     }
   },
   "held": null,
-  "id": 7,
+  "id": 8,
   "implementation_pairing": {
     "model": "claude-opus-5",
     "profile": {
@@ -79,15 +79,16 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>A staged roadmap</h1>\n<p>Too much for one feature, so it is cut into stages and each becomes a\nfeature of its own.</p>\n",
-        "id": 27,
+        "id": 36,
         "markdown": "# A staged roadmap\n\nToo much for one feature, so it is cut into stages and each becomes a\nfeature of its own.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 28,
+        "id": 37,
         "state": "Grilling"
       }
     },
@@ -95,7 +96,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Stage 01 of the <code>mvp</code> roadmap — <em>Workbench</em> — has started as a Conversation of its own, on <code>workbench</code>.</p>\n",
-        "id": 29
+        "id": 38
       }
     }
   ],

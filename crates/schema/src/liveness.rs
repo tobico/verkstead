@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// What a Set still waiting on the human says about itself: whether an agent is
-/// currently waiting on it, or nothing is holding a wait any more.
+/// currently waiting on it, whether nothing is holding a wait any more, or
+/// whether nothing ever was.
 ///
 /// Display state only (ADR-0001). A disconnected Set is still answerable and is
 /// never withdrawn on its own — the CLI reconnects through transient drops, and
@@ -26,4 +27,16 @@ pub enum Liveness {
     /// Nothing has held a wait on the Set for long enough that its agent is
     /// taken to be gone.
     Disconnected,
+
+    /// It was a Deferred Ask: no wait was ever held on it, and none ever will
+    /// be. The session that asked went on working and its Answers reach a later
+    /// one.
+    ///
+    /// A verdict of its own rather than the absence of one, because the question
+    /// the badge answers — is anyone still on the other end? — has three
+    /// answers rather than two, and *disconnected* would be this build reporting
+    /// an agent that had gone where none was ever waiting. It is answerable and
+    /// archivable exactly as the other two are: what differs is who is waiting,
+    /// which is nobody.
+    Deferred,
 }

@@ -217,6 +217,40 @@ pub(crate) fn add(repo: &Path, path: &Path, branch: &str, commit: &str) -> bool 
     .is_some()
 }
 
+/// Check `branch` out again at `path`, on the branch as it already stands.
+///
+/// What a reopened round needs where the directory has gone from under it: the
+/// branch has been worked, so there is nothing to create and nothing to branch
+/// from — [`add`]'s `-b` is exactly the difference between the two, and a second
+/// round that made a branch would start the work over.
+///
+/// Pruned first, because the registration outlives the directory: git keeps a
+/// worktree's administrative files under the repository until it is told the
+/// checkout has gone, and until then it refuses to check the branch out again —
+/// *already used by worktree at …*, naming a directory that is not there.
+pub(crate) fn recheckout(repo: &Path, path: &Path, branch: &str) -> bool {
+    if let Some(parent) = path.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        tracing::error!(error = ?error, path = %parent.display(), "making room for a worktree failed");
+        return false;
+    }
+
+    git(repo, &["worktree", "prune"]);
+
+    git(
+        repo,
+        &[
+            "worktree",
+            "add",
+            "--end-of-options",
+            &path.to_string_lossy(),
+            branch,
+        ],
+    )
+    .is_some()
+}
+
 /// The git directory `worktree` shares with the repository it was made from, in
 /// full.
 ///

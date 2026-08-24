@@ -195,8 +195,11 @@ in
       }
     ];
 
-    # The binary lands on `PATH`; an agent asks with it, and `verkstead serve
-    # --help` is how a human finds out what this unit is passing it.
+    # The binary lands on `PATH`, for a human at a terminal: `verkstead serve
+    # --help` is how they find out what this unit is passing it, and `verkstead
+    # ask` is there for an agent working outside Verkstead. A session inside a
+    # Sandbox asks with the running server's own image instead, bound in ahead of
+    # this one, so the two halves of an ask are always the same build.
     environment.systemPackages = [ cfg.package ];
 
     users.users.verkstead = {

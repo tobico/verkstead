@@ -43,6 +43,9 @@ _Avoid_: task, session, job, thread, ticket
 The checkout a Conversation's work is done in, made when grilling starts along
 with the branch it holds, and removed when the Conversation is aborted — the
 branch outlives it, because a branch is cheap and may hold work worth reading.
+A reopened Conversation keeps the one it has; where the directory has gone, one
+is checked out again on the branch that was worked, which is the only time a
+Worktree is made without a branch being made with it.
 Named for the Repo and the branch, and it lives in the Data Directory rather
 than inside a Watched Path: Verkstead made it, so it goes among Verkstead's own
 things.
@@ -62,12 +65,14 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system and the Skills
-read-only, and nothing else of the machine at all
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
+the Verkstead executable read-only, and nothing else of the machine at all
 — not even the checkout the Worktree was made from. The filesystem is the
 boundary and the network is not: inside, it is the host's own, whole and
 unfiltered, because what stops a session doing harm is that there is nothing
-within reach to harm.
+within reach to harm. The `verkstead` a session asks with is the running
+server's own image, first on the `PATH` inside, so the CLI a session asks with
+and the server it asks are one build and cannot disagree about a schema.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -90,22 +95,27 @@ above the Brief.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
-The editable markdown document a Conversation starts from, and its first
-Timeline Event. Freezes when grilling starts; a reopened round adds a new Brief
-rather than editing the frozen one.
+The editable markdown document a round of a Conversation starts from, and the
+first Timeline Event. Freezes when its round's grilling starts; a reopened round
+adds a new Brief rather than editing the frozen one, so a Conversation has one
+Brief per round and the newest is the one being written. What is *not* the
+human's again on a reopened round is the branch and the base commit: the branch
+has been worked, and the second round carries on from what is on it.
 
-Written where it is read: while the Conversation is drafting, the Brief on its
-card *is* the field — raw markdown, always open, keeping itself on a pause in
-the typing and whenever the field is left, and saying nothing about it either
-way. There is no Edit, no Save and no word about saving, because there is no
-other thing the Brief could be doing while it is a draft. Once it freezes it is
-the server's rendering of it and nothing else.
+Written where it is read: while its round is drafting, the Brief on its card
+*is* the field — raw markdown, always open, keeping itself on a pause in the
+typing and whenever the field is left, and saying nothing about it either way.
+There is no Edit, no Save and no word about saving, because there is no other
+thing the Brief could be doing while it is a draft. Once it freezes it is the
+server's rendering of it and nothing else.
 
 While it is still a draft its card carries the whole of the Conversation's
 setup under it — the branch, the base commit, both Pairings and the readiness
 verdict — because setting the work up and kicking it off are one act, and both
 belong where the work is read. Every one of those freezes at the same moment
-the Brief does, so once grilling starts the card is the Brief alone.
+the Brief does, so once grilling starts the card is the Brief alone; on a
+reopened round the branch and the base commit are frozen already, and what the
+card carries under the new Brief is the Pairings.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:
@@ -118,7 +128,8 @@ _Avoid_: feed, log, history, activity stream
 
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
-commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
+commit, a task list, a stage list, a PR, a Pause, a Notice. Each shows a summary
+in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
@@ -413,6 +424,30 @@ lets whatever is running now reach its own end and halts before the next
 launch, and **Force stop**, which ends the session where it stands.
 _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 
+**Pause**:
+A run stopped because the Agent Profile it was spending has exhausted its usage
+window. An Event on the Timeline, **open** the way a **Halt** stops a run — the
+run does not advance past one, no next Step and no fresh session, and the
+Conversation carries *blocked on you* — and at most one is open per
+Conversation. What makes it a different thing is that nothing went wrong: the
+account is out of window, and the agent is waiting for the same reset under a
+setting of its own that Verkstead neither turns off nor depends on. What the
+Pause adds is that the wait is *said*, and answerable from a phone, instead of
+being a session gone quiet for no stated reason.
+
+It names the Profile that ran out and, where the sentence the session printed
+carried a time this build could read, when the window comes back. Recognition is
+one phrase read off the Capture and the Transcript, kept in one place because the
+wording is the backend's and will move.
+
+It ends two ways, and they meet in the same place: the human says *go on without
+waiting*, or the reset time passes. Neither reverts anything — the Worktree is
+exactly as the session left it — and the record keeps which of the two it was.
+**No auto-switching between Profiles**: an exhausted account is a wait, never a
+reason to spend a different one.
+_Avoid_: halt (that is driving stopped and waiting on a press), hold, rate
+limit, throttle
+
 **Manual Task**:
 A free-text instruction the human types at the end of a Conversation's Timeline,
 with an Agent Profile picked beside it: submitting starts a one-off session that
@@ -443,11 +478,11 @@ take over, errand, manual step
 
 **Stalled**:
 A Conversation in a driven state — Grilling, Implementing or Wrapping — with
-nothing registered as driving it and no **Halt** written down. Nothing is moving
-the work and nothing is saying so, which is the one condition Verkstead has to
-notice on its own account. A condition an active state can be in rather than a
-state of its own — the Conversation is still Grilling or Implementing or
-Wrapping, and that is the half of it that is wrong.
+nothing registered as driving it, no **Halt** written down and no open **Pause**.
+Nothing is moving the work and nothing is saying so, which is the one condition
+Verkstead has to notice on its own account. A condition an active state can be in
+rather than a state of its own — the Conversation is still Grilling or
+Implementing or Wrapping, and that is the half of it that is wrong.
 
 The condition rather than the record of it. A sweep looks every minute and
 **halts** what it finds, by circumstance rather than by anybody's decision, so
@@ -468,6 +503,21 @@ the session until the Response arrives, as every ask does in askance. A
 **Deferred Ask** does not idle it: the Set waits in the Timeline and its
 Answers are folded into a later session's prompt. Work blocks only on Questions
 whose Answers affect work about to be done.
+
+`verkstead ask --deferred` is the second one, and the difference is the session's
+alone. Both land on the Timeline, both leave the Conversation *blocked on you*
+and both notify the human's devices; a deferred one says on the Timeline that it
+is deferred, and its badge says no agent is waiting rather than that one has
+disconnected. What is deferred is how it was asked rather than anything in the
+Set, so it is kept beside the stored body rather than in it.
+
+The **folding** is the far end: when a session is started to build, every
+answered Deferred Ask of that Conversation nobody has been told about goes into
+its prompt, oldest first, under the documents the prompt is built from. Each is
+folded once, and that it was folded is recorded rather than worked out from what
+is answered. A Manual Task's session is never folded into — its prompt is the
+instruction and nothing else — and neither is a relaunched grilling, which is
+already primed with everything the Conversation has answered.
 _Avoid_: sync/async ask, hard/soft question, urgent question
 
 ## Question Sets
@@ -478,6 +528,18 @@ title. The unit that lands on a Conversation's Timeline, gets answered, and is
 archived. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true.
 _Avoid_: request, batch, ticket
+
+**Unreadable**:
+What a stored Question Set is when the build looking at it cannot deserialize
+the body it was written as — ordinary schema movement, a field having left. It
+is drawn as a row saying so, on the Timeline it has always been on, with the
+stored body reachable and nothing offered to answer or archive it by. The rule
+is ADR-0006's, applied to the Sets themselves: keep what was written and defer
+rendering it, so that one record the schema has outrun costs its own row and
+never the Timeline around it. Nothing rewrites a body to make it readable —
+it is the record of what was asked, and a later Verkstead should find it as it
+was written. Distinct from Unanswered, which is a Question the human left open.
+_Avoid_: corrupt, invalid, broken, unparseable, legacy
 
 **Preface**:
 The markdown context that accompanies a Question Set, giving the human

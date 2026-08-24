@@ -19,7 +19,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Direction, Proposal, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
+    Ask, Directing, Event, Implementing, Lifecycle, Proposed, Settlements, Submission, ask,
     load_conversation, open_database, pick_direction, record_handoff, register_repo, save_brief,
     start_conversation, start_grilling, start_implementing, submit_response, timeline,
 };
@@ -200,7 +200,7 @@ async fn answering_a_set_that_carries_a_proposal_is_accepted() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let created = ask(&pool, id, &proposing(Direction::Inline))
+    let created = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -231,7 +231,10 @@ async fn a_pick_records_the_direction_and_leaves_the_conversation_grilling() {
         let (_dir, pool) = fresh_pool().await;
         let id = grilling(&pool).await;
 
-        let created = ask(&pool, id, &proposing(picked)).await.unwrap().unwrap();
+        let created = ask(&pool, id, &proposing(picked), Ask::Blocking)
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(
             proposed(&pool, created.id, &accepting(picked)).await,
@@ -325,7 +328,10 @@ async fn answering_an_ordinary_grilling_set_leaves_it_grilling() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let created = ask(&pool, id, &ordinary()).await.unwrap().unwrap();
+    let created = ask(&pool, id, &ordinary(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
     answer(&pool, created.id).await;
 
     assert_eq!(
@@ -345,7 +351,10 @@ async fn the_acceptance_says_what_the_proposal_settled() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let ordinary = ask(&pool, id, &ordinary()).await.unwrap().unwrap();
+    let ordinary = ask(&pool, id, &ordinary(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         proposed(
             &pool,
@@ -357,7 +366,7 @@ async fn the_acceptance_says_what_the_proposal_settled() {
         "a Set carrying no proposal settled none, and says so by having nothing to say",
     );
 
-    let proposing = ask(&pool, id, &proposing(Direction::TaskList))
+    let proposing = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -399,7 +408,7 @@ async fn any_answer_without_a_pick_leaves_the_conversation_grilling() {
     ] {
         let (_dir, pool) = fresh_pool().await;
         let id = grilling(&pool).await;
-        let created = ask(&pool, id, &proposing(Direction::TaskList))
+        let created = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
             .await
             .unwrap()
             .unwrap();
@@ -434,7 +443,7 @@ async fn any_answer_without_a_pick_leaves_the_conversation_grilling() {
 async fn accepting_with_something_to_add_is_still_accepting() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
-    let created = ask(&pool, id, &proposing(Direction::TaskList))
+    let created = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -467,7 +476,7 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let first = ask(&pool, id, &proposing(Direction::Inline))
+    let first = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -479,7 +488,7 @@ async fn a_proposal_put_again_after_a_refusal_can_be_accepted() {
 
     // The agent read the Response, went back down the branch, and proposed
     // again — a second Set, because the first is answered and stays answered.
-    let second = ask(&pool, id, &proposing(Direction::TaskList))
+    let second = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -512,7 +521,7 @@ async fn a_later_pick_supersedes_the_one_before_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let first = ask(&pool, id, &proposing(Direction::Inline))
+    let first = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -527,7 +536,7 @@ async fn a_later_pick_supersedes_the_one_before_it() {
 
     // The agent proceeded on none of it: it came back with another Set, and the
     // human picked something else on that one.
-    let second = ask(&pool, id, &proposing(Direction::Inline))
+    let second = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -567,11 +576,11 @@ async fn a_pick_answered_after_the_tail_landed_finds_nothing_to_settle() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    let first = ask(&pool, id, &proposing(Direction::Inline))
+    let first = ask(&pool, id, &proposing(Direction::Inline), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
-    let second = ask(&pool, id, &proposing(Direction::TaskList))
+    let second = ask(&pool, id, &proposing(Direction::TaskList), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();

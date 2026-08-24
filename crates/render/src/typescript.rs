@@ -19,12 +19,12 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
-    ConversationStopped, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RepoEntry, Resumed, Screen, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, Shown, Started, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    ConversationReopened, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
+    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
+    PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading,
+    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
+    TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -39,8 +39,11 @@ fn the_viewers_types_are_written_from_these() {
     let config = ts_rs::Config::from_env();
 
     // One Set, whole — which is what both the standalone page and the details
-    // pane of the Timeline it landed on are drawn from.
-    SetView::export_all(&config).unwrap();
+    // pane of the Timeline it landed on are drawn from. The whole reading
+    // rather than the `SetView` inside it: what comes back says whether this
+    // build could read the stored body at all, and the page has to be able to
+    // draw either answer.
+    SetReading::export_all(&config).unwrap();
 
     // Answering a Set, and closing it unanswered. What goes *in* to the first of
     // them is a Response, which the Set already brought along: it is what an
@@ -65,6 +68,10 @@ fn the_viewers_types_are_written_from_these() {
     ConversationView::export_all(&config).unwrap();
     NewConversation::export_all(&config).unwrap();
 
+    // And the order the human dragged that sidebar into, which is the one thing
+    // they say about the list itself rather than about anything on it.
+    NewOrder::export_all(&config).unwrap();
+
     // And starting one to adopt a roadmap with, which is the other way in — the
     // Conversation it starts comes back inside the view above.
     NewAdoption::export_all(&config).unwrap();
@@ -76,11 +83,13 @@ fn the_viewers_types_are_written_from_these() {
     BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
-    // And the two actions that make and unmake what a Conversation works in.
-    // Neither takes a request shape — which Conversation is in the path, and
-    // there is nothing else to say about either — so it is the outcomes alone.
+    // And the three actions that make, unmake and make again what a
+    // Conversation works in. None takes a request shape — which Conversation is
+    // in the path, and there is nothing else to say about any of them — so it is
+    // the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationAborted::export_all(&config).unwrap();
+    ConversationReopened::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
@@ -131,6 +140,12 @@ fn the_viewers_types_are_written_from_these() {
     // as a pinned Event — a number, a title and a URL; what is *on* it is its
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
+
+    // What the human does about a run waiting an account's window out. The Pause
+    // rides on the Timeline whole — it is the one Event with nothing behind a
+    // second fetch — and there is nothing to send with the press, so this is the
+    // outcome alone.
+    PauseResumed::export_all(&config).unwrap();
 
     // What the human sets going by hand at the end of a Timeline, and every way
     // of being refused it. The instruction's own Event rides on the

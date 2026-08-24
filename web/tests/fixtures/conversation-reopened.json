@@ -1,0 +1,138 @@
+{
+  "adopting": null,
+  "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+  "blocked_on": null,
+  "branch": "rate-limiting",
+  "direction": "task-list",
+  "grilling_pairing": {
+    "model": "claude-fable-5",
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/fable/.claude",
+      "config_file": "/srv/accounts/fable/.claude.json",
+      "id": 1,
+      "models": [
+        "claude-fable-5"
+      ],
+      "name": "fable"
+    }
+  },
+  "held": null,
+  "id": 7,
+  "implementation_pairing": {
+    "model": "claude-opus-5",
+    "profile": {
+      "agent_type": "Claude",
+      "broken": null,
+      "claude_dir": "/srv/accounts/opus/.claude",
+      "config_file": "/srv/accounts/opus/.claude.json",
+      "id": 2,
+      "models": [
+        "claude-opus-5",
+        "claude-haiku-4-5-20251001"
+      ],
+      "name": "opus"
+    }
+  },
+  "pinned": [
+    {
+      "PullRequest": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 30,
+        "number": 41,
+        "title": "Rate limiting",
+        "url": "https://github.com/tobico/verkstead/pull/41"
+      }
+    }
+  ],
+  "ready_to_grill": true,
+  "ready_to_resume": false,
+  "ready_to_stop": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Draft",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
+        "html": "<h1>Rate limiting</h1>\n<p>The API has none, so one account can exhaust it for everybody.</p>\n",
+        "id": 26,
+        "markdown": "# Rate limiting\n\nThe API has none, so one account can exhaust it for everybody.\n"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 27,
+        "state": "Grilling"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 28,
+        "state": "Implementing"
+      }
+    },
+    {
+      "Commit": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "deletions": 24,
+        "files": 1,
+        "id": 29,
+        "insertions": 0,
+        "sha": "d41f8a3b6c2e91750f4a8c3d5b7e2f10a9c6d4b8",
+        "snippet": null,
+        "subject": "chore: finish rate-limiting"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 31,
+        "state": "Wrapping"
+      }
+    },
+    {
+      "ManualTask": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<p>Rebase this onto <code>main</code> and force-push — the conflict is in <code>src/limits.rs</code> alone.</p>\n",
+        "id": 32
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 33,
+        "state": "Done"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 34,
+        "state": "Draft"
+      }
+    },
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "frozen": false,
+        "html": "<h1>Rate limiting, per account</h1>\n",
+        "id": 35,
+        "markdown": "# Rate limiting, per account\n\n"
+      }
+    }
+  ],
+  "working": false,
+  "worktree": {
+    "missing": false,
+    "path": "/var/lib/verkstead/worktrees/verkstead-rate-limiting"
+  }
+}

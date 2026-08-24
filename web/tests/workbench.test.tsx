@@ -24,16 +24,18 @@ import type {
   CommitPane,
   ConversationAborted,
   ConversationEntry,
+  ConversationReopened,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
+  PauseResumed,
   ProfileEntry,
   PullRequestDetails,
   Resumed,
   Screen,
   Shown,
-  SetView,
+
   Submitted,
   TimelineEvent,
   TranscriptView,
@@ -59,14 +61,25 @@ import {
   nudged,
   theWorkbench,
 } from "./bench";
-import { askedFor, json, serving, whenever } from "./serving";
+import {
+  askedFor,
+  json,
+  readable,
+  reads,
+  serving,
+  unreadable,
+  whenever,
+} from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import halted from "./fixtures/conversation-halted.json" with { type: "json" };
+import paused from "./fixtures/conversation-paused.json" with { type: "json" };
+import reopened from "./fixtures/conversation-reopened.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
+import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
 import roadmap from "./fixtures/conversation-roadmap.json" with { type: "json" };
 import tasks from "./fixtures/conversation-tasks.json" with { type: "json" };
 import capture from "./fixtures/capture.json" with { type: "json" };
@@ -443,14 +456,39 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(".mark.working")).toBeNull();
   });
 
-  it("shows a dot on a conversation waiting on the human", async () => {
+  /// An icon and a border round the whole card, rather than the dot this used
+  /// to be: what it has to survive is a glance down a list on a phone.
+  it("marks a conversation waiting on the human, card and all", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
 
-    expect(card!.querySelector(".mark.waiting")).toBeTruthy();
+    expect(card!.querySelector(".mark.waiting")?.textContent).toBe("!");
     expect(card!.querySelector(".mark.working")).toBeNull();
+
+    // The border is the card's own, so the row carries it and the stylesheet
+    // says what it looks like — jsdom lays nothing out.
+    expect(card!.classList.contains("waiting")).toBe(true);
+    expect(stylesheet).toContain(
+      ".conversation-row.waiting .open {\n" +
+        "  border-color: var(--accent);\n" +
+        "  box-shadow: inset 0 0 0 1px var(--accent);\n" +
+        "}",
+    );
+  });
+
+  /// The mark is a character, and a character is something a screen reader
+  /// would otherwise read out beside the label that already said it.
+  it("keeps the mark out of what is read aloud", async () => {
+    theSidebar({ state: "Grilling", working: false, waiting: true });
+    const { container } = mount();
+
+    const [card] = await cards(container);
+
+    expect(
+      card!.querySelector(".mark.waiting")!.getAttribute("aria-hidden"),
+    ).toBe("true");
   });
 
   /// A Blocking Ask is exactly this: the session that asked is still alive and
@@ -515,6 +553,9 @@ describe("how a card says where its conversation has got to", () => {
     const [card] = await cards(container);
 
     expect(card!.querySelector(".mark")).toBeNull();
+
+    // Neither half of the waiting mark: no icon above, and no border here.
+    expect(card!.classList.contains("waiting")).toBe(false);
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
@@ -528,7 +569,7 @@ describe("how a card says where its conversation has got to", () => {
 
     // What "draft" means is the stylesheet's, and jsdom lays nothing out.
     expect(stylesheet).toContain(
-      ".conversation-row.draft button {\n  border-style: dotted;\n}",
+      ".conversation-row.draft .open {\n  border-style: dotted;\n}",
     );
   });
 
@@ -550,10 +591,10 @@ describe("how a card says where its conversation has got to", () => {
   /// that being the open one is the accent border and nothing beside it.
   it("takes a closed card well down, and marks the open one with a border", () => {
     expect(stylesheet).toContain(
-      ".conversation-row.ended button {\n  opacity: 0.45;\n}",
+      ".conversation-row.ended .open {\n  opacity: 0.45;\n}",
     );
     expect(stylesheet).toContain(
-      ".conversation-row.selected button {\n  border-color: var(--accent);\n}",
+      ".conversation-row.selected .open {\n  border-color: var(--accent);\n}",
     );
     expect(
       stylesheet,
@@ -632,6 +673,190 @@ describe("how a card says where its conversation has got to", () => {
         "  }\n" +
         "}",
     );
+  });
+});
+
+/// The order the sidebar is in, which is the human's own: they drag a row's grip
+/// and the whole list goes to the server, so it survives a reload, a restart and
+/// a second device without any of the three being a case this page knows about.
+///
+/// What the server does with the order is asked over there — the tests in
+/// `crates/server/tests/conversations.rs` say where an unplaced Conversation
+/// lands. What is asked here is that the list moves under the hand and that what
+/// is sent is what is on the screen.
+describe("the order the human puts the sidebar in", () => {
+  /// A sidebar of three named rows, over an endpoint that takes an order and
+  /// answers with nothing — which is what the real one does. A test wanting it
+  /// to answer otherwise says so, and what it says wins.
+  function three(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(
+        "/api/ui/conversations",
+        json(
+          ["first", "second", "third"].map((branch, n) => ({
+            ...SIDEBAR[0]!,
+            id: n + 1,
+            branch,
+          })),
+        ),
+      ),
+      whenever(
+        "/api/ui/conversations/order",
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "POST",
+      ),
+      ...answers,
+    );
+  }
+
+  /// The branches the sidebar is showing, top first.
+  async function order(container: ParentNode): Promise<(string | null)[]> {
+    return (await cards(container)).map(
+      (card) => card.querySelector(".title")!.textContent,
+    );
+  }
+
+  /// The rows laid out down the pane, one under the last.
+  ///
+  /// jsdom has no layout — every rect is zeros — and a drag asks the rows where
+  /// they are to say which one the pointer is over. The rect is worked out at
+  /// the moment it is asked for rather than fixed here, because the list moves
+  /// under the hand: a row that was second and is now first has to answer for
+  /// where it is now.
+  function laidOut(rows: HTMLElement[], height = 60) {
+    const list = rows[0]!.parentElement!;
+    const drawn = () => [...list.querySelectorAll<HTMLElement>(".conversation-row")];
+
+    for (const row of rows) {
+      row.getBoundingClientRect = () => {
+        const at = drawn().indexOf(row) * height;
+        return {
+          top: at,
+          bottom: at + height,
+          height,
+          left: 0,
+          right: 240,
+          width: 240,
+          x: 0,
+          y: at,
+          toJSON: () => ({}),
+        } as DOMRect;
+      };
+    }
+  }
+
+  /// Drag one row's grip to a height on the pane, and let go.
+  function dragTo(card: HTMLElement, y: number) {
+    const grip = card.querySelector<HTMLElement>(".grip")!;
+
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 0 });
+    fireEvent.pointerMove(grip, { pointerId: 1, clientY: y });
+    fireEvent.pointerUp(grip, { pointerId: 1 });
+  }
+
+  it("moves the row under the hand and sends the whole list", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    // The third row, dragged to the top of the pane.
+    dragTo(rows[2]!, 10);
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+
+    // The list as it now stands, by id, rather than the row that moved: what is
+    // on the screen is what they meant.
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [3, 1, 2],
+      }),
+    );
+  });
+
+  it("drops a row at the end when the hand goes past the last one", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[0]!, 500);
+
+    expect(await order(container)).toEqual(["second", "third", "first"]);
+  });
+
+  /// A grip that could only be dragged would be a control half the people using
+  /// it could not reach.
+  it("moves a row a step at a time from the keyboard", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    expect(await order(container)).toEqual(["first", "third", "second"]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [1, 3, 2],
+      }),
+    );
+  });
+
+  it("leaves the top row where it is when it is asked to go higher", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[0]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "there is nowhere to move it to, so there is nothing to save",
+    ).toBe(0);
+  });
+
+  /// The grip is a second control on a row that already has one, and it does a
+  /// different thing: it says so itself rather than leaving the card's label to
+  /// cover both.
+  it("names what each grip moves", async () => {
+    three();
+    const { container } = mount();
+
+    expect(
+      (await cards(container)).map((card) =>
+        card.querySelector(".grip")!.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Move first", "Move second", "Move third"]);
+  });
+
+  /// Most answering happens on a phone, and a touch that starts on the grip has
+  /// to drag the row rather than scroll the list out from under it.
+  it("takes the touch that starts on a grip", () => {
+    expect(stylesheet).toContain("  cursor: grab;\n  touch-action: none;\n");
+  });
+
+  /// The order that was not saved is not the order to draw: what comes back is
+  /// the server's, with the reason under it.
+  it("says so and puts the list back when the order will not save", async () => {
+    three(
+      whenever(
+        "/api/ui/conversations/order",
+        json({ error: "the server is not taking orders" }, 503),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+
+    const rows = await cards(container);
+    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+
+    await waitFor(() =>
+      screen.getByText(/The order could not be saved/, { exact: false }),
+    );
+    expect(await order(container)).toEqual(["first", "second", "third"]);
   });
 });
 
@@ -2544,8 +2769,13 @@ describe("a move on the timeline", () => {
       "brief",
       "moved",
       "agent-output",
-      // The two Sets that session put to the human, in the order it asked
-      // them: the answered one, and the one still waiting.
+      // The four Sets that session put to the human, in the order it asked
+      // them: the answered one, the one still waiting, the deferred one that is
+      // also still waiting, and the one whose stored body this build cannot
+      // read — which is a row like any other and in its own place in the
+      // record.
+      "question-set",
+      "question-set",
       "question-set",
       "question-set",
     ]);
@@ -3923,6 +4153,165 @@ describe("aborting a conversation", () => {
   });
 });
 
+/// A conversation Verkstead has finished with, opened again for a second brief
+/// round: the frozen brief above the round boundary, and the one being written
+/// under it.
+describe("reopening a conversation", () => {
+  const REOPENED = reopened as ConversationView;
+
+  /// The workbench with the reopened conversation opened instead of the drafting
+  /// one.
+  function theReopened(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${REOPENED.id}`, json(REOPENED)),
+      ...answers,
+    );
+  }
+
+  /// Where `Start grilling` sits, and for the same reason: it is the next thing
+  /// to do about this conversation, and the end of everything that has happened
+  /// is where the next thing belongs.
+  it("offers the press under the timeline once the work is finished", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const press = await drawn(container, ".reopen .reopen-conversation");
+    expect(press.textContent).toContain("Reopen");
+
+    expect(
+      container.querySelector(".timeline")!.compareDocumentPosition(press) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// Done and nowhere else. Aborted is off the ladder and stays there, and every
+  /// other state is somewhere the work has got to.
+  it("is offered on done and on no other state", async () => {
+    for (const state of [
+      "Draft",
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "Aborted",
+    ] as const) {
+      theWorkbenchWith({ state });
+      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+
+      await drawn(container, ".timeline");
+      expect(container.querySelector(".reopen")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("posts to the conversation's own reopen route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Done" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/reopen`,
+        json("Reopened" satisfies ConversationReopened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/reopen`),
+      ).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before pressing it: the frozen brief is not touched,
+  /// and the branch is the one the work is already on.
+  it("says the brief above it stays where it is", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const panel = await drawn(container, ".reopen");
+    expect(panel.textContent).toContain("second round on the same branch");
+    expect(panel.textContent).toContain("stays where it is");
+  });
+
+  it("says when the branch could not be checked out again", async () => {
+    theWorkbenchWith(
+      { state: "Done" },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/reopen`,
+        json("WorktreeRefused" satisfies ConversationReopened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
+
+    await waitFor(() => screen.getByText(/would not check the branch out again/));
+  });
+
+  /// One round's brief is a record and the next one's is the field. Both are on
+  /// the timeline, and only one of them is written in — which is the whole
+  /// reason a brief carries its own `frozen` rather than reading the
+  /// conversation's state, since both of these are on a conversation that is
+  /// drafting.
+  it("draws the frozen brief beside the one being written", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    await drawn(container, ".brief");
+    const briefs = [...container.querySelectorAll(".brief")];
+
+    expect(briefs).toHaveLength(2);
+    expect(briefs[0]!.querySelector("textarea")).toBeNull();
+    expect(briefs[1]!.querySelector("textarea")).toBeTruthy();
+
+    // And the setup goes under the round being set up rather than under both.
+    expect(briefs[0]!.querySelector(".conversation-setup")).toBeNull();
+    expect(briefs[1]!.querySelector(".conversation-setup")).toBeTruthy();
+  });
+
+  /// A reader has to be able to tell which brief the work under it was built
+  /// from, which is the whole of what the boundary is for.
+  it("says where the round boundary falls", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    const boundary = await drawn(container, ".timeline-event > .moved.draft");
+    expect(
+      boundary.textContent,
+      "the move says both states, as every move does — and nothing moves *to* \
+       drafting except a second round",
+    ).toBe("Done → Draft");
+
+    // And it is drawn between the two briefs, which is where the rounds part.
+    const briefs = [...container.querySelectorAll(".brief")];
+    expect(
+      briefs[0]!.compareDocumentPosition(boundary) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      briefs[1]!.compareDocumentPosition(boundary) &
+        Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+
+    // What the boundary looks like is the stylesheet's, and jsdom lays nothing
+    // out.
+    expect(stylesheet).toContain(".timeline-event > .moved.draft {");
+  });
+
+  /// The second round runs the ordinary pipeline from grilling onward, so what
+  /// stands under the new brief is the press every first round starts with.
+  it("offers the ordinary start grilling under the new brief", async () => {
+    theReopened();
+    const { container } = mount(`/conversations/${REOPENED.id}`);
+
+    const start = await drawn(container, ".start-grilling .start");
+    expect(start.textContent).toContain("Start grilling");
+    expect(container.querySelector(".reopen")).toBeNull();
+  });
+});
+
 /// Where the two stops are pressed.
 const STOPPING = `/api/ui/conversations/${GRILLING.id}/stop`;
 const AT_ONCE = `/api/ui/conversations/${GRILLING.id}/force-stop`;
@@ -4080,36 +4469,62 @@ describe("stopping a conversation", () => {
   });
 });
 
-/// The two Question Sets the grilling conversation's session put to the human:
-/// one answered, and one still waiting. Both are needed, because what a row
-/// draws turns on which — and it is the waiting one the human is offered a sheet
-/// for.
+/// The three readable Question Sets the grilling conversation's session put to
+/// the human: one answered, one still waiting on the session that asked it, and
+/// one deferred — waiting too, with nothing standing still until it is
+/// answered. All three are needed, because what a row draws turns on which.
 const ASKED = (() => {
   const found = GRILLING.timeline.flatMap((event) =>
     "QuestionSet" in event ? [event.QuestionSet] : [],
   );
-  if (found.length !== 2) {
-    throw new Error("the fixture should hold an answered Set and a waiting one");
+  if (found.length !== 3) {
+    throw new Error(
+      "the fixture should hold an answered Set, a waiting one and a deferred one",
+    );
   }
   return found;
 })();
 
 const ANSWERED_SET = ASKED.find((asked) => "Answered" in asked.standing)!;
-const WAITING_SET = ASKED.find((asked) => "Waiting" in asked.standing)!;
+
+const WAITING_SET = ASKED.find(
+  (asked) => "Waiting" in asked.standing && asked.standing.Waiting !== "deferred",
+)!;
+
+const DEFERRED_SET = ASKED.find(
+  (asked) => "Waiting" in asked.standing && asked.standing.Waiting === "deferred",
+)!;
+
+/// And the third row a Set gets: the one whose stored body this build cannot
+/// read, which is neither answered nor waiting and is on the record all the
+/// same.
+const UNREADABLE_SET = (() => {
+  const found = GRILLING.timeline.flatMap((event) =>
+    "UnreadableSet" in event ? [event.UnreadableSet] : [],
+  );
+  if (found.length !== 1) {
+    throw new Error("the fixture should hold one Set this build cannot read");
+  }
+  return found[0]!;
+})();
 
 /// The whole document behind each, which is what the details pane fetches. The
 /// two Set fixtures are the same shapes read back from the same endpoint — the
 /// standing is what decides whether the pane draws a sheet or a record, and
 /// these are the two.
-const DOCUMENT = answeredSet as SetView;
-const SHEET = answeringSet as SetView;
+///
+/// Served as the whole reading rather than as the Set inside it, because that is
+/// what the endpoint answers with: the pane is told which of the two kinds it is
+/// holding before it draws anything.
+const DOCUMENT = readable(answeredSet);
+const SHEET = readable(answeringSet);
 
 /// The workbench with the grilling conversation open and both of its Sets
 /// answerable, which is what the details pane fetches when one is opened.
 function theGrillingSets(...answers: Parameters<typeof serving>) {
   return theGrilling(
-    whenever(`/api/ui/sets/${ANSWERED_SET.set_id}`, json(DOCUMENT)),
-    whenever(`/api/ui/sets/${WAITING_SET.set_id}`, json(SHEET)),
+    whenever(`/api/ui/sets/${ANSWERED_SET.set_id}`, json(reads(DOCUMENT))),
+    whenever(`/api/ui/sets/${WAITING_SET.set_id}`, json(reads(SHEET))),
     ...answers,
   );
 }
@@ -4216,11 +4631,40 @@ describe("a question set on the timeline", () => {
     await drawn(container, ".question-set");
     const cards = [...container.querySelectorAll(".question-set")];
 
+    // The answered one, the one still waiting, the deferred one — which is
+    // waiting too, the human being the one who has not answered either — and
+    // the unreadable one, which is waiting on nobody, whatever the record says
+    // about it, because nothing here can put its questions in front of anybody.
     expect(cards.map((card) => card.classList.contains("waiting"))).toEqual([
       false,
       true,
+      true,
+      false,
     ]);
-    expect(screen.getByText("waiting on you")).toBeTruthy();
+    expect(screen.getAllByText("waiting on you")).toHaveLength(2);
+  });
+
+  /// Both are something to answer, so both say so. What the second word adds is
+  /// that no session is standing still until this one is answered — which is
+  /// the difference between a question holding the work up and one the work
+  /// went on without.
+  it("says which of the two waiting sets was deferred", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const cards = [...container.querySelectorAll(".question-set")];
+
+    expect(
+      cards.map((card) => card.querySelector(".deferred") !== null),
+    ).toEqual([false, false, true, false]);
+
+    const deferred = cards[2]!;
+
+    expect(deferred.querySelector(".set-title")!.textContent).toBe(
+      DEFERRED_SET.title,
+    );
+    expect(deferred.querySelector(".deferred")!.textContent).toBe("deferred");
   });
 
   /// A column of blanks would read as a Set that was answered with nothing.
@@ -4341,6 +4785,51 @@ describe("a question set on the timeline", () => {
     await drawn(pane, "nav.contents");
 
     expect(pane.querySelector(".page-header")).toBeNull();
+  });
+});
+
+describe("a question set the build cannot read", () => {
+  it("is a row saying so rather than a gap in the record", async () => {
+    theGrillingSets();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    const row = container.querySelector(".question-set.unreadable")!;
+
+    expect(row.querySelector(".unreadable-badge")!.textContent).toBe(
+      "cannot be read",
+    );
+    // Serde's own sentence, which names the field that has left the schema.
+    expect(row.querySelector(".unreadable-why")!.textContent).toContain(
+      "accepted_by",
+    );
+    // No table, because there is nothing to draw one from — and nothing asking
+    // the human for anything either.
+    expect(row.querySelector(".asked")).toBeNull();
+    expect(row.classList.contains("waiting")).toBe(false);
+  });
+
+  it("opens the stored body in the details pane, the way any Set opens", async () => {
+    theGrillingSets(
+      whenever(`/api/ui/sets/${UNREADABLE_SET.set_id}`, json(unreadableSet)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, ".question-set");
+    fireEvent.click(container.querySelector(".question-set.unreadable")!);
+
+    const pane = screen.getByLabelText("Details");
+    const stored = await waitFor(() => {
+      const found = pane.querySelector(".stored-json");
+      if (!found) {
+        throw new Error("the stored body has not been drawn");
+      }
+      return found;
+    });
+
+    expect(stored.textContent).toBe(unreadable(unreadableSet).body);
+    // The one thing the timeline's rows are not: a sheet to fill in.
+    expect(pane.querySelector(".questions")).toBeNull();
   });
 });
 
@@ -4484,7 +4973,7 @@ const COMMITS = BUILDING.timeline.flatMap((event) =>
 const COMMIT_PANE: CommitPane = {
   summary: null,
   diagrams: false,
-  diff: (answeringSet as SetView).diff,
+  diff: readable(answeringSet).diff,
 };
 
 /// The same commit with something to say for itself: the summary as the server
@@ -5516,6 +6005,184 @@ describe("the notice of a halt", () => {
 
     expect(notice.querySelector("button")).toBeNull();
     expect(notice.classList.contains("openable")).toBe(false);
+  });
+});
+
+/// A conversation waiting an account's window out, and the pause it stopped at.
+const WAITING = paused as ConversationView;
+
+const OUT_OF_WINDOW = (() => {
+  const event = WAITING.timeline.find((entry) => "Pause" in entry);
+  if (!event || !("Pause" in event)) {
+    throw new Error("the fixture should carry a pause");
+  }
+  return event.Pause;
+})();
+
+/// The workbench with that conversation open.
+function thePaused(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${WAITING.id}`,
+      json({ ...WAITING, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+/// Where the human says not to wait for the window.
+const RESUME_PATH = `/api/ui/conversations/${WAITING.id}/pause/${OUT_OF_WINDOW.id}/resume`;
+
+describe("a pause on the timeline", () => {
+  /// The two facts that decide whether the human does anything about it: which
+  /// account ran out, and when it comes back.
+  it("names the account that ran out and when the window comes back", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".what")!.textContent).toContain(
+      `${OUT_OF_WINDOW.profile} is out of window`,
+    );
+    expect(waiting.querySelector(".what")!.textContent).toContain(
+      "2026-08-03 05:00 UTC",
+    );
+
+    // And the backend's own sentence underneath, which is the record of why
+    // this was raised.
+    expect(waiting.querySelector(".how")!.textContent).toBe(OUT_OF_WINDOW.said);
+  });
+
+  /// A display may not carry one. The pause is still the whole record: the wait
+  /// is then the human's to end.
+  it("says only that the account ran out where no reset time could be read", async () => {
+    thePaused({
+      timeline: WAITING.timeline.map((entry) =>
+        "Pause" in entry
+          ? { Pause: { ...entry.Pause, resets_at: null } }
+          : entry,
+      ),
+    });
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".what")!.textContent).toBe(
+      `${OUT_OF_WINDOW.profile} is out of window`,
+    );
+    expect(waiting.querySelector(".resume")).toBeTruthy();
+  });
+
+  /// One press rather than three remedies: Verkstead is not driving anything
+  /// here and has nothing to retry, so the only choice is whether to keep
+  /// waiting.
+  it("offers one press, and says the worktree is untouched", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".resume")!.textContent).toBe(
+      "Go on without waiting",
+    );
+    expect(waiting.querySelectorAll(".remedy")).toHaveLength(0);
+    expect(waiting.textContent).toContain(
+      "the worktree is left exactly as the session left it",
+    );
+  });
+
+  it("sends the press with nothing beside it", async () => {
+    const fetching = thePaused(
+      {},
+      whenever(RESUME_PATH, json("Resumed" satisfies PauseResumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+    fireEvent.click(waiting.querySelector(".resume")!);
+
+    await waitFor(() => expect(sent(fetching, RESUME_PATH)).toEqual({}));
+
+    // And nothing is said about a press that worked: the event reading back
+    // resumed is what says it.
+    expect(waiting.querySelector(".error")).toBeNull();
+  });
+
+  /// The record is what a timeline is: a long run against a busy account
+  /// collects one of these a day, each saying how that day's wait ended.
+  it("shows what ended the wait once something has, and stops offering", async () => {
+    thePaused({
+      blocked_on: null,
+      timeline: WAITING.timeline.map((entry) =>
+        "Pause" in entry
+          ? {
+              Pause: {
+                ...entry.Pause,
+                resumed: {
+                  by: "Reset" as const,
+                  at: "2026-08-03T05:00:04.000Z",
+                },
+              },
+            }
+          : entry,
+      ),
+    });
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".resumed")!.textContent).toBe(
+      "The window came back",
+    );
+    expect(waiting.querySelector(".resuming")).toBeNull();
+    expect(waiting.classList.contains("open")).toBe(false);
+  });
+
+  /// The window came back while the page was open, or a second press. Not an
+  /// error, and said in words rather than retried.
+  it("says so when the wait was already over", async () => {
+    thePaused(
+      {},
+      whenever(
+        RESUME_PATH,
+        json("AlreadyResumed" satisfies PauseResumed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+    fireEvent.click(waiting.querySelector(".resume")!);
+
+    await waitFor(() =>
+      expect(waiting.querySelector(".error")!.textContent).toContain(
+        "The first ending stands",
+      ),
+    );
+  });
+
+  /// A paused run is a run that has stopped, so it carries the same badge an
+  /// interruption does — and the badge stays put, because what there is to press
+  /// is drawn whole in the list and there is no pane behind it.
+  it("carries blocked on you, and the badge opens no pane", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const badge = await drawn<HTMLButtonElement>(container, ".blocked");
+    expect(badge.textContent).toBe("Blocked on you");
+
+    fireEvent.click(badge);
+
+    const waiting = await drawn(container, ".timeline .pause.selected");
+    expect(waiting).toBeTruthy();
+    expect(frame(container).dataset.pane).toBe("timeline");
   });
 });
 

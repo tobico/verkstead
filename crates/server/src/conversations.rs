@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, GrillingStarted,
-    PairingView, Started, Worktree,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationReopened,
+    GrillingStarted, PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -504,6 +504,12 @@ pub(crate) async fn set_base_branch(
 /// for is telling them about a run that stopped while nobody was watching. The
 /// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
+/// **A second round makes neither.** A reopened Conversation is drafting again on
+/// a branch that has been worked, in the worktree that work was done in — see
+/// [`reopen`] — so what this does for one is resolve the commit it branched from
+/// and start the session. The branch already being there is the whole point of it
+/// rather than something to refuse for.
+///
 /// The whole state rather than the four pieces of it this needs: what starting a
 /// grilling reaches is most of what the server holds — the store, the boundary,
 /// the data directory, the sessions and whoever is watching them — and a
@@ -550,7 +556,15 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
-    let path = worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch);
+
+    // Where a second round works is where the first one did. A reopened
+    // Conversation already has its worktree — kept, or checked out again on the
+    // branch it was always on — so there is nothing here to make: the branch has
+    // been worked, and a start that made one would start the work over.
+    let reopened = conversation.worktree.clone();
+    let path = reopened.clone().unwrap_or_else(|| {
+        worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
+    });
 
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
@@ -560,6 +574,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(GrillingStarted::NoBaseCommit);
             };
+
+            // A second round resolves the commit the first one branched from and
+            // stops there: the branch is taken because this Conversation took it,
+            // and the checkout is already where the work will happen.
+            if reopened.is_some() {
+                return Ok(commit);
+            }
 
             if worktrees::branch_exists(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
@@ -675,6 +696,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     };
 
     if conversation.state != store::Lifecycle::Draft {
+        return Ok(Adopted::NotDrafting);
+    }
+
+    // A reopened stage Conversation is drafting again on the branch its stage was
+    // worked on. Adopting is how that work *started*, so it is not a thing to do
+    // twice — and what says it has happened is the worktree, adoption being what
+    // made one.
+    if conversation.worktree.is_some() {
         return Ok(Adopted::NotDrafting);
     }
 
@@ -827,6 +856,86 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
     )
 }
 
+/// Open a second round on a Conversation Verkstead has finished with: a new
+/// Brief to write, somewhere to write it about, and the ordinary pipeline from
+/// grilling onward.
+///
+/// Done and no other state. Aborted is off the ladder and stays there, and every
+/// other state is somewhere the work has got to — there is nothing to reopen
+/// about work that is still going on.
+///
+/// **The worktree is ordinarily still there**, because only aborting takes one
+/// away, so keeping it is the path and making one is the fallback: a directory
+/// that has gone — deleted by hand, or lost with a machine that was rebuilt — is
+/// checked out again *on the Conversation's existing branch*. A branch that has
+/// been worked is not a branch to start over, which is why this is
+/// [`worktrees::recheckout`] rather than the [`worktrees::add`] a first round
+/// uses.
+///
+/// Git first and the store after, which is [`start_grilling`]'s order and for its
+/// reason: a Conversation recorded as drafting again with nothing checked out is
+/// one nothing could grill and nothing would tidy.
+///
+/// No session is started and nothing is launched. What reopening produces is a
+/// Brief with nothing in it, and the human writes that before pressing the same
+/// `Start grilling` a first round is started by.
+pub(crate) async fn reopen(state: &AppState, id: i64) -> Result<ConversationReopened> {
+    let pool = &state.pool;
+
+    let Some(conversation) = store::load_conversation(pool, id).await? else {
+        return Ok(ConversationReopened::NoSuchConversation);
+    };
+
+    if conversation.state != store::Lifecycle::Done {
+        return Ok(ConversationReopened::NotDone);
+    }
+
+    // Where the work was done. A Done Conversation has a worktree recorded —
+    // nothing but aborting forgets one — and the fallback is for a record that
+    // somehow lost it: a name is chosen the way a first round chooses one.
+    let path = conversation.worktree.clone().unwrap_or_else(|| {
+        worktrees::worktree_path(
+            &state.data_dir,
+            id,
+            &conversation.repo.name,
+            &conversation.branch,
+        )
+    });
+
+    let repo = conversation.repo.path.clone();
+    let branch = conversation.branch.clone();
+
+    // Off the runtime, for the reason a first round's checkout is: looking at a
+    // directory and checking a branch out both block.
+    let there = tokio::task::spawn_blocking({
+        let path = path.clone();
+        move || path.is_dir() || worktrees::recheckout(&repo, &path, &branch)
+    })
+    .await?;
+
+    if !there {
+        tracing::error!(
+            conversation_id = id,
+            "a reopened Conversation's branch could not be checked out again"
+        );
+        return Ok(ConversationReopened::WorktreeRefused);
+    }
+
+    match store::reopen_conversation(pool, id, &path).await? {
+        store::Reopening::NoSuchConversation => Ok(ConversationReopened::NoSuchConversation),
+        store::Reopening::NotDone => Ok(ConversationReopened::NotDone),
+        store::Reopening::Reopened => {
+            // A Conversation moved, and its row in the sidebar reads differently
+            // for it: a finished piece of work is drafting again.
+            state
+                .nudges
+                .announce(Nudge::Conversation { conversation: id });
+
+            Ok(ConversationReopened::Reopened)
+        }
+    }
+}
+
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
 /// removed, its branch left where it is.
 ///
@@ -939,14 +1048,17 @@ impl Unready {
     }
 }
 
-/// The Brief off a Conversation's Timeline.
+/// The Brief the round a Conversation is in started from.
 ///
-/// Found rather than taken from the front: the Brief is the first Event, but by
-/// the time anything asks this there are moves on the Timeline after it.
+/// The *last* Brief rather than the first, and searched for rather than taken
+/// from either end: a Conversation gets one Brief per round — a reopened one
+/// adds a second rather than editing the first — and the round about to be
+/// grilled is the one at the bottom of the Timeline.
 async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
     Ok(store::timeline(pool, id)
         .await?
         .into_iter()
+        .rev()
         .find_map(|event| match event.event {
             store::Event::Brief(markdown) => Some(markdown),
             _ => None,
@@ -961,17 +1073,16 @@ async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
 /// wanted together — an inline session, a breakdown and every task session take
 /// exactly these two.
 ///
-/// The Brief is found rather than taken from the front: it is the first Event,
-/// but by the time anything asks this there are moves on the Timeline after it.
-/// The handoff is the *last* of its kind rather than the first, which is the
-/// other way round for a reason: a Conversation gets one handoff per grilling
-/// round, and the one that hands over is the one the grilling that just ended
-/// wrote.
+/// Both are the *last* of their kind rather than the first, and for one reason:
+/// a Conversation gets a Brief and a handoff per round — a reopened one adds a
+/// second Brief rather than editing the first — and what a session about to build
+/// is primed with is the round it is building.
 pub(crate) async fn documents(pool: &SqlitePool, id: i64) -> Result<(String, Option<String>)> {
     let timeline = store::timeline(pool, id).await?;
 
     let brief = timeline
         .iter()
+        .rev()
         .find_map(|event| match &event.event {
             store::Event::Brief(markdown) => Some(markdown.clone()),
             _ => None,

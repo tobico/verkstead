@@ -50,6 +50,7 @@
     {
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
+        "frozen": true,
         "html": "<h1>Retry policy for the outbound queue</h1>\n<p>Failed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.</p>\n",
         "id": 3,
         "markdown": "# Retry policy for the outbound queue\n\nFailed deliveries are retried forever, so one dead endpoint holds up\neverything behind it.\n"
@@ -185,6 +186,57 @@
           "Waiting": "waiting"
         },
         "title": "What a delivery that has failed forty times becomes"
+      }
+    },
+    {
+      "QuestionSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 8,
+        "rows": [
+          {
+            "answer": "",
+            "name": "Q1",
+            "nested": false,
+            "question": "Where should the request counter live?"
+          },
+          {
+            "answer": "",
+            "name": "Q2",
+            "nested": false,
+            "question": "How should a throttled client be told to back off?"
+          },
+          {
+            "answer": "",
+            "name": "Q2a",
+            "nested": true,
+            "question": "What should Retry-After say?"
+          },
+          {
+            "answer": "",
+            "name": "Q2b",
+            "nested": true,
+            "question": "Anything else about the headers?"
+          },
+          {
+            "answer": "",
+            "name": "Q3",
+            "nested": false,
+            "question": "Anything I should know before starting?"
+          }
+        ],
+        "set_id": 3,
+        "standing": {
+          "Waiting": "deferred"
+        },
+        "title": "The wording of the give-up notice"
+      }
+    },
+    {
+      "UnreadableSet": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 9,
+        "set_id": 4,
+        "why": "unknown field `accepted_by`, expected `direction` or `rationale` at line 6 column 17"
       }
     }
   ],

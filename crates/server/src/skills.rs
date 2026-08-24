@@ -176,10 +176,9 @@ pub(crate) fn grilling(brief: &str) -> String {
 /// outlives the session having it: the Questions that were asked and the Answers
 /// that came back.
 ///
-/// Under the Brief, where the retry note goes and for its reason: the Brief says
-/// what the work is, and this says what has already been decided about it — the
-/// newer and the less general of the two, so it goes second. The note the human
-/// wrote goes after both, being newer and less general still.
+/// Under the Brief, and for the reason everything written under one is: the
+/// Brief says what the work is, and this says what has already been decided
+/// about it — the newer and the less general of the two, so it goes second.
 ///
 /// A Conversation with nothing answered yet is the Brief and nothing else. A
 /// heading over an empty digest would tell the session that something had been
@@ -372,8 +371,9 @@ pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> Stri
 /// things to keep true.
 ///
 /// The feedback goes *last*, under the documents rather than over them, for the
-/// reason a retry note does: it is the newest thing said and the least general.
-/// The documents say what the work is; this says what is wrong with it.
+/// reason everything written under them goes there: it is the newest thing said
+/// and the least general. The documents say what the work is; this says what is
+/// wrong with it.
 pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> String {
     let prompt = on_the_documents(
         &format!(
@@ -408,6 +408,28 @@ pub(crate) fn manual_task(instruction: &str) -> String {
          # What I have asked for\n\n{}\n",
         instruction.trim()
     )
+}
+
+/// The same prompt, with the Answers to the Conversation's Deferred Asks that
+/// no session has been told about yet.
+///
+/// Written under the documents rather than over them, because it is the newest
+/// thing said and the least general: the Brief and the handoff describe the work,
+/// and this is what the human has since decided about it. A Deferred Ask is one
+/// whose Answer does not change the work about to be done, so it reaches the
+/// session that does the work after rather than the one that asked.
+///
+/// Nothing to fold is the prompt unchanged, which is every session of an
+/// ordinary run: a heading over an empty digest would tell one that something
+/// had been decided.
+pub(crate) fn folded(prompt: &str, answers: &str) -> String {
+    let answers = answers.trim();
+
+    if answers.is_empty() {
+        return prompt.to_owned();
+    }
+
+    format!("{prompt}\n# What I have since said about the deferred questions\n\n{answers}\n")
 }
 
 /// The body they are all primed with, under whichever opening line names the
@@ -1786,6 +1808,34 @@ mod tests {
             grilling(brief),
             "nothing is added to the prompt at all",
         );
+    }
+
+    /// The Answers to a Deferred Ask go where the newest and least general
+    /// thing said goes: under the documents the prompt is built from.
+    #[test]
+    fn deferred_answers_are_folded_under_the_documents() {
+        let prompt = folded(
+            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("**Q9** Which status?\n\n429 Too Many Requests\n"),
+            "and what the human has since decided about it comes last: {prompt:?}"
+        );
+    }
+
+    /// Which is every session of an ordinary run: a heading over an empty digest
+    /// would tell one that something had been decided.
+    #[test]
+    fn a_session_with_nothing_to_fold_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(folded(&prompt, "  \n"), prompt);
     }
 
     /// The workbench shows a commit's message body beside its diff, and nothing

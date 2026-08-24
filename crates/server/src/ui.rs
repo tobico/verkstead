@@ -29,11 +29,12 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationStopped, ConversationView, Cursor, GrillingStarted, HandedBack,
-    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed, Subscription,
-    TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
+    ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
+    GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
+    NewConversation, NewOrder, PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -59,6 +60,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
         )
+        // The order the human dragged that list into. A path of its own under
+        // the list rather than a field on anything in it: what it says is about
+        // the sidebar rather than about any one Conversation, and the whole
+        // order is what a drag produces.
+        .route("/api/ui/conversations/order", post(place_conversations))
         // The roadmaps in the registered Repos that nothing is driving, drawn
         // as a notice under the new-conversation box. Beside the Conversations
         // rather than under a Repo, because that is where it is read: what it
@@ -117,6 +123,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/abort", post(abort))
+        // And the press that opens a second round on one Verkstead has finished
+        // with. Beside aborting rather than in the menu with it: reopening throws
+        // nothing away, and what it is is the next thing to do about a finished
+        // piece of work — so it belongs at the end of the Timeline, where the
+        // grilling start is.
+        .route("/api/ui/conversations/{id}/reopen", post(reopen))
         // And the one press that ends a Hold. Per Conversation rather than per
         // Event, because a Conversation has one keyboard: which of its sessions
         // the human took is the Conversation's own answer, and a route that made
@@ -131,6 +143,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
         //
+        // And the press that says *do not wait for the window*. Per Event rather
+        // than per Conversation, because that is what is being answered: the
+        // Timeline is where the wait was said, and a route that took only the
+        // Conversation would answer whichever Pause happened to be open when it
+        // arrived. Nothing in the body: there is one thing to do about a Pause,
+        // and a choice of one is a press rather than a form.
+        .route(
+            "/api/ui/conversations/{id}/pause/{event}/resume",
+            post(resume_pause),
+        )
         // And what the human sets going by hand, wherever nothing is running.
         // Per Conversation rather than per Event, unlike a Set: a Manual Task
         // answers nothing on the Timeline — it is a new thing to do, and the
@@ -224,10 +246,34 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         }
     };
 
+    // A stored body this build's schema will not take is a page all the same,
+    // and the same page whether it is reached by its own URL or opened from the
+    // Timeline: the record, said to be unreadable, with the body itself under
+    // it. Not a failure — the Set is there, and this is what there is of it.
+    let set = match stored.set {
+        store::Asked::Set(set) => set,
+        store::Asked::Unreadable(unreadable) => {
+            tracing::warn!(
+                set_id = id,
+                why = unreadable.why,
+                "a stored Question Set cannot be read"
+            );
+
+            return Json(SetReading::Unreadable(UnreadableSet {
+                id: stored.id,
+                conversation,
+                body: unreadable.body,
+                why: unreadable.why,
+            }))
+            .into_response();
+        }
+    };
+
     let standing = standing(
         &state,
         id,
         settlement,
+        stored.deferred,
         &stored.created_at,
         OffsetDateTime::now_utc(),
     );
@@ -238,8 +284,9 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
     // On the blocking pool, for the Diff inside it: a Set is asked with the whole
     // of a dirty working tree attached, and parsing and colouring that is not
     // work to do on an async worker thread while other requests wait behind it.
+    let set_id = stored.id;
     let view = tokio::task::spawn_blocking(move || {
-        verkstead_render::set_view(stored.id, conversation, stored.set, standing)
+        verkstead_render::set_view(set_id, conversation, set, standing)
     })
     .await;
 
@@ -251,7 +298,7 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
         }
     };
 
-    Json(view).into_response()
+    Json(SetReading::Set(Box::new(view))).into_response()
 }
 
 /// Where a Set stands, as both its own page and its row on a Timeline read it.
@@ -259,10 +306,16 @@ async fn set(State(state): State<AppState>, Path(id): Path<String>) -> HttpRespo
 /// The Liveness comes out of the registry of held waits, which is the same
 /// registry either way: whichever of the two the human is looking at, it is the
 /// page they act on.
+///
+/// Except for a Deferred Ask, which the registry has nothing to say about: no
+/// wait was ever held on one, so ageing it against the clock would report an
+/// agent that had gone where none was ever there. `deferred` is what the record
+/// says about how it was asked, and it is the whole verdict where it is true.
 fn standing(
     state: &AppState,
     set_id: i64,
     settlement: Option<store::Settlement>,
+    deferred: bool,
     created_at: &str,
     now: OffsetDateTime,
 ) -> Standing {
@@ -276,6 +329,7 @@ fn standing(
         Some(store::Settlement::ArchivedUnanswered(archived)) => {
             Standing::ArchivedUnanswered(archived.archived_at)
         }
+        None if deferred => Standing::Waiting(verkstead_schema::Liveness::Deferred),
         None => Standing::Waiting(state.waits.liveness(set_id, created_at, now)),
     }
 }
@@ -502,6 +556,32 @@ async fn start_conversation(
     }
 }
 
+/// `POST /api/ui/conversations/order` — the sidebar, in the order the human just
+/// dragged it into.
+///
+/// Refused for nothing. Every id is either a Conversation, which is placed, or
+/// not one, which is passed over — a viewer sends the list it drew, and by the
+/// time it lands a row may have been started or aborted. There is nothing to
+/// answer with beyond that it was taken, so it answers with nothing.
+///
+/// The Nudge is what carries it to the other devices: an order is the list
+/// having moved, which is the one thing every open sidebar has to read again.
+async fn place_conversations(
+    State(state): State<AppState>,
+    Json(placed): Json<NewOrder>,
+) -> HttpResponse {
+    match store::place_conversations(&state.pool, &placed.order).await {
+        Ok(()) => {
+            state.nudges.announce(Nudge::Conversations);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "placing the Conversations failed");
+            unavailable("the order could not be saved")
+        }
+    }
+}
+
 /// `POST /api/ui/adoptions` — start a Conversation to adopt a roadmap with.
 ///
 /// What clicking a roadmap in the abandoned-roadmaps notice does. It records
@@ -652,9 +732,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     };
 
     // The Brief decides whether the Conversation is ready to grill, so it is
-    // read off the Timeline before the Timeline is spent building the view.
+    // read off the Timeline before the Timeline is spent building the view. The
+    // newest of them: a reopened Conversation has a frozen Brief and an open one,
+    // and what a grilling would start from is the round nobody has grilled yet.
     let brief = timeline
         .iter()
+        .rev()
         .find_map(|event| match &event.event {
             store::Event::Brief(markdown) => Some(markdown.as_str()),
             _ => None,
@@ -668,13 +751,34 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         brief,
     );
 
-    // And what this Conversation is adopting, where it is adopting anything:
-    // the roadmap named and the stage the Adopt press would start, read off the
-    // Repo at the base commit rather than out of any row. Only the roadmap's
-    // name is stored — see [`crate::stages::adopting`].
+    // Which Brief is still being written, where one is. A Brief freezes when its
+    // round's grilling starts, so the one open is the newest — and only while the
+    // Conversation is drafting. An adopting Conversation's first Brief is nobody
+    // here's to write at all: it is the stage brief, and it arrives when the stage
+    // is adopted.
+    let briefs: Vec<i64> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::Brief(_) => Some(event.id),
+            _ => None,
+        })
+        .collect();
+
+    let open_brief = (conversation.state == store::Lifecycle::Draft)
+        .then(|| briefs.last().copied())
+        .flatten()
+        .filter(|open| !(conversation.adopting.is_some() && briefs.first() == Some(open)));
+
+    // And what this Conversation is adopting, where it is adopting anything and
+    // has not adopted it yet: the roadmap named and the stage the Adopt press
+    // would start, read off the Repo at the base commit rather than out of any
+    // row. Only the roadmap's name is stored — see [`crate::stages::adopting`].
+    //
+    // A worktree is what says the adoption has happened, adoption being what
+    // makes one. What follows it is the stage's work and, if the human reopens it
+    // when that work is done, a Brief of their own — never the stage brief again.
     let adopting = match conversation.adopting.clone() {
-        None => None,
-        Some(roadmap) => Some(
+        Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
                 conversation.repo.clone(),
                 conversation.base_commit.clone(),
@@ -682,7 +786,20 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
             )
             .await,
         ),
+        _ => None,
     };
+
+    // What the work is waiting an account's window out on, read off the Timeline
+    // for the reason the Brief is: it is already here. The store's index makes at
+    // most one open, so the last one that is unresumed is the one — and it is the
+    // *only* one, which is what makes *the run stops here* a fact rather than a
+    // promise. It carries *blocked on you* like a halt: a run that has stopped is
+    // stopped, and a badge with nowhere to go would be one the human could not
+    // act on.
+    let waiting_at = timeline.iter().rev().find_map(|event| match &event.event {
+        store::Event::Pause(pause) if pause.resumed.is_none() => Some(event.id),
+        _ => None,
+    });
 
     // Whether driving has stopped: a halt says the Conversation is stopped
     // now, and the Notice it points at says what stopped and why.
@@ -713,11 +830,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // watching. Read off the running server, which is the only thing that knows.
     let held = state.sessions.holding(id);
 
-    // The badge points at whichever of the two is in force, and at the Hold
-    // first. The two cannot really be open together — nothing halts behind a
-    // Hold — and where they somehow are, the keyboard is the thing the human is
-    // holding right now.
-    let blocked_on = held.or(halted);
+    // The badge points at whichever of the three is in force, and at the Hold
+    // first. No two of them can really be in force together — nothing halts
+    // behind a Hold, and a run waiting a window out is one nothing is driving to
+    // halt — and where two somehow are, the keyboard is the thing the human is
+    // holding right now and the halt is the thing they have to press Resume on.
+    let blocked_on = held.or(halted).or(waiting_at);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -764,9 +882,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                 Some(match event.event {
                     // Rendered on the way out where there is markdown to render —
                     // see [`verkstead_render`]. A move has none: it is one state.
-                    store::Event::Brief(markdown) => {
-                        verkstead_render::brief_event(event.id, event.at, markdown)
-                    }
+                    store::Event::Brief(markdown) => verkstead_render::brief_event(
+                        event.id,
+                        event.at,
+                        markdown,
+                        Some(event.id) != open_brief,
+                    ),
                     store::Event::Moved(state) => {
                         verkstead_render::moved_event(event.id, event.at, lifecycle(state))
                     }
@@ -789,18 +910,39 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // The Event's own stamp is what the Liveness verdict is aged
                     // against. It is the Set's creation time — both are written in
                     // the one transaction that puts a Set on a Timeline.
-                    store::Event::QuestionSet(asked) => {
-                        let standing =
-                            standing(&state, asked.set_id, asked.settlement, &event.at, now);
+                    store::Event::QuestionSet(asked) => match &asked.set {
+                        store::Asked::Set(set) => {
+                            let standing = standing(
+                                &state,
+                                asked.set_id,
+                                asked.settlement,
+                                asked.deferred,
+                                &event.at,
+                                now,
+                            );
 
-                        verkstead_render::question_set_event(
-                            event.id,
-                            event.at,
-                            asked.set_id,
-                            &asked.set,
-                            standing,
-                        )
-                    }
+                            verkstead_render::question_set_event(
+                                event.id,
+                                event.at,
+                                asked.set_id,
+                                set,
+                                standing,
+                            )
+                        }
+                        // A row of its own rather than an omission: the ask
+                        // happened, and a Timeline that quietly left it out
+                        // would be this build deciding a decision never
+                        // occurred. What it opens is the stored body — see the
+                        // Set endpoint above.
+                        store::Asked::Unreadable(unreadable) => {
+                            verkstead_render::unreadable_set_event(
+                                event.id,
+                                event.at,
+                                asked.set_id,
+                                unreadable.why.clone(),
+                            )
+                        }
+                    },
                     // Rendered like the Brief, and inline like it: a document to
                     // read, with nothing of it a details pane would add.
                     store::Event::Handoff(markdown) => {
@@ -824,6 +966,14 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             summary: commit.summary,
                         },
                     ),
+                    // Whole, unlike the three above it: there is a press on it,
+                    // and a page that had to fetch what the run was waiting for
+                    // could draw the button before it could say what for. Three
+                    // short strings, because nothing went wrong here and there
+                    // is no evidence to gather.
+                    store::Event::Pause(pause) => {
+                        verkstead_render::pause_event(event.id, event.at, waiting(pause))
+                    }
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
                     // back — and the one nobody wrote for a human to press
@@ -1255,6 +1405,37 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
+/// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
+/// waiting for the window.
+///
+/// The human's half of the two ways a Pause ends; the other is the reset time
+/// passing, which the sweep does — see [`crate::limits`]. Both close the same
+/// row and start the work again from where it stopped, and the Worktree is
+/// untouched by either: a Pause never changed anything in it.
+///
+/// `AlreadyResumed` is an outcome rather than an error, for the reason every
+/// other named outcome here is one: the window may have come back while the page
+/// was open, and the press arriving second is something to say in words rather
+/// than something to retry.
+async fn resume_pause(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Two ids out of a URL a human may have typed, read as permissively as every
+    // other pair here.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return Json(PauseResumed::NoSuchPause).into_response();
+    };
+
+    match crate::limits::resume(&state, id, event, store::By::Human).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "starting a paused run again failed");
+            unavailable("the run could not be started again")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
 ///
 /// The instruction goes on the Timeline and a one-off session starts on it under
@@ -1355,6 +1536,26 @@ async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
             unavailable("the conversation could not be aborted")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/reopen` — a second round on a finished one:
+/// a new Brief to write, on the branch the first round was built on.
+///
+/// Nothing in the body, as the grilling start takes nothing: which Conversation
+/// is in the path, and everything this is refused for the server decides itself
+/// when the button is pressed.
+async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationReopened::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::reopen(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reopening a Conversation failed");
+            unavailable("the conversation could not be reopened")
         }
     }
 }
@@ -1494,6 +1695,27 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
+    }
+}
+
+/// A Pause as the viewer receives it: which account ran out, when it comes back,
+/// and what ended the wait if anything has.
+///
+/// The one Event whose whole self rides on the Timeline. Held to the viewer's
+/// vocabulary here, as a lifecycle state is, because the two enums are one pair
+/// of words said in two crates that do not depend on each other.
+fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
+    verkstead_render::Waiting {
+        profile: pause.profile,
+        said: pause.said,
+        resets_at: pause.resets_at,
+        resumed: pause.resumed.map(|resumed| verkstead_render::PauseEnded {
+            by: match resumed.by {
+                store::By::Human => verkstead_render::By::Human,
+                store::By::Reset => verkstead_render::By::Reset,
+            },
+            at: resumed.at,
+        }),
     }
 }
 

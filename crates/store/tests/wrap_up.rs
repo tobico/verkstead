@@ -11,13 +11,14 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn,
-    addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
-    forget_fix_attempts, implement_again, last_proposal, load_conversation, load_response,
-    load_set, open_database, pick_direction, record_addressed_comments, record_commit,
-    record_fix_attempt, record_pull_request, register_repo, review_asked, save_brief,
-    settle_wrap_up, split_out, start_conversation, start_grilling, submit_response, timeline,
-    unlanded_batch_fixes, unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
+    Archiving, Ask, Event, Finished, Lifecycle, Reopening, Settlements, Submission, WAITED_ON,
+    WaitingOn, addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts,
+    forget_addressed_comments, forget_fix_attempts, implement_again, last_proposal,
+    load_conversation, load_response, load_set, open_database, pick_direction,
+    record_addressed_comments, record_commit, record_fix_attempt, record_pull_request,
+    register_repo, reopen_conversation, review_asked, save_brief, settle_wrap_up, split_out,
+    start_conversation, start_grilling, submit_response, timeline, unlanded_batch_fixes,
+    unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -288,6 +289,51 @@ async fn a_wrap_up_with_all_three_settled_is_done_and_the_move_is_on_the_timelin
     );
 }
 
+/// A second round wraps up from nothing. The round before it settled all three
+/// and addressed whatever was said on the pull request; a round that inherited
+/// the first would be over the moment it reached Wrapping.
+///
+/// The comments are what it keeps, and deliberately: a comment somebody wrote and
+/// a session answered stays answered, where every check and every review belongs
+/// to the round that ran them.
+#[tokio::test]
+async fn reopening_forgets_what_the_round_before_it_settled() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    for waiting_on in WAITED_ON {
+        settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    record_fix_attempt(&pool, id, "build").await.unwrap();
+    record_addressed_comments(&pool, id, &["IC_1".to_owned()])
+        .await
+        .unwrap();
+
+    assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
+
+    assert_eq!(
+        reopen_conversation(&pool, id, Path::new("/state/worktrees/rate-limiting"))
+            .await
+            .unwrap(),
+        Reopening::Reopened
+    );
+
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap(),
+        Vec::new(),
+        "the new round waits on all three again"
+    );
+    assert_eq!(
+        fix_attempts(&pool, id, "build").await.unwrap(),
+        0,
+        "and its checks start from no attempts spent"
+    );
+    assert_eq!(
+        addressed_comments(&pool, id).await.unwrap(),
+        vec!["IC_1".to_owned()],
+        "but a comment already answered stays answered"
+    );
+}
 /// Any one of the three missing keeps it in Wrapping — each of them in turn,
 /// because a rule that held for two of the three would be a wrap-up that
 /// finished with work outstanding.
@@ -390,7 +436,7 @@ async fn answering_the_review_settles_nothing_and_leaves_the_answers_on_the_set(
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing())
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
         .await
         .unwrap()
         .expect("the Conversation is there to ask from");
@@ -430,7 +476,10 @@ async fn answering_the_review_settles_nothing_and_leaves_the_answers_on_the_set(
         .expect("the Response was just stored")
         .response;
     let findings = &set
+        .set()
+        .expect("this build can read the Set it just stored")
         .review
+        .as_ref()
         .expect("the block the review asked with")
         .findings;
 
@@ -463,7 +512,10 @@ async fn the_review_is_found_by_the_block_it_carries() {
         review: None,
         ..reviewing()
     };
-    ask(&pool, id, &ordinary).await.unwrap().unwrap();
+    ask(&pool, id, &ordinary, Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         review_asked(&pool, id).await.unwrap(),
@@ -471,7 +523,10 @@ async fn the_review_is_found_by_the_block_it_carries() {
         "and an ordinary Set is not one",
     );
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
 }
@@ -490,7 +545,10 @@ async fn a_proposal_closed_unanswered_stops_being_the_review() {
     let settlements = Settlements::new(8);
     let id = wrapping(&pool).await;
 
-    let abandoned = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let abandoned = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(abandoned.id));
 
@@ -515,7 +573,10 @@ async fn a_proposal_closed_unanswered_stops_being_the_review() {
         "and as one nothing has been proposed about",
     );
 
-    let read_again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let read_again = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         review_asked(&pool, id).await.unwrap(),
@@ -577,7 +638,7 @@ async fn a_review_answered_and_never_acted_on_owes_the_findings_that_were_accept
         "a wrap-up nobody has reviewed owes nothing",
     );
 
-    let asked = ask(&pool, id, &reviewing())
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
         .await
         .unwrap()
         .expect("the Conversation is there to ask from");
@@ -613,7 +674,10 @@ async fn a_commit_after_the_answers_is_the_fixes_landing() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     // Before the Answers, which is the review session forbidden to touch
     // anything: a commit here is the work the branch already carried.
@@ -698,7 +762,7 @@ async fn a_finding_split_out_is_owed_a_backlog_rather_than_a_fix() {
         "a wrap-up nobody has reviewed has split nothing out",
     );
 
-    let asked = ask(&pool, id, &reviewing_with_a_split())
+    let asked = ask(&pool, id, &reviewing_with_a_split(), Ask::Blocking)
         .await
         .unwrap()
         .expect("the Conversation is there to ask from");
@@ -753,7 +817,7 @@ async fn a_commit_after_the_answers_does_not_land_what_was_split_out() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing_with_a_split())
+    let asked = ask(&pool, id, &reviewing_with_a_split(), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -795,7 +859,7 @@ async fn only_the_option_named_as_the_split_splits_anything_out() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing_with_a_split())
+    let asked = ask(&pool, id, &reviewing_with_a_split(), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -832,7 +896,10 @@ async fn a_review_that_offered_no_split_splits_nothing_out() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     answer_the_review(&pool, asked.id).await;
 
@@ -846,7 +913,10 @@ async fn a_review_that_was_declined_outright_owes_nothing() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     submit_response(
         &pool,
@@ -913,7 +983,10 @@ async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_revie
     );
 
     // The review, answered and acted on, which is where every batch starts from.
-    let reviewed = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let reviewed = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
     answer_the_review(&pool, reviewed.id).await;
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     record_commit(&pool, id, &fixed("a1b2c3d")).await.unwrap();
@@ -929,7 +1002,7 @@ async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_revie
         "and it owes nothing, because it settled by landing what it was told to",
     );
 
-    let batch = ask(&pool, id, &answering_the_comments())
+    let batch = ask(&pool, id, &answering_the_comments(), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
@@ -1044,7 +1117,10 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
-    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let asked = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
 
     implement_again(&pool, id).await.unwrap();
@@ -1076,7 +1152,10 @@ async fn the_first_wraps_review_is_not_the_second_wraps() {
         "nor is anything it was told to fix still owed",
     );
 
-    let again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    let again = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
 
     assert_eq!(
         review_asked(&pool, id).await.unwrap(),

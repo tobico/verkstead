@@ -80,16 +80,29 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
 export function Setup(props: {
   conversation: ConversationView;
 }): JSX.Element {
+  /// Whether the branch this work is done on has been made already, which is
+  /// what a worktree says: one is made with the branch and forgotten only by
+  /// aborting.
+  ///
+  /// A drafting conversation that has one is a reopened one — a second round on
+  /// a branch that has been worked. The branch and the base commit are settled
+  /// for good by then and the server refuses both, so the fields go: a field
+  /// whose save comes back refused is worse than no field. The pairings stay,
+  /// because a second round may well be run under a different account.
+  const branched = () => props.conversation.worktree !== null;
+
   return (
     <section class="conversation-setup" aria-label="Setup">
       {/* No branch field where the conversation is adopting a roadmap: a stage
           is worked on its own slug, so the name invented when the row was made
           is discarded when the stage is adopted, and naming it here would be a
           field with nothing behind it. */}
-      <Show when={!props.conversation.adopting}>
+      <Show when={!props.conversation.adopting && !branched()}>
         <BranchName conversation={props.conversation} />
       </Show>
-      <BaseBranch conversation={props.conversation} />
+      <Show when={!branched()}>
+        <BaseBranch conversation={props.conversation} />
+      </Show>
 
       <Profiles conversation={props.conversation} />
     </section>

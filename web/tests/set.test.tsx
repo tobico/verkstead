@@ -14,7 +14,7 @@
 import { screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Response as Decided, SetView } from "../src/api/types";
+import type { Response as Decided } from "../src/api/types";
 import {
   mount,
   reading,
@@ -22,12 +22,14 @@ import {
   withHeading,
   withPostscript,
   withTable,
+  unreadably,
 } from "./reading";
-import { json, serving } from "./serving";
+import { json, readable, reads, serving, unreadable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 import archived from "./fixtures/set-archived.json" with { type: "json" };
 import diagram from "./fixtures/set-diagram.json" with { type: "json" };
+import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
 
 /// The renderer, which is a page's own doing rather than this page's: what is
 /// asked here is whether it was reached for at all, and never what it drew —
@@ -35,10 +37,14 @@ import diagram from "./fixtures/set-diagram.json" with { type: "json" };
 const drawing = vi.hoisted(() => vi.fn(() => () => {}));
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
 
-const WAITING = answering as SetView;
-const ANSWERED = answered as SetView;
-const ARCHIVED = archived as SetView;
-const DIAGRAMMED = diagram as SetView;
+const WAITING = readable(answering);
+const ANSWERED = readable(answered);
+const ARCHIVED = readable(archived);
+const DIAGRAMMED = readable(diagram);
+
+/// And the one no standing at all: a stored body this build cannot read, which
+/// is a record to be looked at rather than a Set to be answered.
+const UNREADABLE = unreadable(unreadableSet);
 
 /// When the two settled fixtures were settled, as the page words it — pinned
 /// by the test that writes them, and pinned far enough back that the wording
@@ -78,7 +84,7 @@ afterEach(() => {
 
 describe("reading a Set", () => {
   it("asks the server for the Set the URL names", async () => {
-    const fetching = serving(json(WAITING));
+    const fetching = serving(json(reads(WAITING)));
     mount("7");
 
     await waitFor(() => screen.getByText(WAITING.title));
@@ -697,5 +703,37 @@ describe("the client-side renderer", () => {
     await reading(WAITING);
 
     expect(drawing).not.toHaveBeenCalled();
+  });
+});
+
+describe("a Set this build cannot read", () => {
+  it("says so, with the stored body under it and the way back out", async () => {
+    const page = await unreadably(UNREADABLE);
+
+    expect(page.querySelector(".unreadable-badge")!.textContent).toBe(
+      "cannot be read",
+    );
+    // Serde's own sentence, which names the field that has left the schema.
+    expect(page.querySelector(".unreadable-why")!.textContent).toContain(
+      "accepted_by",
+    );
+    // And the record itself, byte for byte: it is what was asked, and the whole
+    // of what there is left to show of it.
+    expect(page.querySelector(".stored-json")!.textContent).toBe(
+      UNREADABLE.body,
+    );
+    expect(page.querySelector(".back")!.getAttribute("href")).toBe(
+      `/conversations/${UNREADABLE.conversation}`,
+    );
+  });
+
+  it("offers nothing to fill in and nothing to press", async () => {
+    const page = await unreadably(UNREADABLE);
+
+    // No sheet, because a Response is checked against Questions nobody here can
+    // read; and no standing menu, so there is no archiving behind it either.
+    expect(page.querySelector(".questions")).toBeNull();
+    expect(page.querySelector(".standing-trigger")).toBeNull();
+    expect(page.querySelectorAll("button")).toHaveLength(0);
   });
 });

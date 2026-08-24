@@ -475,6 +475,40 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
     Ok(Finished::Done)
 }
 
+/// Forget everything a Conversation's wrap-up has settled and everything its
+/// checks have been given, so a second round wraps up from nothing.
+///
+/// What reopening does — see [`super::reopen_conversation`], whose transaction
+/// this runs in. A round that inherited the round before it would reach Wrapping
+/// with every one of the things wrap-up waits on already settled, and would be
+/// over the moment it arrived.
+///
+/// The comments already addressed are deliberately left: a comment somebody
+/// wrote and a session answered stays answered, and forgetting it would
+/// dispatch a session about yesterday's feedback.
+pub(crate) async fn forget_the_round(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+) -> Result<()> {
+    sqlx::query("DELETE FROM wrap_up_settled WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("forgetting what the wrap-up of Conversation {conversation_id} settled")
+        })?;
+
+    sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| {
+            format!("forgetting what has been tried about Conversation {conversation_id}'s checks")
+        })?;
+
+    Ok(())
+}
+
 /// Forget what a Conversation's checks have already been given, so they start
 /// again from nothing.
 ///

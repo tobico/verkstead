@@ -10,12 +10,15 @@ the questions, `tobico-skills/roadrunner` for the driving, and the
 by stage, and they are what it replaces. Starting a piece of work stops meaning
 *which of the three does this part* and starts meaning *open the workbench*.
 
-**Where this stands.** The pipeline is proved by Verkstead's own test suite and
-by nothing else yet: no repository has been taken through it end to end, and
-the old three are still what executes this roadmap. The switch-over is written
-down here ahead of being made, so that making it is a matter of following a
-page rather than reconstructing a design — and the first real run belongs to
-[stage 05](roadmaps/mvp/05-refinement.md).
+**Where this stands.** The switch-over has been made for this repository:
+Verkstead drives its own work, and it is what executes this roadmap — a Stage
+of it is a Conversation, planned and built by sessions Verkstead starts. What
+has *not* happened yet is a Conversation reaching **Done**. Every run so far
+has been driven by hand past the finish: the step that pushes and opens the
+draft pull request has never carried a Conversation into Wrapping, so the
+wrap-up loop and the settling below it are still proved by the test suite
+alone. Closing that is [stage 05](roadmaps/mvp/05-refinement.md), which is
+being built the way everything else here is — by Verkstead, through this page.
 
 The vocabulary in bold is the project's, defined once in
 [CONTEXT.md](../CONTEXT.md).

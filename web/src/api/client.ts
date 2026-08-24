@@ -17,11 +17,13 @@ import type {
   CommitPane,
   ConversationAborted,
   ConversationEntry,
+  ConversationReopened,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandedBack,
   ManualTaskStarted,
+  PauseResumed,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -35,7 +37,7 @@ import type {
   Response as Decided,
   Resumed,
   Screen,
-  SetView,
+  SetReading,
   SettingsEdit,
   SettingsSaved,
   SettingsView,
@@ -64,13 +66,14 @@ export class RefusedError extends Error {
   }
 }
 
-/// One Set, rendered, with where it stands.
+/// One Set, rendered, with where it stands — or the stored body where this
+/// build cannot read it, which is a page to draw rather than a failure.
 ///
 /// The id is whatever the URL held, unparsed: one that is not a number cannot
 /// name a Set, and the server answers for that the same way it answers for one
 /// that names no Set — a 404, which the page reads as "there isn't one".
-export function loadSet(id: string): Promise<SetView> {
-  return get<SetView>(`/api/ui/sets/${encodeURIComponent(id)}`);
+export function loadSet(id: string): Promise<SetReading> {
+  return get<SetReading>(`/api/ui/sets/${encodeURIComponent(id)}`);
 }
 
 /// Answer a Set, which ends the wait the agent is holding on it.
@@ -142,9 +145,23 @@ export function startAdoption(
   });
 }
 
-/// The Conversations in the sidebar, newest first.
+/// The Conversations in the sidebar, in the order the human put them in.
 export function listConversations(): Promise<ConversationEntry[]> {
   return get<ConversationEntry[]>("/api/ui/conversations");
+}
+
+/// Say where the whole list goes, which is what letting go of a dragged row
+/// does.
+///
+/// The whole order rather than the row that moved: the list the human is
+/// looking at is what they meant, and a move replayed against a list the server
+/// has added to since would not be it.
+///
+/// Answered with nothing at all — there is no outcome to read. An id naming a
+/// Conversation that has gone is passed over on the other side, which is what a
+/// list drawn a moment ago is allowed to carry.
+export async function placeConversations(order: number[]): Promise<void> {
+  await refused(await sent("/api/ui/conversations/order", { order }));
 }
 
 /// One Conversation with its Timeline.
@@ -315,6 +332,16 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
   return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
 }
 
+/// Open a second round on a Conversation Verkstead has finished with: a new
+/// brief to write, on the branch the first round was built on.
+///
+/// Nothing is sent, for the reason nothing is sent to start a grilling. The
+/// worktree is ordinarily still there and is kept; one whose directory has gone
+/// is checked out again on the same branch, which is the server's to do.
+export function reopenConversation(id: number): Promise<ConversationReopened> {
+  return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
+}
+
 /// Give a session's keyboard back, which is the one thing that ends a Hold.
 ///
 /// Not the socket closing and not the tab going: Verkstead resuming over a
@@ -323,6 +350,25 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
 /// rules, which is the server's to do and not this side's.
 export function handBack(id: number): Promise<HandedBack> {
   return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
+}
+
+/// Go on without waiting for the account's window to come back.
+///
+/// The human's half of the two ways a pause ends; the other is the reset time
+/// passing, which the server does on its own. Both close the same wait and start
+/// the work again from where it stopped, and neither touches the worktree — a
+/// pause never changed anything in it.
+///
+/// No body: there is one thing to do about a pause, and a choice of one is a
+/// press rather than a form.
+export function resumePause(
+  id: number,
+  event: number,
+): Promise<PauseResumed> {
+  return post<PauseResumed>(
+    `/api/ui/conversations/${id}/pause/${event}/resume`,
+    {},
+  );
 }
 
 /// Set a manual task going: this one instruction, under the pairing picked
@@ -526,7 +572,7 @@ async function taken<T>(response: Response): Promise<T> {
 }
 
 /// Throw if the server refused, in its own words. Split out from [`taken`] for
-/// the one endpoint that answers with no body to read.
+/// the endpoints that answer with no body to read.
 async function refused(response: Response): Promise<void> {
   if (!response.ok) {
     throw new RefusedError(response.status, await refusal(response));

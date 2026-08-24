@@ -38,7 +38,7 @@ use crate::handoffs::Handoffs;
 use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
 use crate::runner::Pace;
-use crate::sandbox::{Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::Skills;
@@ -70,8 +70,9 @@ pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
 /// How a Conversation's agents are run: the home a sandbox reads the machine's
 /// identity out of, where Verkstead itself is reachable from inside one, the
 /// extra binds Sandbox Configuration asks for, the skills every sandbox is
-/// given, where a Conversation's handoff directory is made, where the settings
-/// files are read from, and what an agent is on the command line.
+/// given, the executable every sandbox asks with, where a Conversation's handoff
+/// directory is made, where the settings files are read from, and what an agent
+/// is on the command line.
 ///
 /// Resolved once at startup and shared by every session, because each of them is
 /// a fact about the machine rather than about any one Conversation — including
@@ -87,6 +88,17 @@ pub struct Agents {
     reachable: Reachable,
     config: SandboxConfig,
     skills: Skills,
+
+    /// The executable every sandbox is given as `verkstead`: this server's own
+    /// image — see [`Executable`].
+    ///
+    /// `None` where the server cannot find it, which is not a fallback to the
+    /// machine's install but a session that does not start. Resolved at startup
+    /// like everything else here, and reported per session rather than at
+    /// startup, because what it costs is a session and the log line worth having
+    /// is the one that says which — see [`Sessions::start`].
+    verkstead: Option<Executable>,
+
     handoffs: Handoffs,
     settings: Settings,
 
@@ -119,6 +131,7 @@ impl Agents {
         reachable: Reachable,
         config: SandboxConfig,
         skills: Skills,
+        verkstead: Option<Executable>,
         handoffs: Handoffs,
         settings: Settings,
     ) -> Agents {
@@ -128,18 +141,21 @@ impl Agents {
             reachable,
             config,
             skills,
+            verkstead,
             handoffs,
             settings,
         )
     }
 
     /// The same, with something else where claude goes — see [`Agents::agent`].
+    #[allow(clippy::too_many_arguments)]
     pub fn running(
         agent: Vec<String>,
         home: Home,
         reachable: Reachable,
         config: SandboxConfig,
         skills: Skills,
+        verkstead: Option<Executable>,
         handoffs: Handoffs,
         settings: Settings,
     ) -> Agents {
@@ -148,6 +164,7 @@ impl Agents {
             reachable,
             config,
             skills,
+            verkstead,
             handoffs,
             settings,
             agent,
@@ -595,7 +612,7 @@ impl Sessions {
     /// is only ever false for a router built without [`Agents`], which is every
     /// test about something other than sessions. What such a server cannot do
     /// is take a Conversation up: nothing is driving one, nothing ever will,
-    /// and there is no session for a Remedy to start.
+    /// and there is no session for Resume to start.
     pub(crate) fn runs_sessions(&self) -> bool {
         self.agents.is_some()
     }
@@ -653,11 +670,12 @@ impl Sessions {
     /// put what it prints on the Timeline as it arrives.
     ///
     /// The session that was started, for whoever is driving it — see
-    /// [`Session`]. A server with no way to run agents starts none, and a
-    /// sandbox that cannot be built — a Conversation with no worktree, or one
-    /// git will not own — is the same answer: there is nothing here to launch.
-    /// Both are logged, because both mean a Conversation that is grilling with
-    /// nothing grilling it.
+    /// [`Session`]. A server with no way to run agents starts none, a server
+    /// that cannot find its own executable to equip one with starts none either,
+    /// and a sandbox that cannot be built — a Conversation with no worktree, or
+    /// one git will not own — is the same answer: there is nothing here to
+    /// launch. All three are logged, because each of them means a Conversation
+    /// that is grilling with nothing grilling it.
     ///
     /// The Timeline Event is made after the process is, so that a session that
     /// never started leaves no Capture of nothing.
@@ -673,6 +691,21 @@ impl Sessions {
             tracing::warn!(
                 conversation_id = conversation.id,
                 "this server has no way to run an agent, so no session was started"
+            );
+            return Ok(None);
+        };
+
+        // What the session would ask with, which is the server's own image. Said
+        // here rather than let fall through to a machine's install: the two are
+        // separate builds, and a session asking one binary's Question Sets of
+        // another binary's server is the failure this refuses — see
+        // [`Executable`]. Which session it cost is the whole of what is worth
+        // logging, and this is where that is known.
+        let Some(verkstead) = agents.verkstead.clone() else {
+            tracing::error!(
+                conversation_id = conversation.id,
+                "Verkstead cannot find its own executable, so this session could not be \
+                 equipped with `verkstead` and was not started"
             );
             return Ok(None);
         };
@@ -711,6 +744,7 @@ impl Sessions {
                     home,
                     &reachable,
                     &skills,
+                    &verkstead,
                     &handoffs,
                     &secrets,
                     &config,
@@ -783,6 +817,14 @@ impl Sessions {
         let tail = session
             .as_deref()
             .map(|session| Tail::of(conversation_id, &pairing.profile, session));
+
+        // And the same output watched for the one thing a session says that is
+        // about the account rather than about the work: that its window is
+        // spent. The Profile is taken now because that is what the Pause names,
+        // and a Profile renamed while a session runs was not the account this
+        // one is on — see [`crate::limits`].
+        let limits =
+            crate::limits::Watch::on(conversation_id, event_id, pairing.profile.name.clone());
 
         let (stop, stopping) = oneshot::channel();
 
@@ -859,6 +901,7 @@ impl Sessions {
                         &mut launched,
                         &quiet,
                         tail,
+                        limits,
                         stopping,
                     )
                     .await;
@@ -1076,6 +1119,10 @@ struct Printing {
 /// the Screen is a terminal somebody may be watching, and half a second is a
 /// long time to watch a terminal not move.
 ///
+/// And `limits` is fed the same text a third time, watching for the one thing a
+/// session says that is about the account rather than about the work — see
+/// [`crate::limits`].
+///
 /// The one thing this loop announces that is not something it wrote down is the
 /// session falling quiet, and then waking: a page draws a session that has
 /// stopped differently from one getting on with it, and going quiet is
@@ -1088,6 +1135,11 @@ struct Printing {
 ///
 /// What comes back is how it ended, which is what whoever is driving decides
 /// between carrying on and halting by.
+///
+/// One parameter per thing the loop reads or writes, which is what makes the
+/// list long: gathering them would be a struct built at one call site and taken
+/// apart at the top of this, which is the same list said twice.
+#[allow(clippy::too_many_arguments)]
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
@@ -1095,6 +1147,7 @@ async fn relay(
     session: &mut Launched,
     quiet: &Quiet,
     mut tail: Option<Tail>,
+    mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
     // The Event alone here: what this loop says for itself it says in the log,
@@ -1146,6 +1199,7 @@ async fn relay(
 
                     let text = reading.take(&buffer[..taken]);
                     screen.printed(&text);
+                    limits.printed(&text);
                     pending.push_str(&text);
                 }
                 Err(error) => {
@@ -1155,6 +1209,13 @@ async fn relay(
             },
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
+                // On the same cadence as the flush, and after it: what is being
+                // looked for is in what was just written down, and a Pause the
+                // Timeline had no output under would be a wait with nothing
+                // above it saying where the session had got to.
+                limits
+                    .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                    .await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1166,6 +1227,14 @@ async fn relay(
                     && followed.poll(pool, nudges, event_id).await
                 {
                     summarise(pool, nudges, printing, &reading, told(&tail)).await;
+
+                    // The other record a session leaves behind, looked at the
+                    // moment it moves: a backend that says its window is spent
+                    // in its own log and not on its display would otherwise go
+                    // unnoticed until the terminal happened to say something.
+                    limits
+                        .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
+                        .await;
                 }
 
                 tailed = Instant::now();
@@ -1199,6 +1268,14 @@ async fn relay(
     pending.push_str(&last);
 
     flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
+
+    // And no look at it, deliberately: everything from here down is a session
+    // that has gone. A limit the agent waits out never ends its session — that
+    // is the whole of why a Pause is a wait rather than a failure — so a limit
+    // in a session's last words is a session that did not come back from one,
+    // which is the halt whoever is driving is about to write. Pausing as well
+    // would leave the run stopped on two things at once, and Resume would
+    // launch nothing.
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1359,6 +1436,10 @@ mod tests {
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             Skills::installed(state).expect("this binary carries skills"),
+            // A test harness is its own executable, and what a sandbox does with
+            // one is bind it: any file that is really there will do where nothing
+            // here runs it.
+            Executable::of_the_server(),
             Handoffs::under(state),
             Settings::in_data_dir(state),
         )

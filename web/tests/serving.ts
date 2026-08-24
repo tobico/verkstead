@@ -6,6 +6,8 @@
 
 import { vi } from "vitest";
 
+import type { SetReading, SetView, UnreadableSet } from "../src/api/types";
+
 /// One answer per fetch in the order given. The last answer is repeated,
 /// because a page polls for as long as it is open and a test should not have to
 /// say how many times.
@@ -79,4 +81,38 @@ export function json(body: unknown, status = 200): () => Promise<Response> {
         headers: { "content-type": "application/json" },
       }),
     );
+}
+
+/// The Set inside a fixture of `/api/ui/sets/{id}`.
+///
+/// That endpoint says first which of the two kinds of reading it is holding —
+/// the Set where this build can read the stored body, and the record itself
+/// where it cannot — so the fixtures do too. A test about a Set to read or fill
+/// in takes the Set out of the reading here, once, and goes on asking about the
+/// Set.
+export function readable(fixture: unknown): SetView {
+  const reading = fixture as SetReading;
+
+  if (!("Set" in reading)) {
+    throw new Error("expected a fixture of a Set this build can read");
+  }
+
+  return reading.Set;
+}
+
+/// And the record inside a fixture of one it could not read.
+export function unreadable(fixture: unknown): UnreadableSet {
+  const reading = fixture as SetReading;
+
+  if (!("Unreadable" in reading)) {
+    throw new Error("expected a fixture of a Set this build cannot read");
+  }
+
+  return reading.Unreadable;
+}
+
+/// A Set on its way back out of that endpoint, which is how a test serves one:
+/// the reading is what the page reads, and the Set is what the test is about.
+export function reads(set: SetView): SetReading {
+  return { Set: set };
 }

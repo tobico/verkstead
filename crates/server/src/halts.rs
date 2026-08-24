@@ -21,7 +21,7 @@
 //! nothing, a restart being free to pick that one up unasked — and a stop the
 //! human pressed for sends nothing either, they being the one person a
 //! notification about it would be telling their own news. See [`Decided`], which
-//! is the whole of that rule, and [`crate::push::halted`].
+//! is the whole of that rule, and [`crate::push::News::Halted`].
 //!
 //! Nothing here reverts, resets or stashes anything, and nothing here starts
 //! anything either. The repository is left exactly as the session left it, and
@@ -89,6 +89,14 @@ impl Decided {
 /// next launch it asked to come before, so the stop becomes a halt and the
 /// launch does not happen — see [`crate::stops::asked`].
 ///
+/// **A Pause answers this too**, and that is why it is one question rather than
+/// two. A run waiting an account's window out is stopped on purpose — see
+/// [`crate::limits`] — and launching over one would spend an account that has
+/// nothing left to spend. It is not a halt, because nothing went wrong and
+/// nothing needs Resume pressed: the wait ends on its own when the window comes
+/// back. What it shares with a halt is the only thing this asks about, which is
+/// that nothing may be launched past it.
+///
 /// A store that will not answer reads as *stopped*, which is the right way round
 /// for the one thing this decides: what is on the other side of it is launching
 /// an agent, and something that could not tell whether the run had stopped
@@ -96,6 +104,22 @@ impl Decided {
 pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
     if crate::stops::asked(state, conversation_id).await {
         return true;
+    }
+
+    match store::open_pause(&state.pool, conversation_id).await {
+        Ok(Some(event_id)) => {
+            tracing::info!(
+                conversation_id,
+                event_id,
+                "the account this run is spending is out of window, so nothing was launched"
+            );
+            return true;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether a run was waiting on a usage limit failed");
+            return true;
+        }
     }
 
     match store::halted(&state.pool, conversation_id).await {
@@ -189,7 +213,13 @@ pub(crate) async fn halt(
             // chose sends nothing, and [`Decided`] for why the human's own press
             // sends nothing either.
             if decided.pushes() {
-                crate::push::halted(state, conversation_id, &opening(what));
+                crate::push::told(
+                    &state.pool,
+                    conversation_id,
+                    crate::push::News::Halted {
+                        stopped: opening(what),
+                    },
+                );
             }
         }
         None => tracing::info!(

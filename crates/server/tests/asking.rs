@@ -20,8 +20,11 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{ConversationView, QuestionSetEvent, SetRow, Submitted, TimelineEvent};
-use verkstead_schema::SetCreated;
+use verkstead_render::{
+    ConversationEntry, ConversationView, QuestionSetEvent, SetRow, Standing, Submitted,
+    TimelineEvent,
+};
+use verkstead_schema::{Liveness, SetCreated};
 use verkstead_server::{open_database, router, store};
 
 /// What a grilling session asks: a Question, a Sub-question under it, and a
@@ -110,6 +113,24 @@ async fn ask(app: &Router, conversation: i64, yaml: &str) -> (StatusCode, String
     .await
 }
 
+/// The same, deferred: the flag the CLI sends when the session is not going to
+/// wait, which is a query parameter rather than anything in the Set — see the
+/// server's `sets` module.
+async fn ask_deferred(app: &Router, conversation: i64, yaml: &str) -> (StatusCode, String) {
+    fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!(
+                "/conversations/{conversation}/api/v1/sets?deferred=true"
+            ))
+            .header(header::CONTENT_TYPE, "application/yaml")
+            .body(Body::from(yaml.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
 /// The same, insisting it was taken, and handing back the id the agent then
 /// waits on.
 async fn asked(app: &Router, conversation: i64, yaml: &str) -> i64 {
@@ -118,6 +139,44 @@ async fn asked(app: &Router, conversation: i64, yaml: &str) -> i64 {
 
     let created: SetCreated = serde_saphyr::from_str(&body).unwrap();
     created.id
+}
+
+/// And the same for a Deferred Ask, which is taken and answered exactly as one
+/// that waits.
+async fn deferred(app: &Router, conversation: i64, yaml: &str) -> i64 {
+    let (status, body) = ask_deferred(app, conversation, yaml).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    let created: SetCreated = serde_saphyr::from_str(&body).unwrap();
+    created.id
+}
+
+/// [`SET`] under another title, for a test that asks twice and has to tell the
+/// two apart on the page.
+fn retitled(title: &str) -> String {
+    SET.replace("Retry policy for the outbound queue", title)
+}
+
+/// Whether the sidebar says this Conversation wants the human.
+async fn waiting(app: &Router, conversation: i64) -> bool {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri("/api/ui/conversations")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let sidebar: Vec<ConversationEntry> = serde_json::from_str(&body).unwrap();
+
+    sidebar
+        .into_iter()
+        .find(|row| row.id == conversation)
+        .expect("the Conversation is on the sidebar")
+        .waiting
 }
 
 /// Open a wait the way the CLI does, through the Conversation the Set was asked
@@ -317,8 +376,11 @@ async fn a_set_read_by_its_own_id_names_the_conversation_it_was_asked_from() {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
 
-        let view: verkstead_render::SetView =
+        let reading: verkstead_render::SetReading =
             serde_json::from_str(&body).unwrap_or_else(|err| panic!("reading {body:?}: {err}"));
+        let verkstead_render::SetReading::Set(view) = reading else {
+            panic!("a Set this build just stored reads back: {body}");
+        };
         assert_eq!(
             view.conversation, expected,
             "Set {id} should lead back to the Conversation it was asked from",
@@ -467,5 +529,70 @@ async fn a_whole_loop_of_rounds_lands_on_the_one_timeline() {
             .iter()
             .all(|asked| matches!(asked.standing, verkstead_render::Standing::Answered(_))),
         "and both have been answered"
+    );
+}
+
+/// Both kinds of ask land on the same Timeline and are answered from the same
+/// page. What tells them apart is the standing on the one still waiting: nobody
+/// is on the other end of a Deferred Ask, and reading it as an agent that had
+/// disconnected would be reporting a failure where there is none.
+#[tokio::test]
+async fn a_deferred_set_says_so_where_a_blocking_one_says_who_is_waiting() {
+    let (_dir, _pool, app, first, _second) = two_conversations().await;
+
+    let blocking = asked(&app, first, SET).await;
+    let deferred = deferred(&app, first, &retitled("Wording of the retry log line")).await;
+
+    let view = view(&app, first).await;
+    let standing = |set_id: i64| {
+        sets(&view)
+            .into_iter()
+            .find(|asked| asked.set_id == set_id)
+            .map(|asked| asked.standing.clone())
+            .expect("the Set is on the Timeline it was asked from")
+    };
+
+    assert_eq!(
+        standing(blocking),
+        Standing::Waiting(Liveness::Waiting),
+        "the blocking reading, which is the registry of held waits speaking: a \
+         Set nobody has had time to walk away from",
+    );
+    assert_eq!(
+        standing(deferred),
+        Standing::Waiting(Liveness::Deferred),
+        "and no wait was ever held on this one, by design",
+    );
+}
+
+/// Both are something to answer, so both leave the Conversation *blocked on
+/// you*: the human is the one being waited on either way, and the sidebar says
+/// only that.
+#[tokio::test]
+async fn a_deferred_set_leaves_the_conversation_waiting_on_the_human() {
+    let (_dir, pool, app, first, _second) = two_conversations().await;
+
+    // Out of Draft, which is the state the badge is never drawn on: a draft is
+    // drawn as a draft, and nothing has been asked from one.
+    store::set_state(&pool, first, store::Lifecycle::Grilling)
+        .await
+        .unwrap();
+
+    assert!(!waiting(&app, first).await, "nothing has been asked yet");
+
+    let deferred = deferred(&app, first, SET).await;
+    assert!(
+        waiting(&app, first).await,
+        "an unanswered Deferred Ask is an unanswered question to the human",
+    );
+
+    assert_eq!(
+        answer::<Submitted>(&app, deferred, decided()).await,
+        Submitted::Accepted,
+        "and it is answered through the one route a Set is answered by",
+    );
+    assert!(
+        !waiting(&app, first).await,
+        "which is the whole of what it was waiting for",
     );
 }

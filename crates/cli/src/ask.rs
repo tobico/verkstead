@@ -1,5 +1,5 @@
-//! `verkstead ask`: read a Question Set, check it, enrich it, send it, and
-//! wait.
+//! `verkstead ask`: read a Question Set, check it, enrich it, send it, and —
+//! unless it was deferred — wait.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -10,12 +10,19 @@ use verkstead_schema::QuestionSet;
 use crate::client::Client;
 use crate::repo;
 
-/// Put a Question Set to the human and block until it is answered.
+/// Put a Question Set to the human and block until it is answered — or, where
+/// `deferred` says so, leave it with them and return.
 ///
 /// The Set is refused here, before anything is sent, if it breaks the question
 /// grammar — the agent gets the same violations the server would have given it,
 /// only sooner and naming the Question at fault.
-pub fn ask(file: Option<&Path>, server: &str) -> Result<()> {
+///
+/// A Deferred Ask is the same submission and the same Set on the same Timeline.
+/// The only difference is on this end: nothing opens a wait, so the session goes
+/// on working, and what stdout carries is the stored Set instead of a Response —
+/// which is the whole of what there is to say at that point, and says which Set
+/// it was.
+pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     let yaml = read(file)?;
 
     let mut set = QuestionSet::from_yaml(&yaml)
@@ -45,14 +52,22 @@ pub fn ask(file: Option<&Path>, server: &str) -> Result<()> {
     // and captures both streams into one file, so anything said here on the way
     // would arrive ahead of the Response the agent came for.
     let client = Client::new(server);
-    let created = client.submit(&set)?;
-    let response = client.wait(created.id)?;
+    let created = client.submit(&set, deferred)?;
 
     // The Response is the CLI's whole output: the agent parses stdout, so
-    // nothing else has ever been written there.
-    let mut yaml = response
-        .to_yaml()
-        .context("rendering the Response as YAML")?;
+    // nothing else has ever been written there. A Deferred Ask has no Response
+    // to print and never will have on this end, so what goes there is the one
+    // thing that did happen — the Set was stored, and this is which one.
+    let mut yaml = match deferred {
+        true => created
+            .to_yaml()
+            .context("rendering the stored Question Set as YAML")?,
+        false => client
+            .wait(created.id)?
+            .to_yaml()
+            .context("rendering the Response as YAML")?,
+    };
+
     if !yaml.ends_with('\n') {
         yaml.push('\n');
     }
@@ -61,7 +76,7 @@ pub fn ask(file: Option<&Path>, server: &str) -> Result<()> {
     stdout
         .write_all(yaml.as_bytes())
         .and_then(|()| stdout.flush())
-        .context("writing the Response to stdout")
+        .context("writing to stdout")
 }
 
 /// The Set as the agent gave it: from a file, or from stdin when there is no

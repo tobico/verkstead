@@ -1,12 +1,59 @@
 # Asking the human
 
-Verkstead carries a Question Set from a coding agent to the human and blocks
-until it comes back answered. The human answers on a phone, away from the
-terminal, so a wait of hours is the tool working rather than the tool failing.
+Verkstead carries a Question Set from a coding agent to the human. The human
+answers on a phone, away from the terminal, so a wait of hours is the tool
+working rather than the tool failing — and where the work does not turn on the
+answer, an ask that does not wait at all is the point of the second kind below.
 
 This Guide is everything the binary knows about asking well, and it ships
 inside the binary: `verkstead guide` — or `verkstead` with no arguments — is
 where an agent starts, and it is the whole of it. Nothing else has to be found.
+
+## Two kinds of ask
+
+Every Set lands on its conversation's timeline, notifies the human's devices and
+waits there to be answered. What differs is this end.
+
+- **Blocking** — `verkstead ask`. The session idles until the Response comes
+  back, so the Answers are in front of it when it goes on.
+- **Deferred** — `verkstead ask --deferred`. The Set is stored, the command
+  returns at once, and the session carries on without it. The human answers in
+  their own time, and their Answers are folded into the prompt of a later
+  session of the same conversation — so nothing *this* session does will ever
+  see them.
+
+**Block only on Questions whose Answers affect the work about to be done.** That
+is the whole rule. "Which of these two shapes should the config take?" blocks,
+when the config is what is being written now. "Is the wording of this error
+message right?" does not: it is worth asking, the work does not turn on it, and
+the answer reaches whoever picks the work up next.
+
+The rule decides a Question at a time, and a Set is one kind or the other — so
+Questions of both kinds go in two Sets: what the work turns on in the blocking
+one, and everything else in a deferred one sent alongside it. Budget each of
+them as a Set in its own right, by **Pacing** below.
+
+A deferred ask is a foreground call: it returns as soon as the Set is stored,
+and there is nothing to wait for. What it prints is the stored Set rather than a
+Response — the `id` it was stored under and when the server took it — and that
+is the whole of what comes back on this end, ever.
+
+```
+verkstead ask --deferred <<'YAML'
+title: …
+questions:
+  - label: Q1
+    text: …
+YAML
+```
+
+```yaml
+id: 42
+created_at: 2026-08-24T09:12:03.114Z
+```
+
+Everything below is about writing a Set and holds for both kinds. **Running the
+ask** is where the blocking one's own mechanics are.
 
 ## Question labels
 
@@ -95,7 +142,7 @@ Verbatim, as shipped:
 ```
 Submit a Question Set and block until the human answers it.
 
-Prints the Response as YAML on stdout and exits 0. Nothing else is ever written to stdout, so the agent can parse it as it stands.
+Prints the Response as YAML on stdout and exits 0 — or, with `--deferred`, prints the stored Set and returns without waiting. Nothing else is ever written to stdout, so the agent can parse what comes back as it stands.
 
 Usage: verkstead ask [OPTIONS] [FILE]
 
@@ -104,9 +151,14 @@ Arguments:
           The Question Set, as YAML. Read from stdin when absent
 
 Options:
+      --deferred
+          Don't wait: store the Set and return.
+          
+          Prints the stored Set as YAML instead of a Response — its `id` and when the server took it — and exits 0. The human answers it in their own time, and their Answers reach a later session of this Conversation. Block only on Questions whose Answers affect the work about to be done.
+
       --server <SERVER>
           Base URL of the Verkstead server
-
+          
           [env: VERKSTEAD_SERVER=]
           [default: http://127.0.0.1:8422]
 
@@ -282,6 +334,11 @@ call with `run_in_background: true`. The call blocks until the human answers,
 with no timeout, and that may be hours: the whole point is that they are not at
 the terminal. A foreground tool call here hangs the session. The harness wakes
 the agent when the Response arrives.
+
+The whole of this section is the blocking ask's. A deferred one waits for
+nothing, so it is an ordinary foreground call and there is no Response to read
+— see **Two kinds of ask**. Everything below about a failure that isn't the Set
+holds for both.
 
 Pipe the Set in on stdin — no file to name, and nothing left behind:
 

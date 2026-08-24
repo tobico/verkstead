@@ -19,7 +19,9 @@ mod comments;
 mod commits;
 mod continuing;
 mod conversations;
+mod deferrals;
 mod drivers;
+mod exchanges;
 mod followers;
 /// Verkstead's own reach into GitHub: the host's `gh`, run against a Repo.
 ///
@@ -38,6 +40,7 @@ mod halts;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod hold;
+mod limits;
 mod manual;
 mod nudge;
 mod profiles;
@@ -440,6 +443,11 @@ fn routed(
     // nobody — see [`stalls`].
     stalls::sweeping(&state, resumed);
 
+    // And the runs waiting an account's window out, whose windows go on coming
+    // back while the server is down: nothing holds a clock across the process,
+    // so the first sweep is what finds one already due — see [`limits`].
+    limits::sweeping(&state);
+
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.
@@ -535,6 +543,17 @@ pub async fn run(config: Config) -> Result<()> {
     let skills = skills::Skills::installed(&data_dir)
         .context("installing the skills every sandbox is given")?;
 
+    // And the executable every sandbox asks with, which is this one: `verkstead
+    // serve` and `verkstead ask` are two verbs of one binary, so a session's CLI
+    // is the running server's own build and cannot disagree with it about a
+    // schema, a Guide or a wire format — see [`sandbox::Executable`].
+    //
+    // Not a reason to refuse to start, unlike the two above. A server that
+    // cannot say what it is running has nothing to equip a session with, and
+    // which session that costs is the thing worth reporting — so it is said as
+    // one is started rather than here, where there is nothing to name.
+    let verkstead = sandbox::Executable::of_the_server();
+
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first
     // session starts.
@@ -568,6 +587,7 @@ pub async fn run(config: Config) -> Result<()> {
         home = %home.path.display(),
         sandbox_binds = binds.count(),
         skills = %skills.path().display(),
+        verkstead = ?verkstead.as_ref().map(sandbox::Executable::path),
         "verkstead is listening",
     );
 
@@ -583,6 +603,7 @@ pub async fn run(config: Config) -> Result<()> {
                 sandbox::Reachable::at(config.listen),
                 binds,
                 skills,
+                verkstead,
                 handoffs,
                 settings.clone(),
             ),

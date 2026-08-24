@@ -48,20 +48,32 @@ impl Client {
         }
     }
 
-    /// Submit a Set and take back the id the wait is held on.
+    /// Submit a Set and take back the id the wait is held on — or, for a
+    /// Deferred Ask, the id and nothing to wait on.
     ///
     /// This one does not retry. A Set is not idempotent — a retry could leave
     /// the human with the same questions twice — and an agent that cannot reach
     /// the server is better off being told so now than blocking forever on a
     /// Set that was never accepted.
-    pub fn submit(&self, set: &QuestionSet) -> Result<SetCreated> {
+    ///
+    /// Which kind it is rides in the query string rather than in the Set: the
+    /// body is what the agent wrote, and this is how it ran the CLI.
+    pub fn submit(&self, set: &QuestionSet, deferred: bool) -> Result<SetCreated> {
         let body = set
             .to_yaml()
             .context("rendering the Question Set as YAML")?;
 
+        // Left off entirely for a blocking ask, which is what every ask was
+        // before there were two kinds: the server reads an absent parameter as
+        // the blocking one.
+        let deferred = match deferred {
+            true => "?deferred=true",
+            false => "",
+        };
+
         let mut reply = self
             .agent
-            .post(format!("{}/api/v1/sets", self.base))
+            .post(format!("{}/api/v1/sets{deferred}", self.base))
             .header("Content-Type", "application/yaml")
             .send(&body)
             .with_context(|| format!("submitting the Question Set to {}", self.base))?;

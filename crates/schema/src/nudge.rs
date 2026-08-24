@@ -54,9 +54,9 @@ pub enum Nudge {
     /// included — a lifecycle that moved is a row that reads differently.
     Conversation { conversation: i64 },
 
-    /// The membership of the list moved: a Conversation appeared or left. Which
-    /// is a different thing from one of them moving, and the reason both kinds
-    /// exist.
+    /// The list itself moved: a Conversation appeared or left, or the human
+    /// dragged the sidebar into a different order. Which is a different thing
+    /// from one of them moving, and the reason both kinds exist.
     Conversations,
 
     /// Something about the Repos moved, roadmaps nothing is driving included.

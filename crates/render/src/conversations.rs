@@ -392,6 +392,15 @@ pub enum TimelineEvent {
     /// Set page reads.
     QuestionSet(QuestionSetEvent),
 
+    /// A Question Set whose stored body this build cannot read, drawn as itself.
+    ///
+    /// Its own kind rather than a flag on the one above, because there is no
+    /// table to draw and nothing to answer: the row says it cannot be read, and
+    /// what it opens is the stored body rather than a document. The Set is on
+    /// the record and stays on it — an omission would be this build quietly
+    /// deciding a decision never happened.
+    UnreadableSet(UnreadableSetEvent),
+
     /// The handoff the grilling wrote on its way out, rendered inline like the
     /// Brief — and for the same reason: it is a document to read, and there is
     /// nothing of it a details pane would show that the Timeline does not.
@@ -402,6 +411,16 @@ pub enum TimelineEvent {
     /// the same arrangement a Capture and a Question Set have, and for the
     /// same reason.
     Commit(CommitEvent),
+
+    /// A run waiting an account's window out: which Profile ran out, when it
+    /// comes back, and the press that starts the work again.
+    ///
+    /// The one kind of Event that carries its whole self rather than a summary
+    /// with the rest behind a fetch: there is something to press on it, and a
+    /// page that had to fetch what it was waiting for could draw the button
+    /// before it could say what for. Three short strings, where a Capture and a
+    /// diff are megabytes.
+    Pause(PauseEvent),
 
     /// Something Verkstead did on its own account, rendered inline like the
     /// Brief — and for the same reason: it is a sentence to read, and there is
@@ -421,6 +440,80 @@ pub enum TimelineEvent {
     /// committed — so this is the instruction alone, which is the part of a
     /// Manual Task nothing else on the Timeline records.
     ManualTask(ManualTaskEvent),
+}
+
+/// A run waiting an account's window out, as the Timeline shows it.
+///
+/// Nothing here went wrong, which is what makes it a different Event from the
+/// Notice a halt writes: the account is out of window, the agent is waiting for
+/// the same reset, and the Conversation is *blocked on you* only in the sense
+/// that the human may decide not to wait.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PauseEvent {
+    pub id: i64,
+
+    /// When the run stopped, RFC 3339.
+    pub at: String,
+
+    /// What the Agent Profile whose account ran out is called, as it was called
+    /// then.
+    pub profile: String,
+
+    /// The line the session printed, as it printed it. The record of why this
+    /// was raised, in the backend's own words rather than in Verkstead's.
+    pub said: String,
+
+    /// When the window resets, RFC 3339 — or `null` where what the session
+    /// printed carried no time this build could read as one, which is a wait the
+    /// human ends.
+    pub resets_at: Option<String>,
+
+    /// What ended the wait, or `null` while it is still on — which is the state
+    /// the run is stopped in, and what the resume press is drawn for.
+    pub resumed: Option<PauseEnded>,
+}
+
+/// How a Pause ended: what started the work again, and when.
+///
+/// Named for the Pause rather than for the resuming, because [`Resumed`] is
+/// already what pressing **Resume** on a halt answers with. The two are
+/// different things said with one word — one is a wait that is over, the other
+/// is a run that has been started again — so this takes the longer name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PauseEnded {
+    pub by: By,
+
+    /// When it ended, RFC 3339.
+    pub at: String,
+}
+
+/// The two things that end a wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum By {
+    /// The human said so, from the workbench or from their phone.
+    Human,
+
+    /// The reset time passed.
+    Reset,
+}
+
+/// What became of pressing resume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PauseResumed {
+    /// Recorded, and the run is going on again.
+    Resumed,
+
+    /// This Conversation has no such Pause — an Event id that belongs to another
+    /// Conversation names nothing.
+    NoSuchPause,
+
+    /// The wait was over before this arrived — the window came back, or a second
+    /// press. Not an error and not something to act on twice.
+    AlreadyResumed,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -783,6 +876,18 @@ pub struct BriefEvent {
 
     /// The same, as HTML — rendered and sanitized by the server on the way out.
     pub html: String,
+
+    /// Whether this Brief is done being written: the round it belongs to has
+    /// been grilled, so it is the record of what that round was built from
+    /// rather than a document to edit.
+    ///
+    /// The server's rule rather than something the page works out from the
+    /// Conversation around it, as `ready_to_grill` is — and it is a fact about
+    /// one Brief rather than about the Conversation, because a reopened one has
+    /// a frozen Brief and an open one on the same Timeline. An adopting
+    /// Conversation's first Brief is frozen from the start: it is the stage
+    /// brief, and nobody here writes it.
+    pub frozen: bool,
 }
 
 /// A session's output as the Timeline shows it: how far its conversation has
@@ -872,6 +977,32 @@ pub struct QuestionSetEvent {
     /// The same verdict the Set's own page carries, from the same registry of
     /// held waits — this is a Timeline the human answers from.
     pub standing: Standing,
+}
+
+/// A Question Set the Timeline cannot draw a table for, because this build
+/// cannot read the body it was stored as.
+///
+/// What it carries is the reason and no more. There is no title — that is in the
+/// body with everything else — and no standing, because a Set nobody here can
+/// read is not one anybody is going to answer. The stored body itself is what
+/// the details pane fetches, through the same `/api/ui/sets/{id}` a readable Set
+/// is opened by: it is the same Set reached the same way, and what comes back
+/// says which of the two it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct UnreadableSetEvent {
+    pub id: i64,
+
+    /// When the Set was put, RFC 3339.
+    pub at: String,
+
+    pub set_id: i64,
+
+    /// What deserializing the stored body said. On the row rather than behind
+    /// the fetch, because it is one line and it is the whole of what happened:
+    /// a reader who has to open the Event to find out why a row says nothing has
+    /// been told nothing by the row.
+    pub why: String,
 }
 
 /// One row of a Question Set's Timeline table: the number it answers to, what
@@ -1104,6 +1235,20 @@ pub fn question_set_event(
     })
 }
 
+/// A Question Set whose stored body this build cannot read, as an Event.
+///
+/// Nothing is summarised because nothing could be: what the row has to say is
+/// that the record is there and this build cannot render it, which is the reason
+/// and the id it is stored under.
+pub fn unreadable_set_event(id: i64, at: String, set_id: i64, why: String) -> TimelineEvent {
+    TimelineEvent::UnreadableSet(UnreadableSetEvent {
+        id,
+        at,
+        set_id,
+        why,
+    })
+}
+
 /// The Set's Questions and Sub-questions as the Timeline's table, in the order
 /// the agent asked them, each against whatever became of it.
 fn asked(
@@ -1186,12 +1331,13 @@ fn decided(
 /// Here rather than in the server for the reason the Set's rendering is: this is
 /// the crate with the markdown parser in it, and whatever serves the viewer, the
 /// rendering happens in one place.
-pub fn brief_event(id: i64, at: String, markdown: String) -> TimelineEvent {
+pub fn brief_event(id: i64, at: String, markdown: String, frozen: bool) -> TimelineEvent {
     TimelineEvent::Brief(BriefEvent {
         id,
         at,
         html: crate::markdown::to_html(&markdown),
         markdown,
+        frozen,
     })
 }
 
@@ -1338,6 +1484,34 @@ pub struct Comment {
     pub markdown: String,
 }
 
+/// A run waiting an account's window out, as an Event. Nothing to render — a
+/// Profile's name and a line off a terminal are not markdown — and here beside
+/// the rest for the reason a move is: one place knows how a Timeline is made.
+pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
+    TimelineEvent::Pause(PauseEvent {
+        id,
+        at,
+        profile: waiting.profile,
+        said: waiting.said,
+        resets_at: waiting.resets_at,
+        resumed: waiting.resumed,
+    })
+}
+
+/// What the caller of [`pause_event`] hands over: the Pause as the store holds
+/// it.
+///
+/// Its own type rather than the store's, because this crate does not depend on
+/// the store — and rather than four parameters, two of which are strings: a
+/// call with those in the wrong order would compile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    pub profile: String,
+    pub said: String,
+    pub resets_at: Option<String>,
+    pub resumed: Option<PauseEnded>,
+}
+
 /// The handoff as an Event, rendered on the way — the same rendering the Brief
 /// gets, because it is the same kind of thing: markdown somebody wrote for
 /// somebody else to read.
@@ -1392,6 +1566,20 @@ pub struct NewConversation {
 pub struct NewAdoption {
     pub repo_id: i64,
     pub roadmap: String,
+}
+
+/// The order the human has just dragged the sidebar into: every Conversation
+/// they can see, by id, top first.
+///
+/// The whole list rather than the one row that moved, because the whole list is
+/// what a drag produces and what the human is looking at when they let go. A
+/// move said as *this one, to there* would have to be replayed against a list
+/// the server might have added to since; a list said whole is simply what they
+/// meant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct NewOrder {
+    pub order: Vec<i64>,
 }
 
 /// What became of starting one.
@@ -1703,6 +1891,31 @@ pub enum Adopted {
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
+    WorktreeRefused,
+}
+
+/// What became of reopening a finished one with a new round.
+///
+/// Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
+/// press that gives a Conversation somewhere to work, and what stops one is
+/// something different for the human to go and do each time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationReopened {
+    /// Reopened: it is drafting again, with a Brief of its own to write and a
+    /// worktree to work in.
+    Reopened,
+
+    NoSuchConversation,
+
+    /// It is not Done, so there is no finished round to open another after.
+    /// Aborted is off the ladder, and every other state is somewhere the work
+    /// has got to.
+    NotDone,
+
+    /// The worktree's directory had gone and git would not check the branch out
+    /// again. The reason is in the server's log — this is the one refusal with
+    /// nothing for the human to correct.
     WorktreeRefused,
 }
 

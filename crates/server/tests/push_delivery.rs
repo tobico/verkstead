@@ -222,12 +222,22 @@ async fn subscribe(app: &Router, device: &Device) {
 
 /// Send a Set the way the CLI does, and return what the agent was told.
 async fn post_set(app: &Router, yaml: &str) -> (StatusCode, SetCreated) {
+    post_asking(app, yaml, "").await
+}
+
+/// The same, deferred: nothing will wait on the Set, which is a fact about the
+/// session that asked rather than about the human being told.
+async fn post_deferred_set(app: &Router, yaml: &str) -> (StatusCode, SetCreated) {
+    post_asking(app, yaml, "?deferred=true").await
+}
+
+async fn post_asking(app: &Router, yaml: &str, asking: &str) -> (StatusCode, SetCreated) {
     let http = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets"))
+                .uri(format!("/conversations/{ASKING_FROM}/api/v1/sets{asking}"))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -448,4 +458,34 @@ async fn answering_or_archiving_a_set_sends_nothing() {
         2,
         "one notification per new Set — no reminders and no follow-ups",
     );
+}
+
+/// A Deferred Ask reaches the human's devices exactly as a blocking one does.
+///
+/// Which kind of ask it was is a fact about the session that sent it — whether
+/// anything is standing still until the Answer — and none about the human, who
+/// is being asked either way. A notification withheld because no agent was
+/// waiting would be a question they never heard about.
+#[tokio::test]
+async fn a_deferred_set_notifies_every_device_the_same_way() {
+    let (service, received) = push_service().await;
+    let (_dir, _pool, app) = fresh_app().await;
+
+    let phone = Device::new(&service, "take", "phone");
+    subscribe(&app, &phone).await;
+
+    let (status, created) = post_deferred_set(&app, SET).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let taken = pushes(&received, 1).await;
+    settle().await;
+    assert_eq!(received.lock().unwrap().len(), 1, "one device, one push");
+
+    let notice = phone.read(&taken[0]);
+    assert_eq!(
+        notice["path"],
+        format!("/sets/{}", created.id),
+        "and it opens the Set, which is the page the human answers it on",
+    );
+    assert_eq!(notice["title"], "Rate limiting for the public API");
 }

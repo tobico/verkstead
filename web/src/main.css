@@ -371,8 +371,9 @@ textarea::placeholder {
 
 /* A word rather than a light, because a Set is read on a phone and "agent
    disconnected" has to read as itself without a legend. Waiting is the ordinary
-   state and stays as quiet as the rest of the line; only the Set nobody is
-   listening on speaks up. */
+   state and stays as quiet as the rest of the line; only the Set whose agent has
+   gone speaks up. A Deferred Ask stays quiet too: nobody is waiting on one by
+   design, so there is nothing wrong to point at. */
 .standing .liveness.disconnected {
   color: var(--removed);
   font-weight: 500;
@@ -1243,13 +1244,25 @@ main:has(.workbench) {
   gap: 0.5rem;
 }
 
+/* The row itself is the card and the grip beside it: the card is what is
+   pressed to open the Conversation, and the grip is what is dragged to move it.
+   Two targets rather than one, because a card that was both would have to guess
+   which of the two a press meant — and on a phone it would have to take the
+   touch that was meant to scroll the list. */
+.conversation-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
 /* A row rather than a column: the name and the repo it is in stack down the
    left, and whatever mark the Conversation carries sits at the right edge. */
-.conversation-row button {
+.conversation-row .open {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0.85rem 1rem;
   font: inherit;
   color: inherit;
@@ -1265,7 +1278,7 @@ main:has(.workbench) {
    its near edge read as heavier than the rest of the list rather than as the one
    being looked at. A fill is no better — the row is read, and a wash behind it
    would fight the words. */
-.conversation-row.selected button {
+.conversation-row.selected .open {
   border-color: var(--accent);
 }
 
@@ -1275,7 +1288,7 @@ main:has(.workbench) {
    `border-style` alone, so a selected draft still takes the accent — a dotted
    accent border is a draft that is open, which is both things at once and is
    what it should look like. */
-.conversation-row.draft button {
+.conversation-row.draft .open {
   border-style: dotted;
 }
 
@@ -1289,12 +1302,73 @@ main:has(.workbench) {
    below all the same — left soft it would be dimmed twice, and the card is what
    should recede and not the words in it. Still a card to press: a Done
    Conversation can be reopened. */
-.conversation-row.ended button {
+.conversation-row.ended .open {
   opacity: 0.45;
 }
 
 .conversation-row.ended .meta {
   color: var(--ink);
+}
+
+/* Something is waiting on the human, and the whole card says so: the accent all
+   the way round it, at the card's weight — one 1px border and one 1px inset
+   shadow being the same 2px this is. A border rather than the mark alone,
+   because what this has to survive is a glance down a list on a phone, and an
+   edge is legible where a 12px dot beside four names is not.
+
+   The accent rather than the `--stopped` red for the reason the mark inside it
+   is the accent: an ask left open, a run stopped on an Interruption and an
+   account out of window are none of them anything going wrong. */
+.conversation-row.waiting .open {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Open *and* waiting: both marks on the one card, the near edge thickened and
+   the ring around it, rather than the later rule taking the earlier one's
+   shadow away. */
+.conversation-row.selected.waiting .open {
+  box-shadow:
+    inset 0.2rem 0 0 var(--accent),
+    inset 0 0 0 1px var(--accent);
+}
+
+/* The grip: the part of a row that is dragged rather than pressed, which is how
+   the human says where a Conversation sits. Its own target beside the card, as
+   wide as a thumb and as tall as the row.
+
+   `touch-action: none` is what makes it work on a phone at all: without it a
+   touch that starts here scrolls the sidebar, and the pointer events the drag is
+   made of are cancelled the moment it does. It is on the grip alone, so the rest
+   of the list scrolls under a thumb exactly as it did. */
+.conversation-row .grip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  padding: 0;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: grab;
+  touch-action: none;
+  font: inherit;
+  font-size: 1rem;
+  letter-spacing: -0.25em;
+  text-indent: -0.25em;
+}
+
+/* The row under the hand: lifted off the list while it is being moved, so what
+   is being dragged is the one thing on the list that is obviously moving. */
+.conversation-row.held .grip {
+  cursor: grabbing;
+}
+
+.conversation-row.held .open {
+  border-color: var(--accent);
+  opacity: 0.9;
 }
 
 /* The left-hand column: everything the row says in words. `min-width: 0` so a
@@ -1332,13 +1406,24 @@ main:has(.workbench) {
   border-radius: 50%;
 }
 
-/* Something is waiting on the human: an ask left open, driving that has
-   halted, or a direction to choose. The ember, filled — the one mark that is
-   about them rather than about the work, and the reason it is the accent rather
-   than the `--stopped` red is that not one of the three is anything going
-   wrong. */
-.mark.waiting {
+/* Something is waiting on the human: an ask left open, driving that has halted,
+   a run waiting an account's window out, or a direction to choose. An icon
+   rather than the dot it used to be — a shape reads at a glance where a dot has
+   to be looked at, and this is a list that is glanced down, so it is a size up
+   on the session marks beside it. The border around the whole card is the other
+   half of the same mark; see `.conversation-row.waiting`. The accent rather than
+   the `--stopped` red, because not one of the four is anything going wrong. */
+.conversation-row .mark.waiting {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
   background: var(--accent);
+  border-radius: 50%;
+  color: var(--card);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 /* And a session getting on with it: a ring with one lit arc, turning slowly.
@@ -1348,6 +1433,7 @@ main:has(.workbench) {
 .mark.working {
   border: 1.5px solid var(--edge);
   border-top-color: var(--ink-soft);
+  border-radius: 50%;
   animation: turning 1.4s linear infinite;
 }
 
@@ -2028,6 +2114,16 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
+/* The round boundary, which is the one move worth seeing from across the page:
+   everything above it was built from a different brief. */
+.timeline-event > .moved.draft {
+  font-weight: 600;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--edge);
+  padding-top: 0.6rem;
+  margin-top: 0.4rem;
+}
+
 /* And something Verkstead did on its own account, which reads as the same kind
    of thing again — a fact about the work, said by the one voice on a Timeline
    that is neither the human's nor an agent's. Marked off by a rule at its left
@@ -2156,6 +2252,17 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
+/* And which kind of ask it was, beside the fact that it is waiting. Quiet where
+   "waiting on you" is the accent: both want answering, and this says only that
+   no session is standing still until it is. */
+.question-set .deferred {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
 /* A Set nobody was ever going to answer. Said quietly: it is a fact about the
    record rather than something to do. */
 .question-set .closed {
@@ -2236,6 +2343,51 @@ main:has(.workbench) {
    yet"; on a settled one it is the question the human left open. */
 .question-set .asked .open {
   opacity: 0.6;
+}
+
+/* A Set whose stored body this build cannot read. Dashed rather than coloured:
+   nothing has gone wrong with the work and there is nothing here to answer — the
+   record is intact and this build cannot render it, which is a gap in the
+   drawing rather than a state of the Conversation. */
+.timeline-event > .question-set.unreadable {
+  border-style: dashed;
+}
+
+.unreadable-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+/* What deserializing it said, on the row and on the page. Wrapped rather than
+   clipped: serde names the field and where in the body it sits, and half of that
+   sentence is no use to anybody. */
+.unreadable-why {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The body as it was stored, which is the whole of what there is to show. Its
+   own scroll, because one long line of JSON is not a reason for the column
+   beside it to move. */
+.stored-body {
+  margin-bottom: 1.5rem;
+}
+
+.stored-json {
+  margin: 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: var(--code-wash);
+  border-radius: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* A commit a session landed on the branch. A button, as the two events above
@@ -2348,6 +2500,75 @@ main:has(.workbench) {
   margin: 0 0 1.5rem;
   padding: 0 0 1.25rem;
   border-bottom: 1px solid var(--edge);
+}
+
+/* A run waiting an account's window out. A card and not a button, unlike the
+   events above it: this one has something to press *inside* it, so the press is
+   a control of its own rather than the whole card. Marked while it is open the
+   way a waiting question set is — in the colour that means stopped rather than
+   the one that means happening. What it does not have is a way into a details
+   pane, because it has no evidence to gather; three short facts are the whole of
+   it, and they are here. */
+.timeline-event > .pause.selected {
+  border-color: var(--accent);
+}
+
+.timeline-event > .pause.open {
+  border-color: var(--stopped);
+}
+
+.pause .event-head {
+  justify-content: flex-start;
+}
+
+/* Not `.live`, which is the accent and means something is happening here. This
+   means the opposite: nothing is happening, and it is waiting on you. */
+.pause .event-head .live {
+  color: var(--stopped);
+}
+
+/* Which account ran out and when it comes back, then the sentence the session
+   printed: the first reads as the heading of the thing that stopped, and the
+   second is the machine's own account of it. */
+.pause .what {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pause .how {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* What ended the wait, once something has. The press goes and this stays: a long
+   run against a busy account collects one of these a day. */
+.pause .resumed {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+/* The window coming back on its own is the ordinary ending and reads as one; the
+   human deciding not to wait is the exception, and is the half worth marking. */
+.pause .resumed.Human {
+  color: var(--accent);
+}
+
+/* One press and no more, because there is one thing to do: Verkstead is not
+   driving anything here and has nothing to retry. */
+.resuming {
+  margin-top: 1rem;
+}
+
+.resuming .resume {
+  font: inherit;
+  cursor: pointer;
+}
+
+.resuming .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
 }
 
 /* What the conversation has stopped on, said where the conversation is named. A
@@ -2723,6 +2944,35 @@ main:has(.workbench) {
 }
 
 .start-grilling .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* And what happens next on one that is finished, in the same place and never at
+   the same time: a conversation is either drafting a round or it has finished
+   one. Drawn quieter than `Start grilling` — reopening is a deliberate second
+   thought about work that is over, rather than the obvious next press. */
+.reopen {
+  margin-top: 1rem;
+}
+
+.reopen .reopen-conversation {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.reopen .reopen-conversation:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.reopen .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }

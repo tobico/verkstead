@@ -20,6 +20,15 @@ pub struct SetCreated {
     pub created_at: String,
 }
 
+impl SetCreated {
+    /// As the wire carries it — and, for a Deferred Ask, as the CLI prints it:
+    /// there is no Response coming to that agent, so what it is owed on stdout
+    /// is that the Set was stored and which one it is.
+    pub fn to_yaml(&self) -> Result<String, serde_saphyr::SerializeError> {
+        serde_saphyr::to_string(self)
+    }
+}
+
 /// What `POST …/api/v1/sets/{id}/response` returns once a Response is stored.
 /// The human's device gets this; the agent gets the Response itself, off the
 /// wait.

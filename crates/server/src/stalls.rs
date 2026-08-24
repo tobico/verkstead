@@ -3,14 +3,16 @@
 //!
 //! **Stalled** is three things at once: the state is Grilling, Implementing or
 //! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
-//! it is not halted already. Each of the three is doing work. The state is
+//! nothing has stopped it on purpose. Each of the three is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
 //! the human, Done finished and Aborted stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
 //! — a wrapping Conversation idles for days under live watchers and is perfectly
 //! healthy, and so are the gaps between an unattended run's steps. And a halt is
 //! already the record of a Conversation that stopped, so one that has one is one
-//! that has been written down.
+//! that has been written down — as is one waiting an account's window out, which
+//! is a run stopped on purpose and said on its own Timeline. Both are the one
+//! question [`crate::halts::stopped`] answers.
 //!
 //! What it records is a **halt** — see [`crate::halts`] — of the kind nobody
 //! chose: a stall is a driver that went away rather than a decision anybody
@@ -131,6 +133,20 @@ pub(crate) async fn sweep(state: &AppState) {
             Ok(None) => {}
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation had already stopped failed");
+                continue;
+            }
+        }
+
+        // A run waiting an account's window out, which is stopped on purpose,
+        // said on its own Timeline and already push-notified — see
+        // [`crate::limits`]. Halting it would be telling the human twice about
+        // one wait and calling a deliberate one a failure, and the wait ends
+        // itself when the window comes back.
+        match store::open_pause(&state.pool, conversation.id).await {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id = conversation.id, "asking whether a Conversation was waiting on a usage limit failed");
                 continue;
             }
         }

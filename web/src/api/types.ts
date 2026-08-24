@@ -343,7 +343,20 @@ markdown: string,
 /**
  * The same, as HTML — rendered and sanitized by the server on the way out.
  */
-html: string, };
+html: string, 
+/**
+ * Whether this Brief is done being written: the round it belongs to has
+ * been grilled, so it is the record of what that round was built from
+ * rather than a document to edit.
+ *
+ * The server's rule rather than something the page works out from the
+ * Conversation around it, as `ready_to_grill` is — and it is a fact about
+ * one Brief rather than about the Conversation, because a reopened one has
+ * a frozen Brief and an open one on the same Timeline. An adopting
+ * Conversation's first Brief is frozen from the start: it is the stage
+ * brief, and nobody here writes it.
+ */
+frozen: boolean, };
 
 /**
  * What became of an edit to a Brief.
@@ -357,6 +370,11 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
  * was written down. This is what has become of its pair since.
  */
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
+
+/**
+ * The two things that end a wait.
+ */
+export type By = "Human" | "Reset";
 
 /**
  * One session's Capture, whole, as the details pane receives it.
@@ -514,6 +532,15 @@ idle: boolean,
  * the whole of what a draft has to say.
  */
 waiting: boolean, };
+
+/**
+ * What became of reopening a finished one with a new round.
+ *
+ * Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
+ * press that gives a Conversation somewhere to work, and what stops one is
+ * something different for the human to go and do each time.
+ */
+export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -760,7 +787,8 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
- * currently waiting on it, or nothing is holding a wait any more.
+ * currently waiting on it, whether nothing is holding a wait any more, or
+ * whether nothing ever was.
  *
  * Display state only (ADR-0001). A disconnected Set is still answerable and is
  * never withdrawn on its own — the CLI reconnects through transient drops, and
@@ -769,7 +797,7 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
  * It is a verdict rather than a timestamp because the server has the clock and
  * the registry of held waits; the browser only draws what it is told.
  */
-export type Liveness = "waiting" | "disconnected";
+export type Liveness = "waiting" | "disconnected" | "deferred";
 
 /**
  * A Manual Task as the page receives it: what the human asked for, and when.
@@ -859,6 +887,18 @@ export type NewAdoption = { repo_id: number, roadmap: string, };
 export type NewConversation = { repo_id: number, };
 
 /**
+ * The order the human has just dragged the sidebar into: every Conversation
+ * they can see, by id, top first.
+ *
+ * The whole list rather than the one row that moved, because the whole list is
+ * what a drag produces and what the human is looking at when they let go. A
+ * move said as *this one, to there* would have to be replayed against a list
+ * the server might have added to since; a list said whole is simply what they
+ * meant.
+ */
+export type NewOrder = { order: Array<number>, };
+
+/**
  * A notice as the page receives it: what Verkstead did, and when.
  *
  * HTML alone, like the handoff and unlike the Brief: nobody edits it. Rendered
@@ -930,6 +970,60 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
+
+/**
+ * How a Pause ended: what started the work again, and when.
+ *
+ * Named for the Pause rather than for the resuming, because [`Resumed`] is
+ * already what pressing **Resume** on a halt answers with. The two are
+ * different things said with one word — one is a wait that is over, the other
+ * is a run that has been started again — so this takes the longer name.
+ */
+export type PauseEnded = { by: By, 
+/**
+ * When it ended, RFC 3339.
+ */
+at: string, };
+
+/**
+ * A run waiting an account's window out, as the Timeline shows it.
+ *
+ * Nothing here went wrong, which is what makes it a different Event from the
+ * Notice a halt writes: the account is out of window, the agent is waiting for
+ * the same reset, and the Conversation is *blocked on you* only in the sense
+ * that the human may decide not to wait.
+ */
+export type PauseEvent = { id: number, 
+/**
+ * When the run stopped, RFC 3339.
+ */
+at: string, 
+/**
+ * What the Agent Profile whose account ran out is called, as it was called
+ * then.
+ */
+profile: string, 
+/**
+ * The line the session printed, as it printed it. The record of why this
+ * was raised, in the backend's own words rather than in Verkstead's.
+ */
+said: string, 
+/**
+ * When the window resets, RFC 3339 — or `null` where what the session
+ * printed carried no time this build could read as one, which is a wait the
+ * human ends.
+ */
+resets_at: string | null, 
+/**
+ * What ended the wait, or `null` while it is still on — which is the state
+ * the run is stopped in, and what the resume press is drawn for.
+ */
+resumed: PauseEnded | null, };
+
+/**
+ * What became of pressing resume.
+ */
+export type PauseResumed = "Resumed" | "NoSuchPause" | "AlreadyResumed";
 
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
@@ -1309,6 +1403,19 @@ export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyD
 export type Screen = { repaint: string, columns: number, rows: number, };
 
 /**
+ * One stored Question Set as the browser receives it: the document where this
+ * build can still read what was asked, and the record itself where it cannot.
+ *
+ * A tagged kind rather than a `SetView` with everything nulled out, because the
+ * two are read for different things. One is a Set to answer or a decision to
+ * read back; the other is a body nobody here can render, kept so that what was
+ * asked is not lost — see [`UnreadableSet`]. A page that had to work out which
+ * it was holding from a field being null would be a page that could draw a
+ * sheet over a Set it cannot read.
+ */
+export type SetReading = { "Set": SetView } | { "Unreadable": UnreadableSet };
+
+/**
  * One row of a Question Set's Timeline table: the number it answers to, what
  * was asked, and what was decided.
  *
@@ -1576,7 +1683,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.
@@ -1698,6 +1805,59 @@ export type Unread = {
  * The turn's place in the conversation, counted from 1.
  */
 id: number, line: string, };
+
+/**
+ * A stored Set this build cannot deserialize, as the browser receives it: the
+ * stored body, and what reading it came to.
+ *
+ * The body verbatim rather than rendered — there is nothing here that knows
+ * what it means, which is the whole of what is wrong — so the page draws it as
+ * the JSON it is. Nothing rewrites it: a later Verkstead that can read it again
+ * should find it exactly as the agent sent it.
+ *
+ * No `standing` and no title. Answering is checked against Questions nobody
+ * here can read, so it is not offered, and neither is archiving; and what the
+ * Set was called is in the body along with everything else, said once rather
+ * than half-recovered into a heading.
+ */
+export type UnreadableSet = { id: number, 
+/**
+ * The Conversation it was asked from — the way back, which an unreadable
+ * Set needs exactly as a readable one does.
+ */
+conversation: number, 
+/**
+ * The stored JSON, byte for byte.
+ */
+body: string, 
+/**
+ * What deserializing it said.
+ */
+why: string, };
+
+/**
+ * A Question Set the Timeline cannot draw a table for, because this build
+ * cannot read the body it was stored as.
+ *
+ * What it carries is the reason and no more. There is no title — that is in the
+ * body with everything else — and no standing, because a Set nobody here can
+ * read is not one anybody is going to answer. The stored body itself is what
+ * the details pane fetches, through the same `/api/ui/sets/{id}` a readable Set
+ * is opened by: it is the same Set reached the same way, and what comes back
+ * says which of the two it is.
+ */
+export type UnreadableSetEvent = { id: number, 
+/**
+ * When the Set was put, RFC 3339.
+ */
+at: string, set_id: number, 
+/**
+ * What deserializing the stored body said. On the row rather than behind
+ * the fetch, because it is one line and it is the whole of what happened:
+ * a reader who has to open the Event to find out why a row says nothing has
+ * been told nothing by the row.
+ */
+why: string, };
 
 /**
  * A device asking not to be told any more, named by its endpoint — which is the

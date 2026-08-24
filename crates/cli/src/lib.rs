@@ -41,11 +41,23 @@ pub struct Cli {
 enum Command {
     /// Submit a Question Set and block until the human answers it.
     ///
-    /// Prints the Response as YAML on stdout and exits 0. Nothing else is ever
-    /// written to stdout, so the agent can parse it as it stands.
+    /// Prints the Response as YAML on stdout and exits 0 — or, with
+    /// `--deferred`, prints the stored Set and returns without waiting.
+    /// Nothing else is ever written to stdout, so the agent can parse what
+    /// comes back as it stands.
     Ask {
         /// The Question Set, as YAML. Read from stdin when absent.
         file: Option<PathBuf>,
+
+        /// Don't wait: store the Set and return.
+        ///
+        /// Prints the stored Set as YAML instead of a Response — its `id` and
+        /// when the server took it — and exits 0. The human answers it in their
+        /// own time, and their Answers reach a later session of this
+        /// Conversation. Block only on Questions whose Answers affect the work
+        /// about to be done.
+        #[arg(long)]
+        deferred: bool,
 
         /// Base URL of the Verkstead server.
         #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
@@ -73,7 +85,11 @@ enum Command {
 impl Cli {
     pub fn run(self) -> Result<()> {
         match self.command {
-            Some(Command::Ask { file, server }) => ask::ask(file.as_deref(), &server),
+            Some(Command::Ask {
+                file,
+                deferred,
+                server,
+            }) => ask::ask(file.as_deref(), deferred, &server),
             Some(Command::Serve(config)) => serve::serve(config),
             Some(Command::Guide { topic }) => guide::guide(topic.as_deref()),
             None => guide::guide(None),

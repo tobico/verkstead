@@ -13,7 +13,7 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SetView, Submitted } from "../src/api/types";
+import type { Submitted } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import {
   answering,
@@ -24,7 +24,7 @@ import {
   withPostscript,
   withTable,
 } from "./reading";
-import { json } from "./serving";
+import { json, readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
@@ -32,8 +32,8 @@ import waiting from "./fixtures/set-answering.json" with { type: "json" };
 /// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-const WAITING = waiting as SetView;
-const ANSWERED = answered as SetView;
+const WAITING = readable(waiting);
+const ANSWERED = readable(answered);
 
 /// The Response the answered fixture carries: what the server stored and handed
 /// back when this same Set was answered. Filling the sheet in the same way has

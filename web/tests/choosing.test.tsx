@@ -12,10 +12,10 @@ import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import stylesheet from "../src/main.css?raw";
-import type { Direction, SetView, Submitted } from "../src/api/types";
+import type { Direction, Submitted } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import { answering, sent, texts } from "./reading";
-import { json } from "./serving";
+import { json, readable } from "./serving";
 import proposed from "./fixtures/set-proposed.json" with { type: "json" };
 import proposing from "./fixtures/set-proposing.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
@@ -24,11 +24,11 @@ import waiting from "./fixtures/set-answering.json" with { type: "json" };
 /// mocked so nothing here loads megabytes of mermaid.
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-const PROPOSING = proposing as SetView;
-const PROPOSED = proposed as SetView;
+const PROPOSING = readable(proposing);
+const PROPOSED = readable(proposed);
 
 /// An ordinary Set, which carries no proposal and so has no chooser on it.
-const ORDINARY = waiting as SetView;
+const ORDINARY = readable(waiting);
 
 /// The Response the answered fixture carries: what the server stored and handed
 /// back when this same Set was picked on.

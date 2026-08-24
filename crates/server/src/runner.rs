@@ -99,6 +99,15 @@ pub struct Pace {
     /// how often Verkstead looks at things, and a stall is one of the things it
     /// looks for.
     pub stalls: Duration,
+
+    /// And how often the runs waiting an account's window out are looked over
+    /// for one whose window has come back — see [`crate::limits`].
+    ///
+    /// Its own field rather than [`Pace::stalls`] said twice, because the two
+    /// sweeps look for different things: a server tuned to notice a stalled
+    /// Conversation briskly has not asked to be told about a reset any sooner,
+    /// and a wait that ends a minute late costs nothing at all.
+    pub pauses: Duration,
 }
 
 impl Default for Pace {
@@ -110,6 +119,7 @@ impl Default for Pace {
             holding: crate::push::HELD_A_WHILE,
             manual: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
+            pauses: crate::limits::SWEPT_EVERY,
         }
     }
 }
@@ -1482,6 +1492,15 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
         }
     };
 
+    // And whatever the human has since answered on this Conversation's Deferred
+    // Asks that no session has been told about — under everything above, which
+    // is where the newest and least general thing said goes. Here rather than in
+    // `Sessions::start`, because this is where every session that *builds* is
+    // launched from: the two that are not launched here are the two an Answer
+    // must not be spent on — see [`crate::deferrals`].
+    let folding = crate::deferrals::unfolded(&state.pool, conversation_id).await;
+    let prompt = folding.under(&prompt);
+
     // One Worktree holds one agent. Every session a run launches of its own
     // accord follows one this has already ended, but a Resume follows one that
     // died — and a register still holding a relay that has not finished unwinding
@@ -1493,7 +1512,16 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
         .start(&state.pool, &state.nudges, &conversation, &pairing, &prompt)
         .await
     {
-        Ok(session) => session,
+        Ok(session) => {
+            // Once there is a session reading them, and only then: a launch that
+            // came to nothing would otherwise cost the human the one session
+            // their Answers were folded into.
+            if session.is_some() {
+                folding.recorded(&state.pool).await;
+            }
+
+            session
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a task session could not be started");
             None

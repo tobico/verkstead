@@ -142,7 +142,9 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
 
     // Asked before anything is dispatched, for the runner's reason: *the run does
     // not advance past a halt* means no session is launched while the human is
-    // the only thing that can start one. Including the halt written here.
+    // the only thing that can start one. Including the halt written here, and
+    // including a run waiting an account's window out — see
+    // [`crate::halts::stopped`], which is where the two are one question.
     if crate::halts::stopped(state, conversation_id).await {
         return Watching::Done("driving has stopped");
     }

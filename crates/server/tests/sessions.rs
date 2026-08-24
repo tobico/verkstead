@@ -46,13 +46,13 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationAborted,
     ConversationStopped, ConversationView, GrillingStarted, HandedBack, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
-    Resumed, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
-    Watching,
+    ManualTaskStarted, NoticeEvent, PauseEvent, PauseResumed, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Resumed, Shown, Size, Started, Submitted, TaskListEvent,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::sandbox::{Home, Reachable, SandboxConfig};
+use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::{Agents, Gh, Pace, WatchedPaths, open_database, router_running_sessions};
@@ -74,6 +74,16 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// is half a second, and a loaded machine can take a while to get bwrap and a
 /// shell going.
 const PATIENCE: Duration = Duration::from_secs(30);
+
+/// What every sandbox here is equipped with as `verkstead`.
+///
+/// A test harness is its own executable, and what a sandbox does with one is
+/// bind it read-only — so any file that is really there will do where nothing in
+/// this file runs it. That a session asks with the *server's* build is the
+/// sandbox's own claim, and `tests/sandbox.rs` is where it is put to a session.
+fn equipped() -> Option<Executable> {
+    Executable::of_the_server()
+}
 
 /// A Conversation with a session running under a stub agent, and everything
 /// holding its directories open.
@@ -253,6 +263,7 @@ impl Grilling {
                 Reachable::at(LISTENING),
                 SandboxConfig::resolve(&[self.spill.path().display().to_string()]).unwrap(),
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
+                equipped(),
                 Handoffs::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
@@ -291,6 +302,30 @@ impl Grilling {
             Request::builder()
                 .method("POST")
                 .uri(format!("/conversations/{}/api/v1/sets", self.id))
+                .header(header::CONTENT_TYPE, "application/yaml")
+                .body(Body::from(yaml.to_owned()))
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::CREATED, "the Set was refused: {body}");
+
+        let created: verkstead_schema::SetCreated = serde_saphyr::from_str(&body).unwrap();
+        created.id
+    }
+
+    /// The same, deferred: what a session sends when it is not going to wait
+    /// for the Answer, which is a query parameter rather than anything in the
+    /// Set — see the server's `sets` module.
+    async fn ask_deferred(&self, yaml: &str) -> i64 {
+        let (status, body) = fetch(
+            &self.app,
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/conversations/{}/api/v1/sets?deferred=true",
+                    self.id
+                ))
                 .header(header::CONTENT_TYPE, "application/yaml")
                 .body(Body::from(yaml.to_owned()))
                 .unwrap(),
@@ -404,6 +439,26 @@ impl Grilling {
             &serde_json::json!({}),
         )
         .await
+    }
+
+    /// Say not to wait for the window, the way the press in the workbench does.
+    ///
+    /// Its own press rather than Resume's: what it ends is a wait that nothing
+    /// went wrong in, and it names the Pause it is ending.
+    async fn go_on_without_waiting(&self, event: i64) -> PauseResumed {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/pause/{event}/resume", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Wait until a run is waiting an account's window out, and hand back the
+    /// Pause it is waiting on.
+    async fn waiting(&self) -> PauseEvent {
+        self.until(|view| pauses(view).last().map(|it| (*it).clone()))
+            .await
     }
 
     /// Wait until there is a session running, and hand back the Event it is
@@ -602,6 +657,10 @@ const BRISKLY: Pace = Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: Duration::from_secs(600),
+    // And the same again for the other sweep, for the same reason: a run
+    // waiting an account's window out ends its own wait, and only the test
+    // about that wants to watch it happen.
+    pauses: Duration::from_secs(600),
 };
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -612,6 +671,18 @@ const BRISKLY: Pace = Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 const SWEEPING: Pace = Pace {
     stalls: Duration::from_millis(100),
+    ..BRISKLY
+};
+
+/// And the same for the other sweep, for the one test that watches a wait end
+/// itself.
+///
+/// A server looks over the runs waiting an account's window out every minute.
+/// What is being asked here is whether a window that has come back starts the
+/// work again with nobody pressing anything, and the number of seconds it waits
+/// before noticing is not part of the answer.
+const RESUMING: Pace = Pace {
+    pauses: Duration::from_millis(100),
     ..BRISKLY
 };
 
@@ -872,6 +943,12 @@ async fn grilling_swept(stub: &str) -> Grilling {
     grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
 }
 
+/// The same, on a server that looks for a window that has come back briskly
+/// enough to watch it do so — see [`RESUMING`].
+async fn grilling_resuming(stub: &str) -> Grilling {
+    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, RESUMING).await
+}
+
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
@@ -1003,6 +1080,7 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         Skills::installed(state.path()).expect("this binary carries skills"),
+        equipped(),
         Handoffs::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
@@ -1082,6 +1160,17 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::QuestionSet(asked) => Some(asked),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Pauses on a Timeline, in the order the account ran out.
+fn pauses(view: &ConversationView) -> Vec<&PauseEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Pause(waiting) => Some(waiting),
             _ => None,
         })
         .collect()
@@ -2127,6 +2216,7 @@ async fn a_capture_survives_the_server_restarting() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            equipped(),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
@@ -3679,6 +3769,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            equipped(),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )
@@ -6089,6 +6180,166 @@ async fn a_wrap_up_with_nothing_left_outstanding_finishes_without_waiting_for_a_
     );
 }
 
+/// And the two milestones a whole run passes through on its way there reach the
+/// devices: the work landing on a pull request, and the Conversation reaching
+/// Done.
+///
+/// These are the moments the work moved on with nobody watching. Everything
+/// between the direction and Done happens unattended by design — that is what
+/// the pipeline is *for* — and a human who has to keep opening the sidebar to
+/// find out whether it did is one the notifications were never written for.
+///
+/// The device subscribes after the direction is picked, so what is read back is
+/// the milestones alone: a Question Set's push is `push_delivery.rs`'s subject
+/// and there is none left to send after this point anyway.
+#[tokio::test]
+async fn a_pull_request_opening_and_a_conversation_finishing_reach_the_devices() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let before = fixture.view().await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    // In the order they happened: the pull request opens the wrap-up, and Done
+    // is what ends it.
+    let pushed = pushes(&taken, 2).await;
+    let opened = phone.read(&pushed[0]);
+    let done = phone.read(&pushed[1]);
+
+    assert_eq!(
+        opened["path"],
+        format!("/conversations/{}", fixture.id),
+        "tapping either opens the Conversation it is about",
+    );
+    assert_eq!(
+        opened["title"],
+        format!("{} is on pull request #41", before.branch),
+        "and the pull request's says which one, because that is where the human's \
+         own part of the work starts",
+    );
+    assert_eq!(opened["project"], before.repo.name);
+
+    assert_eq!(done["path"], format!("/conversations/{}", fixture.id));
+    assert_eq!(
+        done["title"],
+        format!("{} is done", before.branch),
+        "and Done's says so in words nothing else here says",
+    );
+
+    // Long enough for many more polls of the settling loop and the checks
+    // watcher, either of which could have said the same thing twice.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        2,
+        "one push per milestone, and no reminders about a Conversation that is over",
+    );
+}
+
+/// And none of it can hold the work up: a push service that cannot be reached
+/// costs a notification and nothing else.
+///
+/// Every one of these is sent from behind the thing it announces, which is what
+/// makes them safe to send at all — the pull request is recorded, the wrap-up
+/// settles and the Conversation reaches Done whether or not a phone hears about
+/// any of it. Reached through an address nothing is listening on, because that
+/// is the shape of it on the real internet: a vendor's push service down, or a
+/// tailnet with no way out.
+///
+/// The device stays on the list, too. Only a `404` or a `410` says a
+/// subscription is finished with — see `push_delivery.rs` — and a service that
+/// cannot be reached has said nothing at all about the device.
+#[tokio::test]
+async fn a_push_service_that_cannot_be_reached_costs_a_notification_and_nothing_else() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let phone = Device::new(&nowhere().await, "phone");
+    fixture.subscribe(&phone).await;
+
+    // Which arrives on its own, at the pace it would have without any of this:
+    // a run that waited on the push services would never get here at all.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+    let opened = pull_request(&view).expect("the pull request is on the record");
+
+    assert_eq!(opened.number, 41, "the record landed with nobody told");
+    assert!(
+        !notices(&view)
+            .iter()
+            .any(|notice| notice.contains("stopped")),
+        "and a notification nobody could be sent is not a run that went wrong: {:?}",
+        notices(&view),
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let devices = verkstead_server::store::push_subscriptions(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    assert_eq!(
+        devices
+            .iter()
+            .map(|device| device.endpoint.as_str())
+            .collect::<Vec<_>>(),
+        [phone.endpoint.as_str()],
+        "and the device is still on the list: nothing said it had gone",
+    );
+}
+
+/// An address nothing is listening on: bound to claim a free port, then dropped.
+async fn nowhere() -> String {
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("a port to claim");
+    let at = listener.local_addr().unwrap();
+    drop(listener);
+
+    format!("http://{at}")
+}
+
 /// A commit landing on the pull request is a new run to wait on, so the green the
 /// last one left does not stand.
 ///
@@ -6680,6 +6931,358 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
     );
 }
 
+/// The backlog every usage-limit test below is worked against: two tasks, and a
+/// stub that prints its account is out of window as it works the first.
+///
+/// The sentence is the one claude 2.1.234 draws — the reset time is what the
+/// caller varies, because that is the half that decides whether the wait ends by
+/// itself. Each task session commits its task and exits, so the run reaches the
+/// point of launching the next one, which is the moment a Pause has to stop.
+///
+/// **The banner is redrawn, with the glyph in front of it turning**, which is
+/// what a display does for as long as the wait lasts. The line is therefore a
+/// different string every frame, and every frame of it has to come to one Pause:
+/// what Verkstead keeps is the line as it was drawn, decoration and all, so a
+/// build that told one banner from the next by comparing those strings would
+/// read every repaint as a fresh limit: the store refuses the second Pause, so
+/// what it costs is the reading behind it — a parse, a question to the machine
+/// about its offset, and a transaction, twice a second for as long as the wait
+/// lasts.
+fn out_of_window(sentence: &str) -> String {
+    format!(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                if [ "$next" = 01-count.md ]; then
+                    # The wait itself, in miniature: the account runs out, the
+                    # agent holds with its banner up, and it goes on when the
+                    # window comes back. Redrawn eight times over a second —
+                    # more than the half a second Verkstead writes down what a
+                    # session printed on, so the banner is looked at more than
+                    # once — with claude's own spinner turning in front of it,
+                    # which is what makes each repaint a different line.
+                    for pass in 1 2; do
+                        for turning in \
+                            '\xe2\x9c\xbb' '\xe2\x9c\xbd' \
+                            '\xe2\x9c\xb3' '\xe2\x9c\xa2'
+                        do
+                            printf "$turning {sentence}\r\n"
+                            sleep 0.125
+                        done
+                    done
+                fi
+                printf 'working %s\n' "$next"
+                number=${{next%%-*}}
+                printf 'a limiter\n' >> limiter.md
+                rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+                git add -A
+                git commit --quiet -m "feat: $next"
+            else
+                printf 'finishing\n'
+                git rm --quiet .tasks/TODO.md
+                git commit --quiet -m 'chore: finish rate-limiting'
+            fi
+            sleep 300
+            ;;
+        esac
+        "#
+    )
+}
+
+/// Get such a backlog running, and hand back the fixture once the first task's
+/// session has started.
+async fn running_out(fixture: &Grilling) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+}
+
+/// An account that runs out of window mid-run: the wait goes on the Timeline
+/// naming the account and the reset, the devices are told, and nothing else is
+/// launched until somebody says so.
+///
+/// The agent waits too — that is settled, and it is why this is a Pause rather
+/// than an Interruption. What Verkstead adds is that the wait is answerable from
+/// a phone instead of being a session that has gone quiet for no stated reason.
+#[tokio::test]
+async fn an_account_out_of_window_pauses_the_run_and_tells_the_devices() {
+    let fixture = grilling(&out_of_window(
+        "Usage limit reached \\xc2\\xb7 continuing automatically at 2026-08-24T05:00:00Z \\xc2\\xb7 esc to cancel",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    // Subscribed after the closing Set is answered, so the only push these
+    // devices are ever told about is the one this test is about — a Set's own
+    // push is `asking.rs`'s subject.
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.profile, "implementation",
+        "the Pause names the account that ran out, which is the implementation Profile \
+         the task was being worked under",
+    );
+    assert!(
+        waiting.said.contains("✻ Usage limit reached"),
+        "with the backend's own sentence kept as it was printed, spinner and all: {:?}",
+        waiting.said,
+    );
+    assert_eq!(
+        waiting.resets_at.as_deref(),
+        Some("2026-08-24T05:00:00Z"),
+        "and when the window comes back, where the sentence carried a time",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(waiting.id),
+        "a run that has stopped carries *blocked on you*, whatever stopped it",
+    );
+
+    // One per subscribed device, exactly as a Question Set's push is.
+    let pushed = pushes(&taken, 1).await;
+    let notice = phone.read(&pushed[0]);
+
+    assert_eq!(
+        notice["path"],
+        format!("/conversations/{}", fixture.id),
+        "tapping it opens the Conversation whose run stopped",
+    );
+    assert_eq!(
+        notice["title"], "implementation is out of window until 2026-08-24T05:00:00Z",
+        "and it says which account and until when, which is what decides whether the \
+         human does anything about it",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is paused the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        pauses(&fixture.view().await).len(),
+        1,
+        "and the banner redrawing — eight repaints, a different line each time as \
+         the spinner turns — does not pause it twice over the same wait",
+    );
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "a run stopped on purpose is not a run that went wrong, so nothing halts",
+    );
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        1,
+        "one push for the wait, however long it lasts",
+    );
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the task the session was working landed, because a Pause reverts nothing",
+    );
+    assert!(
+        worktree.join(".tasks/02-refuse.md").exists(),
+        "and the task after it is still there to be worked",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "the Worktree is exactly as the session left it",
+    );
+}
+
+/// The human presses *go on without waiting*, and the backlog picks up from
+/// where it stopped.
+#[tokio::test]
+async fn the_humans_press_starts_a_paused_run_again_where_it_stopped() {
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
+
+    running_out(&fixture).await;
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.resets_at, None,
+        "a sentence with no time in it carries none, which is a wait the human ends",
+    );
+
+    assert_eq!(
+        fixture.go_on_without_waiting(waiting.id).await,
+        PauseResumed::Resumed
+    );
+
+    // The rest of the backlog, worked by sessions of its own: the run picked up
+    // at the step it had reached rather than starting over.
+    let subjects = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 4).then(|| {
+                landed
+                    .iter()
+                    .map(|commit| commit.subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await;
+
+    assert_eq!(
+        subjects,
+        vec![
+            "chore: plan the rate limiter".to_owned(),
+            "feat: 01-count.md".to_owned(),
+            "feat: 02-refuse.md".to_owned(),
+            "chore: finish rate-limiting".to_owned(),
+        ],
+        "the backlog in order and each step once: the run picked up where it stopped \
+         rather than starting over",
+    );
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and nothing was reverted, reset or stashed on the way through the wait",
+    );
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.resumed.map(|resumed| resumed.by),
+        Some(verkstead_render::By::Human),
+        "the record says the human decided not to wait",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and nothing is blocked on them any more",
+    );
+}
+
+/// And nobody presses anything: the reset time passes, and the run goes on by
+/// itself.
+///
+/// Swept rather than timed, which is what makes it survive a restart — nothing
+/// holds a clock across the process, so a window that came back while the server
+/// was down is one the next sweep finds already due. Which is also how this test
+/// reaches it: the sentence names a time that has been and gone.
+#[tokio::test]
+async fn the_window_coming_back_starts_a_paused_run_again_on_its_own() {
+    let fixture = grilling_resuming(&out_of_window(
+        "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    // Nothing is pressed here at all. The sweep reads the reset time, finds it
+    // has passed, and starts the work again.
+    let subjects = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 4).then(|| {
+                landed
+                    .iter()
+                    .map(|commit| commit.subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await;
+
+    assert_eq!(
+        subjects,
+        vec![
+            "chore: plan the rate limiter".to_owned(),
+            "feat: 01-count.md".to_owned(),
+            "feat: 02-refuse.md".to_owned(),
+            "chore: finish rate-limiting".to_owned(),
+        ],
+        "the backlog was worked through from where it stopped",
+    );
+
+    let view = fixture.view().await;
+    let waiting = pauses(&view);
+
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(
+        waiting[0].resumed.as_ref().map(|resumed| resumed.by),
+        Some(verkstead_render::By::Reset),
+        "and the record says the window came back rather than that anybody pressed",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "a Conversation waiting a window out is never swept up as a stall: it is \
+         stopped on purpose and already said so",
+    );
+}
+
+/// An exhausted account is a wait, never a reason to spend a different one.
+#[tokio::test]
+async fn nothing_moves_a_paused_conversation_onto_another_profile() {
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
+
+    let before = fixture.view().await;
+
+    running_out(&fixture).await;
+
+    let waiting = fixture.waiting().await;
+    assert_eq!(
+        fixture.go_on_without_waiting(waiting.id).await,
+        PauseResumed::Resumed
+    );
+
+    fixture
+        .until(|view| (commits(view).len() == 4).then_some(()))
+        .await;
+
+    let after = fixture.view().await;
+
+    assert_eq!(
+        after.grilling_pairing.map(|pairing| pairing.profile.id),
+        before.grilling_pairing.map(|pairing| pairing.profile.id),
+    );
+    assert_eq!(
+        after
+            .implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        before
+            .implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        "the account that ran out is the account the rest of the run is spent on",
+    );
+}
+
 /// Aborting a conversation is not a run that went wrong.
 ///
 /// The abort ends the session and takes the worktree away, so every signal the
@@ -7212,16 +7815,26 @@ const RECORDS_STACKING: &str = r#"    printf '# Git workflow\n\n## Review proces
 /// Both stages open, which is a roadmap with something to start.
 const TWO_STAGES: &str = r#"- [ ] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n"#;
 
-/// Take a roadmap Conversation from its Brief to a settled wrap-up: staged,
-/// pushed, reviewed, green, done — with nothing pressed but the two the human
-/// presses at the start.
-async fn staged_and_settled(fixture: &Grilling) {
+/// The two presses a roadmap Conversation ever takes: start grilling, and pick
+/// the roadmap direction on the Set that ends it.
+///
+/// Everything after this happens with nobody watching, which is what makes the
+/// far side of it worth a notification — so it is a step of its own, for the
+/// tests that subscribe a device in between.
+async fn staged(fixture: &Grilling) {
     fixture
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "roadmap").await, Submitted::Accepted);
+}
+
+/// Take a roadmap Conversation from its Brief to a settled wrap-up: staged,
+/// pushed, reviewed, green, done — with nothing pressed but the two the human
+/// presses at the start.
+async fn staged_and_settled(fixture: &Grilling) {
+    staged(fixture).await;
 
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
@@ -7481,6 +8094,84 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     );
 }
 
+/// And the roadmap moving on is the third milestone: the devices are told which
+/// stage started, and tapping it opens the Conversation the work is on now.
+///
+/// This is the moment the pipeline is *for* — a stage complete, its successor
+/// already running, and nobody asked about any of it. What the human would
+/// otherwise do is open the sidebar to find out whether it happened.
+///
+/// The Conversation that settled is announced too, in its own words: they are
+/// two facts about two Conversations, and a phone told only that something was
+/// done would say nothing about the thing that had started.
+#[tokio::test]
+async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let roadmap = fixture.view().await;
+    let stage = stage_of(&fixture).await;
+
+    // Three: the pull request the staging session opened, the roadmap
+    // Conversation reaching Done, and the stage that started behind it.
+    let told: Vec<serde_json::Value> = pushes(&taken, 3)
+        .await
+        .iter()
+        .map(|push| phone.read(push))
+        .collect();
+
+    let titles: Vec<&str> = told
+        .iter()
+        .map(|notice| notice["title"].as_str().unwrap())
+        .collect();
+
+    let started = told
+        .iter()
+        .find(|notice| notice["title"] == "Stage 01 of the `rate-limiting` roadmap has started")
+        .unwrap_or_else(|| panic!("nothing said a stage had started: {titles:?}"));
+
+    assert_eq!(
+        started["path"],
+        format!("/conversations/{}", stage.id),
+        "tapping it opens the stage, which is where the work is now — not the \
+         Conversation it was started from",
+    );
+    assert_eq!(started["project"], roadmap.repo.name);
+
+    assert!(
+        titles.contains(&format!("{} is done", roadmap.branch).as_str()),
+        "and the Conversation that settled says so in words of its own: {titles:?}",
+    );
+    assert!(
+        titles.contains(&format!("{} is on pull request #41", roadmap.branch).as_str()),
+        "as does the pull request it opened on the way: {titles:?}",
+    );
+
+    // Long enough for the stage's own run to have got going and said something
+    // else, if starting one were worth announcing twice.
+    tokio::time::sleep(BRISKLY.checks * 3).await;
+
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        3,
+        "one push per thing that happened, and nothing about the stage's own work",
+    );
+}
+
 /// A repository that records no way to stack a roadmap stage gets a branch off
 /// its default branch — and the Timeline says so plainly rather than Verkstead
 /// inventing a convention the repository never agreed to.
@@ -7526,10 +8217,15 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
     );
 }
 
-/// A roadmap with every stage checked starts nothing, and the Timeline says why.
+/// A roadmap with every stage checked starts nothing, and the Timeline says why
+/// — and the devices are told the roadmap is finished.
 ///
 /// Which is where the whole pipeline stops of its own accord: there is no stage
 /// left, so there is nothing to carry on and nothing for the human to do.
+///
+/// The last stage of a roadmap completing has no stage after it to be announced
+/// by, so this is what says it happened. Told about the Conversation that
+/// settled, because with nothing started there is no other one to open.
 #[tokio::test]
 async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_complete() {
     let spill = tempfile::tempdir().unwrap();
@@ -7548,7 +8244,17 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     )
     .await;
 
-    staged_and_settled(&fixture).await;
+    staged(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let before = fixture.view().await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
 
     let said = said_by(&fixture).await;
 
@@ -7566,6 +8272,33 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
     );
+
+    // The pull request, the Conversation reaching Done, and the roadmap running
+    // out of stages behind it.
+    let told: Vec<serde_json::Value> = pushes(&taken, 3)
+        .await
+        .iter()
+        .map(|push| phone.read(push))
+        .collect();
+
+    let finished = told
+        .iter()
+        .find(|notice| notice["title"] == "The `rate-limiting` roadmap is complete")
+        .unwrap_or_else(|| {
+            panic!(
+                "nothing said the roadmap was finished: {:?}",
+                told.iter()
+                    .map(|notice| &notice["title"])
+                    .collect::<Vec<_>>(),
+            )
+        });
+
+    assert_eq!(
+        finished["path"],
+        format!("/conversations/{}", fixture.id),
+        "and it opens the Conversation that settled, there being no stage to open",
+    );
+    assert_eq!(finished["project"], before.repo.name);
 }
 
 /// A roadmap committed on the repository's default branch, as the old tools or
@@ -10128,6 +10861,80 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     );
 }
 
+/// And the Deferred Ask the dead session left behind is *not* archived, which is
+/// the same rule read the other way.
+///
+/// Nothing was ever waiting on one, so a session dying takes nothing away from
+/// it: the human answers it in their own time and the Answers are folded into
+/// whichever session builds next. Archiving it here would close a question they
+/// were meant to answer, on the grounds that nobody would read the answer — the
+/// one thing that is not true of a Deferred Ask.
+#[tokio::test]
+async fn resuming_a_stalled_grilling_leaves_its_deferred_asks_open() {
+    let fixture = grilling_swept(
+        r#"
+        if [ -f GRILLED ]; then
+            sleep 300
+        else
+            printf 'once\n' > GRILLED
+        fi
+        "#,
+    )
+    .await;
+
+    fixture.quiet().await;
+
+    // One of each, left behind by the session that went: a Blocking Ask with
+    // nobody reading the Answer, and a Deferred Ask that never had anybody.
+    let blocking = fixture.ask(LEFT_HANGING).await;
+    let deferred = fixture.ask_deferred(DEFERRED).await;
+
+    fixture.halted().await;
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let standing = |view: &ConversationView, wanted: i64| {
+        sets(view)
+            .into_iter()
+            .find(|asked| asked.set_id == wanted)
+            .expect("the Set is on the Timeline")
+            .standing
+            .clone()
+    };
+
+    // Waited for on the blocking one, because that is the archiving the relaunch
+    // does: once it has happened, the deferred one has been walked past too.
+    let view = fixture
+        .until(|view| {
+            matches!(
+                standing(view, blocking),
+                verkstead_render::Standing::ArchivedUnanswered(_)
+            )
+            .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        matches!(
+            standing(&view, deferred),
+            verkstead_render::Standing::Waiting(verkstead_schema::Liveness::Deferred),
+        ),
+        "the Deferred Ask is still the human's to answer: {:?}",
+        standing(&view, deferred),
+    );
+
+    // And answering it still reaches a session, which is the whole of what
+    // leaving it open was for.
+    assert_eq!(
+        fixture
+            .respond(
+                deferred,
+                serde_json::json!([{ "label": "Q9", "selected": 1 }]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+}
+
 /// Resume on a wrap-up that stopped at a red check watches it again from no
 /// attempts spent.
 ///
@@ -10839,4 +11646,176 @@ async fn a_restart_that_can_start_nothing_halts_with_the_refusal_on_the_timeline
         view.blocked_on.is_some(),
         "and the human is what it is waiting on",
     );
+}
+
+/// A Set the session asked without waiting for it: two Questions, so what comes
+/// back is a decision and something the human wrote in their own words.
+///
+/// Nothing about the Set says it was deferred — that is how it was sent — so
+/// this is an ordinary Set, and the Answers to it are what a later session is
+/// owed.
+const DEFERRED: &str = r#"
+title: The wording of the rate-limit error
+questions:
+  - label: Q9
+    text: Which status should a throttled request get?
+    options:
+      - n: 1
+        text: 429 Too Many Requests
+        recommended: true
+      - n: 2
+        text: 503 Service Unavailable
+"#;
+
+/// A two-task backlog whose sessions write down the prompt they were started on,
+/// somewhere that outlives the worktree.
+///
+/// The prompts are what these tests are about, and a capture would not do: a
+/// prompt is a document, and what is being asked is whether one part of it
+/// reached one session and not the next.
+fn a_backlog_of_two_writing_prompts(prompts: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    printf '# 02\n' > .tasks/02-refuse.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    printf '===== %s\n%s\n' "${{next:-finish}}" "$2" >> {prompts}
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m "feat: $next"
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        prompts = quoted(prompts),
+    )
+}
+
+/// What each session was started on, as the stub above wrote them down: the step
+/// it was working against the whole prompt.
+fn prompts_by_step(written: &Path) -> Vec<(String, String)> {
+    std::fs::read_to_string(written)
+        .unwrap_or_default()
+        .split("===== ")
+        .filter(|block| !block.trim().is_empty())
+        .map(|block| {
+            let (step, prompt) = block.split_once('\n').expect("a step names its prompt");
+            (step.trim().to_owned(), prompt.to_owned())
+        })
+        .collect()
+}
+
+/// The far end of a Deferred Ask: the session that asked it never saw the
+/// Answer, and the next session started on the Conversation opens with it.
+///
+/// Asked during the grilling and answered before the direction is picked, which
+/// is the ordinary shape of one — the Questions the work does not turn on are
+/// exactly the ones a grilling can leave with the human while it gets on. What
+/// this asks is that the Answers reach the first session that builds, and reach
+/// nothing after it: folding is recorded, so the second task session is primed
+/// with the work and not with a decision it has already been told.
+#[tokio::test]
+async fn an_answered_deferred_set_is_folded_into_the_next_session_and_no_later_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let written = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_of_two_writing_prompts(&written),
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    // The grilling asks something the work does not turn on and carries on
+    // without it, and the human answers it in their own time — here, before the
+    // direction is picked, so that what follows is deterministic.
+    let deferred = fixture.ask_deferred(DEFERRED).await;
+    assert_eq!(
+        fixture
+            .respond(
+                deferred,
+                serde_json::json!([{
+                    "label": "Q9",
+                    "selected": 1,
+                    "free_text": "and say which limit it hit",
+                }])
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let started = prompts_by_step(&written);
+    let steps: Vec<&str> = started.iter().map(|(step, _)| step.as_str()).collect();
+
+    assert_eq!(
+        steps,
+        ["01-count.md", "02-refuse.md", "finish"],
+        "a session per step, in order: {started:?}",
+    );
+
+    let (_, first) = &started[0];
+
+    assert!(
+        first.contains("# What I have since said about the deferred questions"),
+        "the first session started after the Answers came back is the one they \
+         belong to: {first:?}",
+    );
+    assert!(
+        first.contains("429 Too Many Requests") && first.contains("and say which limit it hit"),
+        "and it is the exchange itself — the Option picked and what the human \
+         wrote beside it: {first:?}",
+    );
+    assert!(
+        first.contains("# The Brief this started from"),
+        "under the documents the prompt is built from, where the newest and \
+         least general thing said goes: {first:?}",
+    );
+
+    for (step, prompt) in &started[1..] {
+        assert!(
+            !prompt.contains("deferred questions"),
+            "each Answer is folded once: {step} was told again: {prompt:?}",
+        );
+    }
 }

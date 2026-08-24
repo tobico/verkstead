@@ -15,26 +15,26 @@
 //! them the interview twice.
 //!
 //! **And except for what was left hanging.** A session that died mid-question
-//! leaves a Question Set open with nothing waiting on the Answer: the human can
-//! still see it, still answer it, and nothing will ever read what they write.
-//! So the relaunch archives it unanswered first — the same archiving the human
-//! reaches by hand for a Set whose agent has gone.
+//! leaves a **Blocking Ask** open with nothing waiting on the Answer: the human
+//! can still see it, still answer it, and nothing will ever read what they
+//! write. So the relaunch archives it unanswered first — the same archiving the
+//! human reaches by hand for a Set whose agent has gone.
+//!
+//! **A Deferred Ask is left standing**, and that is the same rule read the other
+//! way. Nothing was ever waiting on one — see [`crate::deferrals`] — so a dead
+//! session takes nothing away from it, and what the human writes is folded into
+//! the prompt of whichever session builds next. Archiving one here would close a
+//! question they were meant to answer in their own time, and close it on the
+//! grounds that nobody would read the answer, which is the one thing that is not
+//! true of it.
 
-use verkstead_schema::{Nudge, QuestionOption, QuestionSet, Response};
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::drivers::Driving;
+use crate::exchanges::exchange;
 use crate::skills;
 use crate::store;
-
-/// What is written where the human left a question open, and where nothing came
-/// back for one at all.
-///
-/// Said rather than left blank, because the two readings are opposite: a
-/// question with nothing under it reads as a question nobody put, and this is a
-/// question the human saw and chose not to settle. The new grilling is welcome
-/// to ask it again, and this is what tells it that it may.
-const LEFT_OPEN: &str = "_Left open._";
 
 /// Grill the work again, because the human pressed Resume on a Conversation
 /// nothing was grilling.
@@ -183,26 +183,32 @@ async fn orphaned(state: &AppState, conversation_id: i64, timeline: &[store::Tim
     }
 }
 
-/// The Sets on the Timeline that are still waiting on the human.
+/// The Blocking Asks on the Timeline that are still waiting on the human.
+///
+/// Blocking alone: a Deferred Ask is one nothing was ever waiting on, so the
+/// session dying takes nothing away from it and it is left where it is — see the
+/// module note.
 fn open(timeline: &[store::TimelineEvent]) -> Vec<i64> {
     timeline
         .iter()
         .filter_map(|event| match &event.event {
-            store::Event::QuestionSet(asked) => asked.settlement.is_none().then_some(asked.set_id),
+            store::Event::QuestionSet(asked) => {
+                (asked.settlement.is_none() && !asked.deferred).then_some(asked.set_id)
+            }
             _ => None,
         })
         .collect()
 }
 
-/// The Brief the Conversation started from, which is what a grilling is a
-/// grilling of.
+/// The Brief the round started from, which is what a grilling is a grilling of.
 ///
-/// The first, as [`crate::conversations::documents`] reads it: a Brief is frozen
-/// the moment the Conversation moves out of Draft, and the one on the Timeline
-/// is the one the dead session was primed with.
+/// The last, as [`crate::conversations::documents`] reads it: a Brief is frozen
+/// the moment its round moves out of Draft, and the newest on the Timeline is the
+/// one the dead session was primed with.
 fn brief(timeline: &[store::TimelineEvent]) -> String {
     timeline
         .iter()
+        .rev()
         .find_map(|event| match &event.event {
             store::Event::Brief(markdown) => Some(markdown.clone()),
             _ => None,
@@ -232,98 +238,24 @@ fn settled(timeline: &[store::TimelineEvent]) -> String {
             continue;
         };
 
-        digest.push_str(&exchange(&asked.set, &answered.response));
+        // A Set this build cannot read has no exchange to write down: the
+        // Questions it was asked with are in a body nothing here can take
+        // apart. It is passed over rather than failing the digest — the rest of
+        // what the human has answered is still worth priming a session with.
+        let Some(set) = asked.set.set() else {
+            continue;
+        };
+
+        digest.push_str(&exchange(set, &answered.response));
     }
 
     digest
 }
 
-/// One Set and its Answers: what it was called, each question against what
-/// became of it, and whatever the human said about the whole of it.
-///
-/// The agent's own markdown, kept as it was written. What this is going into is
-/// a prompt rather than a table on a phone, so the question that was asked with
-/// a code block in it is worth having with the code block still in it.
-fn exchange(set: &QuestionSet, response: &Response) -> String {
-    let mut said = format!("## {}\n\n", set.title.trim());
-
-    for question in &set.questions {
-        said.push_str(&format!(
-            "**{}** {}\n\n",
-            question.name(),
-            question.text.trim()
-        ));
-
-        // A Heading asks nothing of its own — it heads its Sub-questions — so no
-        // Answer ever comes back for one, and nothing is written under it.
-        if !question.heading() {
-            said.push_str(&format!(
-                "{}\n\n",
-                decided(response, question.name(), &question.options)
-            ));
-        }
-
-        for subquestion in &question.subquestions {
-            let name = subquestion.name(question);
-
-            said.push_str(&format!(
-                "**{name}** {}\n\n{}\n\n",
-                subquestion.text.trim(),
-                decided(response, &name, &subquestion.options)
-            ));
-        }
-    }
-
-    if let Some(comment) = response
-        .comment
-        .as_deref()
-        .map(str::trim)
-        .filter(|comment| !comment.is_empty())
-    {
-        said.push_str(&format!("**About the Set as a whole** {comment}\n\n"));
-    }
-
-    said
-}
-
-/// What became of one question: the Option that was chosen, whatever the human
-/// wrote, or both.
-///
-/// The Timeline's own reading of an Answer — see `verkstead_render`'s — with the
-/// markdown left in and the empty case spoken aloud. Both differences are the
-/// reader: that one is a table a human skims, and this is a paragraph an agent
-/// is being brought up to speed by.
-fn decided(response: &Response, name: &str, options: &[QuestionOption]) -> String {
-    let Some(answer) = response
-        .answers
-        .iter()
-        .find(|answer| answer.label.trim() == name)
-    else {
-        return LEFT_OPEN.to_owned();
-    };
-
-    let chosen = answer
-        .selected
-        .and_then(|n| options.iter().find(|option| option.n == n))
-        .map(|option| option.text.trim());
-
-    let wrote = answer
-        .free_text
-        .as_deref()
-        .map(str::trim)
-        .filter(|wrote| !wrote.is_empty());
-
-    // Both where the human picked an Option and said why, which is the ordinary
-    // shape of an Answer that carries a qualification.
-    match (chosen, wrote) {
-        (Some(chosen), Some(wrote)) => format!("{chosen} — {wrote}"),
-        (Some(only), None) | (None, Some(only)) => only.to_owned(),
-        (None, None) => LEFT_OPEN.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use verkstead_schema::{QuestionSet, Response};
+
     use super::*;
 
     /// A Set with one of everything a digest has to carry: a Question answered
@@ -388,8 +320,15 @@ comment: none of this is settled about the burst allowance
             at: "2026-08-23T12:00:00Z".to_owned(),
             event: store::Event::QuestionSet(Box::new(store::SetOnTimeline {
                 set_id,
-                set: QuestionSet::from_yaml(ASKED).expect("the example Set parses"),
+                set: store::Asked::Set(
+                    QuestionSet::from_yaml(ASKED).expect("the example Set parses"),
+                ),
                 settlement,
+                // A grilling's digest is made of what was answered rather than
+                // of how it was asked: a Deferred Ask the human answered is
+                // something they decided, and the relaunch is owed it exactly as
+                // it is owed a blocking one's.
+                deferred: false,
             })),
         }
     }

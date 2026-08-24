@@ -11,14 +11,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
 import { mount, reading, texts } from "./reading";
-import { json, serving, whenever } from "./serving";
+import { json, readable, reads, serving, whenever } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
 
 /// The Set with a Diff attached, and one without: two files, one of them a Rust
 /// file the server has highlighted.
-const WAITING = answering as SetView;
-const UNDIFFED = answered as SetView;
+const WAITING = readable(answering);
+const UNDIFFED = readable(answered);
 
 /// Where the wrap setting is kept — the key `src/device.ts` writes, asked for
 /// here by the name a browser would find it under.
@@ -104,7 +104,7 @@ describe("the attached Diff", () => {
     const RETITLED: SetView = { ...WAITING, title: "Rate limiting, again" };
     let standing = WAITING;
     serving(
-      whenever(`/api/ui/sets/${WAITING.id}`, () => json(standing)()),
+      whenever(`/api/ui/sets/${WAITING.id}`, () => json(reads(standing))()),
     );
     const { container, client } = mount(String(WAITING.id));
     await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());

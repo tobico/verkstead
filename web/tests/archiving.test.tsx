@@ -9,20 +9,20 @@
 import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Archived, SetView } from "../src/api/types";
+import type { Archived } from "../src/api/types";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
-import { json } from "./serving";
+import { json, readable } from "./serving";
 import archivedSet from "./fixtures/set-archived.json" with { type: "json" };
 import waiting from "./fixtures/set-answering.json" with { type: "json" };
 
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
-const WAITING = waiting as SetView;
+const WAITING = readable(waiting);
 
 /// The same Set once it has been closed: what the server answers with when the
 /// page reads it back where it stands.
-const ARCHIVED = { ...(archivedSet as SetView), id: WAITING.id };
+const ARCHIVED = { ...readable(archivedSet), id: WAITING.id };
 const KEY = draftKey(WAITING.id);
 
 const archived = (outcome: Archived) => json(outcome);
@@ -92,6 +92,23 @@ describe("the offer to close a Set unanswered", () => {
     const badge = page.querySelector(".standing .liveness")!;
     expect(badge.className).toBe("liveness disconnected");
     expect(badge.textContent).toBe("agent disconnected");
+  });
+
+  /// A Deferred Ask has nobody on the other end and never had, so the badge
+  /// says that rather than reporting an agent that has gone. The offer behind
+  /// it is the same offer: the Set is still the human's to close.
+  it("says nobody is waiting on a Set that was deferred", async () => {
+    const { page } = await answering({
+      ...WAITING,
+      standing: { Waiting: "deferred" },
+    });
+
+    const badge = page.querySelector(".standing .liveness")!;
+    expect(badge.className).toBe("liveness deferred");
+    expect(badge.textContent).toBe("no agent waiting");
+
+    reachForArchive(page);
+    expect(page.querySelector(".confirm")).toBeTruthy();
   });
 
   it("is not offered on a Set that has already settled", async () => {
