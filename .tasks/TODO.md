@@ -17,5 +17,5 @@ disappearing.
 - [x] 04: Comment batches propose before they fix — [details](04-responding-skill.md)
 - [x] 05: Red checks fold into the woken session — [details](05-checks-fold-in.md)
 - [x] 06: A finding can offer a split Option — [details](06-split-option-schema.md)
-- [ ] 07: A Conversation can wrap up twice — [details](07-second-wrap.md)
+- [x] 07: A Conversation can wrap up twice — [details](07-second-wrap.md)
 - [ ] 08: A split pick becomes a backlog — [details](08-split-becomes-backlog.md)

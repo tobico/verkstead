@@ -4517,6 +4517,166 @@ async fn a_review_whose_findings_were_all_declined_settles_by_ending() {
     );
 }
 
+/// A Conversation can wrap up twice, and the second wrap is a whole one.
+///
+/// The plumbing a split-out backlog lands on: the work goes back to be built,
+/// its finish step wraps it up again, and what comes back is a branch nobody has
+/// read. So the review runs afresh — *settled once and stays settled* is a rule
+/// about one wrap rather than about the Conversation — and the first wrap's own
+/// Set is no longer the review it finds asking. Nothing is recorded twice
+/// either: the pull request the second finish step opens is the one the first
+/// one did.
+///
+/// The two moves are made here rather than by a session, because the session
+/// that writes the backlog is task 08's. What starts the second wrap's watchers
+/// is a restart, which takes up every Conversation it finds wrapping.
+///
+/// The checks cannot be asked about, which is what keeps both wraps going: one
+/// that had finished would be a Conversation there was nothing left to review
+/// from.
+#[tokio::test]
+async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let stub = a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX);
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
+    // The first wrap, whole: findings put, answered, fixed and settled.
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the first wrap's review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    assert_eq!(
+        review_asked(&fixture).await,
+        Some(set),
+        "which is the Set the first wrap put its findings on",
+    );
+
+    // What the session that split its findings out into a backlog leaves behind,
+    // and what the finish step that follows the backlog then does.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        verkstead_server::store::implement_again(&pool, fixture.id)
+            .await
+            .unwrap(),
+        verkstead_server::store::Rebuilding::Started,
+    );
+    assert_eq!(
+        verkstead_server::store::record_pull_request(
+            &pool,
+            fixture.id,
+            &verkstead_server::store::PullRequest {
+                number: 41,
+                title: "Rate limiting".to_owned(),
+                url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            },
+        )
+        .await
+        .unwrap(),
+        verkstead_server::store::Wrapping::Started,
+    );
+
+    pool.close().await;
+
+    assert!(
+        !review_settled(&fixture).await,
+        "leaving Wrapping took the review's settle with it",
+    );
+    assert_eq!(
+        review_asked(&fixture).await,
+        None,
+        "and the first wrap's Set is not this wrap's review",
+    );
+
+    // A second server over the same database, which takes up every Conversation
+    // it finds wrapping up — the whole of a wrap-up, its review included.
+    let _restarted = fixture.restarted(&stub, &gh).await;
+
+    let deadline = Instant::now() + PATIENCE;
+    let read_again = loop {
+        let written = std::fs::read_to_string(&reviews).unwrap_or_default();
+
+        if prompts(&written).len() > 1 {
+            break written;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the second wrap never read the branch: {written}",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(
+        prompts(&read_again).len(),
+        2,
+        "one review per wrap, and the second wrap ran its own: {read_again}",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let events = verkstead_server::store::timeline(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    let requests = events
+        .iter()
+        .filter(|event| matches!(event.event, verkstead_server::store::Event::PullRequest(_)))
+        .count();
+
+    assert_eq!(
+        requests, 1,
+        "one branch, one pull request, however many times it is wrapped up",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and the second wrap is where the Conversation is, its checks still unanswerable",
+    );
+}
+
+/// Which Set this Conversation's wrap-up has its review's findings on, as
+/// Verkstead reads it — and `None` where the wrap it is in has not asked.
+async fn review_asked(fixture: &Grilling) -> Option<i64> {
+    let pool = open_database(&fixture.database).await.unwrap();
+    let asked = verkstead_server::store::review_asked(&pool, fixture.id)
+        .await
+        .unwrap();
+    pool.close().await;
+
+    asked
+}
+
 /// One agent in one Worktree, which is what the wrap-up's turns are for.
 ///
 /// The checks are watched while the review runs, and starting a session for a

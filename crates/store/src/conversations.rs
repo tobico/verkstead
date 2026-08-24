@@ -550,6 +550,26 @@ pub enum Implementing {
     NoSuchConversation,
 }
 
+/// What became of sending a wrapping Conversation back to be built.
+///
+/// The one way back down the ladder, and the only thing that takes it: a review
+/// whose findings were too big to fix in one sitting splits them out as a
+/// backlog, and a backlog is built rather than wrapped. What follows it is the
+/// finish step and [`super::record_pull_request`] again, which is the second wrap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rebuilding {
+    /// Recorded: the Conversation is being built again, the move is on its
+    /// Timeline, and its review is back to waiting.
+    Started,
+
+    /// It is not wrapping up, so there is no wrap-up here to leave — it was
+    /// aborted out from under the session, or it is being built already.
+    NotWrapping,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
 /// What became of aborting one.
 ///
 /// Aborting twice is not an error, which is what [`Aborting::AlreadyAborted`] is
@@ -1534,12 +1554,21 @@ pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Op
     Ok(proposals(pool, conversation_id).await?.last().copied())
 }
 
-/// Every Set of this Conversation's carrying a `review` block, oldest first.
+/// Every Set of this Conversation's carrying a `review` block, oldest first —
+/// and only the ones this wrap asked.
 ///
 /// A Set carrying the block *is* a proposal to fix things, which is the whole
 /// reason the block is a field being there rather than a convention. A second
 /// record saying which Sets were which would be a second thing to keep true, and
 /// the one that could disagree.
+///
+/// **This wrap's**, because a Conversation can wrap up more than once: a review
+/// that splits its findings out into a backlog leaves Wrapping to build them and
+/// comes back for a second wrap, and the first wrap's proposals are answered and
+/// done with. Counting them would be a second review that never ran, because the
+/// review it found asking was last month's. So the window opens at the newest
+/// move into Wrapping — and where there has been no such move, at the start of
+/// the Timeline, which is every Conversation that has not got that far.
 async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> {
     let rows: Vec<(i64, String)> = sqlx::query_as(
         "SELECT q.id, q.body
@@ -1547,9 +1576,16 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> 
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
          WHERE e.conversation_id = ?
+           AND e.id > COALESCE(
+                   (SELECT MAX(w.id) FROM timeline_events w
+                    WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),
+                   0)
          ORDER BY q.id",
     )
     .bind(conversation_id)
+    .bind(conversation_id)
+    .bind(Event::Moved(Lifecycle::Wrapping).kind())
+    .bind(Lifecycle::Wrapping.stored())
     .fetch_all(pool)
     .await
     .with_context(|| format!("looking for Conversation {conversation_id}'s proposals"))?;
@@ -2052,6 +2088,61 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
     tx.commit().await.context("starting the implementation")?;
 
     Ok(Implementing::Started)
+}
+
+/// Send a wrapping Conversation back to be built, because its review split work
+/// out into a backlog.
+///
+/// The one move down the ladder there is. A review that judged its findings too
+/// big to fix where it stood wrote them as `.tasks/`, and a backlog is something
+/// to work a session at a time — so the Conversation goes back to Implementing
+/// and comes round to Wrapping again through its finish step, which is the
+/// second wrap.
+///
+/// Refused for anything but Wrapping, for the reason every other move is refused
+/// outside the state it leaves: a Conversation aborted out from under the session
+/// that wrote the backlog is not one to start building.
+///
+/// **The review's settle goes with it**, in the same transaction. *Settled once
+/// and stays settled* is a rule about one wrap rather than about the
+/// Conversation — see [`super::WaitingOn::Review`] — and a settle left standing
+/// would be a second wrap that reached Done having read none of what the backlog
+/// built. The checks and the comments need no such thing: both are asked of
+/// GitHub on every poll, so they settle from the answers the second wrap gets.
+///
+/// One transaction, as every move is: a Conversation that says Implementing
+/// always has the move on its Timeline to say when it got there.
+pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
+    let mut tx = pool.begin().await.context("building the split-out work")?;
+
+    let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading the state of Conversation {id}"))?;
+
+    let Some((state,)) = row else {
+        return Ok(Rebuilding::NoSuchConversation);
+    };
+
+    if Lifecycle::read(&state)? != Lifecycle::Wrapping {
+        return Ok(Rebuilding::NotWrapping);
+    }
+
+    super::wrap_up::unsettle(&mut tx, id, super::WaitingOn::Review).await?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(Lifecycle::Implementing.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} back to implementing"))?;
+
+    moved(&mut tx, id, Lifecycle::Implementing).await?;
+
+    tx.commit().await.context("building the split-out work")?;
+
+    Ok(Rebuilding::Started)
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.

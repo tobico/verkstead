@@ -13,11 +13,11 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Event, Finished, Lifecycle, Settlements, Submission, WAITED_ON, WaitingOn, addressed_comments,
     ask, finish_wrap_up, fix_attempts, forget_addressed_comments, forget_fix_attempts,
-    last_proposal, load_conversation, load_response, load_set, open_database, pick_direction,
-    record_addressed_comments, record_commit, record_fix_attempt, record_pull_request,
-    register_repo, review_asked, save_brief, settle_wrap_up, start_conversation, start_grilling,
-    submit_response, timeline, unlanded_batch_fixes, unlanded_fixes, unsettle_wrap_up,
-    wrap_up_settled,
+    implement_again, last_proposal, load_conversation, load_response, load_set, open_database,
+    pick_direction, record_addressed_comments, record_commit, record_fix_attempt,
+    record_pull_request, register_repo, review_asked, save_brief, settle_wrap_up,
+    start_conversation, start_grilling, submit_response, timeline, unlanded_batch_fixes,
+    unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -763,5 +763,79 @@ async fn comments_forgotten_are_dispatched_for_again() {
         addressed_comments(&pool, id).await.unwrap(),
         Vec::<String>::new(),
         "nothing has been dispatched about, so the next poll dispatches again",
+    );
+}
+
+/// *Settled once and stays settled* is a rule about one wrap. A review that
+/// split its findings out into a backlog sends the work back to be built, and
+/// what comes back is a branch nobody has read — so leaving Wrapping takes the
+/// review's settle with it.
+///
+/// The checks it leaves alone: they are asked of GitHub on every poll, so a
+/// second wrap settles them from the answers it gets rather than from what the
+/// first one wrote down.
+#[tokio::test]
+async fn leaving_wrapping_puts_the_review_back_to_waiting_and_nothing_else() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+    settle_wrap_up(&pool, id, WaitingOn::Checks).await.unwrap();
+
+    implement_again(&pool, id).await.unwrap();
+
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap(),
+        vec![WaitingOn::Checks],
+        "the review is waiting again and the checks are left where they were",
+    );
+}
+
+/// And the first wrap's proposals are not the second's. The review Set it asked
+/// was answered and acted on, and a second wrap that counted it would be one
+/// that never reviewed anything: what it found asking was the wrap before.
+#[tokio::test]
+async fn the_first_wraps_review_is_not_the_second_wraps() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let asked = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+    assert_eq!(review_asked(&pool, id).await.unwrap(), Some(asked.id));
+
+    implement_again(&pool, id).await.unwrap();
+    record_pull_request(
+        &pool,
+        id,
+        &verkstead_store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        None,
+        "the second wrap has been reviewed by nobody, so a review runs over the branch",
+    );
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "and nothing of the first wrap's is what a batch session would be measured against",
+    );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap(),
+        Vec::new(),
+        "nor is anything it was told to fix still owed",
+    );
+
+    let again = ask(&pool, id, &reviewing()).await.unwrap().unwrap();
+
+    assert_eq!(
+        review_asked(&pool, id).await.unwrap(),
+        Some(again.id),
+        "the second wrap's own review is the one it finds",
     );
 }

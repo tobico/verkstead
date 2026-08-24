@@ -42,10 +42,15 @@ pub enum WaitingOn {
 
     /// The self-review has been answered — or found nothing to ask about.
     ///
-    /// Unlike the checks, this is settled once and stays settled. A review is
-    /// something that happened rather than a state of the branch: the human has
-    /// read what it found and said which of it to fix, and a commit landing
-    /// afterwards does not un-say that.
+    /// Unlike the checks, this is settled once and stays settled — within one
+    /// wrap. A review is something that happened rather than a state of the
+    /// branch: the human has read what it found and said which of it to fix, and
+    /// a commit landing afterwards does not un-say that.
+    ///
+    /// Across re-entry it does not hold, and could not: a wrap-up that split its
+    /// findings out into a backlog leaves Wrapping to build them, and what comes
+    /// back is a branch nobody has read. So the move out takes this settle with
+    /// it — see [`super::implement_again`] — and the second wrap reviews afresh.
     Review,
 
     /// Nothing has been said on the pull request that has not had a session
@@ -195,10 +200,29 @@ pub async fn unsettle_wrap_up(
     conversation_id: i64,
     waiting_on: WaitingOn,
 ) -> Result<()> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .context("putting something a wrap-up waits on back to waiting")?;
+
+    unsettle(&mut connection, conversation_id, waiting_on).await
+}
+
+/// The same, inside a transaction that is doing something else as well.
+///
+/// Which is the move out of Wrapping: leaving takes the review's settle with it,
+/// in the same breath as the state changes, so a Conversation being built again
+/// is never one carrying a settled review of work that has not been done yet.
+/// See [`super::implement_again`].
+pub(crate) async fn unsettle(
+    tx: &mut sqlx::SqliteConnection,
+    conversation_id: i64,
+    waiting_on: WaitingOn,
+) -> Result<()> {
     sqlx::query("DELETE FROM wrap_up_settled WHERE conversation_id = ? AND waiting_on = ?")
         .bind(conversation_id)
         .bind(waiting_on.stored())
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .with_context(|| {
             format!(

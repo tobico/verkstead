@@ -30,7 +30,10 @@ The core entity: a Repo, a base commit, a Brief, one branch and one Worktree.
 Everything done about one piece of work hangs off it. Runs through Draft →
 Grilling → Implementing → Wrapping → Done — a roadmap Conversation passes
 straight from Grilling to Wrapping, its building belonging to its Stages — and
-can be aborted from any of them or reopened once Done. *Blocked on you* is a badge on an active
+can be aborted from any of them or reopened once Done. There is one move back
+down the ladder: a wrap-up whose review split its findings out into a backlog
+returns to Implementing to build it, and its finish step wraps up again on the
+pull request it already had, reviewed afresh. *Blocked on you* is a badge on an active
 state, never a state of its own — where **Aborted** is a state of its own, off
 the ladder rather than on it: every other state is somewhere the work has got
 to, and aborting is the work stopping wherever it was.
