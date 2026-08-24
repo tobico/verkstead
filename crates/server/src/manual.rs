@@ -228,7 +228,7 @@ async fn stop(state: &AppState, conversation_id: i64, writing: i64, how: &str) {
     let halted = crate::halts::halt(
         state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         "doing what the manual task said",
         how,
         Some(writing),

@@ -282,7 +282,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
     if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         "reviewing the branch the pull request is on",
         how,
         Some(writing),

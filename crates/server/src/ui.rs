@@ -29,11 +29,11 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    Resumed, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted, Subscribed,
-    Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
+    ConversationEntry, ConversationStopped, ConversationView, Cursor, GrillingStarted, HandedBack,
+    Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
+    RepoEntry, Resumed, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
+    Subscribed, Subscription, TokenEdit, TokenSaved, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -149,6 +149,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // and with no body at all — there is nothing to say about it beyond
         // which Conversation it is.
         .route("/api/ui/conversations/{id}/resume", post(resume))
+        // And the two presses that stop it, which are Resume's opposite number
+        // and take a body for the same reason it does: none. Which Conversation
+        // it is is the whole of what either says, and which press it was is the
+        // route — a Stop that waits for the step it is on, and one that does
+        // not.
+        .route("/api/ui/conversations/{id}/stop", post(stop))
+        .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
         .route(
             "/api/ui/conversations/{id}/grilling-pairing",
             post(choose_grilling_pairing),
@@ -677,6 +684,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // much as of the record — see [`crate::resume::ready`].
     let ready_to_resume = crate::resume::ready(&state, id, conversation.state, halted.is_some());
 
+    // And whether there is driving to stop, which is the same fact read the
+    // other way: a Conversation that says it is being worked on and has not
+    // halted is one the human may pull the brake on. Nothing about the register
+    // here — a run between two steps is as much a run to stop as a busy one. See
+    // [`crate::stops::ready`].
+    let ready_to_stop = crate::stops::ready(conversation.state, halted.is_some());
+
     // And what the human has taken the keyboard of, which is the other thing the
     // work can be stopped on and the one that is nowhere on the Timeline: a Hold
     // leaves no Event, because the Timeline records the work rather than the
@@ -712,6 +726,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         state: lifecycle(conversation.state),
         ready_to_grill,
         ready_to_resume,
+        ready_to_stop,
         adopting,
         grilling_pairing,
         implementation_pairing,
@@ -1305,6 +1320,41 @@ async fn resume(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "starting to drive a Conversation again failed");
             unavailable("the conversation could not be resumed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/stop` — pause after the current task.
+///
+/// Answered as soon as the decision is made, like Resume: what the browser is
+/// waiting for is *whether* the run is stopping, and a session left to reach its
+/// own end takes as long as the step takes.
+async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationStopped::NoSuchConversation).into_response();
+    };
+
+    match crate::stops::stop(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation failed");
+            unavailable("the conversation could not be stopped")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/force-stop` — halt now, and end what is
+/// running.
+async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationStopped::NoSuchConversation).into_response();
+    };
+
+    match crate::stops::force(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation where it stood failed");
+            unavailable("the conversation could not be stopped")
         }
     }
 }

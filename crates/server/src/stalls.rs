@@ -118,6 +118,17 @@ pub(crate) async fn sweep(state: &AppState) {
             }
         }
 
+        // A Stop the human pressed while something was running, whose run then
+        // came to rest without launching anything else — a backlog that finished
+        // its last task, a session that was the whole of the work. There was no
+        // next launch for the request to land at, so it lands here, and what is
+        // written is their stop rather than a stall: nobody is owed a Notice
+        // saying nothing was driving a Conversation they stopped themselves. See
+        // [`crate::stops::asked`].
+        if crate::stops::asked(state, conversation.id).await {
+            continue;
+        }
+
         stalled(state, conversation.id, conversation.state).await;
     }
 }
@@ -143,7 +154,7 @@ async fn stalled(state: &AppState, conversation_id: i64, lifecycle: Lifecycle) {
     let halted = crate::halts::halt(
         state,
         conversation_id,
-        store::Halt::Circumstance,
+        crate::halts::Decided::Nobody,
         driving(lifecycle),
         "nothing is driving it: no session is running, and nothing is left to start one",
         said_last(state, conversation_id).await,

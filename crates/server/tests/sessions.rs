@@ -45,10 +45,10 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
-    ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
-    Resumed, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
-    Watching,
+    ConversationStopped, ConversationView, GrillingStarted, HandedBack, InterruptionEvent,
+    Lifecycle, ManualTaskEvent, ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Resumed, Shown, Size, Started, Submitted, TaskListEvent,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
@@ -380,6 +380,27 @@ impl Grilling {
         post(
             &self.app,
             &format!("/api/ui/conversations/{}/resume", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// And press Stop, which is the same shape of press: nothing goes with it,
+    /// and what comes back says whether the run has stopped or is about to.
+    async fn stop(&self) -> ConversationStopped {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/stop", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// And Force stop, which is the same press without the waiting.
+    async fn force_stop(&self) -> ConversationStopped {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/force-stop", self.id),
             &serde_json::json!({}),
         )
         .await
@@ -4999,6 +5020,314 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
         "and an aborted Conversation is not blocked on anybody",
     );
     assert_eq!(view.state, Lifecycle::Aborted);
+}
+
+/// A backlog whose task sessions wait at a gate the test opens, so that a press
+/// can arrive while a step is genuinely in flight.
+///
+/// Two tasks, because what Stop promises is about the *next* one: a backlog with
+/// a single task in it would come to rest whether the human pressed anything or
+/// not.
+fn two_tasks_waiting_at(gate: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'breaking down\r\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+    printf '# 01. Count the requests\n' > .tasks/01-count.md
+    printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    printf 'the backlog has landed\r\n'
+    sleep 300
+    ;;
+*)
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    printf 'working %s\r\n' "$next"
+    while [ ! -f {gate} ]; do sleep 0.05; done
+    number=$(printf '%s' "$next" | cut -d- -f1)
+    printf 'a limiter\n' >> limiter.md
+    rm ".tasks/$next"
+    sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+    git add -A
+    git commit --quiet -m "feat: $next"
+    sleep 300
+    ;;
+esac
+"#,
+        gate = quoted(gate),
+    )
+}
+
+/// Stop pressed while a task is being worked: the session finishes what it was
+/// doing, and the run stops before it starts the next one.
+///
+/// The whole promise of the press, and both halves of it matter. Nothing is cut
+/// short — the commit the session was on its way to lands, because a step killed
+/// halfway is work the human then has to pick apart — and nothing is launched
+/// behind it, because a run that took one more task after being told to stop
+/// would be a machine ignoring a button.
+///
+/// It is the human's own press, so it stays stopped until they say otherwise and
+/// their phone is told nothing: they are the one person who already knows.
+#[tokio::test]
+async fn stop_lets_the_task_finish_and_halts_before_the_next_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The first task's session, waiting at the gate: a step in flight, which is
+    // what this press is about.
+    let working = fixture.attachable(2).await;
+
+    let (service, taken) = push_service().await;
+    fixture.subscribe(&Device::new(&service, "phone")).await;
+
+    assert_eq!(fixture.stop().await, ConversationStopped::Stopping);
+
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view)
+            .iter()
+            .any(|output| output.id == working && output.running),
+        "the session working the task is left alone: Stop waits for it",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing has stopped yet, because the step has not finished: {:?}",
+        notices(&view),
+    );
+
+    // What the session was waiting for. From here it commits its task and idles,
+    // which is where the run would have launched the next one.
+    std::fs::write(&gate, "go").unwrap();
+
+    let stopped = fixture.halted().await;
+
+    assert!(
+        stopped.html.contains("you pressed Stop"),
+        "the Notice says whose stop it was: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "a stop the human asked for is not one a restart may drive past",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        commits(&view)
+            .iter()
+            .map(|commit| commit.subject.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            "chore: plan rate-limiting tasks".to_owned(),
+            "feat: 01-count.md".to_owned(),
+        ],
+        "the task the session was on landed: nothing was cut short",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "and the run is waiting on the human, who is the only one who ends this",
+    );
+
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    // Long enough for the runner to have launched the next task if it were still
+    // going to, several times over.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        2,
+        "the grilling and the one task: nothing was started after the press",
+    );
+    assert!(
+        worktree.join(".tasks/02-refuse.md").exists(),
+        "the task nothing was launched for is still there to be worked",
+    );
+    assert!(
+        taken.lock().unwrap().is_empty(),
+        "and nobody's phone was told: they pressed it themselves",
+    );
+
+    // And the one press that undoes it, which reads the backlog again and works
+    // what is left of it.
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    fixture
+        .until(|view| (outputs(view).len() == 3).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "nothing is waiting on the human once the work is being driven again",
+    );
+}
+
+/// Force stop pressed while a task is being worked: the session is ended where
+/// it stands and the halt is written at once.
+///
+/// The other half of the same choice. What it costs is the step — the session is
+/// killed mid-sentence, and whatever it had not committed stays uncommitted in
+/// the Worktree — and what it buys is not having to wait for a session that may
+/// be stuck for hours. Nothing is reverted: the repository is left exactly as the
+/// session left it, which is what makes taking it on by hand possible.
+///
+/// Then the two presses on a Conversation that has already stopped, which refuse
+/// as such: a second stop is not a thing to record, and Resume is what gets one
+/// going again.
+#[tokio::test]
+async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let working = fixture.attachable(2).await;
+
+    let (service, taken) = push_service().await;
+    fixture.subscribe(&Device::new(&service, "phone")).await;
+
+    // The gate is never opened, so this session would sit there for the whole
+    // five minutes it sleeps for. Which is the case the press is for.
+    assert_eq!(fixture.force_stop().await, ConversationStopped::Stopped);
+
+    let stopped = fixture.halted().await;
+
+    assert!(
+        stopped.html.contains("you pressed Force stop"),
+        "the Notice says whose stop it was, and which of the two: {:?}",
+        stopped.html,
+    );
+    assert_eq!(fixture.chosen().await, Halt::Deliberate);
+
+    fixture
+        .until(|view| {
+            outputs(view)
+                .iter()
+                .find(|output| output.id == working)
+                .filter(|output| !output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "and the run is waiting on the human",
+    );
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "the task the session was cut off in the middle of is still there: \
+         nothing was reverted and nothing was finished either",
+    );
+
+    // Long enough for the driver that was seeing the session out to have decided
+    // what its ending meant, and for anything else to have been launched.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        2,
+        "nothing was started to replace what was ended",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "and the session Verkstead ended is not a run that went wrong: one stop, \
+         one Notice",
+    );
+    assert!(
+        taken.lock().unwrap().is_empty(),
+        "and nobody's phone was told about a press they made themselves",
+    );
+
+    assert_eq!(
+        fixture.stop().await,
+        ConversationStopped::AlreadyHalted,
+        "a Conversation that has stopped is not one to stop again",
+    );
+    assert_eq!(
+        fixture.force_stop().await,
+        ConversationStopped::AlreadyHalted,
+        "whichever of the two is pressed",
+    );
+
+    assert_eq!(
+        fixture.resume().await,
+        Resumed::Resumed,
+        "and the one press that undoes either of them works on this one too",
+    );
+
+    fixture
+        .until(|view| (outputs(view).len() == 3).then_some(()))
+        .await;
+}
+
+/// Stop pressed with nothing running: there is nothing to see out, so it halts
+/// where it stands.
+///
+/// The quiet moments are half of what a run is — between two steps, waiting on a
+/// poll, after a session has gone — and a Stop that recorded a wish and did
+/// nothing in one of them would be the press the human trusted least. So the
+/// same button means the same thing whenever it is pressed: from here on,
+/// nothing is driving this.
+#[tokio::test]
+async fn stop_pressed_with_nothing_running_halts_where_it_stands() {
+    let fixture = grilling(r#"printf 'the grilling has nothing to say\n'"#).await;
+
+    fixture.quiet().await;
+
+    assert_eq!(fixture.stop().await, ConversationStopped::Stopped);
+
+    let stopped = fixture.halted().await;
+
+    assert!(
+        stopped.html.contains("nothing was running to see out"),
+        "the Notice says why it stopped now rather than after something: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("Grilling the work"),
+        "and what it was that stopped: {:?}",
+        stopped.html,
+    );
+    assert_eq!(fixture.chosen().await, Halt::Deliberate);
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "and the Conversation is waiting on the human from here",
+    );
 }
 
 /// A roadmap Conversation that stages, wraps up and settles — with a stub that

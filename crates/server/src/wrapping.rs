@@ -195,7 +195,7 @@ async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Opt
     if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         "finding the pull request the finish step opened",
         why,
         writing,

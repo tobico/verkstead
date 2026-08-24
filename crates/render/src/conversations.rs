@@ -239,6 +239,22 @@ pub struct ConversationView {
     /// which each of them is.
     pub ready_to_resume: bool,
 
+    /// And whether there is driving to stop: the Conversation is in a state
+    /// something ought to be driving, and it has not halted.
+    ///
+    /// What decides whether Stop and Force stop are offered. Not the mirror of
+    /// [`ready_to_resume`]: a Conversation between one step and the next has
+    /// both, because nothing is running now and the run is going to launch
+    /// something the moment it can. A quiet Conversation is one to stop as much
+    /// as a busy one.
+    ///
+    /// Force stop is offered where this and [`working`] are both true — the
+    /// stop that ends a session is worth offering only where there is one.
+    ///
+    /// [`ready_to_resume`]: ConversationView::ready_to_resume
+    /// [`working`]: ConversationView::working
+    pub ready_to_stop: bool,
+
     /// What this Conversation is adopting, where it is adopting anything.
     ///
     /// `null` is the ordinary Conversation, which begins with a Brief and a
@@ -1769,6 +1785,43 @@ pub enum Adopted {
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
     WorktreeRefused,
+}
+
+/// What became of pressing Stop or Force stop.
+///
+/// One answer for both presses, because they ask for the same thing and differ
+/// only in what they will wait for: the run is to stop, and nothing is to be
+/// started for this Conversation until Resume is pressed. [`Stopped`] and
+/// [`Stopping`] are the two ways that is now true — see each.
+///
+/// Named the way [`Resumed`]'s refusals are, and for the same reason: a press
+/// that quietly did nothing would leave the human watching a run they thought
+/// they had stopped.
+///
+/// [`Stopped`]: ConversationStopped::Stopped
+/// [`Stopping`]: ConversationStopped::Stopping
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationStopped {
+    /// It has stopped: the halt is written, the Notice is on the Timeline, and
+    /// nothing more will be launched. Force stop always answers this, and so
+    /// does a Stop pressed with nothing running to see out.
+    Stopped,
+
+    /// It is stopping: the session running now runs to its own end, and the
+    /// Conversation halts before anything else is started. What Stop answers
+    /// where there was something to see out.
+    Stopping,
+
+    /// It has stopped already, so the halt standing is the one that explains it.
+    /// Getting going again is Resume's, not a second stop's.
+    AlreadyHalted,
+
+    /// It is drafting, done or aborted, so nothing was ever driving it and there
+    /// is nothing to stop.
+    NotDriven,
+
+    NoSuchConversation,
 }
 
 /// What became of aborting one.

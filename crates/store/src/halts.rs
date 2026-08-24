@@ -16,6 +16,13 @@
 //! Cleared when driving starts again — see [`clear_halt`], which is what Resume
 //! presses. Nothing here starts anything: what a halt *means* is the server's,
 //! and what this holds is only that there is one.
+//!
+//! Beside it, the stop that has not landed yet: the human pressed **Stop** while
+//! a session was still running, so the run halts once that session has reached
+//! its own end rather than now — see [`ask_to_stop`]. Durable for the reason the
+//! halt is. A Conversation the human asked to stop is one that stays stopped,
+//! and a server restarted in the gap that read nothing here would take it up
+//! again as though nobody had asked.
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
@@ -75,10 +82,11 @@ pub struct Halted {
     pub at: String,
 }
 
-/// The halts table. It hangs off a Conversation rather than off the Notice
-/// below it, unlike nearly every other row here, and that is the point: a
-/// Notice is something that happened and a halt is how things *are*, so one
-/// Conversation has any number of the first and at most one of the second.
+/// The halts table, and the asked-for stops that have yet to become one. Both
+/// hang off a Conversation rather than off the Notice below it, unlike nearly
+/// every other row here, and that is the point: a Notice is something that
+/// happened and a halt is how things *are*, so one Conversation has any number
+/// of the first and at most one of the second.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS halts (
@@ -91,6 +99,19 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .execute(pool)
     .await
     .context("creating the halts table")?;
+
+    // One asked-for stop per Conversation, by the primary key, for the reason
+    // there is one halt: a second press is the first one arriving again, and
+    // what it asks for has not changed.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stops_asked (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             at              TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the table of stops asked for")?;
 
     Ok(())
 }
@@ -191,6 +212,66 @@ pub async fn halted(pool: &SqlitePool, conversation_id: i64) -> Result<Option<Ha
         event_id,
         at,
     }))
+}
+
+/// Ask for the run to stop once whatever is running now has reached its end.
+///
+/// What **Stop** records where a session is still going. Nothing is ended and
+/// nothing is put on the Timeline: the halt and its Notice come later, as the
+/// run is about to launch the next thing — see the server's `stops` module.
+///
+/// Nothing happens twice. A second press is the first one arriving again, and
+/// the Conversation is stopping either way.
+pub async fn ask_to_stop(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    // Selected from `conversations` rather than trusting the id, as every halt
+    // is: a stop asked for on a Conversation that is not there is one nothing
+    // would ever act on.
+    sqlx::query(
+        "INSERT OR IGNORE INTO stops_asked (conversation_id, at)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         FROM conversations WHERE id = ?",
+    )
+    .bind(conversation_id)
+    .execute(pool)
+    .await
+    .with_context(|| format!("asking Conversation {conversation_id} to stop"))?;
+
+    Ok(())
+}
+
+/// Whether the human has asked this Conversation to stop and it has not stopped
+/// yet.
+///
+/// Asked in front of every launch a run makes, which is where a stop asked for
+/// becomes a halt.
+pub async fn asked_to_stop(pool: &SqlitePool, conversation_id: i64) -> Result<bool> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT conversation_id FROM stops_asked WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| {
+                format!("reading whether Conversation {conversation_id} was asked to stop")
+            })?;
+
+    Ok(row.is_some())
+}
+
+/// Take an asked-for stop away: it has become a halt, or Resume has overtaken
+/// it.
+///
+/// Nothing to do where none was asked for, which is every Conversation nobody
+/// has pressed Stop on.
+pub async fn forget_stop(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
+    sqlx::query("DELETE FROM stops_asked WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(pool)
+        .await
+        .with_context(|| {
+            format!("forgetting the stop asked for on Conversation {conversation_id}")
+        })?;
+
+    Ok(())
 }
 
 /// Take the halt away, which is what starting to drive again does.

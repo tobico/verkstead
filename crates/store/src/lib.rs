@@ -49,7 +49,7 @@ pub use conversations::{
     start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
     unanswered_set_since,
 };
-pub use halts::{Halt, Halted, clear_halt, halt, halted};
+pub use halts::{Halt, Halted, ask_to_stop, asked_to_stop, clear_halt, forget_stop, halt, halted};
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
     record_interruption, settle_interruption,

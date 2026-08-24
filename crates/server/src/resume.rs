@@ -400,7 +400,7 @@ async fn refused(state: &AppState, conversation_id: i64, lifecycle: Lifecycle, r
     let halted = crate::halts::halt(
         state,
         conversation_id,
-        Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         crate::stalls::driving(lifecycle),
         &format!("nothing could be started for it as the server came back up: {why}"),
         crate::stalls::said_last(state, conversation_id).await,
@@ -454,11 +454,17 @@ fn why(refusal: Resumed) -> Option<&'static str> {
 /// What goes is the state — the badge, and the guard that stops anything being
 /// launched behind it.
 ///
+/// And a Stop asked for that has not landed goes with it, for the same reason:
+/// what is being started here is the very thing it asked to come before, so a
+/// request left behind would halt the run again at its next step. See
+/// [`crate::stops`].
+///
 /// Nothing to clear is the ordinary case rather than a mistake: Resume is
 /// offered on a Conversation that is merely undriven as much as on one that
 /// halted, and a restarted server's are all of the first kind.
 async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
     store::clear_halt(&state.pool, conversation_id).await?;
+    store::forget_stop(&state.pool, conversation_id).await?;
 
     state.nudges.announce(Nudge::Conversation {
         conversation: conversation_id,

@@ -79,6 +79,9 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// The human stopping a Conversation on purpose: Stop, which waits for the step
+/// it is on, and Force stop, which does not.
+mod stops;
 mod tasks;
 /// The pseudo-terminal a session runs on — Verkstead's own, rather than one
 /// `script` made inside the sandbox.

@@ -18,8 +18,10 @@
 //! says it in full, and it says it to somebody who is looking; a run that
 //! stopped is a run that stays stopped until Resume is pressed, so a stop
 //! nobody is told about is one found days late. A stop nobody chose sends
-//! nothing, a restart being free to pick that one up unasked — see
-//! [`crate::push::halted`].
+//! nothing, a restart being free to pick that one up unasked — and a stop the
+//! human pressed for sends nothing either, they being the one person a
+//! notification about it would be telling their own news. See [`Decided`], which
+//! is the whole of that rule, and [`crate::push::halted`].
 //!
 //! Nothing here reverts, resets or stashes anything, and nothing here starts
 //! anything either. The repository is left exactly as the session left it, and
@@ -35,6 +37,46 @@ use crate::AppState;
 use crate::repos::git;
 use crate::store;
 
+/// Who stopped it, which decides the two things that follow from a halt: whether
+/// a restart takes the Conversation up unasked, and whether a phone is told.
+///
+/// Both of those are really one question — *is anybody waiting on this?* — asked
+/// of the record and of a pocket. Verkstead pulling the brake is waited on by
+/// nobody until they are told, so it is pushed and it waits for a press. A stop
+/// nobody chose is waited on by nothing at all: the next server up carries the
+/// work on. And a stop the human pressed for waits for their press like the
+/// first, but tells them nothing, because they are the one person who already
+/// knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Decided {
+    /// Verkstead pulled the brake: a session that fell over, checks that would
+    /// not go green, a finish step that left no pull request.
+    Verkstead,
+
+    /// The human pressed Stop or Force stop.
+    Human,
+
+    /// Nobody: a restart or a crash took the driver away.
+    Nobody,
+}
+
+impl Decided {
+    /// What the record keeps, which is only whether anybody chose — see
+    /// [`store::Halt`]. Verkstead and the human are one thing to a restart: both
+    /// are decisions, and neither is a server's to overturn.
+    fn halt(self) -> store::Halt {
+        match self {
+            Self::Verkstead | Self::Human => store::Halt::Deliberate,
+            Self::Nobody => store::Halt::Circumstance,
+        }
+    }
+
+    /// And whether the human's devices are told.
+    fn pushes(self) -> bool {
+        matches!(self, Self::Verkstead)
+    }
+}
+
 /// Whether driving has already stopped, which is what nothing may advance past.
 ///
 /// Asked wherever a session is about to be launched — the runner between steps,
@@ -42,6 +84,10 @@ use crate::store;
 /// Conversation the human has to press Resume on does not quietly get another
 /// agent spent on it. The one halt per Conversation makes a second stop
 /// impossible; this makes a session behind the first one impossible too.
+///
+/// A Stop the human pressed while a session was running lands here: this is the
+/// next launch it asked to come before, so the stop becomes a halt and the
+/// launch does not happen — see [`crate::stops::asked`].
 ///
 /// An Interruption a Verkstead of before left open counts, until the migration
 /// rewrites the stored ones. It says the same thing about the same Conversation,
@@ -53,6 +99,10 @@ use crate::store;
 /// an agent, and something that could not tell whether the run had stopped
 /// should wait rather than spend an account guessing.
 pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
+    if crate::stops::asked(state, conversation_id).await {
+        return true;
+    }
+
     match store::halted(&state.pool, conversation_id).await {
         Ok(Some(halted)) => {
             tracing::info!(
@@ -116,13 +166,14 @@ pub(crate) const TAIL_LINES: usize = 40;
 /// as still. A Conversation that has gone has nobody left to tell.
 ///
 /// A halt that was written and that Verkstead decided on is also pushed to the
-/// human's devices. The `None` above is what keeps that to one push per stop:
-/// the sweep that finds the same Conversation standing still writes nothing, so
-/// there is nothing here to tell anybody about twice.
+/// human's devices — see [`Decided`], which says which stops those are. The
+/// `None` above is what keeps that to one push per stop: the sweep that finds
+/// the same Conversation standing still writes nothing, so there is nothing here
+/// to tell anybody about twice.
 pub(crate) async fn halt(
     state: &AppState,
     conversation_id: i64,
-    halt: store::Halt,
+    decided: Decided,
     what: &str,
     how: &str,
     writing: Option<i64>,
@@ -134,14 +185,14 @@ pub(crate) async fn halt(
         &session_tail(state, conversation_id, writing).await,
     );
 
-    let halted = store::halt(&state.pool, conversation_id, halt, &said).await?;
+    let halted = store::halt(&state.pool, conversation_id, decided.halt(), &said).await?;
 
     match halted {
         Some(event_id) => {
             tracing::warn!(
                 conversation_id,
                 event_id,
-                halt = ?halt,
+                decided = ?decided,
                 how,
                 "driving stopped, so the Conversation is blocked on the human"
             );
@@ -156,8 +207,9 @@ pub(crate) async fn halt(
             // rather than in front of it, both being handed to the runtime
             // either way: the page somebody is looking at should not wait on a
             // push service to redraw. See [`crate::push`] for why a stop nobody
-            // chose sends nothing.
-            if halt == store::Halt::Deliberate {
+            // chose sends nothing, and [`Decided`] for why the human's own press
+            // sends nothing either.
+            if decided.pushes() {
                 crate::push::halted(state, conversation_id, &opening(what));
             }
         }

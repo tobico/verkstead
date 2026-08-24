@@ -879,7 +879,7 @@ async fn follow_inline(
     stop(
         &state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         "implementing the work inline",
         &how,
         Some(event_id),
@@ -1202,13 +1202,10 @@ async fn committed_and_quiet(
 
 /// Stop the run: record the halt and put what stopped on the Timeline.
 ///
-/// `halt` is whether anybody chose to stop, which is the one thing a restart has
-/// to know. A step whose session ended without landing it is
-/// [`store::Halt::Deliberate`] — Verkstead pulled the brake, and it does not
-/// spend an account on the same failure again unasked. A step whose session a
-/// restart took away is [`store::Halt::Circumstance`]: nothing decided anything,
-/// so starting it again is putting things back rather than overriding a
-/// decision.
+/// `decided` is who stopped it, which is what a restart reads and what decides
+/// whether a phone is told — see [`crate::halts::Decided`]. A step whose session
+/// ended without landing it is Verkstead's own: it pulled the brake, and it does
+/// not spend an account on the same failure again unasked.
 ///
 /// `writing` is the Timeline Event the session that failed was printing into, and
 /// `None` where there is no session left to read one off — a restart, which kills
@@ -1221,12 +1218,14 @@ async fn committed_and_quiet(
 async fn stop(
     state: &AppState,
     conversation_id: i64,
-    halt: store::Halt,
+    decided: crate::halts::Decided,
     what: &str,
     how: &str,
     writing: Option<i64>,
 ) {
-    if let Err(error) = crate::halts::halt(state, conversation_id, halt, what, how, writing).await {
+    if let Err(error) =
+        crate::halts::halt(state, conversation_id, decided, what, how, writing).await
+    {
         tracing::error!(
             error = ?error,
             conversation_id,
@@ -1331,7 +1330,7 @@ async fn see_out(
     stop(
         state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         &step.what(),
         &how,
         Some(event_id),
@@ -1567,6 +1566,12 @@ enum Prompt {
 /// Held across the launch alone rather than across the session, because that is
 /// the whole of what it is protecting: once a session is registered, everything
 /// else that might start one can see it there.
+///
+/// And a Stop the human pressed lands here, which is why it is asked after the
+/// wait rather than before: *nothing new starts* has to be true of the moment a
+/// session would be started, and the wait is however long the session in front
+/// of this one took. Every launch a run makes goes through here, so this is the
+/// one place that can say it of all of them — see [`crate::stops::asked`].
 async fn launch_in_turn(
     state: &AppState,
     conversation_id: i64,
@@ -1574,6 +1579,10 @@ async fn launch_in_turn(
     note: &str,
 ) -> Option<Session> {
     let _turn = state.sessions.turn(conversation_id).await;
+
+    if crate::stops::asked(state, conversation_id).await {
+        return None;
+    }
 
     launch(state, conversation_id, inside, note).await
 }

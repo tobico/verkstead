@@ -19,12 +19,12 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
-    ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Resumed, Screen, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    ConversationEntry, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Resumed, Screen,
+    SetView, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -150,6 +150,11 @@ fn the_viewers_types_are_written_from_these() {
     // is to send is which Conversation. What comes back is the outcome — a
     // start, or the named reason there was nothing to start.
     Resumed::export_all(&config).unwrap();
+
+    // And the two presses that stop it, which take no request shape either and
+    // answer with one outcome between them: the run is stopping, or the named
+    // reason there was nothing to stop.
+    ConversationStopped::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

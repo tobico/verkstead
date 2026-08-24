@@ -17,6 +17,7 @@ import type {
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
+  ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandedBack,
@@ -367,6 +368,31 @@ export function startManualTask(
 /// could: resume is never silent, and the refusals are what that means.
 export function resume(id: number): Promise<Resumed> {
   return post<Resumed>(`/api/ui/conversations/${id}/resume`, {});
+}
+
+/// Stop driving a conversation after the task it is on.
+///
+/// Nothing new is started and nothing running is cut short: the session going
+/// now runs to its own end, and the conversation halts before the next launch.
+/// Nothing is sent, for the reason nothing goes with a resume — which
+/// conversation it is is the whole of it.
+export function stopConversation(id: number): Promise<ConversationStopped> {
+  return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
+}
+
+/// And stop it now: whatever is running is ended where it stands, and the halt
+/// is written at once.
+///
+/// The step is left however far the session had got, uncommitted work and all.
+/// Nothing else goes either — the worktree stays, the branch stays, and a
+/// question set nobody has answered is left standing.
+export function forceStopConversation(
+  id: number,
+): Promise<ConversationStopped> {
+  return post<ConversationStopped>(
+    `/api/ui/conversations/${id}/force-stop`,
+    {},
+  );
 }
 
 /// The Agent Profiles a session can be run under, by name.

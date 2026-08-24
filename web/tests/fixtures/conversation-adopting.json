@@ -20,6 +20,7 @@
   "pinned": [],
   "ready_to_grill": false,
   "ready_to_resume": false,
+  "ready_to_stop": false,
   "repo": {
     "default_branch": "main",
     "id": 1,

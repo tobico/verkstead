@@ -27,9 +27,10 @@
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
 //! One of them lives there — `Start grilling` under the Brief it will freeze.
-//! Aborting is in neither place and not in the list: it is not a step
-//! in the work but a way of ending it, so it hangs off the header behind a menu,
-//! where a destructive action is not one stray click away.
+//! Stopping the work is in neither place and not in the list: none of the three
+//! ways of doing it — stop after this task, stop now, abort the conversation —
+//! is a step in the work, so all three hang off the header behind a menu, where
+//! what cannot be undone is not one stray click away.
 //!
 //! Nothing here ends the grilling, and nothing here chooses a direction. That is
 //! the agent's own closing move — a Question Set carrying a proposal, with the
@@ -50,11 +51,13 @@ import {
 
 import {
   abortConversation,
+  forceStopConversation,
   listProfiles,
   resume,
   saveBrief,
   startGrilling,
   startManualTask,
+  stopConversation,
 } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -62,6 +65,7 @@ import type {
   BriefSaved,
   CommitEvent,
   ConversationAborted,
+  ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -130,6 +134,22 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   NoBaseCommit: "The repo has nothing to branch from any more.",
   BranchExists: "That branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
+};
+
+/// And each way of being refused a stop, whichever of the two was pressed.
+///
+/// The two that are not refusals map to nothing: a conversation that has
+/// stopped says so by the badge and the notice the read after the press brings
+/// back, and one that is still finishing its task says so in its own words
+/// beside the button rather than as an error.
+export const STOP_REFUSAL: Record<ConversationStopped, string> = {
+  Stopped: "",
+  Stopping: "",
+  AlreadyHalted:
+    "This conversation has already stopped. Resume is what gets it going again.",
+  NotDriven:
+    "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
+  NoSuchConversation: "This conversation is gone.",
 };
 
 /// And each way of being refused an abort.
@@ -1426,17 +1446,62 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 }
 
 /// What can be done to the conversation as a whole, rather than to any one
-/// event: a menu on the header, holding abort.
+/// event: a menu on the header, holding the three ways of ending what it is
+/// doing.
 ///
-/// A menu rather than a button, because aborting throws a worktree away and the
-/// header is somewhere the human's cursor passes on the way to everything else.
-/// Native `details`/`summary`, so it opens, closes and reaches the keyboard
-/// without any of that being this component's to get right.
+/// A menu rather than three buttons, because the last of them throws a worktree
+/// away and the header is somewhere the human's cursor passes on the way to
+/// everything else. Native `details`/`summary`, so it opens, closes and reaches
+/// the keyboard without any of that being this component's to get right.
+///
+/// In order of what each costs: stop, which waits for the task the run is on;
+/// force stop, which does not; and abort, which is not a stop at all but the end
+/// of the conversation. Each says what it does under it, because *stop* and
+/// *force stop* are two words apart and hours of work apart.
+///
+/// Each is drawn only where it applies. The two stops need something to stop —
+/// see `ready_to_stop`, which is the server's rule and not this page's — and
+/// force stop needs a session to end, which is what `working` says.
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [open, setOpen] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
+  const [halting, setHalting] = createSignal<ConversationStopped | null>(null);
+
+  /// What every press here leaves behind: a page drawn against a conversation
+  /// that has moved. Reading it again is both the correction and, where the
+  /// press was refused, the explanation.
+  const reread = () => {
+    void queries.invalidateQueries({ queryKey: ["conversation"] });
+    void queries.invalidateQueries({ queryKey: ["conversations"] });
+  };
+
+  /// Both stops answer the same way, so both are pressed the same way: the
+  /// outcome is kept whatever it is — it is either what happened or why nothing
+  /// did — and the menu closes only on a conversation that has actually
+  /// stopped. A stop that is still waiting for a step to finish has something
+  /// left to say, and says it where it was pressed.
+  const pressing = (stopping: () => Promise<ConversationStopped>) => ({
+    mutationFn: stopping,
+    onSuccess: (outcome: ConversationStopped) => {
+      setHalting(outcome);
+
+      if (outcome === "Stopped") {
+        setOpen(false);
+      }
+
+      reread();
+    },
+  });
+
+  const stop = useMutation(() =>
+    pressing(() => stopConversation(props.conversation.id)),
+  );
+
+  const force = useMutation(() =>
+    pressing(() => forceStopConversation(props.conversation.id)),
+  );
 
   const abort = useMutation(() => ({
     mutationFn: () => abortConversation(props.conversation.id),
@@ -1449,8 +1514,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
       // Aborted or already aborted: what was asked for holds either way.
       setRefused(null);
       setOpen(false);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
+      reread();
     },
   }));
 
@@ -1462,20 +1526,67 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     >
       <summary aria-label="Conversation actions">⋯</summary>
       <div class="menu">
+        <Show when={props.conversation.ready_to_stop}>
+          <div class="action">
+            <button
+              type="button"
+              class="stop"
+              disabled={stop.isPending}
+              onClick={() => stop.mutate()}
+            >
+              {stop.isPending ? "Stopping…" : "Stop"}
+            </button>
+            <p class="note">Pause after the current task until you resume.</p>
+            <Show when={halting() === "Stopping"}>
+              <p class="note waiting">
+                The session running now finishes its task first. Nothing will be
+                started after it.
+              </p>
+            </Show>
+          </div>
+
+          <Show when={props.conversation.working}>
+            <div class="action">
+              <button
+                type="button"
+                class="force-stop"
+                disabled={force.isPending}
+                onClick={() => force.mutate()}
+              >
+                {force.isPending ? "Stopping…" : "Force stop"}
+              </button>
+              <p class="note">Halt any running tasks and stop immediately.</p>
+            </div>
+          </Show>
+        </Show>
+
         <Show
           when={props.conversation.state !== "Aborted"}
           fallback={<p class="note">This conversation has been aborted.</p>}
         >
-          <button
-            type="button"
-            class="abort"
-            disabled={abort.isPending}
-            onClick={() => abort.mutate()}
-          >
-            {abort.isPending ? "Aborting…" : "Abort conversation"}
-          </button>
-          <p class="note">
-            Removes the worktree. The branch stays where it is.
+          <div class="action">
+            <button
+              type="button"
+              class="abort"
+              disabled={abort.isPending}
+              onClick={() => abort.mutate()}
+            >
+              {abort.isPending ? "Aborting…" : "Abort conversation"}
+            </button>
+            <p class="note">
+              Permanently end the conversation and delete the worktree. The
+              branch stays where it is.
+            </p>
+          </div>
+        </Show>
+
+        <Show when={halting() && STOP_REFUSAL[halting()!]}>
+          <p class="error">{STOP_REFUSAL[halting()!]}</p>
+        </Show>
+        <Show when={stop.isError || force.isError}>
+          <p class="error">
+            The conversation could not be stopped:{" "}
+            {stop.error?.message ?? force.error?.message}
           </p>
         </Show>
 

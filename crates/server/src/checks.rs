@@ -309,7 +309,7 @@ async fn ask(
     if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
-        store::Halt::Deliberate,
+        crate::halts::Decided::Verkstead,
         "getting the pull request's checks green again",
         &how,
         writing,

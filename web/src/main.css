@@ -2884,18 +2884,33 @@ main:has(.workbench) {
   box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 15%);
 }
 
-.conversation-actions .abort {
+/* One block per action, so that a button and the line saying what it does read
+   as one thing and the next action is plainly a different one. */
+.conversation-actions .action + .action {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
+}
+
+.conversation-actions button {
   padding: 0.4rem 0.8rem;
   font: inherit;
   font-weight: 600;
-  color: #b3382c;
+  color: var(--ink);
   background: none;
-  border: 1px solid #b3382c;
+  border: 1px solid var(--edge);
   border-radius: 0.4rem;
   cursor: pointer;
 }
 
-.conversation-actions .abort:disabled {
+/* The one that cannot be undone, in the colour of what cannot be undone. Both
+   stops are reversed by a resume, and read as the ordinary buttons they are. */
+.conversation-actions .abort {
+  color: #b3382c;
+  border-color: #b3382c;
+}
+
+.conversation-actions button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -2904,6 +2919,11 @@ main:has(.workbench) {
 .conversation-actions .error {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
+}
+
+/* What a stop that is waiting for a task to finish says while it waits. */
+.conversation-actions .waiting {
+  color: var(--ink);
 }
 
 /* From 60rem the window holds the sidebar beside the level being read: the

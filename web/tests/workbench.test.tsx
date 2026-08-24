@@ -24,6 +24,7 @@ import type {
   CommitDiff,
   ConversationAborted,
   ConversationEntry,
+  ConversationStopped,
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
@@ -46,6 +47,7 @@ import {
   CLAMPED_LINES,
   MANUAL_TASK_REFUSAL,
   RESUME_REFUSAL,
+  STOP_REFUSAL,
   SWIPE,
 } from "../src/workbench/Timeline";
 import {
@@ -3363,15 +3365,17 @@ describe("aborting a conversation", () => {
     );
   });
 
-  /// What the human is owed before throwing a worktree away: what goes, and
-  /// what stays.
-  it("says the branch survives it", async () => {
+  /// What the human is owed before throwing a worktree away: that it is the end
+  /// of the conversation rather than a pause, what goes, and what stays.
+  it("says it is permanent and that the branch survives it", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
 
-    await waitFor(() => screen.getByText(/Removes the worktree/));
+    await waitFor(() =>
+      screen.getByText(/Permanently end the conversation and delete the/),
+    );
     expect(screen.getByText(/The branch stays where it is/)).toBeTruthy();
   });
 
@@ -3399,6 +3403,165 @@ describe("aborting a conversation", () => {
     fireEvent.click(await drawn(container, ".conversation-actions .abort"));
 
     await waitFor(() => screen.getByText(/could not be removed/));
+  });
+});
+
+/// Where the two stops are pressed.
+const STOPPING = `/api/ui/conversations/${GRILLING.id}/stop`;
+const AT_ONCE = `/api/ui/conversations/${GRILLING.id}/force-stop`;
+
+/// The grilling conversation as the server would say it stands right now — a
+/// session running, or nothing running, or a run that has already halted.
+function theGrillingStanding(
+  over: Partial<ConversationView>,
+  ...answers: Parameters<typeof serving>
+) {
+  return theGrilling(
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+describe("stopping a conversation", () => {
+  /// The two stops sit in the same menu as the abort, in the order of what each
+  /// one costs: pause after this task, stop now, end the conversation. Each says
+  /// what it does, because *stop* and *force stop* are two words apart and hours
+  /// of work apart.
+  it("offers the three ways of stopping, each saying what it does", async () => {
+    theGrillingStanding({ ready_to_stop: true, working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    const menu = await drawn(container, ".conversation-actions .menu");
+    const offered = [...menu.querySelectorAll("button")].map(
+      (button) => button.className,
+    );
+
+    expect(offered).toEqual(["stop", "force-stop", "abort"]);
+
+    expect(
+      screen.getByText("Pause after the current task until you resume."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Halt any running tasks and stop immediately."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/Permanently end the conversation and delete the/),
+    ).toBeTruthy();
+  });
+
+  /// Force stop ends a session, so it is offered where there is one. With
+  /// nothing running the ordinary stop halts the run at once anyway, and a
+  /// second button promising the same thing would be one to think about for
+  /// nothing.
+  it("offers no force stop where nothing is running", async () => {
+    theGrillingStanding({ ready_to_stop: true, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await drawn(container, ".conversation-actions .stop");
+    expect(
+      container.querySelector(".conversation-actions .force-stop"),
+    ).toBeNull();
+  });
+
+  /// And neither is offered on a conversation that has already stopped. Getting
+  /// one going again is what resume is for; there is nothing here left to stop.
+  it("offers neither stop on a conversation that has already halted", async () => {
+    theGrillingStanding({ ready_to_stop: false, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await drawn(container, ".conversation-actions .abort");
+    expect(container.querySelector(".conversation-actions .stop")).toBeNull();
+    expect(
+      container.querySelector(".conversation-actions .force-stop"),
+    ).toBeNull();
+  });
+
+  /// Nothing goes with either press. Which conversation it is is the whole of
+  /// what there is to say, and which of the two stops it was is the route.
+  it("posts to the conversation's own stop route", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(
+        STOPPING,
+        json("Stopping" satisfies ConversationStopped),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, ".conversation-actions .stop"));
+
+    await waitFor(() => expect(sent(fetching, STOPPING)).toEqual({}));
+  });
+
+  it("posts to the force stop route", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(AT_ONCE, json("Stopped" satisfies ConversationStopped), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, ".conversation-actions .force-stop"),
+    );
+
+    await waitFor(() => expect(sent(fetching, AT_ONCE)).toEqual({}));
+  });
+
+  /// A stop that is waiting for a task to finish says so where it was pressed.
+  /// Nothing on the timeline has changed yet — the session is still running, and
+  /// the notice comes when it stops — so this is the only thing that can tell
+  /// the human the press landed.
+  it("says a stop is waiting for the task to finish", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(
+        STOPPING,
+        json("Stopping" satisfies ConversationStopped),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, ".conversation-actions .stop"));
+
+    const waiting = await drawn(container, ".conversation-actions .waiting");
+
+    expect(waiting.textContent).toContain("finishes its task first");
+  });
+
+  /// And a press that found the run already stopped says that instead, rather
+  /// than looking as though it did something.
+  it("says in words that it had already stopped", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(
+        STOPPING,
+        json("AlreadyHalted" satisfies ConversationStopped),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, ".conversation-actions .stop"));
+
+    const refused = await drawn(container, ".conversation-actions .error");
+
+    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyHalted);
+    expect(refused.textContent).toContain("Resume");
   });
 });
 
