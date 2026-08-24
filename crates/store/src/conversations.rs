@@ -1549,6 +1549,100 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
     Ok(None)
 }
 
+/// One finding the human said to fix, as the session that will fix it is told
+/// about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fixing {
+    /// The finding as the review wrote it for whoever fixes it.
+    pub what: String,
+
+    /// And whatever the human wrote alongside their Answer, or empty where they
+    /// wrote nothing — which is the ordinary way of agreeing with the
+    /// recommendation.
+    pub said: String,
+}
+
+/// The findings this Conversation's review was told to fix and nothing has
+/// landed, in the order the review raised them.
+///
+/// Empty is the ordinary answer, and it covers every way there is nothing owed:
+/// no review has asked, the Set is still waiting on the human, they declined
+/// every finding, or the session that was going to fix them did so. What is left
+/// is the one failure this exists for — the decisions were made and the doing did
+/// not happen — and the words it hands back are the review's own, which is what
+/// a session dispatched to finish the job is told.
+///
+/// **Landed is a commit after the Answers**, which is as much as anything here
+/// can know: what the fixes are is prose the review wrote, and no reading of a
+/// branch can say which commit was which finding. So this is a coarse question
+/// deliberately — a review whose accepted findings landed one commit and then
+/// stopped reads as landed, because a session that got that far is one that was
+/// working rather than one that fell over before it started.
+///
+/// The two stamps are the Response's and the commit Event's, both written by
+/// SQLite as this database's `now`, so comparing them as text is comparing the
+/// instants they name.
+pub async fn unlanded_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
+    let Some(set_id) = review_asked(pool, conversation_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let Some(stored) = super::load_set(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let Some(review) = &stored.set.review else {
+        return Ok(Vec::new());
+    };
+
+    let Some(answered) = super::load_response(pool, set_id).await? else {
+        return Ok(Vec::new());
+    };
+
+    let fixing: Vec<Fixing> = review
+        .findings
+        .iter()
+        .filter(|finding| finding.accepted(&answered.response))
+        .map(|finding| Fixing {
+            what: finding.what.trim().to_owned(),
+            said: finding.said(&answered.response).to_owned(),
+        })
+        .collect();
+
+    if fixing.is_empty() || landed_since(pool, conversation_id, &answered.submitted_at).await? {
+        return Ok(Vec::new());
+    }
+
+    Ok(fixing)
+}
+
+/// Whether anything has been committed on this Conversation's branch since
+/// `submitted_at`.
+///
+/// The commits on the Timeline rather than the branch itself, for the reason
+/// every other reader of them asks the store: the branch is swept while the
+/// session runs and what it finds lands here, so this is where a fresh commit
+/// shows up — and asking it costs one small read where asking git costs a
+/// process.
+async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &str) -> Result<bool> {
+    let found: Option<(i64,)> = sqlx::query_as(
+        "SELECT c.event_id
+         FROM commits c
+         JOIN timeline_events e ON e.id = c.event_id
+         WHERE c.conversation_id = ? AND e.at > ?
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(submitted_at)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| {
+        format!("looking for what Conversation {conversation_id} committed since {submitted_at}")
+    })?;
+
+    Ok(found.is_some())
+}
+
 /// A Question Set of this Conversation's that arrived after `event_id` and is
 /// still waiting to be answered, or `None` where none is.
 ///
