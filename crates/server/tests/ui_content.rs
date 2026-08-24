@@ -1986,6 +1986,68 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And the same backlog waiting an account's window out, which is the other
+    // shape a viewer test cannot reach any other way: a Pause is raised by a
+    // session printing that its account is spent, and there are no sessions
+    // here. Recorded on a Conversation of its own rather than on the one above,
+    // because that one already has a run stopped on it — and *one thing
+    // stopping a run* is what both these Events are for.
+    let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks")
+        .await
+        .unwrap()
+        .unwrap();
+    store::set_grilling_profile(&pool, waiting, profiles[0].id)
+        .await
+        .unwrap();
+    store::set_implementation_profile(&pool, waiting, profiles[1].id)
+        .await
+        .unwrap();
+    store::save_brief(
+        &pool,
+        waiting,
+        "# Deferred asks\n\n\
+         An ask that never idles the session that sends it.\n",
+    )
+    .await
+    .unwrap();
+    // A real directory, so the page reads back a Worktree that is there — the
+    // same arrangement the backlog above has, without a `.tasks/` in it: what
+    // this fixture is about is the run having stopped, and an empty Worktree is
+    // what an inline run is working in.
+    let worktree = _dir.path().join("worktrees/verkstead-deferred-asks");
+    std::fs::create_dir_all(&worktree).unwrap();
+
+    store::start_grilling(
+        &pool,
+        waiting,
+        "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
+        &worktree,
+    )
+    .await
+    .unwrap();
+    store::start_implementing(&pool, waiting).await.unwrap();
+
+    store::record_pause(
+        &pool,
+        waiting,
+        &profiles[1].name,
+        "Usage limit reached · continuing automatically at 3pm · esc to cancel",
+        Some("2026-08-03T05:00:00.000Z"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    write(
+        "conversation-paused.json",
+        &pin_worktree(
+            &pin_health(&pin_timeline(
+                &get(&app, &format!("/api/ui/conversations/{waiting}")).await,
+            )),
+            "/var/lib/verkstead/worktrees/verkstead-deferred-asks",
+        ),
+    );
+
     // And a sixth, whose backlog is worked through: the finish step pushed and
     // opened a pull request, Verkstead found it through the host's `gh`, and the
     // Conversation moved into Wrapping on the strength of it. The PR is pinned

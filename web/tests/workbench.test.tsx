@@ -26,6 +26,7 @@ import type {
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
+  PauseResumed,
   PullRequestDetails,
   RemedySettled,
   Screen,
@@ -61,6 +62,7 @@ import adopting from "./fixtures/conversation-adopting.json" with { type: "json"
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import interrupted from "./fixtures/conversation-interrupted.json" with { type: "json" };
+import paused from "./fixtures/conversation-paused.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
@@ -3382,6 +3384,184 @@ describe("an interruption on the timeline", () => {
         "The first choice stands",
       ),
     );
+  });
+});
+
+/// A conversation waiting an account's window out, and the pause it stopped at.
+const WAITING = paused as ConversationView;
+
+const OUT_OF_WINDOW = (() => {
+  const event = WAITING.timeline.find((entry) => "Pause" in entry);
+  if (!event || !("Pause" in event)) {
+    throw new Error("the fixture should carry a pause");
+  }
+  return event.Pause;
+})();
+
+/// The workbench with that conversation open.
+function thePaused(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${WAITING.id}`,
+      json({ ...WAITING, ...over }),
+    ),
+    ...answers,
+  );
+}
+
+/// Where the human says not to wait for the window.
+const RESUME_PATH = `/api/ui/conversations/${WAITING.id}/pause/${OUT_OF_WINDOW.id}/resume`;
+
+describe("a pause on the timeline", () => {
+  /// The two facts that decide whether the human does anything about it: which
+  /// account ran out, and when it comes back.
+  it("names the account that ran out and when the window comes back", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".what")!.textContent).toContain(
+      `${OUT_OF_WINDOW.profile} is out of window`,
+    );
+    expect(waiting.querySelector(".what")!.textContent).toContain(
+      "2026-08-03 05:00 UTC",
+    );
+
+    // And the backend's own sentence underneath, which is the record of why
+    // this was raised.
+    expect(waiting.querySelector(".how")!.textContent).toBe(OUT_OF_WINDOW.said);
+  });
+
+  /// A display may not carry one. The pause is still the whole record: the wait
+  /// is then the human's to end.
+  it("says only that the account ran out where no reset time could be read", async () => {
+    thePaused({
+      timeline: WAITING.timeline.map((entry) =>
+        "Pause" in entry
+          ? { Pause: { ...entry.Pause, resets_at: null } }
+          : entry,
+      ),
+    });
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".what")!.textContent).toBe(
+      `${OUT_OF_WINDOW.profile} is out of window`,
+    );
+    expect(waiting.querySelector(".resume")).toBeTruthy();
+  });
+
+  /// One press rather than three remedies: Verkstead is not driving anything
+  /// here and has nothing to retry, so the only choice is whether to keep
+  /// waiting.
+  it("offers one press, and says the worktree is untouched", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".resume")!.textContent).toBe(
+      "Go on without waiting",
+    );
+    expect(waiting.querySelectorAll(".remedy")).toHaveLength(0);
+    expect(waiting.textContent).toContain(
+      "the worktree is left exactly as the session left it",
+    );
+  });
+
+  it("sends the press with nothing beside it", async () => {
+    const fetching = thePaused(
+      {},
+      whenever(RESUME_PATH, json("Resumed" satisfies PauseResumed), "POST"),
+    );
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+    fireEvent.click(waiting.querySelector(".resume")!);
+
+    await waitFor(() => expect(sent(fetching, RESUME_PATH)).toEqual({}));
+
+    // And nothing is said about a press that worked: the event reading back
+    // resumed is what says it.
+    expect(waiting.querySelector(".error")).toBeNull();
+  });
+
+  /// The record is what a timeline is: a long run against a busy account
+  /// collects one of these a day, each saying how that day's wait ended.
+  it("shows what ended the wait once something has, and stops offering", async () => {
+    thePaused({
+      blocked_on: null,
+      timeline: WAITING.timeline.map((entry) =>
+        "Pause" in entry
+          ? {
+              Pause: {
+                ...entry.Pause,
+                resumed: {
+                  by: "Reset" as const,
+                  at: "2026-08-03T05:00:04.000Z",
+                },
+              },
+            }
+          : entry,
+      ),
+    });
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+
+    expect(waiting.querySelector(".resumed")!.textContent).toBe(
+      "The window came back",
+    );
+    expect(waiting.querySelector(".resuming")).toBeNull();
+    expect(waiting.classList.contains("open")).toBe(false);
+  });
+
+  /// The window came back while the page was open, or a second press. Not an
+  /// error, and said in words rather than retried.
+  it("says so when the wait was already over", async () => {
+    thePaused(
+      {},
+      whenever(
+        RESUME_PATH,
+        json("AlreadyResumed" satisfies PauseResumed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const waiting = await drawn(container, ".timeline .pause");
+    fireEvent.click(waiting.querySelector(".resume")!);
+
+    await waitFor(() =>
+      expect(waiting.querySelector(".error")!.textContent).toContain(
+        "The first ending stands",
+      ),
+    );
+  });
+
+  /// A paused run is a run that has stopped, so it carries the same badge an
+  /// interruption does — and the badge stays put, because what there is to press
+  /// is drawn whole in the list and there is no pane behind it.
+  it("carries blocked on you, and the badge opens no pane", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const badge = await drawn<HTMLButtonElement>(container, ".blocked");
+    expect(badge.textContent).toBe("Blocked on you");
+
+    fireEvent.click(badge);
+
+    const waiting = await drawn(container, ".timeline .pause.selected");
+    expect(waiting).toBeTruthy();
+    expect(frame(container).dataset.pane).toBe("timeline");
   });
 });
 

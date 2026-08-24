@@ -2000,6 +2000,73 @@ main:has(.workbench) {
   margin-top: 1rem;
 }
 
+/* A run waiting an account's window out. Drawn as the interruption's sibling,
+   because it is the same kind of card — a run that has stopped, with something
+   to press inside it — and marked the same way while it is open: nothing is
+   happening here, and it is waiting. What it does not have is a way into a
+   details pane, because it has no evidence to gather; three short facts are the
+   whole of it, and they are here. */
+.timeline-event > .pause.selected {
+  border-color: var(--accent);
+}
+
+.timeline-event > .pause.open {
+  border-color: var(--stopped);
+  box-shadow: inset 0.2rem 0 0 var(--stopped);
+}
+
+.pause .event-head {
+  justify-content: flex-start;
+}
+
+.pause .event-head .live {
+  color: var(--stopped);
+}
+
+/* Which account ran out and when it comes back, then the sentence the session
+   printed — the heading and the machine's own account of it, exactly as an
+   interruption's two lines are. */
+.pause .what {
+  margin: 0;
+  font-weight: 600;
+}
+
+.pause .how {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* What ended the wait, once something has. The press goes and this stays: a long
+   run against a busy account collects one of these a day. */
+.pause .resumed {
+  margin: 0.75rem 0 0;
+  font-weight: 600;
+}
+
+/* The window coming back on its own is the ordinary ending and reads as one; the
+   human deciding not to wait is the exception, and is the half worth marking. */
+.pause .resumed.Human {
+  color: var(--accent);
+}
+
+/* One press rather than a list of remedies, because there is one thing to do:
+   Verkstead is not driving anything here and has nothing to retry. */
+.resuming {
+  margin-top: 1rem;
+}
+
+.resuming .resume {
+  font: inherit;
+  cursor: pointer;
+}
+
+.resuming .note {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* The evidence, in the details pane: what git made of the worktree, and the tail
    of what the session said. Preformatted, because neither is markdown and the
    columns are the whole of what makes a status readable — and scrolled sideways

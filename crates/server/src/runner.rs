@@ -99,6 +99,15 @@ pub struct Pace {
     /// how often Verkstead looks at things, and a stall is one of the things it
     /// looks for.
     pub stalls: Duration,
+
+    /// And how often the runs waiting an account's window out are looked over
+    /// for one whose window has come back — see [`crate::limits`].
+    ///
+    /// Its own field rather than [`Pace::stalls`] said twice, because the two
+    /// sweeps look for different things: a server tuned to notice a stalled
+    /// Conversation briskly has not asked to be told about a reset any sooner,
+    /// and a wait that ends a minute late costs nothing at all.
+    pub pauses: Duration,
 }
 
 impl Default for Pace {
@@ -110,6 +119,7 @@ impl Default for Pace {
             holding: crate::push::HELD_A_WHILE,
             manual: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
+            pauses: crate::limits::SWEPT_EVERY,
         }
     }
 }
@@ -1283,14 +1293,16 @@ async fn committed_and_quiet(
     }
 }
 
-/// Whether an Interruption is already holding this run up.
+/// Whether anything is already holding this run up — an open Interruption, or a
+/// Pause waiting an account's window out. See [`crate::interruptions::held_up`],
+/// which is where the two are one question.
 ///
 /// A store that will not answer reads as *stopped*, which is the right way round
 /// for the one thing this decides: what is on the other side of it is launching
 /// an agent, and a runner that could not tell whether the human was still being
 /// asked something should wait rather than spend an account guessing.
 async fn stopped(state: &AppState, conversation_id: i64) -> bool {
-    match store::open_interruption(&state.pool, conversation_id).await {
+    match crate::interruptions::held_up(&state.pool, conversation_id).await {
         Ok(Some(event_id)) => {
             tracing::info!(
                 conversation_id,

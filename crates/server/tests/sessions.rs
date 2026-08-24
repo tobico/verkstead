@@ -46,9 +46,9 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitDiff, CommitEvent, ConversationAborted,
     ConversationView, GrillingStarted, HandedBack, InterruptionEvent, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Remedy,
-    RemedySettled, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView,
-    Turn, Watching,
+    ManualTaskStarted, PauseEvent, PauseResumed, PinnedEvent, ProfileSaved, PullRequestEvent,
+    Registered, Remedy, RemedySettled, Shown, Size, Started, Submitted, TaskListEvent,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
@@ -386,6 +386,23 @@ impl Grilling {
             .await
     }
 
+    /// Say not to wait for the window, the way the press in the workbench does.
+    async fn resume(&self, event: i64) -> PauseResumed {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/pause/{event}/resume", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Wait until a run is waiting an account's window out, and hand back the
+    /// Pause it is waiting on.
+    async fn waiting(&self) -> PauseEvent {
+        self.until(|view| pauses(view).last().map(|it| (*it).clone()))
+            .await
+    }
+
     /// Wait until there is a session running, and hand back the Event it is
     /// printing into — which is what a Screen is watched by.
     async fn running(&self) -> i64 {
@@ -577,6 +594,10 @@ const BRISKLY: Pace = Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: Duration::from_secs(600),
+    // And the same again for the other sweep, for the same reason: a run
+    // waiting an account's window out ends its own wait, and only the test
+    // about that wants to watch it happen.
+    pauses: Duration::from_secs(600),
 };
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -587,6 +608,18 @@ const BRISKLY: Pace = Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 const SWEEPING: Pace = Pace {
     stalls: Duration::from_millis(100),
+    ..BRISKLY
+};
+
+/// And the same for the other sweep, for the one test that watches a wait end
+/// itself.
+///
+/// A server looks over the runs waiting an account's window out every minute.
+/// What is being asked here is whether a window that has come back starts the
+/// work again with nobody pressing anything, and the number of seconds it waits
+/// before noticing is not part of the answer.
+const RESUMING: Pace = Pace {
+    pauses: Duration::from_millis(100),
     ..BRISKLY
 };
 
@@ -813,6 +846,12 @@ async fn grilling_swept(stub: &str) -> Grilling {
     grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
 }
 
+/// The same, on a server that looks for a window that has come back briskly
+/// enough to watch it do so — see [`RESUMING`].
+async fn grilling_resuming(stub: &str) -> Grilling {
+    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, RESUMING).await
+}
+
 /// The same, over a directory the caller already has the name of — which is
 /// what a stub that has to write somewhere the worktree is not needs, the
 /// script naming the path being written before there is a fixture to ask.
@@ -1029,6 +1068,17 @@ fn interruptions(view: &ConversationView) -> Vec<&InterruptionEvent> {
         .iter()
         .filter_map(|event| match event {
             TimelineEvent::Interruption(stopped) => Some(stopped),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Pauses on a Timeline, in the order the account ran out.
+fn pauses(view: &ConversationView) -> Vec<&PauseEvent> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Pause(waiting) => Some(waiting),
             _ => None,
         })
         .collect()
@@ -4827,6 +4877,329 @@ async fn a_backlog_stops_at_the_task_whose_session_died() {
     assert!(
         worktree.join(".tasks/01-count.md").exists(),
         "the task is still there to be worked, because nothing reverted anything",
+    );
+}
+
+/// The backlog every usage-limit test below is worked against: two tasks, and a
+/// stub that prints its account is out of window as it works the first.
+///
+/// The sentence is the one claude 2.1.234 draws — the reset time is what the
+/// caller varies, because that is the half that decides whether the wait ends by
+/// itself. Each task session commits its task and exits, so the run reaches the
+/// point of launching the next one, which is the moment a Pause has to stop.
+fn out_of_window(sentence: &str) -> String {
+    format!(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+            printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+            printf -- '- [ ] 02: refuse the excess\n' >> .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+            if [ -n "$next" ]; then
+                if [ "$next" = 01-count.md ]; then
+                    printf '{sentence}\r\n'
+                    # The wait itself, in miniature: the account runs out, the
+                    # agent holds, and it goes on when the window comes back. A
+                    # second is more than the half a second Verkstead writes
+                    # down what a session printed on, which is what makes this a
+                    # limit noticed while the session is still running rather
+                    # than one found in its last words.
+                    sleep 1
+                fi
+                printf 'working %s\n' "$next"
+                number=${{next%%-*}}
+                printf 'a limiter\n' >> limiter.md
+                rm ".tasks/$next"
+                sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+                git add -A
+                git commit --quiet -m "feat: $next"
+            else
+                printf 'finishing\n'
+                git rm --quiet .tasks/TODO.md
+                git commit --quiet -m 'chore: finish rate-limiting'
+            fi
+            sleep 300
+            ;;
+        esac
+        "#
+    )
+}
+
+/// Get such a backlog running, and hand back the fixture once the first task's
+/// session has started.
+async fn running_out(fixture: &Grilling) {
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+}
+
+/// An account that runs out of window mid-run: the wait goes on the Timeline
+/// naming the account and the reset, the devices are told, and nothing else is
+/// launched until somebody says so.
+///
+/// The agent waits too — that is settled, and it is why this is a Pause rather
+/// than an Interruption. What Verkstead adds is that the wait is answerable from
+/// a phone instead of being a session that has gone quiet for no stated reason.
+#[tokio::test]
+async fn an_account_out_of_window_pauses_the_run_and_tells_the_devices() {
+    let fixture = grilling(&out_of_window(
+        "Usage limit reached \\xc2\\xb7 continuing automatically at 2026-08-24T05:00:00Z \\xc2\\xb7 esc to cancel",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    // Subscribed after the closing Set is answered, so the only push these
+    // devices are ever told about is the one this test is about — a Set's own
+    // push is `asking.rs`'s subject.
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.profile, "implementation",
+        "the Pause names the account that ran out, which is the implementation Profile \
+         the task was being worked under",
+    );
+    assert!(
+        waiting.said.contains("Usage limit reached"),
+        "with the backend's own sentence kept as it was printed: {:?}",
+        waiting.said,
+    );
+    assert_eq!(
+        waiting.resets_at.as_deref(),
+        Some("2026-08-24T05:00:00Z"),
+        "and when the window comes back, where the sentence carried a time",
+    );
+
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(waiting.id),
+        "a run that has stopped carries *blocked on you*, whatever stopped it",
+    );
+
+    // One per subscribed device, exactly as a Question Set's push is.
+    let pushed = pushes(&taken, 1).await;
+    let notice = phone.read(&pushed[0]);
+
+    assert_eq!(
+        notice["path"],
+        format!("/conversations/{}", fixture.id),
+        "tapping it opens the Conversation whose run stopped",
+    );
+    assert_eq!(
+        notice["title"], "implementation is out of window until 2026-08-24T05:00:00Z",
+        "and it says which account and until when, which is what decides whether the \
+         human does anything about it",
+    );
+
+    let sessions = outputs(&fixture.view().await).len();
+
+    // Long enough for several more turns of a runner that was still turning.
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    assert_eq!(
+        outputs(&fixture.view().await).len(),
+        sessions,
+        "while it is paused the run does not advance: no next Step, no fresh session",
+    );
+    assert_eq!(
+        pauses(&fixture.view().await).len(),
+        1,
+        "and the banner redrawing does not pause it twice over the same wait",
+    );
+    assert!(
+        interruptions(&fixture.view().await).is_empty(),
+        "a run stopped on purpose is not a run that went wrong",
+    );
+    assert_eq!(
+        taken.lock().unwrap().len(),
+        1,
+        "one push for the wait, however long it lasts",
+    );
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["log", "--format=%s", "-1"]),
+        "feat: 01-count.md\n",
+        "the task the session was working landed, because a Pause reverts nothing",
+    );
+    assert!(
+        worktree.join(".tasks/02-refuse.md").exists(),
+        "and the task after it is still there to be worked",
+    );
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "the Worktree is exactly as the session left it",
+    );
+}
+
+/// The human presses *go on without waiting*, and the backlog picks up from
+/// where it stopped.
+#[tokio::test]
+async fn the_humans_press_starts_a_paused_run_again_where_it_stopped() {
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
+
+    running_out(&fixture).await;
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.resets_at, None,
+        "a sentence with no time in it carries none, which is a wait the human ends",
+    );
+
+    assert_eq!(fixture.resume(waiting.id).await, PauseResumed::Resumed);
+
+    // The rest of the backlog, worked by sessions of its own: the run picked up
+    // at the step it had reached rather than starting over.
+    let subjects = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 4).then(|| {
+                landed
+                    .iter()
+                    .map(|commit| commit.subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await;
+
+    assert_eq!(
+        subjects,
+        vec![
+            "chore: plan the rate limiter".to_owned(),
+            "feat: 01-count.md".to_owned(),
+            "feat: 02-refuse.md".to_owned(),
+            "chore: finish rate-limiting".to_owned(),
+        ],
+        "the backlog in order and each step once: the run picked up where it stopped \
+         rather than starting over",
+    );
+
+    let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
+
+    assert_eq!(
+        git(&worktree, &["status", "--porcelain"]),
+        "",
+        "and nothing was reverted, reset or stashed on the way through the wait",
+    );
+
+    let waiting = fixture.waiting().await;
+
+    assert_eq!(
+        waiting.resumed.map(|resumed| resumed.by),
+        Some(verkstead_render::By::Human),
+        "the record says the human decided not to wait",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and nothing is blocked on them any more",
+    );
+}
+
+/// And nobody presses anything: the reset time passes, and the run goes on by
+/// itself.
+///
+/// Swept rather than timed, which is what makes it survive a restart — nothing
+/// holds a clock across the process, so a window that came back while the server
+/// was down is one the next sweep finds already due. Which is also how this test
+/// reaches it: the sentence names a time that has been and gone.
+#[tokio::test]
+async fn the_window_coming_back_starts_a_paused_run_again_on_its_own() {
+    let fixture = grilling_resuming(&out_of_window(
+        "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
+    ))
+    .await;
+
+    running_out(&fixture).await;
+
+    // Nothing is pressed here at all. The sweep reads the reset time, finds it
+    // has passed, and starts the work again.
+    let subjects = fixture
+        .until(|view| {
+            let landed = commits(view);
+            (landed.len() == 4).then(|| {
+                landed
+                    .iter()
+                    .map(|commit| commit.subject.clone())
+                    .collect::<Vec<_>>()
+            })
+        })
+        .await;
+
+    assert_eq!(
+        subjects,
+        vec![
+            "chore: plan the rate limiter".to_owned(),
+            "feat: 01-count.md".to_owned(),
+            "feat: 02-refuse.md".to_owned(),
+            "chore: finish rate-limiting".to_owned(),
+        ],
+        "the backlog was worked through from where it stopped",
+    );
+
+    let view = fixture.view().await;
+    let waiting = pauses(&view);
+
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(
+        waiting[0].resumed.as_ref().map(|resumed| resumed.by),
+        Some(verkstead_render::By::Reset),
+        "and the record says the window came back rather than that anybody pressed",
+    );
+    assert!(
+        interruptions(&view).is_empty(),
+        "a Conversation waiting a window out is never swept up as a stall: it is \
+         stopped on purpose and already said so",
+    );
+}
+
+/// An exhausted account is a wait, never a reason to spend a different one.
+#[tokio::test]
+async fn nothing_moves_a_paused_conversation_onto_another_profile() {
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
+
+    let before = fixture.view().await;
+
+    running_out(&fixture).await;
+
+    let waiting = fixture.waiting().await;
+    assert_eq!(fixture.resume(waiting.id).await, PauseResumed::Resumed);
+
+    fixture
+        .until(|view| (commits(view).len() == 4).then_some(()))
+        .await;
+
+    let after = fixture.view().await;
+
+    assert_eq!(
+        after.grilling_profile.map(|profile| profile.id),
+        before.grilling_profile.map(|profile| profile.id),
+    );
+    assert_eq!(
+        after.implementation_profile.map(|profile| profile.id),
+        before.implementation_profile.map(|profile| profile.id),
+        "the account that ran out is the account the rest of the run is spent on",
     );
 }
 

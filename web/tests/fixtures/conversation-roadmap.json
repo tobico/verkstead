@@ -14,7 +14,7 @@
     "name": "fable"
   },
   "held": null,
-  "id": 7,
+  "id": 8,
   "implementation_profile": {
     "agent_type": "Claude",
     "broken": null,
@@ -67,14 +67,14 @@
       "Brief": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<h1>A staged roadmap</h1>\n<p>Too much for one feature, so it is cut into stages and each becomes a\nfeature of its own.</p>\n",
-        "id": 29,
+        "id": 33,
         "markdown": "# A staged roadmap\n\nToo much for one feature, so it is cut into stages and each becomes a\nfeature of its own.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 30,
+        "id": 34,
         "state": "Grilling"
       }
     },
@@ -82,7 +82,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>Stage 01 of the <code>mvp</code> roadmap — <em>Workbench</em> — has started as a Conversation of its own, on <code>workbench</code>.</p>\n",
-        "id": 31
+        "id": 35
       }
     }
   ],

@@ -236,7 +236,7 @@ async fn wanted(state: &AppState, conversation_id: i64) -> bool {
         }
     }
 
-    match store::open_interruption(&state.pool, conversation_id).await {
+    match crate::interruptions::held_up(&state.pool, conversation_id).await {
         Ok(None) => true,
         Ok(Some(event_id)) => {
             tracing::info!(

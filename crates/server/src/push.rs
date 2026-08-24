@@ -1,7 +1,8 @@
 //! Telling the devices that something is waiting for the human.
 //!
-//! Two things are: a Question Set has arrived, or a Hold has stood a while with
-//! nobody coming back to it. One push per subscribed device either way,
+//! Three things are: a Question Set has arrived, a Hold has stood a while with
+//! nobody coming back to it, or a run has stopped because the account it was
+//! spending ran out of window. One push per subscribed device in every case,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
 //! service worker to draw the notification and to know which page to open, and
@@ -194,6 +195,72 @@ async fn remind(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     let notice = serde_json::to_vec(&notice).context("building the push notice")?;
 
     notify(pool, &format!("the Hold on {conversation_id}"), &notice).await
+}
+
+/// Tell every subscribed device that a run is waiting an account's window out,
+/// without making the pause wait for it.
+///
+/// Returns as soon as the work is handed to the runtime, exactly as a Set's does:
+/// what the caller is doing is putting the wait on the Timeline, and a push
+/// service that cannot be reached must not be able to cost the record.
+///
+/// Named by the Profile that ran out and the time it comes back, because those
+/// are the two things that decide whether the human does anything about it: an
+/// account back in twenty minutes is one to leave alone, and there is no more of
+/// the work on a lock screen than there is for a Question Set.
+pub(crate) fn paused(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    profile: &str,
+    resets_at: Option<&str>,
+) {
+    let pool = pool.clone();
+    let profile = profile.to_owned();
+    let resets_at = resets_at.map(str::to_owned);
+
+    tokio::spawn(async move {
+        if let Err(error) = tell(&pool, conversation_id, &profile, resets_at.as_deref()).await {
+            tracing::error!(
+                conversation_id,
+                error = ?error,
+                "telling the devices about a paused run failed",
+            );
+        }
+    });
+}
+
+/// The notice one Pause is worth, sent.
+///
+/// The Repo underneath, as a Hold's is, so that a lock screen says which piece of
+/// work stopped — and the branch in the title, which is what a Conversation is
+/// read by.
+async fn tell(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    profile: &str,
+    resets_at: Option<&str>,
+) -> Result<()> {
+    let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
+    else {
+        // Aborted and gone between the Pause landing and this being sent. There
+        // is no run left waiting to say anything about.
+        return Ok(());
+    };
+
+    let title = match resets_at {
+        Some(resets_at) => format!("{profile} is out of window until {resets_at}"),
+        None => format!("{profile} is out of window"),
+    };
+
+    let notice = Notice {
+        path: format!("/conversations/{conversation_id}"),
+        title: &title,
+        project: Some(&conversation.repo.name),
+    };
+
+    let notice = serde_json::to_vec(&notice).context("building the push notice")?;
+
+    notify(pool, &format!("the Pause on {conversation_id}"), &notice).await
 }
 
 /// Send the notice to every device, and prune the ones the push services have

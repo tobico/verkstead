@@ -295,6 +295,15 @@ pub enum Event {
     /// Timeline's worth of memory to hold the one kind that needs it.
     Interruption(Box<super::Interruption>),
 
+    /// A run waiting out an Agent Profile's window: which account ran out, when
+    /// it comes back, and what ended the wait — see [`super::pauses`].
+    ///
+    /// Its body is not in the `body` column either, for the Interruption's
+    /// reason: what a Pause is, is a row of separate facts. Unboxed, unlike the
+    /// Interruption beside it — three short strings is no more than a Brief
+    /// carries, and there is no gathered evidence here to make the enum large.
+    Pause(super::Pause),
+
     /// Something Verkstead has to say on its own account: which stage it has
     /// started and where the branch went, or that a roadmap has no stages left
     /// to run.
@@ -365,6 +374,7 @@ impl Event {
             Self::Commit(_) => "commit",
             Self::PullRequest(_) => PULL_REQUEST,
             Self::Interruption(_) => super::interruptions::INTERRUPTION,
+            Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
         }
@@ -389,6 +399,8 @@ impl Event {
             Self::PullRequest(_) => "",
             // Nothing either, and for the commit's reason.
             Self::Interruption(_) => "",
+            // Nothing either, and for the commit's reason again.
+            Self::Pause(_) => "",
             Self::Notice(markdown) => markdown,
             Self::ManualTask(instruction) => instruction,
         }
@@ -401,6 +413,12 @@ impl Event {
     /// without the other is a database somebody has been in by hand — worth
     /// saying rather than reading as a session that printed nothing or a Set
     /// that asked nothing.
+    ///
+    /// One parameter per kind of row that can be joined in, which is what makes
+    /// the list long: they are the Timeline's own columns rather than an
+    /// argument list somebody chose, and gathering them into a struct would be a
+    /// second shape to keep true beside the query that fills it.
+    #[allow(clippy::too_many_arguments)]
     fn read(
         kind: &str,
         body: String,
@@ -409,6 +427,7 @@ impl Event {
         commit: Option<super::Commit>,
         pull_request: Option<super::PullRequest>,
         interruption: Option<super::Interruption>,
+        pause: Option<super::Pause>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -431,6 +450,9 @@ impl Event {
                 Self::Interruption(Box::new(interruption.ok_or_else(|| {
                     anyhow!("an Interruption Event has no evidence beside it")
                 })?))
+            }
+            super::pauses::PAUSE => {
+                Self::Pause(pause.ok_or_else(|| anyhow!("a Pause Event has no Pause beside it"))?)
             }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
@@ -898,6 +920,11 @@ async fn started(
 /// - An **open Interruption**, which is a run stopped on a choice only they can
 ///   make. Read off the table rather than off the Timeline, so the whole list
 ///   costs one query.
+/// - An **open Pause**, which is a run stopped because the account it was
+///   spending is out of window. Read the same way and for the same reason. The
+///   human may not have to do anything about one — the window comes back by
+///   itself — but a run that has stopped is one the sidebar has to say has
+///   stopped.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -924,6 +951,10 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                     OR EXISTS (
                         SELECT 1 FROM interruptions i
                         WHERE i.conversation_id = c.id AND i.remedy IS NULL
+                    )
+                    OR EXISTS (
+                        SELECT 1 FROM pauses u
+                        WHERE u.conversation_id = c.id AND u.resumed_at IS NULL
                     )
                 ) AS waiting
          FROM conversations c
@@ -1196,6 +1227,11 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
+    // And the Pauses, for the arithmetic again and at the Interruptions' cost:
+    // an account running out of window is the rare Event, so this is a second
+    // query that nearly always comes back with nothing.
+    let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
+
     // And which of the Sets above were asked deferred, for the arithmetic again
     // — see [`super::deferrals::deferred_on_timeline`]. Cheaper than either:
     // one indexed column, and most Conversations have no deferred Set at all.
@@ -1262,6 +1298,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
             // one Event and the Events are walked once.
             let interruption = interruptions.remove(&id);
             let pull_request = pull_requests.remove(&id);
+            let pause = pauses.remove(&id);
 
             Ok(TimelineEvent {
                 id,
@@ -1274,6 +1311,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                     commit,
                     pull_request,
                     interruption,
+                    pause,
                 )?,
             })
         })

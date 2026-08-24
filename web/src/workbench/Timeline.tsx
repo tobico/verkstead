@@ -63,6 +63,7 @@ import { useReading } from "../freshness";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Interruption } from "./Interruption";
+import { Pause } from "./Pause";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -132,6 +133,20 @@ export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
     "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
+/// Whether the event the *blocked on you* badge points at has a details pane
+/// behind it.
+///
+/// Every other thing that stops a run does — an interruption opens its evidence,
+/// a held session opens its screen — and a pause does not: what it has to say is
+/// three short facts and they are drawn whole in the list, with the press on
+/// them. So the badge selects it and stays put, rather than sending a narrow
+/// window away from the very thing there is to press.
+function opensAPane(conversation: ConversationView, event: number): boolean {
+  return !conversation.timeline.some(
+    (entry) => "Pause" in entry && entry.Pause.id === event,
+  );
+}
+
 /// What a move reads as. The state moved *to*, said as something that happened.
 const MOVED: Record<Lifecycle, string> = {
   Draft: "Went back to drafting",
@@ -173,7 +188,10 @@ export function Timeline(props: {
               class="blocked"
               onClick={() => {
                 props.select(event());
-                props.details();
+
+                if (opensAPane(props.conversation, event())) {
+                  props.details();
+                }
               }}
             >
               Blocked on you
@@ -277,6 +295,18 @@ export function Timeline(props: {
                         props.select(stopped().id);
                         props.details();
                       }}
+                    />
+                  )}
+                </Match>
+                {/* Drawn like the interruption above it and with nothing behind
+                    a pane: what a pause has to say is a profile, a time and the
+                    line the session printed, so there is nothing to open. */}
+                <Match when={"Pause" in event && event.Pause}>
+                  {(waiting) => (
+                    <Pause
+                      conversation={props.conversation}
+                      waiting={waiting()}
+                      selected={props.selected === waiting().id}
                     />
                   )}
                 </Match>

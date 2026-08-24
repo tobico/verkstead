@@ -1,0 +1,75 @@
+{
+  "adopting": null,
+  "base_commit": "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
+  "blocked_on": 25,
+  "branch": "deferred-asks",
+  "direction": null,
+  "grilling_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/fable/.claude",
+    "config_file": "/srv/accounts/fable/.claude.json",
+    "id": 1,
+    "model": "claude-fable-5",
+    "name": "fable"
+  },
+  "held": null,
+  "id": 6,
+  "implementation_profile": {
+    "agent_type": "Claude",
+    "broken": null,
+    "claude_dir": "/srv/accounts/opus/.claude",
+    "config_file": "/srv/accounts/opus/.claude.json",
+    "id": 2,
+    "model": "claude-opus-5",
+    "name": "opus"
+  },
+  "pinned": [],
+  "ready_to_grill": false,
+  "repo": {
+    "default_branch": "main",
+    "id": 1,
+    "name": "verkstead",
+    "path": "/srv/repos/verkstead"
+  },
+  "state": "Implementing",
+  "timeline": [
+    {
+      "Brief": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "html": "<h1>Deferred asks</h1>\n<p>An ask that never idles the session that sends it.</p>\n",
+        "id": 22,
+        "markdown": "# Deferred asks\n\nAn ask that never idles the session that sends it.\n"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 23,
+        "state": "Grilling"
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 24,
+        "state": "Implementing"
+      }
+    },
+    {
+      "Pause": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 25,
+        "profile": "opus",
+        "resets_at": "2026-08-03T05:00:00.000Z",
+        "resumed": null,
+        "said": "Usage limit reached · continuing automatically at 3pm · esc to cancel"
+      }
+    }
+  ],
+  "working": false,
+  "worktree": {
+    "missing": false,
+    "path": "/var/lib/verkstead/worktrees/verkstead-deferred-asks"
+  }
+}

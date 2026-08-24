@@ -742,6 +742,13 @@ impl Sessions {
             .as_deref()
             .map(|session| Tail::of(conversation_id, profile, session));
 
+        // And the same output watched for the one thing a session says that is
+        // about the account rather than about the work: that its window is
+        // spent. The Profile is taken now because that is what the Pause names,
+        // and a Profile renamed while a session runs was not the account this
+        // one is on — see [`crate::limits`].
+        let limits = crate::limits::Watch::on(conversation_id, event_id, profile.name.clone());
+
         let (stop, stopping) = oneshot::channel();
 
         // The two halves of what a driver holds a session by: the clock the
@@ -817,6 +824,7 @@ impl Sessions {
                         &mut launched,
                         &quiet,
                         tail,
+                        limits,
                         stopping,
                     )
                     .await;
@@ -1034,8 +1042,17 @@ struct Printing {
 /// the Screen is a terminal somebody may be watching, and half a second is a
 /// long time to watch a terminal not move.
 ///
+/// And `limits` is fed the same text a third time, watching for the one thing a
+/// session says that is about the account rather than about the work — see
+/// [`crate::limits`].
+///
 /// What comes back is how it ended, which is what whoever is driving decides
 /// between carrying on and raising an Interruption by.
+///
+/// One parameter per thing the loop reads or writes, which is what makes the
+/// list long: gathering them would be a struct built at one call site and taken
+/// apart at the top of this, which is the same list said twice.
+#[allow(clippy::too_many_arguments)]
 async fn relay(
     pool: &SqlitePool,
     nudges: &Nudges,
@@ -1043,6 +1060,7 @@ async fn relay(
     session: &mut Launched,
     quiet: &Quiet,
     mut tail: Option<Tail>,
+    mut limits: crate::limits::Watch,
     mut stopping: oneshot::Receiver<()>,
 ) -> Ended {
     // The Event alone here: what this loop says for itself it says in the log,
@@ -1077,6 +1095,7 @@ async fn relay(
 
                     let text = reading.take(&buffer[..taken]);
                     screen.printed(&text);
+                    limits.printed(&text);
                     pending.push_str(&text);
                 }
                 Err(error) => {
@@ -1087,6 +1106,11 @@ async fn relay(
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 let said = tail.as_ref().and_then(Tail::latest);
                 flush(pool, nudges, printing, &mut pending, &reading, said).await;
+                // On the same cadence as the flush, and after it: what is being
+                // looked for is in what was just written down, and a Pause the
+                // Timeline had no output under would be a wait with nothing
+                // above it saying where the session had got to.
+                limits.look(pool, nudges, said).await;
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1098,6 +1122,12 @@ async fn relay(
                     && tail.poll(pool, nudges, event_id).await
                 {
                     summarise(pool, nudges, printing, &reading, tail.latest()).await;
+
+                    // The other record a session leaves behind, looked at the
+                    // moment it moves: a backend that says its window is spent
+                    // in its own log and not on its display would otherwise go
+                    // unnoticed until the terminal happened to say something.
+                    limits.look(pool, nudges, tail.latest()).await;
                 }
 
                 tailed = Instant::now();
@@ -1121,6 +1151,14 @@ async fn relay(
 
     let said = tail.as_ref().and_then(Tail::latest);
     flush(pool, nudges, printing, &mut pending, &reading, said).await;
+
+    // And no look at it, deliberately: everything from here down is a session
+    // that has gone. A limit the agent waits out never ends its session — that
+    // is the whole of why a Pause is a wait rather than a failure — so a limit
+    // in a session's last words is a session that did not come back from one,
+    // which is the Interruption whoever is driving is about to raise. Pausing as
+    // well would leave the run stopped on two things at once, and the Remedy
+    // would launch nothing.
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.

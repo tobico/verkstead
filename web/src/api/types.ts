@@ -334,6 +334,11 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
+ * The two things that end a wait.
+ */
+export type By = "Human" | "Reset";
+
+/**
  * One session's Capture, whole, as the details pane receives it.
  *
  * Byte for byte, control sequences and all: what a terminal was sent is what a
@@ -823,6 +828,46 @@ text_html: string, recommended: boolean,
 cells: Array<string>, };
 
 /**
+ * A run waiting an account's window out, as the Timeline shows it.
+ *
+ * Nothing here went wrong, which is what makes it a different Event from the
+ * Interruption it is shaped like: the account is out of window, the agent is
+ * waiting for the same reset, and the Conversation is *blocked on you* only in
+ * the sense that the human may decide not to wait.
+ */
+export type PauseEvent = { id: number, 
+/**
+ * When the run stopped, RFC 3339.
+ */
+at: string, 
+/**
+ * What the Agent Profile whose account ran out is called, as it was called
+ * then.
+ */
+profile: string, 
+/**
+ * The line the session printed, as it printed it. The record of why this
+ * was raised, in the backend's own words rather than in Verkstead's.
+ */
+said: string, 
+/**
+ * When the window resets, RFC 3339 — or `null` where what the session
+ * printed carried no time this build could read as one, which is a wait the
+ * human ends.
+ */
+resets_at: string | null, 
+/**
+ * What ended the wait, or `null` while it is still on — which is the state
+ * the run is stopped in, and what the resume press is drawn for.
+ */
+resumed: Resumed | null, };
+
+/**
+ * What became of pressing resume.
+ */
+export type PauseResumed = "Resumed" | "NoSuchPause" | "AlreadyResumed";
+
+/**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
  * A fixed set — a task list, a stage list and a PR — and no manual pin or
@@ -1201,6 +1246,15 @@ comment?: string | null,
 direction?: Direction | null, };
 
 /**
+ * How a Pause ended: what started the work again, and when.
+ */
+export type Resumed = { by: By, 
+/**
+ * When it ended, RFC 3339.
+ */
+at: string, };
+
+/**
  * One session's Screen: the grid its Capture leaves on a terminal.
  *
  * Not the bytes and not a picture of them — the escape sequences that would
@@ -1496,7 +1550,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Interruption": InterruptionEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.

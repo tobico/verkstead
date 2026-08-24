@@ -20,7 +20,7 @@ use crate::{
     AbandonedRepo, Adopted, Archived, BaseCommitOverride, BaseRecorded, BranchRename,
     BranchRenamed, BriefEdit, BriefSaved, Capture, CommitDiff, ConversationAborted,
     ConversationEntry, ConversationView, GrillingStarted, HandedBack, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice, ProfileChosen,
+    ManualTaskSubmission, NewAdoption, NewConversation, PauseResumed, ProfileChoice, ProfileChosen,
     ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
     Registered, Registration, RemedyChoice, RemedySettled, RepoEntry, Screen, SetReading,
     SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
@@ -141,6 +141,11 @@ fn the_viewers_types_are_written_from_these() {
     // it was answered.
     RemedyChoice::export_all(&config).unwrap();
     RemedySettled::export_all(&config).unwrap();
+
+    // And what the human does about a run waiting an account's window out. The
+    // Pause rides on the Timeline whole for the Interruption's reason, and there
+    // is nothing to send with the press — so this is the outcome alone.
+    PauseResumed::export_all(&config).unwrap();
 
     // What the human sets going by hand at the end of a Timeline, and every way
     // of being refused it. The instruction's own Event rides on the

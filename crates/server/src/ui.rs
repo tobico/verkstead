@@ -30,9 +30,9 @@ use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseCommitOverride, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationView, Cursor, GrillingStarted, HandedBack, Lifecycle,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled, RepoEntry,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, PauseResumed,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemedyChoice, RemedySettled,
+    RepoEntry, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, Submitted,
     Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
     Verified,
 };
@@ -135,6 +135,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/interruption/{event}",
             post(settle_interruption),
+        )
+        // And the press that says *do not wait for the window*. Per Event for
+        // the Interruption's reason, and with nothing in the body: there is one
+        // thing to do about a Pause, and a choice of one is a press rather than
+        // a form.
+        .route(
+            "/api/ui/conversations/{id}/pause/{event}/resume",
+            post(resume_pause),
         )
         // And what the human sets going by hand, wherever nothing is running.
         // Per Conversation rather than per Event, unlike settling an
@@ -657,10 +665,15 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // most one open, so the last one that is unsettled is the one — and it is
     // the *only* one, which is what makes *the run stops here* a fact rather
     // than a promise.
+    // A Pause answers this too, and the two are read in one pass: a run stopped
+    // because its account is out of window is stopped, and *blocked on you* with
+    // nowhere to go would be a badge the human could not act on. The newest
+    // unsettled of either, the store's two indexes making at most one of each.
     let stopped_at = timeline.iter().rev().find_map(|event| match &event.event {
         store::Event::Interruption(interruption) if interruption.settled.is_none() => {
             Some(event.id)
         }
+        store::Event::Pause(pause) if pause.resumed.is_none() => Some(event.id),
         _ => None,
     });
 
@@ -805,6 +818,14 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             event.at,
                             stopped(*interruption),
                         )
+                    }
+                    // Whole as well, and for the Interruption's reason: there is
+                    // a press on it, and a page that had to fetch what the run
+                    // was waiting for could draw the button before it could say
+                    // what for. Three short strings rather than four — nothing
+                    // went wrong here, so there is no evidence to gather.
+                    store::Event::Pause(pause) => {
+                        verkstead_render::pause_event(event.id, event.at, waiting(pause))
                     }
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
@@ -1258,6 +1279,37 @@ async fn settle_interruption(
     }
 }
 
+/// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
+/// waiting for the window.
+///
+/// The human's half of the two ways a Pause ends; the other is the reset time
+/// passing, which the sweep does — see [`crate::limits`]. Both close the same
+/// row and start the work again from where it stopped, and the Worktree is
+/// untouched by either: a Pause never changed anything in it.
+///
+/// `AlreadyResumed` is an outcome rather than an error, for the reason a settled
+/// Interruption is one: the window may have come back while the page was open,
+/// and the press arriving second is something to say in words rather than
+/// something to retry.
+async fn resume_pause(
+    State(state): State<AppState>,
+    Path((id, event)): Path<(String, String)>,
+) -> HttpResponse {
+    // Two ids out of a URL a human may have typed, read as permissively as every
+    // other pair here.
+    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
+        return Json(PauseResumed::NoSuchPause).into_response();
+    };
+
+    match crate::limits::resume(&state, id, event, store::By::Human).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, event_id = event, "starting a paused run again failed");
+            unavailable("the run could not be started again")
+        }
+    }
+}
+
 /// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
 ///
 /// The instruction goes on the Timeline and a one-off session starts on it under
@@ -1459,6 +1511,27 @@ fn stopped(interruption: store::Interruption) -> verkstead_render::Stopped {
                 note: settled.note,
                 at: settled.at,
             }),
+    }
+}
+
+/// A Pause as the viewer receives it: which account ran out, when it comes back,
+/// and what ended the wait if anything has.
+///
+/// Held to the viewer's vocabulary here for the same reason [`stopped`] is: the
+/// two enums are one pair of words said in two crates that do not depend on each
+/// other.
+fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
+    verkstead_render::Waiting {
+        profile: pause.profile,
+        said: pause.said,
+        resets_at: pause.resets_at,
+        resumed: pause.resumed.map(|resumed| verkstead_render::Resumed {
+            by: match resumed.by {
+                store::By::Human => verkstead_render::By::Human,
+                store::By::Reset => verkstead_render::By::Reset,
+            },
+            at: resumed.at,
+        }),
     }
 }
 

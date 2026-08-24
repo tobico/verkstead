@@ -382,6 +382,16 @@ pub enum TimelineEvent {
     /// buttons before it could say what they were for.
     Interruption(InterruptionEvent),
 
+    /// A run waiting an account's window out: which Profile ran out, when it
+    /// comes back, and the press that starts the work again.
+    ///
+    /// Its whole self, like the Interruption above it and for the same reason:
+    /// there is something to press on it, and a page that had to fetch what it
+    /// was waiting for could draw the button before it could say what for. Three
+    /// short strings, where an Interruption's evidence is four — this one is not
+    /// a reading of anything that went wrong, because nothing did.
+    Pause(PauseEvent),
+
     /// Something Verkstead did on its own account, rendered inline like the
     /// Brief — and for the same reason: it is a sentence to read, and there is
     /// nothing of it a details pane would show.
@@ -501,6 +511,75 @@ pub enum RemedySettled {
     /// press. Not an error and not something to act on twice: the first choice
     /// stands.
     AlreadySettled,
+}
+
+/// A run waiting an account's window out, as the Timeline shows it.
+///
+/// Nothing here went wrong, which is what makes it a different Event from the
+/// Interruption it is shaped like: the account is out of window, the agent is
+/// waiting for the same reset, and the Conversation is *blocked on you* only in
+/// the sense that the human may decide not to wait.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PauseEvent {
+    pub id: i64,
+
+    /// When the run stopped, RFC 3339.
+    pub at: String,
+
+    /// What the Agent Profile whose account ran out is called, as it was called
+    /// then.
+    pub profile: String,
+
+    /// The line the session printed, as it printed it. The record of why this
+    /// was raised, in the backend's own words rather than in Verkstead's.
+    pub said: String,
+
+    /// When the window resets, RFC 3339 — or `null` where what the session
+    /// printed carried no time this build could read as one, which is a wait the
+    /// human ends.
+    pub resets_at: Option<String>,
+
+    /// What ended the wait, or `null` while it is still on — which is the state
+    /// the run is stopped in, and what the resume press is drawn for.
+    pub resumed: Option<Resumed>,
+}
+
+/// How a Pause ended: what started the work again, and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct Resumed {
+    pub by: By,
+
+    /// When it ended, RFC 3339.
+    pub at: String,
+}
+
+/// The two things that end a wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum By {
+    /// The human said so, from the workbench or from their phone.
+    Human,
+
+    /// The reset time passed.
+    Reset,
+}
+
+/// What became of pressing resume.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum PauseResumed {
+    /// Recorded, and the run is going on again.
+    Resumed,
+
+    /// This Conversation has no such Pause — an Event id that belongs to another
+    /// Conversation names nothing.
+    NoSuchPause,
+
+    /// The wait was over before this arrived — the window came back, or a second
+    /// press. Not an error and not something to act on twice.
+    AlreadyResumed,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -1379,6 +1458,35 @@ pub struct Stopped {
     pub git_status: String,
     pub tail: String,
     pub settled: Option<RemedyTaken>,
+}
+
+/// A run waiting an account's window out, as an Event. Nothing to render — a
+/// Profile's name and a line off a terminal are not markdown — and here beside
+/// the rest for the reason the Interruption above it is: one place knows how a
+/// Timeline is made.
+pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
+    TimelineEvent::Pause(PauseEvent {
+        id,
+        at,
+        profile: waiting.profile,
+        said: waiting.said,
+        resets_at: waiting.resets_at,
+        resumed: waiting.resumed,
+    })
+}
+
+/// What the caller of [`pause_event`] hands over: the Pause as the store holds
+/// it.
+///
+/// Its own type rather than the store's, for [`Stopped`]'s reason: this crate
+/// does not depend on the store, and a call with two strings in the wrong order
+/// would compile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    pub profile: String,
+    pub said: String,
+    pub resets_at: Option<String>,
+    pub resumed: Option<Resumed>,
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

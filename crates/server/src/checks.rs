@@ -128,10 +128,11 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
         return Watching::Done("the Conversation is not wrapping up any more");
     }
 
-    // Asked before anything is dispatched, for the runner's reason: *the run does
-    // not advance past an Interruption* means no session is launched while the
-    // human is still being asked something. Including the one raised here.
-    match store::open_interruption(&state.pool, conversation_id).await {
+    // Asked before anything is dispatched, for the runner's reason: the run
+    // does not advance past an Interruption or a Pause, which means no session is
+    // launched while the human is still being asked something or the account is
+    // out of window. Including the Interruption raised here.
+    match crate::interruptions::held_up(&state.pool, conversation_id).await {
         Ok(Some(_)) => return Watching::Done("the run is blocked on the human"),
         Ok(None) => {}
         Err(error) => {

@@ -3,14 +3,16 @@
 //!
 //! **Stalled** is three things at once: the state is Grilling, Implementing or
 //! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
-//! it has no open Interruption. Each of the three is doing work. The state is
+//! nothing has stopped it on purpose. Each of the three is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
 //! the human, Done finished and Aborted stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
 //! — a wrapping Conversation idles for days under live watchers and is perfectly
 //! healthy, and so are the gaps between an unattended run's steps. And an open
 //! Interruption is already the human being asked, so a Conversation that has one
-//! is a Conversation that has been told.
+//! is a Conversation that has been told — as is one waiting an account's window
+//! out, which is a run stopped on purpose and said on its own Timeline. Both are
+//! the one question [`crate::interruptions::held_up`] answers.
 //!
 //! What it raises is an ordinary Interruption, because that is exactly what a
 //! stall is: something Verkstead noticed about an unattended run and cannot
@@ -118,7 +120,13 @@ pub(crate) async fn sweep(state: &AppState) {
         // and a Conversation that already has one open is not one to spend
         // either on. It is also not stalled — being asked about is the half of a
         // stall that is missing.
-        match store::open_interruption(&state.pool, conversation.id).await {
+        //
+        // A Pause answers the same way and for a stronger reason: a run waiting
+        // an account's window out is stopped on purpose, said on the Timeline
+        // and already push-notified. Raising an Interruption about one would be
+        // telling the human twice about one wait, and calling a deliberate wait
+        // a failure.
+        match crate::interruptions::held_up(&state.pool, conversation.id).await {
             Ok(Some(_)) => continue,
             Ok(None) => {}
             Err(error) => {

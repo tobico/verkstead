@@ -19,8 +19,10 @@
 //! the Worktree the way aborting a Conversation from its menu does: the human is
 //! being handed the wreckage on purpose.
 //!
-//! Usage limits — an account exhausting its window mid-run — are not detected
-//! here. That is its own stage.
+//! Usage limits — an account exhausting its window mid-run — are not raised
+//! here. They stop a run all the same, and [`held_up`] is where the two are
+//! asked about together; what recognises one and what ends the wait is
+//! [`crate::limits`].
 
 use std::path::Path;
 
@@ -100,6 +102,27 @@ pub(crate) async fn raise(
     }
 
     Ok(raised)
+}
+
+/// Which Event a run has stopped on, or `None` where nothing is stopping it.
+///
+/// The one question every launcher asks before it spends an account, and there
+/// are two ways of answering it yes. An open **Interruption** is something
+/// Verkstead noticed and cannot resolve, waiting on a Remedy. An open **Pause**
+/// is the account itself being out of window, waiting on the human or on the
+/// clock — see [`crate::limits`]. Neither is a run to launch anything for, and
+/// both leave the Conversation *blocked on you*, so the callers want one answer
+/// rather than two questions they could get out of step.
+///
+/// The Interruption first where somehow both are open, for the reason a Hold
+/// comes before an Interruption in the badge: it is the one that needs an answer
+/// rather than a wait.
+pub(crate) async fn held_up(pool: &sqlx::SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    if let Some(event_id) = store::open_interruption(pool, conversation_id).await? {
+        return Ok(Some(event_id));
+    }
+
+    store::open_pause(pool, conversation_id).await
 }
 
 /// What git makes of the Conversation's Worktree, as `git status` says it.

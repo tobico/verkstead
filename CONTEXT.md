@@ -104,8 +104,8 @@ _Avoid_: feed, log, history, activity stream
 
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
-commit, a task list, a stage list, a PR, an interruption, a Notice. Each shows a
-summary in the
+commit, a task list, a stage list, a PR, an interruption, a Pause, a Notice. Each
+shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
 are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
@@ -327,6 +327,29 @@ reverts, resets or stashes anything, which is what makes taking over one at all.
 Aborting from here therefore keeps the Worktree, unlike aborting a Conversation.
 _Avoid_: action, resolution, fix, recovery option
 
+**Pause**:
+A run stopped because the Agent Profile it was spending has exhausted its usage
+window. An Event on the Timeline, **open** exactly as an Interruption is — the
+run does not advance past one, no next Step and no fresh session, and the
+Conversation carries *blocked on you* — and at most one is open per
+Conversation. What makes it a different thing is that nothing went wrong: the
+account is out of window, and the agent is waiting for the same reset under a
+setting of its own that Verkstead neither turns off nor depends on. What the
+Pause adds is that the wait is *said*, and answerable from a phone, instead of
+being a session gone quiet for no stated reason.
+
+It names the Profile that ran out and, where the sentence the session printed
+carried a time this build could read, when the window comes back. Recognition is
+one phrase read off the Capture and the Transcript, kept in one place because the
+wording is the backend's and will move.
+
+It ends two ways, and they meet in the same place: the human says *go on without
+waiting*, or the reset time passes. Neither reverts anything — the Worktree is
+exactly as the session left it — and the record keeps which of the two it was.
+**No auto-switching between Profiles**: an exhausted account is a wait, never a
+reason to spend a different one.
+_Avoid_: interruption (that is a run that went wrong), hold, rate limit, throttle
+
 **Manual Task**:
 A free-text instruction the human types at the end of a Conversation's Timeline,
 with an Agent Profile picked beside it: submitting starts a one-off session that
@@ -355,7 +378,8 @@ take over (the Remedy), errand, manual step
 
 **Stalled**:
 A Conversation in a driven state — Grilling, Implementing or Wrapping — with
-nothing registered as driving it and no open Interruption. Nothing is moving the
+nothing registered as driving it and nothing having stopped it on purpose —
+neither an open Interruption nor an open Pause. Nothing is moving the
 work and nothing is asking the human to, so there is nothing they can do about
 it: the case a Manual Task is the escape hatch for, and the one condition
 Verkstead has to notice on its own account. A condition an active state can be

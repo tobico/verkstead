@@ -33,6 +33,7 @@ mod commits;
 mod conversations;
 mod deferrals;
 mod interruptions;
+mod pauses;
 mod profiles;
 mod pull_requests;
 mod push;
@@ -57,6 +58,10 @@ pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded
 pub use interruptions::{
     Evidence, Interruption, Remedy, Settled, Settling, Step, interruption, open_interruption,
     record_interruption, settle_interruption,
+};
+pub use pauses::{
+    By, Pause, Resumed, Resuming, Waiting, open_pause, pause, record_pause, resume_pause,
+    waiting_pauses,
 };
 pub use profiles::{
     AgentType, Deleting, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -669,6 +674,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // again — and off the Conversations too, which is what makes *one open
     // Interruption per Conversation* a rule the database keeps.
     interruptions::apply_schema(pool).await?;
+
+    // And where a run is waiting an account's window out, which hangs off both
+    // for the Interruptions' reasons said again — *one open Pause per
+    // Conversation* is a rule the database keeps, the same way.
+    pauses::apply_schema(pool).await?;
 
     // And what the work ended up on, which hangs off the Timelines the same way
     // — and off the Conversations, which is what makes *one pull request per
