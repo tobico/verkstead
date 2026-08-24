@@ -62,6 +62,43 @@ Pick a conventional-commit type — `feat`, `fix`, `refactor`, `test`, `docs`,
 `chore`. The commit is how the task is reported done: the file being gone *and*
 committed is what says this step is over, so leave nothing uncommitted.
 
+### What the message body says
+
+A commit that delivers work — code, tests or documentation the work asked for —
+carries a summary as its message body. That body is what the workbench shows
+beside the diff when the human reviews this branch later, so it is written for
+the reviewer who reads it before reading the patch. Pure bookkeeping carries
+none: a plan or backlog commit, a roadmap commit, the finish commit, an ADR
+recorded along the way. A commit still counts as delivering work when a task
+file's deletion rides along with the code.
+
+- **The diagram first**, whenever the diff is more than three changed lines.
+  The glance comes before the reading, so it goes above the prose. Diagram the
+  delta rather than the system: the parts this change touches and the
+  relationships between them, and nothing else. Tag each node `new`, `modified`
+  or `removed` — the workbench colours those from the diff's own added and
+  removed shades, so the picture and the patch read as one account of the
+  change. Around ten nodes, so that it reads on a phone.
+- **The prose after it** — what you built and how it hangs together.
+
+Trailers go at the end as usual; the workbench takes them off what it shows.
+
+    feat: share the rate limiter's count between instances
+
+    ```mermaid
+    flowchart LR
+      api[POST /v1/messages] --> limiter[Rate limiter]
+      limiter --> counter[(Redis counter)]
+      api --> throttle[In-process throttle]
+
+      class limiter,counter new
+      class api modified
+      class throttle removed
+    ```
+
+    The counter moves out of the process, so every instance counts against the
+    same window, and the in-process throttle it replaces goes away.
+
 Then **stop**. Do not start the next task, and do not say anything about clearing
 a context — Verkstead runs a fresh session of its own for it, and starting on it
 here would put two tasks in one commit and one task's worth of context in the

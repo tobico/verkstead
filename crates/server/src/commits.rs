@@ -15,7 +15,7 @@
 //!
 //! A branch is swept whole rather than followed from where the last sweep got
 //! to. What makes that cheap is the store: it already knows which commits are on
-//! the Timeline, so the reading of git that costs anything — a subject and a set
+//! the Timeline, so the reading of git that costs anything — a message and a set
 //! of counts per commit — happens only for the ones that are not. And what makes
 //! it *correct* is the same thing, because a branch is not a queue: one that was
 //! amended, reset or rebased has commits before its tip that no sweep has seen.
@@ -195,7 +195,7 @@ fn since(branch: &Branch, recorded: &[String]) -> Vec<store::Commit> {
         .collect()
 }
 
-/// What one commit is, as its Timeline row says it: the subject git recorded,
+/// What one commit is, as its Timeline row says it: the message git recorded,
 /// and how much of the repository it moved.
 ///
 /// Two reads rather than one that says both. `--numstat` and a format string can
@@ -203,13 +203,26 @@ fn since(branch: &Branch, recorded: &[String]) -> Vec<store::Commit> {
 /// has to be told apart from them — and the counts are the half that has to be
 /// parsed exactly.
 ///
+/// The message is one read all the same. `%s` is a single line whatever the
+/// commit did to its first paragraph, so the subject is everything before the
+/// first newline and the body is the rest — and asking for the body separately
+/// would be a third git process per commit for a string git already had open.
+///
 /// `None` where the repository will not say, which is a commit that has gone
 /// between being listed and being asked about.
 fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
-    let subject = git(
+    let message = git(
         repo,
-        &["show", "--no-patch", "--format=%s", "--end-of-options", sha],
+        &[
+            "show",
+            "--no-patch",
+            "--format=%s%n%b",
+            "--end-of-options",
+            sha,
+        ],
     )?;
+
+    let (subject, body) = message.split_once('\n').unwrap_or((message.as_str(), ""));
 
     let counted = git(
         repo,
@@ -245,10 +258,72 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
 
     Some(store::Commit {
         sha: sha.to_owned(),
-        subject: subject.trim_end_matches('\n').to_owned(),
+        subject: subject.trim_end().to_owned(),
         files,
         insertions,
         deletions,
+        summary: without_trailers(body),
+    })
+}
+
+/// What a commit says about itself: its message body with the trailing trailer
+/// block taken off, or `None` where that leaves nothing.
+///
+/// The trailers are git's own convention rather than anything of Verkstead's —
+/// `Co-Authored-By`, `Signed-off-by` and their kin — and every session's commits
+/// end with at least one. They are bookkeeping about who wrote the commit, not
+/// part of what the agent had to say about it, so the pane would be showing the
+/// reader a line they did not come for. git keeps the whole message regardless:
+/// this is what is *shown*, not what is kept.
+///
+/// The block is the last paragraph, and only where every line of it is a trailer
+/// — `Token: value`, or a line indented under one. That is git's own reading, so
+/// a commit whose last paragraph is prose keeps it, and a body that is nothing
+/// but trailers comes back as `None`: bookkeeping alone is no summary at all.
+fn without_trailers(body: &str) -> Option<String> {
+    let body = body.trim_start_matches('\n').trim_end();
+
+    let lines: Vec<&str> = body.lines().collect();
+
+    // Where the last paragraph starts: past the last blank line there is one.
+    let opens = lines
+        .iter()
+        .rposition(|line| line.trim().is_empty())
+        .map_or(0, |blank| blank + 1);
+
+    let kept = if trailers(&lines[opens..]) {
+        lines[..opens].join("\n")
+    } else {
+        body.to_owned()
+    };
+
+    let kept = kept.trim_end();
+
+    (!kept.is_empty()).then(|| kept.to_owned())
+}
+
+/// Whether these lines are a trailer block: at least one line, the first of them
+/// a `Token: value`, and every line after it either another one or a
+/// continuation indented under the one above.
+fn trailers(paragraph: &[&str]) -> bool {
+    let Some((first, rest)) = paragraph.split_first() else {
+        return false;
+    };
+
+    trailer(first)
+        && rest
+            .iter()
+            .all(|line| trailer(line) || line.starts_with([' ', '\t']))
+}
+
+/// Whether one line opens a trailer: a token of letters, digits and hyphens,
+/// then a colon.
+fn trailer(line: &str) -> bool {
+    line.split_once(':').is_some_and(|(token, _)| {
+        !token.is_empty()
+            && token
+                .chars()
+                .all(|it| it.is_ascii_alphanumeric() || it == '-')
     })
 }
 
@@ -344,6 +419,100 @@ mod tests {
         assert_eq!(described.deletions, 0);
     }
 
+    /// What the agent wrote under the subject is the Commit Summary, and the
+    /// trailers every session's commits end with are not part of it.
+    #[test]
+    fn a_commit_carries_its_body_as_a_summary_without_the_trailers() {
+        let dir = repository();
+        let path = dir.path();
+
+        std::fs::write(path.join("README.md"), "# a repository\n\nWith words.\n").unwrap();
+        run(
+            path,
+            &[
+                "commit",
+                "-am",
+                "feat: rate limiting\n\n```mermaid\nflowchart LR\n  in --> out\n```\n\n\
+                 A bucket per account.\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+            ],
+        );
+
+        let described = describe(path, &head(path)).unwrap();
+
+        assert_eq!(described.subject, "feat: rate limiting");
+        assert_eq!(
+            described.summary.as_deref(),
+            Some("```mermaid\nflowchart LR\n  in --> out\n```\n\nA bucket per account."),
+            "the diagram and the prose, and nothing about who wrote them",
+        );
+    }
+
+    /// The two commits that carry no summary: the bookkeeping one that said only
+    /// what it was, and the one whose body is trailers and nothing else.
+    #[test]
+    fn a_commit_that_said_nothing_about_itself_has_no_summary() {
+        let dir = repository();
+        let path = dir.path();
+
+        std::fs::write(path.join("README.md"), "# a repository\n\nWith words.\n").unwrap();
+        run(path, &["commit", "-am", "chore: plan the tasks"]);
+
+        assert_eq!(
+            describe(path, &head(path)).unwrap().summary,
+            None,
+            "a subject on its own is no summary",
+        );
+
+        std::fs::write(path.join("README.md"), "# a repository\n\nAnd more.\n").unwrap();
+        run(
+            path,
+            &[
+                "commit",
+                "-am",
+                "chore: finish commit-summaries\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
+            ],
+        );
+
+        assert_eq!(
+            describe(path, &head(path)).unwrap().summary,
+            None,
+            "and neither is bookkeeping about who wrote it",
+        );
+    }
+
+    /// The trailer block is the *last* paragraph, and only where the whole of it
+    /// is trailers. Prose that happens to have a colon in it is prose.
+    #[test]
+    fn only_a_trailing_block_of_trailers_is_taken_off() {
+        assert_eq!(
+            without_trailers("What it does.\n\nNote: it is fast.\nAnd it is small.\n"),
+            Some("What it does.\n\nNote: it is fast.\nAnd it is small.".to_owned()),
+            "a last paragraph that is not all trailers is kept whole",
+        );
+
+        assert_eq!(
+            without_trailers(
+                "What it does.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n\
+                 Signed-off-by: Someone\n    <who@wrapped.example>\n"
+            ),
+            Some("What it does.".to_owned()),
+            "several trailers and a wrapped one are one block",
+        );
+
+        assert_eq!(
+            without_trailers("Reviewed-by: Someone\n\nWhat it does.\n"),
+            Some("Reviewed-by: Someone\n\nWhat it does.".to_owned()),
+            "a trailer that is not last is a paragraph like any other",
+        );
+
+        assert_eq!(without_trailers(""), None);
+        assert_eq!(
+            without_trailers("\n  \n"),
+            None,
+            "and whitespace is nothing"
+        );
+    }
+
     /// A repository's first commit has no parent to be compared against, and
     /// there is no reason the human should see an empty row where the whole
     /// beginning of a repository is.
@@ -367,7 +536,7 @@ mod tests {
         );
         assert!(patch.contains("+# a repository"));
         assert!(
-            verkstead_render::commit_diff(&patch).diff.is_some(),
+            verkstead_render::commit_pane(None, &patch).diff.is_some(),
             "and it renders",
         );
     }

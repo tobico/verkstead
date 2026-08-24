@@ -1583,7 +1583,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     //
     // Two of them, because a Timeline row has to read as one of several rather
     // than as a lone event — and on the Conversation that has been through a
-    // grilling, because that is where a branch first has anything on it.
+    // grilling, because that is where a branch first has anything on it. One of
+    // each kind, too: the bookkeeping commit that says only what it was, and the
+    // one that delivered work and wrote a Commit Summary about it.
     for commit in [
         store::Commit {
             sha: "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93".to_owned(),
@@ -1591,6 +1593,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 2,
             insertions: 74,
             deletions: 3,
+            summary: None,
         },
         store::Commit {
             sha: "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d".to_owned(),
@@ -1598,6 +1601,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 5,
             insertions: 213,
             deletions: 41,
+            summary: Some(
+                "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
+                 The relay reads the account's own limit error off stderr and \
+                 hands the session's runner a time to wake at, instead of the \
+                 fixed backoff it used to guess."
+                    .to_owned(),
+            ),
         },
     ] {
         store::record_commit(&pool, directing, &commit)
@@ -1675,6 +1685,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 5,
             insertions: 132,
             deletions: 0,
+            summary: None,
         },
     )
     .await
@@ -1794,6 +1805,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             files: 1,
             insertions: 0,
             deletions: 24,
+            summary: None,
         },
     )
     .await

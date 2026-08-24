@@ -33,15 +33,15 @@ pub use answering::{Archived, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseCommitOverride, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent,
-    BriefSaved, Capture, Comment, CommitDiff, CommitEvent, CommitSummary, ConversationAborted,
+    BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
     ConversationEntry, ConversationStopped, ConversationView, GrillingStarted, HandedBack,
     HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted, ManualTaskSubmission, MovedEvent,
     NewAdoption, NewConversation, NoticeEvent, PinnedEvent, ProposalView, PullRequestComment,
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     Resumed, Screen, SetRow, Shown, Size, StageEntry, StageListEvent, Started, TaskEntry,
-    TaskListEvent, TimelineEvent, Watching, Worktree, agent_output_event, brief_event, commit_diff,
-    commit_event, handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
-    pull_request_details, pull_request_event, question_set_event, stage_list_event,
+    TaskListEvent, TimelineEvent, Watching, Worktree, agent_output_event, brief_event,
+    commit_event, commit_pane, handoff_event, manual_task_event, moved_event, notice_event,
+    proposal_view, pull_request_details, pull_request_event, question_set_event, stage_list_event,
     task_list_event,
 };
 pub use profiles::{

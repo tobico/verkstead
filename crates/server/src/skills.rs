@@ -396,6 +396,29 @@ mod tests {
         String::from_utf8(file.data.to_vec()).expect("a skill is markdown")
     }
 
+    /// Where the shared commit-summary block starts, and the last line of it.
+    /// Every skill that commits work carries the block word for word; what
+    /// follows it differs from skill to skill, so the end is found by its own
+    /// last line rather than by whatever section comes after.
+    const SUMMARY_BLOCK: &str = "### What the message body says";
+    const SUMMARY_BLOCK_END: &str = "the in-process throttle it replaces goes away.\n";
+
+    /// The block as one skill carries it, cut out so that the four can be held
+    /// against each other.
+    fn summary_block(name: &str) -> String {
+        let text = skill(name);
+        let start = text
+            .find(SUMMARY_BLOCK)
+            .unwrap_or_else(|| panic!("{name} should ask for the commit's summary:\n{text}"));
+        let rest = &text[start..];
+        let end = rest
+            .find(SUMMARY_BLOCK_END)
+            .unwrap_or_else(|| panic!("{name} should carry the whole block:\n{rest}"))
+            + SUMMARY_BLOCK_END.len();
+
+        rest[..end].to_string()
+    }
+
     /// The whole reason the fork exists: the twelve lines it came from say to
     /// interview the human and never say how, because on a workstation the
     /// global `CLAUDE.md` said it — and inside a sandbox there is no such file.
@@ -1460,6 +1483,107 @@ mod tests {
             grilling_again(brief, "   \n"),
             grilling(brief),
             "nothing is added to the prompt at all",
+        );
+    }
+
+    /// The workbench shows a commit's message body beside its diff, and nothing
+    /// else tells a session to write one — so every skill that commits work has
+    /// to say it. One wording across the four, because four wordings would be
+    /// four things to keep true and the human reads them as one convention.
+    #[test]
+    fn every_skill_that_commits_work_asks_for_the_commits_summary() {
+        let block = summary_block("next-task/SKILL.md");
+
+        for name in [
+            "implementing/SKILL.md",
+            "manual-task/SKILL.md",
+            "addressing/SKILL.md",
+        ] {
+            assert_eq!(
+                summary_block(name),
+                block,
+                "{name} should carry the same block, word for word"
+            );
+        }
+    }
+
+    /// And what the block says, held once: which commits get a summary, when the
+    /// diagram is required, what kind of diagram it is, and that it comes first.
+    #[test]
+    fn the_summary_block_says_which_commits_and_what_goes_in_one() {
+        let block = summary_block("next-task/SKILL.md");
+
+        assert!(
+            block.contains("delivers work") && block.contains("as its message body"),
+            "the body is the summary, and it is the delivering commits that carry one: \
+             {block}"
+        );
+        for bookkeeping in [
+            "backlog commit",
+            "roadmap commit",
+            "the finish commit",
+            "ADR",
+        ] {
+            assert!(
+                block.contains(bookkeeping),
+                "and {bookkeeping} is bookkeeping, which carries none: {block}"
+            );
+        }
+        assert!(
+            block.contains("file's deletion rides along with the code"),
+            "a task's commit is still a delivering one, deletion and all: {block}"
+        );
+        assert!(
+            block.contains("more than three changed lines"),
+            "the diagram is required past a threshold rather than always: {block}"
+        );
+        assert!(
+            block.contains("delta rather than the system"),
+            "and it is the delta diagram the retired gates Topic taught: {block}"
+        );
+        assert!(
+            block.contains("Tag each node `new`, `modified`") && block.contains("`removed`"),
+            "tagged with what happened to each part, which is what the viewer colours \
+             from the diff's own shades: {block}"
+        );
+        assert!(
+            block.contains("Around ten nodes"),
+            "and small enough to read on a phone: {block}"
+        );
+        assert!(
+            block.find("The diagram first") < block.find("The prose after it"),
+            "the glance comes before the reading, in the block as in the message: {block}"
+        );
+    }
+
+    /// The skills that only keep the books are left alone: a plan, a roadmap or
+    /// a stage's backlog is not work delivered, and a summary over one would be
+    /// a diagram of a file that was written rather than of a change.
+    #[test]
+    fn the_bookkeeping_skills_ask_for_no_summary() {
+        for name in [
+            "breaking-down/SKILL.md",
+            "staging/SKILL.md",
+            "next-stage/SKILL.md",
+        ] {
+            let text = skill(name);
+
+            assert!(
+                !text.contains(SUMMARY_BLOCK),
+                "{name} commits bookkeeping, which carries no summary:\n{text}"
+            );
+        }
+    }
+
+    /// And the one bookkeeping commit inside a working skill stays subject-only
+    /// for the same reason: taking the list away delivers nothing.
+    #[test]
+    fn the_next_task_forks_finish_commit_stays_subject_only() {
+        let next_task = skill("next-task/SKILL.md");
+
+        assert!(
+            next_task.contains(r#"git commit -m "chore: finish <feature-name>""#),
+            "the finish is a subject and nothing under it: {next_task}"
         );
     }
 
