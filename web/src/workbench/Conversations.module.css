@@ -20,22 +20,26 @@
    the icon by itself is a shape nobody has been taught yet, and the word by
    itself is what every other pane's title already looks like.
 
-   Heading-sized, and still an `<h1>`, so the pane keeps a heading at the top of
-   it for a screen reader to find. It is the class the sidebar hands the pane
-   head for its heading — see the `heading` prop in `PaneHead.tsx`. */
+   Larger than a pane's title, and still an `<h1>`, so the pane keeps a heading
+   at the top of it for a screen reader to find. It is the class the sidebar
+   hands the pane head for its heading — see the `heading` prop in
+   `PaneHead.tsx`, which is how the app's own header is a variant of the one
+   header component rather than a second component beside it. Everything sized
+   here is sized on this class alone, so no other pane's title moves with it. */
 .wordmark {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.8rem;
+  /* Over the 1.4rem `base.css` gives every `<h1>`: this one names the app
+     rather than the pane, and it is read before any of them. */
+  font-size: 1.8rem;
 }
 
+/* The mark at the height of the header rather than of the word beside it, so
+   what the eye lands on first is the thing rather than the name of it. */
 .wordmark img {
-  width: 1.4rem;
-  height: 1.4rem;
-  /* The artwork is full-bleed — a square of cold iron with the anvil on it —
-     so at this size it is an app icon rather than a glyph, and it is cornered
-     like one. */
-  border-radius: 0.3rem;
+  width: 3rem;
+  height: 3rem;
 }
 
 /* The ⋯ at the head of the pane: what there is beyond the conversations at all.

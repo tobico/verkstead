@@ -120,9 +120,9 @@
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.
               curl
-              # The PWA icons are one SVG rasterized to the PNG sizes the manifest
-              # and iOS need — see tools/generate-icons.sh.
-              resvg
+              # The PWA icons are one PNG downscaled to the sizes the favicon,
+              # the manifest and iOS need — see tools/generate-icons.sh.
+              imagemagick
             ]);
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";

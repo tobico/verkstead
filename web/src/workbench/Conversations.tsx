@@ -205,7 +205,7 @@ export function Conversations(props: {
       {/* The mark rather than a title: this pane is where Verkstead is entered
           and the list under it says what it is a list of. The icon is served
           from `assets/`, which vite copies to the site root untouched, and it is
-          the same file the favicon is.
+          cut from the same artwork the favicon is, at the size this draws it.
 
           No alt text on it, because the word it stands beside is the alt text: a
           screen reader that read both would say the name twice.
@@ -217,7 +217,7 @@ export function Conversations(props: {
         heading={styles.wordmark}
         title={
           <>
-            <img src="/icons/verkstead.svg" alt="" />
+            <img src="/icons/icon-192.png" alt="" />
             Verkstead
           </>
         }

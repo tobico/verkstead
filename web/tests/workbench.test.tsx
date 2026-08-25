@@ -330,10 +330,10 @@ describe("the workbench", () => {
     expect(heading.textContent).toContain("Verkstead");
     expect(heading.textContent).not.toContain("Conversations");
 
-    // The one icon source, served from `assets/` at the site root — the file the
-    // favicon is, rather than a copy of it under `web/`.
+    // Cut from the one artwork, served from `assets/` at the site root — the
+    // same file the manifest names, rather than a copy of it under `web/`.
     const icon = heading.querySelector("img")!;
-    expect(icon.getAttribute("src")).toBe("/icons/verkstead.svg");
+    expect(icon.getAttribute("src")).toBe("/icons/icon-192.png");
 
     // Nothing for a screen reader to read: the word beside it is the name, and
     // an alt that repeated it would have the heading say it twice.

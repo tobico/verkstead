@@ -56,7 +56,14 @@ describe("the document", () => {
     expect(shell).toContain('rel="manifest" href="/manifest.webmanifest"');
   });
 
-  it("names an icon iOS will read, which is neither the manifest's nor an SVG", () => {
+  it("names a favicon at the size a tab draws", () => {
+    // A PNG cut to size rather than the artwork itself: the source is far larger
+    // than anything serving it, and a browser shrinking it per tab would be both
+    // slower and softer than `tools/generate-icons.sh` was.
+    expect(shell).toContain('rel="icon" href="/icons/icon-32.png"');
+  });
+
+  it("names an icon iOS will read, which is not one of the manifest's", () => {
     expect(shell).toContain('rel="apple-touch-icon" href="/icons/apple-touch-icon.png"');
   });
 
