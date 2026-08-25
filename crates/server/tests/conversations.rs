@@ -1470,6 +1470,67 @@ async fn steering_into_grilling_without_a_brief_writes_none() {
     );
 }
 
+/// And a steer into Grilling with nothing written on either side is refused by
+/// name: a grilling starts from a Brief, and there is no Brief here.
+///
+/// The rule a pressed *Start grilling* is refused by — see
+/// [`starting_is_refused_when_the_brief_is_empty`] — asked of the other way in.
+/// It has to
+/// be asked at the steer rather than left to the session, because the Brief a
+/// steered round lands with is frozen where it lands: a round opened on an empty
+/// one is an interview about nothing that nothing can go back and write into.
+///
+/// A Draft is where this happens, every Conversation being created with a Brief
+/// nobody has written yet. Everything past drafting was grilled out of one
+/// somebody wrote.
+#[tokio::test]
+async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    let grilling = profile(&app, watched.path(), "fable").await;
+    let implementation = profile(&app, watched.path(), "opus").await;
+    choose(&app, id, "grilling", grilling).await;
+    choose(&app, id, "implementation", implementation).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::EmptyBrief,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft, "it is where it was");
+    assert_eq!(
+        steered(&view),
+        [],
+        "and nothing on the record says a steer happened",
+    );
+
+    // The same steer with the round's Brief written in the modal, which is what
+    // that field is for on a Conversation holding none.
+    assert_eq!(
+        steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(
+        briefs(&view)
+            .iter()
+            .map(|brief| brief.markdown.as_str())
+            .collect::<Vec<_>>(),
+        ["", "# Retries\n\nThe backoff is wrong.\n"],
+        "beside the empty one the draft was created with rather than over it",
+    );
+}
+
 /// The Pairing picked in the modal for a steer into Grilling is the *grilling*
 /// one, and it is recorded as the Conversation's own.
 ///

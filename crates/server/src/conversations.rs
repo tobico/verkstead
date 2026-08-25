@@ -1055,7 +1055,11 @@ impl Unready {
 /// from either end: a Conversation gets one Brief per round — a reopened one
 /// adds a second rather than editing the first — and the round about to be
 /// grilled is the one at the bottom of the Timeline.
-async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
+///
+/// Asked by the two ways into a grilling, so that both are refused on an empty
+/// one: [`start_grilling`] above, and [`crate::steering::refusal`] for a steer
+/// that opens a round without writing a brief for it.
+pub(crate) async fn brief(pool: &SqlitePool, id: i64) -> Result<String> {
     Ok(store::timeline(pool, id)
         .await?
         .into_iter()

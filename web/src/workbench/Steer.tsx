@@ -12,8 +12,11 @@
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
 //! but it does need a pairing, because sessions run there. **Grilling** carries
-//! a payload: a new brief, which is optional, and a choice about how much of
-//! the last interview the session is primed with. **Implementing** carries the
+//! a payload: a new brief — optional where one is already written, because
+//! empty there means grill the one that stands, and required where none is,
+//! because a grilling starts from a brief and a round steered into freezes the
+//! one it lands with — and a choice about how much of the last interview the
+//! session is primed with. **Implementing** carries the
 //! other one: an instruction, which is what the session it starts is sent off
 //! to do — optional where the branch has something to carry on, because writing
 //! nothing there means carry it on, and required where it has not, because
@@ -59,6 +62,8 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
     "This work is on no pull request, so there is no wrap-up to steer it into.",
   NoInstruction:
     "There is nothing on this branch to carry on — no backlog with work left in it, and no roadmap it has written — so write what to do.",
+  EmptyBrief:
+    "There is no brief to grill: this conversation has none written yet, so write the one this round is about.",
   NoPairing: "Pick the account and model the work runs under from here.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
@@ -128,6 +133,24 @@ const TARGETS: {
 /// where the record's own pull request is drawn from.
 function onAPullRequest(conversation: ConversationView): boolean {
   return conversation.pinned.some((pinned) => "PullRequest" in pinned);
+}
+
+/// Whether there is a brief for a steer into grilling to start a round on.
+///
+/// The newest one on the timeline, which is the round's own — a conversation
+/// gets a brief per round, and a reopened one adds a second beside the first
+/// rather than editing it. A grilling starts from a brief, so where this is
+/// false the modal's brief field is what the target *is*, and the server
+/// refuses a submit without one by name.
+///
+/// Empty is the ordinary draft: every conversation is created with a brief
+/// nobody has written into yet.
+function briefStands(conversation: ConversationView): boolean {
+  const briefs = conversation.timeline.flatMap((event) =>
+    "Brief" in event ? [event.Brief] : [],
+  );
+
+  return (briefs[briefs.length - 1]?.markdown.trim() ?? "") !== "";
 }
 
 /// The modal, and everything it settles before the move.
@@ -217,10 +240,15 @@ export function Steer(props: {
 
   /// The new round's brief, for a steer into grilling.
   ///
-  /// Optional, and empty is the ordinary case: the round starts on the brief
-  /// that is already there. What is typed here lands as a brief of its own,
-  /// frozen the moment it does.
+  /// Optional where a brief already stands, and empty is the ordinary case
+  /// there: the round starts on the one that is already written. Required where
+  /// none does — a draft nobody has written into — because a grilling starts
+  /// from a brief and there would otherwise be nothing to interview about.
+  /// What is typed here lands as a brief of its own, frozen the moment it does.
   const [brief, setBrief] = createSignal("");
+
+  /// Whether one is already written, which is what makes the field optional.
+  const stands = createMemo(() => briefStands(props.conversation));
 
   /// And whether the session is primed with everything already answered.
   ///
@@ -245,6 +273,13 @@ export function Steer(props: {
       target() === "Implementing" &&
       !props.conversation.ready_to_continue &&
       !instruction().trim(),
+  );
+
+  /// And the same for the brief, which is the same rule on the other target: a
+  /// round has to be about something, and where nothing is written down yet the
+  /// modal is the only place it can be said.
+  const needsBrief = createMemo(
+    () => target() === "Grilling" && !stands() && !brief().trim(),
   );
 
   const [interrupt, setInterrupt] = createSignal(false);
@@ -344,7 +379,11 @@ export function Steer(props: {
               value={brief()}
               onInput={(event) => setBrief(event.currentTarget.value)}
               disabled={submit.isPending}
-              placeholder="Leave it empty to grill the brief that is already there."
+              placeholder={
+                stands()
+                  ? "Leave it empty to grill the brief that is already there."
+                  : "Nothing is written down yet, so say what this round is about."
+              }
             />
             <p class="note">
               What you write lands as a brief of its own, frozen at once. The
@@ -452,7 +491,10 @@ export function Steer(props: {
             type="submit"
             class="steer"
             disabled={
-              submit.isPending || (runs() && !picked()) || needsInstruction()
+              submit.isPending ||
+              (runs() && !picked()) ||
+              needsInstruction() ||
+              needsBrief()
             }
           >
             {submit.isPending ? "Steering…" : "Steer"}

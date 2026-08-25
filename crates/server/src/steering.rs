@@ -330,6 +330,23 @@ async fn refusal(
         return Ok(Some(ConversationSteered::NoInstruction));
     }
 
+    // And a grilling starts from a Brief, so a round opened with none written in
+    // the modal and none already on the Timeline is an interview about nothing.
+    // The rule a pressed *Start grilling* is refused by — see
+    // [`crate::conversations::start_grilling`] — asked of the other way in, and
+    // it has to be asked here rather than left to the session: the Brief a
+    // steered round lands with is frozen where it lands, so there is no draft to
+    // go back and write one in.
+    if submission.target == SteerTarget::Grilling
+        && brief(submission).is_none()
+        && crate::conversations::brief(&state.pool, conversation.id)
+            .await?
+            .trim()
+            .is_empty()
+    {
+        return Ok(Some(ConversationSteered::EmptyBrief));
+    }
+
     let Some(role) = role(submission.target) else {
         return Ok(None);
     };

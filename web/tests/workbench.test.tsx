@@ -4513,6 +4513,73 @@ describe("steering a conversation", () => {
     ).toContain("carry on with what the branch already holds");
   });
 
+  /// And a grilling starts from a brief, so the brief is required exactly where
+  /// none is written down — a draft nobody has typed into — and optional where
+  /// one is, empty there meaning grill the one that stands.
+  ///
+  /// The round's own brief is the newest on the timeline, which is what the
+  /// server refuses by too: a round steered into freezes the brief it lands
+  /// with, so an empty one is an interview about nothing that nothing can go
+  /// back and write into.
+  it("requires the brief where the conversation has none written", async () => {
+    theGrillingStanding(
+      {
+        ready_to_stop: true,
+        working: false,
+        timeline: GRILLING.timeline.map((event) =>
+          "Brief" in event
+            ? { Brief: { ...event.Brief, markdown: "", html: "" } }
+            : event,
+        ),
+      },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    const bare = await openSteer(container);
+
+    fireEvent.click(await drawn(bare, '.steer-target input[value="Grilling"]'));
+
+    const held = (await drawn(
+      bare,
+      ".steer-buttons .steer",
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(held.disabled).toBe(true));
+    expect(
+      (bare.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+    ).toContain("Nothing is written down yet");
+
+    fireEvent.input(await drawn(bare, "#steer-brief"), {
+      target: { value: "# Retries\n\nThe backoff is wrong.\n" },
+    });
+
+    await waitFor(() => expect(held.disabled).toBe(false));
+    unmount();
+
+    // And where one stands, writing nothing means grill the one that is there:
+    // the field is still drawn, and the submit was never held shut.
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const standing = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(standing.container);
+
+    fireEvent.click(await drawn(modal, '.steer-target input[value="Grilling"]'));
+
+    const press = (await drawn(
+      modal,
+      ".steer-buttons .steer",
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      (modal.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+    ).toContain("brief that is already there");
+  });
+
   /// And the instruction is drawn under implementing alone: what a hand-written
   /// job under a wrap-up would mean is nothing at all.
   it("draws the instruction only under implementing", async () => {

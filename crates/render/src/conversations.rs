@@ -1971,6 +1971,17 @@ pub enum ConversationSteered {
     /// — and this is the same rule asked again on arrival.
     NoInstruction,
 
+    /// Grilling was named with no brief written, for a Conversation whose newest
+    /// Brief is empty.
+    ///
+    /// The rule a pressed *Start grilling* is refused by — see
+    /// [`GrillingStarted::EmptyBrief`] — asked of the other way in. A grilling
+    /// starts from a Brief and a round steered into is frozen where it lands, so
+    /// an empty one is an interview about nothing that nothing can go back and
+    /// edit. Reachable on a Draft alone in practice: everything past drafting
+    /// was grilled out of a Brief somebody wrote.
+    EmptyBrief,
+
     /// Nothing says which account and model the work runs under from here:
     /// neither a Pairing picked in the modal nor one the Conversation already
     /// had.
