@@ -2248,7 +2248,8 @@ async fn a_capture_survives_the_server_restarting() {
 /// grilling session writes a handoff where the skill says and goes quiet, and
 /// that handoff plus quiet is what ends the grilling — after which a fresh
 /// session under the *other* Profile builds the work, primed with the handoff and
-/// committing without anything to wait on.
+/// committing without anything to wait on, and carries the branch to a pull
+/// request the Conversation then wraps up.
 ///
 /// One stub for both sessions, telling them apart by the model it was run on,
 /// because that is the fact under all of it: the two run as different accounts,
@@ -2340,10 +2341,37 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         "and with the Brief the work started from: {said:?}"
     );
 
+    // And the ending an inline run has. The session that built the work carried
+    // the branch to a pull request on its way out, the way a finished backlog's
+    // last step does, so the Conversation moves on to wrapping that up.
+    let opened = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(opened.number, 41);
+
     assert_eq!(
-        fixture.view().await.state,
-        Lifecycle::Implementing,
-        "the Conversation is building the work",
+        fixture
+            .view()
+            .await
+            .timeline
+            .iter()
+            .filter_map(|event| match event {
+                TimelineEvent::Moved(moved) => Some(moved.state),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        [
+            Lifecycle::Grilling,
+            Lifecycle::Implementing,
+            Lifecycle::Wrapping,
+        ],
+        "with Implementing on the way, unlike a roadmap: an inline Conversation's \
+         own work is the building, and the whole of it was that one session's",
     );
 
     assert!(
@@ -10469,16 +10497,23 @@ async fn a_manual_task_ending_asks_whether_anything_is_driving_the_conversation_
     );
 }
 
-/// An inline run that lands its work and exits leaves nothing driving the
-/// Conversation, and the halt says what it was that nobody was doing.
+/// An inline run that lands its work and leaves no pull request halts, with the
+/// reason `gh` gave and the Worktree it stopped in on the Timeline.
 ///
-/// The other half of what a stall's evidence is for. The Conversation says it is
-/// implementing, so that is what the Notice opens with — and the Worktree it
-/// stopped in is read as it stands, which is how the human sees at a glance what
-/// the session left behind.
+/// The inline half of what a finish step's missing pull request does — see
+/// [`a_finish_that_opened_no_pull_request_leaves_the_conversation_where_it_is`].
+/// The session committed and exited without ever pushing, which is precisely the
+/// ending nothing used to notice: the run went quiet in Implementing and stayed
+/// there. Now it is asked about, and a Conversation that cannot be moved on is
+/// one the human is told about.
+///
+/// The evidence is both halves of it: what git makes of the Worktree, and the
+/// tail of what the session last said — which is where the reason it opened
+/// nothing is usually written down, and is why the session's own Timeline Event
+/// goes to the wrap-up with it.
 #[tokio::test]
-async fn an_inline_run_nothing_followed_halts_saying_what_it_was_doing() {
-    let fixture = grilling_swept(
+async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where_it_is() {
+    let fixture = grilling_asking(
         r#"
         case "$1" in
         claude-grilling-5)
@@ -10495,6 +10530,7 @@ async fn an_inline_run_nothing_followed_halts_saying_what_it_was_doing() {
             ;;
         esac
         "#,
+        NO_PULL_REQUEST,
     )
     .await;
 
@@ -10505,22 +10541,51 @@ async fn an_inline_run_nothing_followed_halts_saying_what_it_was_doing() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    // The session committed its work and exited, so nothing was left to say
-    // anything about — and nothing was left driving the Conversation either,
-    // which is the stall.
-    let stalled = fixture.halted().await;
+    let stopped = fixture.halted().await;
 
     assert!(
-        stalled.html.contains("Implementing the work"),
-        "the Conversation says it is implementing and nothing is: {:?}",
-        stalled.html,
+        stopped.html.contains("pull request"),
+        "the step is named as what it was: {:?}",
+        stopped.html,
     );
     assert!(
-        stalled.html.contains("notes.md"),
-        "with what git makes of the Worktree it stopped in: {:?}",
-        stalled.html,
+        stopped.html.contains("no pull request"),
+        "and the reason is `gh`'s, in words: {:?}",
+        stopped.html,
     );
-    assert_eq!(fixture.view().await.blocked_on, Some(stalled.id));
+    assert!(
+        stopped.html.contains("notes.md"),
+        "with what git makes of the Worktree it stopped in: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped
+            .html
+            .contains("the limiter is in, the middleware is not"),
+        "and the tail of what the session last said, which is the Event the \
+         wrap-up was handed: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "what is missing is out here rather than in a driver that went away, so a \
+         restart looking again would find the same missing thing",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "the work is where it was, because nothing about it got any further",
+    );
+    assert!(pull_request(&view).is_none(), "and nothing is pinned");
+    assert_eq!(
+        view.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human, which is what the badge is for",
+    );
 }
 
 /// And a wrap-up nothing is watching halts as one, in the words wrapping up
@@ -10534,6 +10599,12 @@ async fn an_inline_run_nothing_followed_halts_saying_what_it_was_doing() {
 /// starts the watchers, so the only way to have a wrap-up nothing is watching is
 /// to make the move the way the store makes it and leave them unstarted — which
 /// is precisely what a wrap-up whose watchers have all died looks like.
+///
+/// So the inline run in front of it is one that reaches no pull request: its
+/// `gh` can find none, which halts the run where it stands and starts nothing.
+/// The halt is then taken away, exactly as the badge's press takes it away, and
+/// the store's own move is made over the top — leaving a Conversation that says
+/// it is wrapping up with nothing whatever behind it.
 #[tokio::test]
 async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     let fixture = grilling_asking(
@@ -10557,7 +10628,7 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
             ;;
         esac
         "#,
-        &gh_about(GREEN, "", ""),
+        NO_PULL_REQUEST,
     )
     .await;
 
@@ -10571,6 +10642,12 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
     fixture
         .until(|view| (commits(view).len() == 1).then_some(()))
         .await;
+
+    // The inline run's own halt, on the pull request it never opened. Cleared
+    // rather than resumed: what this is about is the state on the far side of
+    // it, and a Resume would start the very watchers it needs unstarted.
+    let missing = fixture.halted().await;
+    fixture.drive_again().await;
     fixture.quiet().await;
 
     wrapping_unwatched(&fixture).await;
@@ -10591,7 +10668,16 @@ async fn a_wrap_up_nothing_is_watching_halts_as_one() {
         ManualTaskStarted::Started,
     );
 
-    let stalled = fixture.halted().await;
+    // The second Notice: the first is the pull request the inline run never
+    // opened, and this is the wrap-up nobody is watching.
+    let stalled = fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .find(|notice| notice.id != missing.id)
+                .cloned()
+        })
+        .await;
 
     assert!(
         stalled.html.contains("Wrapping the work up"),

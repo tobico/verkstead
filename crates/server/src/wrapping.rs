@@ -2,12 +2,14 @@
 //! request the session opened is found, and the Conversation moves into
 //! Wrapping.
 //!
-//! Two endings arrive here, because two kinds of work end on a pull request. A
-//! backlog worked to empty ends at its finish step, from Implementing. A roadmap
-//! ends at the roadmap commit, from Grilling — the session that settled the work
-//! wrote it and carried the branch on without ever leaving the grilling, and
-//! there was no Implementing to leave, because on a roadmap the building belongs
-//! to the Stages.
+//! Three endings arrive here, because three kinds of work end on a pull request.
+//! A backlog worked to empty ends at its finish step, from Implementing. An
+//! inline implementation ends at its one session, from Implementing too — the
+//! whole of the work was that session's, so what ends it is the session ending.
+//! A roadmap ends at the roadmap commit, from Grilling — the session that
+//! settled the work wrote it and carried the branch on without ever leaving the
+//! grilling, and there was no Implementing to leave, because on a roadmap the
+//! building belongs to the Stages.
 //!
 //! The push and the pull request are the session's either way. It follows the
 //! target repository's own review process — read out of that repository's
@@ -236,15 +238,15 @@ pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool 
 /// run that has stopped on something Verkstead cannot resolve itself. Resume
 /// once `gh` is logged in, or open the pull request by hand, or abort the run.
 ///
-/// [`store::Halt::Deliberate`]: the finish step ran and left no pull request, so
-/// what is wrong is out here rather than in a driver that went away, and a
-/// restart looking again would find the same missing thing.
+/// [`store::Halt::Deliberate`]: the work ran and left no pull request, so what
+/// is wrong is out here rather than in a driver that went away, and a restart
+/// looking again would find the same missing thing.
 async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Option<i64>) {
     if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
         crate::halts::Decided::Verkstead,
-        "finding the pull request the finish step opened",
+        "finding the pull request the work ended on",
         why,
         writing,
     )

@@ -658,7 +658,8 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
     follow_inline(state, conversation_id, session, driving).await
 }
 
-/// See an inline implementation session out, and halt the run if it ends having
+/// See an inline implementation session out, and carry the Conversation on to
+/// wrapping the pull request it opened — or halt the run if it ends having
 /// landed nothing.
 ///
 /// The whole of the work in one session, so there is no next step to launch and
@@ -670,6 +671,13 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// which is what makes a second go answerable: a first attempt that committed
 /// twice and then died leaves two commits behind, and a second that commits
 /// nothing has still landed nothing.
+///
+/// What follows a session that landed something is the same ending a backlog's
+/// finish step has: the session followed the repository's own review process on
+/// its way out, so the branch is pushed and on a pull request by the time it
+/// goes quiet, and [`crate::wrapping::opened`] is what finds that pull request
+/// and moves the Conversation on. An inline implementation is work like any
+/// other work and goes for review like any other work.
 ///
 /// The registration it is handed is held until the session is over and whatever
 /// it left behind has been read, so an inline run is a driven Conversation for
@@ -725,13 +733,18 @@ async fn follow_inline(
 
     let how = match (ended.badly(), landed) {
         // Ended well and committed something, which is an inline implementation
-        // done. What becomes of the work from here is the wrap-up phase's.
+        // done. What becomes of the work from here is the wrap-up phase's, and
+        // the session's own Timeline Event goes with it, so that a halt written
+        // there carries the tail of what it last said — which is where the
+        // reason it opened no pull request is usually written down.
         (None, true) => {
             tracing::info!(
                 conversation_id,
                 event_id,
                 "an inline session has landed its work"
             );
+
+            crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
             return;
         }
         // Exited cleanly having committed nothing at all. An interactive agent
