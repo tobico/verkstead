@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // The page's own vocabulary, both ways: the hashed names to query the page by,
 // and the source to read the Gutter's own rules off, jsdom laying nothing out
 // to read them from.
+import app from "../src/App.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import stylesheet from "../src/set/Sheet.module.css?raw";
 import type { Direction, Submitted } from "../src/api/types";
@@ -123,7 +124,9 @@ describe("the chooser on a Set that carries a proposal", () => {
   it("is a headed section holding one question-like card", async () => {
     const { page } = await answering(PROPOSING);
 
-    const heading = page.querySelector(`.${sheet.directionPick} > h2.section-heading`);
+    const heading = page.querySelector(
+      `.${sheet.directionPick} > h2.${app.sectionHeading}`,
+    );
     expect(heading, "expected the section's heading over the card").toBeTruthy();
     expect(heading!.textContent).toBe("Direction");
 
@@ -275,7 +278,9 @@ describe("the record a picked-on Set becomes", () => {
   it("keeps the heading and the card on the settled record", async () => {
     const { page } = await answering(PROPOSED);
 
-    const heading = page.querySelector(`.${sheet.directionPick} > h2.section-heading`);
+    const heading = page.querySelector(
+      `.${sheet.directionPick} > h2.${app.sectionHeading}`,
+    );
     expect(heading, "expected the heading over the record").toBeTruthy();
     expect(heading!.textContent).toBe("Direction");
     expect(
@@ -296,7 +301,7 @@ describe("the record a picked-on Set becomes", () => {
       "Stage a roadmap",
     ]);
     expect(
-      page.querySelectorAll('.direction-pick input[type="radio"]'),
+      page.querySelectorAll(`.${sheet.directionPick} input[type="radio"]`),
       "and there is nothing left to press: a Set is answered once",
     ).toHaveLength(0);
   });

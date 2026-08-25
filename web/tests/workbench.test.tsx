@@ -42,6 +42,7 @@ import type {
   Turn,
 } from "../src/api/types";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
+import app from "../src/App.module.css";
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The set page as it is drawn inside a details pane: its nav, its sections, and
@@ -369,7 +370,7 @@ describe("the workbench", () => {
 
     // And nothing about where it has got to, in words: that is drawn now — see
     // *how a card says where its conversation has got to*.
-    expect(row.querySelector(".state")).toBeNull();
+    expect(row.textContent).not.toContain(DRAFTING.state);
   });
 
   it("says so plainly when nothing is being worked on", async () => {
@@ -415,9 +416,9 @@ describe("the workbench", () => {
     expect(
       container.querySelector(`.${sidebar.workbenchActions} > .${dropdown.drop}`),
     ).toBeNull();
+    // The way to the settings is in the menu and nowhere else, so with the menu
+    // shut there is no way out of this page on it at all.
     expect(screen.queryByText("Settings")).toBeNull();
-    // And the link that used to sit under the conversations is gone with it.
-    expect(container.querySelector(".elsewhere")).toBeNull();
   });
 
   /// The menu still opens with nothing to start a conversation in — and what is
@@ -1061,7 +1062,6 @@ describe("the adopt-a-roadmap group", () => {
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
-    expect(container.querySelector(".abandoned")).toBeNull();
     expect(container.querySelector(`.${sidebar.adoptRoadmap}`)).toBeNull();
   });
 
@@ -1440,7 +1440,9 @@ describe("writing the brief", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
-    const growing = container.querySelector(`.${timeline.brief} .grow`)!;
+    const growing = container.querySelector(
+      `.${timeline.brief} .${app.grow}`,
+    )!;
     expect(growing.getAttribute("data-value")).toBe(BRIEF.markdown);
 
     fireEvent.input(field(), { target: { value: "# One\n\n# Two\n" } });
@@ -1460,7 +1462,7 @@ describe("writing the brief", () => {
 
     // The field stays where it is, and says nothing at all about the save.
     expect(field().value).toBe(written);
-    expect(container.querySelector(".brief-standing")).toBeNull();
+    expect(container.textContent).not.toContain("Saved");
   });
 
   it("saves what was typed after a pause in the typing", async () => {
@@ -1525,7 +1527,6 @@ describe("writing the brief", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
     const quiet = () => {
-      expect(container.querySelector(".brief-standing")).toBeNull();
       expect(container.textContent).not.toContain("Saving");
       expect(container.textContent).not.toContain("Not saved yet");
       expect(container.textContent).not.toContain("Saved");
@@ -1632,7 +1633,6 @@ describe("writing the brief", () => {
     await drawn(container, `.${timeline.briefBody}`);
 
     expect(screen.queryByLabelText("Brief")).toBeNull();
-    expect(container.querySelector(".brief-standing")).toBeNull();
   });
 });
 
@@ -1656,7 +1656,7 @@ describe("a conversation's setup", () => {
 
     // Under the words rather than over them: the brief is what the card is,
     // and while it is a draft the words are the field they are typed into.
-    const body = container.querySelector(`.${timeline.brief} .grow`)!;
+    const body = container.querySelector(`.${timeline.brief} .${app.grow}`)!;
     expect(
       body.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -1689,8 +1689,6 @@ describe("a conversation's setup", () => {
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(container.querySelector(".conversation-facts")).toBeNull();
-    expect(container.querySelector(".conversation-worktree")).toBeNull();
     expect(container.textContent).not.toContain(OPEN.repo.path);
     expect(container.textContent).not.toContain(
       "/var/lib/verkstead/worktrees/verkstead-open",
@@ -4936,8 +4934,7 @@ describe("a grilling that has handed over", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(BUILDING.state).toBe("Implementing");
-    expect(container.querySelector(".direction-chooser")).toBeNull();
-    expect(container.querySelector(".directions")).toBeNull();
+    expect(container.querySelector(`.${sheet.directions}`)).toBeNull();
   });
 
   it("shows the answered proposal set as the record of the choice", async () => {
@@ -5015,8 +5012,7 @@ describe("disagreeing with a proposal", () => {
 
     await drawn(container, `.${timeline.timeline}`);
 
-    expect(container.querySelector(".direction-chooser")).toBeNull();
-    expect(container.querySelector(".directions")).toBeNull();
+    expect(container.querySelector(`.${sheet.directions}`)).toBeNull();
   });
 });
 
@@ -6159,7 +6155,7 @@ describe("a pause on the timeline", () => {
     expect(waiting.querySelector(`.${pausing.resume}`)!.textContent).toBe(
       "Go on without waiting",
     );
-    expect(waiting.querySelectorAll(".remedy")).toHaveLength(0);
+    expect(waiting.querySelectorAll("button")).toHaveLength(1);
     expect(waiting.textContent).toContain(
       "the worktree is left exactly as the session left it",
     );
@@ -7091,7 +7087,7 @@ describe("the documents on a timeline", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
-    await drawn(container, `.${timeline.brief} .grow textarea`);
+    await drawn(container, `.${timeline.brief} .${app.grow} textarea`);
 
     expect(brief.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(brief.getAttribute("role")).toBeNull();

@@ -21,6 +21,7 @@
 import type { JSX } from "solid-js";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 
+import app from "../App.module.css";
 import type {
   Answer,
   AskView,
@@ -245,7 +246,7 @@ export function Sheet(props: {
       <Show when={props.set.preface_html}>
         {(html) => (
           <section class={styles.preface} id="preface">
-            <h2 class="section-heading">Preface</h2>
+            <h2 class={app.sectionHeading}>Preface</h2>
             <div class={`${styles.prefaceBody} markdown`} innerHTML={html()} />
           </section>
         )}
@@ -322,7 +323,7 @@ function Questions(props: {
       <Show when={nothing()}>
         {(said) => <p class={styles.counterQuestion}>{said()}</p>}
       </Show>
-      <h2 class="section-heading" id="questions">
+      <h2 class={app.sectionHeading} id="questions">
         Questions
       </h2>
       <ol class={`${styles.questions} ${styles.decided}`}>
@@ -386,7 +387,7 @@ function Chosen(props: {
       {/* Headed and carded exactly as the chooser is — see `Choosing` — because
           the record is that same section read after the fact, and a heading the
           answering page had and this one dropped would be two pages. */}
-      <h2 class="section-heading">Direction</h2>
+      <h2 class={app.sectionHeading}>Direction</h2>
       <div class={styles.directionCard}>
         {/* Asked as a Question is asked, and read back the same way: the label
             floated in the accent with the agent's argument running beside it,

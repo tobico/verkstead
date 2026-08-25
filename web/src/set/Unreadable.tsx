@@ -18,6 +18,7 @@
 
 import type { JSX } from "solid-js";
 
+import app from "../App.module.css";
 import type { UnreadableSet } from "../api/types";
 // The provenance line is the sheet's: a Set this build cannot read still says
 // where it came from, in the same place a readable one does.
@@ -51,7 +52,7 @@ export function Unreadable(props: {
           Set carries a Preface and a Diff, and one long line of JSON is not a
           reason for the column beside it to move. */}
       <section class={styles.storedBody} id="stored-body">
-        <h2 class="section-heading">As it was stored</h2>
+        <h2 class={app.sectionHeading}>As it was stored</h2>
         <pre class={styles.storedJson}>{props.set.body}</pre>
       </section>
     </>

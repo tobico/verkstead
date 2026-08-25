@@ -24,6 +24,7 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
+import app from "../App.module.css";
 import styles from "./Postscript.module.css";
 import { closing } from "./outline";
 
@@ -43,7 +44,7 @@ export function Postscript(props: {
       {/* Named and anchored like the Preface: the heading is what a jump from
           the table of contents lands on, and the id is what it jumps to — see
           `closing` in `outline.ts`, which names it by the same rule. */}
-      <h2 class="section-heading">{closing(props.html)}</h2>
+      <h2 class={app.sectionHeading}>{closing(props.html)}</h2>
       <div class={styles.postscriptCard}>
         <Show when={props.html}>
           {(html) => (

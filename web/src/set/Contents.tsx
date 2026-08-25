@@ -22,6 +22,7 @@
 import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
+import app from "../App.module.css";
 import { Switch } from "../Switch";
 import shell from "../workbench/Workbench.module.css";
 import contents from "./Contents.module.css";
@@ -402,9 +403,9 @@ function headingPassed(watched: Accessor<Watched[]>): Accessor<boolean> {
     if (section === null) {
       return;
     }
-    const heading = section.classList.contains("section-heading")
+    const heading = section.matches(`.${app.sectionHeading}`)
       ? section
-      : (section.querySelector(".section-heading") ?? section);
+      : (section.querySelector(`.${app.sectionHeading}`) ?? section);
 
     // Out of view in either direction reads as passed. In practice the first
     // heading only ever leaves upward — it sits at the top of the page.

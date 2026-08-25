@@ -357,9 +357,9 @@
 }
 
 /* And a section of the page like the others, headed outside and carded within:
-   the heading carries `.section-heading`'s own gap, and the card is a
-   Question's box down to the corner — see `.question`, which is the same four
-   lines and has to stay the same four. */
+   the heading carries `.sectionHeading`'s own gap — see `App.module.css` — and
+   the card is a Question's box down to the corner — see `.question`, which is
+   the same four lines and has to stay the same four. */
 .directionCard {
   padding: 1rem;
   background: var(--card);
@@ -692,7 +692,7 @@
 
    Only where the window holds the column at its widest — the same 60rem the
    column itself asks for, so the Gutter travels with the full-width card
-   however the window ranks against the breakpoints in `main.css`. On a narrower
+   however the window ranks against the breakpoints elsewhere. On a narrower
    window the card would be paying for the Gutter out of the measure, so there is
    none, and the marks sit inline as they always did. Only on this page, too:
    the two widths are named on the column every page sits in, because the Diff's

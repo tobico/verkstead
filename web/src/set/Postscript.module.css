@@ -9,7 +9,7 @@
 
 /* A section like the Preface and the Questions, and headed like them: the
    heading is above the card rather than inside it, and the gap under it is
-   `.section-heading`'s own. */
+   `.sectionHeading`'s own — see `App.module.css`. */
 .postscript {
   margin-top: 1.5rem;
   /* Where a jump from the table of contents lands — see `--jump-clear` in

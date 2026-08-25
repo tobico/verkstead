@@ -6,9 +6,9 @@
    look alike today are still two lists, and a rule they held in common would
    make every change to one a decision about the other.
 
-   The heading each section of this page is topped with is `section-head`,
-   which is still page vocabulary in `main.css` and so is reached here through
-   `:global`. */
+   The heading each section of this page is topped with is `sectionHead`, page
+   vocabulary rather than this module's: it is defined once in `App.module.css`
+   and `ProfileList.tsx` writes it beside its own. */
 
 .profiles {
   margin-bottom: 1.5rem;
@@ -22,7 +22,7 @@
 /* The button on the heading that opens the form, and the two on every row,
    drawn alike because they are the same size of act: one adds a profile where
    the others change one or take it away. */
-.profiles > :global(.section-head) > button,
+.opens,
 .actions button {
   padding: 0.35rem 0.75rem;
   font: inherit;

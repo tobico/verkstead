@@ -47,6 +47,7 @@ import type {
 } from "../api/types";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
+import app from "../App.module.css";
 import styles from "./Credentials.module.css";
 
 /// The credentials as they stand, and the form that writes them.
@@ -202,9 +203,13 @@ export function Credentials(): JSX.Element {
         <section class={styles.credentials}>
           {/* The heading, with the one thing there is to do to what is under it
               on the other end of its line — as the two lists below have. */}
-          <div class="section-head">
+          <div class={app.sectionHead}>
             <h2>GitHub and git author</h2>
-            <button type="button" onClick={() => setOpen(true)}>
+            <button
+              class={styles.opens}
+              type="button"
+              onClick={() => setOpen(true)}
+            >
               Edit
             </button>
           </div>

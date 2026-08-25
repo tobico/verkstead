@@ -45,6 +45,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
 
 /// What each way of being refused a save says, once, wherever it is met.
@@ -226,9 +227,9 @@ export function ProfileList(): JSX.Element {
     <section class={styles.profiles}>
       {/* The heading, with the one thing there is to do to the list under it on
           the other end of its line. */}
-      <div class="section-head">
+      <div class={app.sectionHead}>
         <h2>Agent profiles</h2>
-        <button type="button" onClick={add}>
+        <button class={styles.opens} type="button" onClick={add}>
           Add a profile
         </button>
       </div>

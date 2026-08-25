@@ -6,9 +6,9 @@
    lists that look alike today are still two lists, and a rule they held in
    common would make every change to one a decision about the other.
 
-   The heading each section of this page is topped with is `section-head`,
-   which is still page vocabulary in `main.css` and so is reached here through
-   `:global`. */
+   The heading each section of this page is topped with is `sectionHead`, page
+   vocabulary rather than this module's: it is defined once in `App.module.css`
+   and `RepoList.tsx` writes it beside its own. */
 
 .repos {
   margin-bottom: 1.5rem;
@@ -21,7 +21,7 @@
 
 /* The button on the heading that opens the form, drawn as the quiet outline
    every section of this page heads its list with. */
-.repos > :global(.section-head) > button {
+.opens {
   padding: 0.35rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;

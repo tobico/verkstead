@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
 // The wrap control, which is the one on/off switch this page draws twice.
+import app from "../src/App.module.css";
 import toggle from "../src/Switch.module.css";
 import { mount, reading, texts } from "./reading";
 import { json, readable, reads, serving, whenever } from "./serving";
@@ -72,7 +73,9 @@ describe("the attached Diff", () => {
     const diff = diffOf(await reading(WAITING));
 
     expect(diff.id).toBe("diff");
-    expect(diff.querySelector("h2.section-heading")!.textContent).toBe("Diff");
+    expect(diff.querySelector(`h2.${app.sectionHeading}`)!.textContent).toBe(
+      "Diff",
+    );
   });
 
   it("folds and unfolds each file", async () => {
@@ -135,7 +138,7 @@ describe("the attached Diff", () => {
     expect(page.querySelector("#diff")).toBeNull();
     expect(page.querySelector("#diff-1")).toBeNull();
     expect(
-      texts(page, "h2.section-heading"),
+      texts(page, `h2.${app.sectionHeading}`),
       "with no Diff there is no heading to draw either — the closing section " +
         "is headed for the box it holds, this Set having no Postscript",
     ).toEqual(["Preface", "Questions", "Comment"]);

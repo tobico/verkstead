@@ -14,6 +14,7 @@ import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Submitted } from "../src/api/types";
+import app from "../src/App.module.css";
 import notices from "../src/notices.module.css";
 // The sheet's own vocabulary, and the two classes the form alone draws.
 import submitting from "../src/set/Answering.module.css";
@@ -271,7 +272,7 @@ describe("the sheet a waiting Set is answered on", () => {
 
     // Every field grows from one row, and the wrapper the stylesheet measures
     // it by is around each of them.
-    expect(page.querySelectorAll(".grow > textarea")).toHaveLength(6);
+    expect(page.querySelectorAll(`.${app.grow} > textarea`)).toHaveLength(6);
     expect(
       [...page.querySelectorAll("textarea")].every(
         (field) => field.getAttribute("rows") === "1",

@@ -15,3 +15,67 @@
   max-width: none;
   padding: 0;
 }
+
+/* What a page is made of, wherever the page is. Three names that no one page
+   owns — the Set page, the settings, the repos and the profiles head their
+   sections with two of them, and the Set page and the Timeline both grow a
+   field to fit what is typed into it — so they sit with the shell every page
+   is drawn in rather than with any of them. Each of those components imports
+   this module for the ones it writes. */
+
+/* A section heading with a control on the other end of its line. The heading
+   keeps its own margin, so the row is only the arrangement. */
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+/* The quiet headings naming a page's sections, so a jump from the table of
+   contents lands somewhere the reader can see they have arrived at. Under the
+   title rather than beside it: they are signposts, not the ask. */
+.sectionHeading {
+  font-size: 1rem;
+  margin: 0 0 0.6rem;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* A field as tall as what has been typed into it, and one line tall when nothing
+   has.
+
+   Nothing measures anything. The wrapper holds two things in the same grid cell:
+   the field, and a copy of the field's text that is in the layout but invisible.
+   The copy is ordinary wrapped text and so has an ordinary height; a grid cell is
+   as tall as its tallest occupant; the field is stretched to match. That makes the
+   height right before the first keystroke as well as after it — a restored draft
+   included, and a server-rendered page before any script has run.
+
+   The trailing space in the content is what reserves the last line: a value ending
+   in a newline would otherwise measure as though it did not.
+
+   As wide as the words going into it, which is the prose measure `styles/base.css`
+   names: the field is read at the width its text will be read at. */
+.grow {
+  display: grid;
+  max-width: var(--measure);
+}
+
+.grow > textarea,
+.grow::after {
+  grid-area: 1 / 1;
+}
+
+.grow::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+  /* Every metric that decides where a line breaks, matching the field's own — a
+     copy that wrapped differently would be the wrong height. The border is
+     transparent rather than absent, because it still takes up its width. */
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}

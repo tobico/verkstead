@@ -30,6 +30,7 @@ import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import app from "../App.module.css";
 import styles from "./RepoList.module.css";
 
 /// What each way of being refused says, once, wherever it is met.
@@ -117,9 +118,9 @@ export function RepoList() {
     <section class={styles.repos}>
       {/* The heading, with the one thing there is to do to the list under it on
           the other end of its line. */}
-      <div class="section-head">
+      <div class={app.sectionHead}>
         <h2>Repos</h2>
-        <button type="button" onClick={() => setOpen(true)}>
+        <button class={styles.opens} type="button" onClick={() => setOpen(true)}>
           Add a repo
         </button>
       </div>

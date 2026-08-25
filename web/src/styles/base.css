@@ -134,8 +134,8 @@ main {
      own padding either side, and it is never traded away: at every window that
      holds it, the column is this wide — what the window's width decides is
      only what stands beside it and where it sits, which is the breakpoints'
-     whole business in `main.css`. A narrower window is the one thing that
-     narrows it. */
+     whole business in the pages' own modules. A narrower window is the one
+     thing that narrows it. */
   --measure: 42rem;
   max-width: 60rem;
   margin: 0 auto;
@@ -152,9 +152,9 @@ main {
    window too narrow for the difference to exist, the cap simply never binds.
 
    What is measured here is what has no component to measure it: the renderer's
-   own markup, and the field every page grows to fit what is typed into it. The
-   blocks that are some component's — an Option on offer, the human's own words
-   on the record, the submit — read `--measure` from their own modules, this
+   own markup. The blocks that are some component's — an Option on offer, the
+   human's own words on the record, the submit, and the field every page grows
+   to fit what is typed into it — read `--measure` from their own modules, this
    being where the width is named. */
 .markdown > p,
 .markdown > ul,
@@ -166,9 +166,7 @@ main {
 .markdown > h4,
 .markdown > h5,
 .markdown > h6,
-.markdown > hr,
-/* A field is as wide as the words going into it. */
-.grow {
+.markdown > hr {
   max-width: var(--measure);
 }
 
@@ -189,9 +187,10 @@ textarea {
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
-  /* Every field in the app grows to fit what is in it — see `.grow` — so there is
-     nothing to scroll and no reason to offer a drag handle. A height dragged by
-     hand would be overwritten by the next keystroke anyway. */
+  /* Every field in the app grows to fit what is in it — see `.grow` in
+     `App.module.css` — so there is nothing to scroll and no reason to offer a
+     drag handle. A height dragged by hand would be overwritten by the next
+     keystroke anyway. */
   resize: none;
   overflow: hidden;
 }

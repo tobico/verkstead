@@ -42,6 +42,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import app from "../App.module.css";
 import { Switch as Toggle } from "../Switch";
 import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
@@ -235,8 +236,8 @@ export function Commit(props: {
                   class={wrapped() ? "diff wrapped" : "diff"}
                   id={DIFF}
                 >
-                  <div class="section-head">
-                    <h2 class="section-heading">Diff</h2>
+                  <div class={app.sectionHead}>
+                    <h2 class={app.sectionHeading}>Diff</h2>
                     <Toggle label="Word wrap" on={wrapped()} flip={flip} />
                   </div>
                   {/* The per-file folds and their anchors are stamped by the

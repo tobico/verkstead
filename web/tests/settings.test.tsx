@@ -36,6 +36,7 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
+import app from "../src/App.module.css";
 import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
 import repoList from "../src/repos/RepoList.module.css";
@@ -602,8 +603,8 @@ describe("the settings page", () => {
 
     await waitFor(() => screen.getByText(REPOS[0]!.name));
 
-    // `section-head` is still page vocabulary rather than any module's, which
-    // is why it is the one name spelled out here.
+    // `sectionHead` is page vocabulary rather than any of these modules', which
+    // is why it is the one name read from the shell's module here.
     const sections = [
       styles.credentials,
       profileList.profiles,
@@ -611,7 +612,7 @@ describe("the settings page", () => {
     ];
     for (const section of sections) {
       expect(
-        container.querySelector(`.${section} > .section-head > button`),
+        container.querySelector(`.${section} > .${app.sectionHead} > button`),
         `expected .${section} to head its own form`,
       ).not.toBeNull();
     }

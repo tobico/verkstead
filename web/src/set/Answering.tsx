@@ -15,6 +15,7 @@ import type { JSX } from "solid-js";
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 
+import app from "../App.module.css";
 import { Modal } from "../Modal";
 import { submitResponse } from "../api/client";
 import type {
@@ -199,7 +200,7 @@ export function Answering(props: {
 
   return (
     <>
-      <h2 class="section-heading" id="questions">
+      <h2 class={app.sectionHeading} id="questions">
         Questions
       </h2>
       <ol class={page.questions}>
@@ -265,7 +266,7 @@ export function Answering(props: {
           either way. */}
       <Postscript html={props.postscript}>
         <section class={page.setComment}>
-          <div class="grow" data-value={sheet.comment}>
+          <div class={app.grow} data-value={sheet.comment}>
             <textarea
               id="set-comment"
               name="set-comment"
@@ -366,7 +367,7 @@ function Choosing(props: {
           the Questions do: the section names what is being decided and the card
           is the deciding, so this reads as one more question under a heading of
           its own rather than as furniture of a different kind. */}
-      <h2 class="section-heading">Direction</h2>
+      <h2 class={app.sectionHeading}>Direction</h2>
       <div class={page.directionCard}>
         {/* Asked as a Question is asked: the label floated in the accent with
             the agent's argument running beside it, and the three to pick from
@@ -483,10 +484,10 @@ function Asking(props: { ask: AskView; fields: Fields }): JSX.Element {
           field with nothing else naming it would reach a screen reader unnamed.
 
           The wrapper carries the text a second time, where the stylesheet uses
-          it to give the field its height — see `.grow`. It is the field's own
-          value, so a restored draft arrives at the right height rather than one
-          line tall with the rest of it hidden. */}
-      <div class="grow" data-value={props.fields.free_text()}>
+          it to give the field its height — see `.grow` in `App.module.css`. It
+          is the field's own value, so a restored draft arrives at the right
+          height rather than one line tall with the rest of it hidden. */}
+      <div class={app.grow} data-value={props.fields.free_text()}>
         <textarea
           id={field()}
           name={field()}

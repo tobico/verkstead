@@ -86,6 +86,7 @@ import type {
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
+import app from "../App.module.css";
 import { Menu } from "../Menu";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -740,8 +741,9 @@ function ManualTaskComposer(props: {
 
         <label for="manual-task">What should the agent do?</label>
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`, which the brief's field uses for the same reason. */}
-        <div class="grow" data-value={instruction()}>
+            `.grow` in `App.module.css`, which the brief's field uses for the
+            same reason. */}
+        <div class={app.grow} data-value={instruction()}>
           <textarea
             id="manual-task"
             rows="1"
@@ -2033,8 +2035,8 @@ function Brief(props: {
         }
       >
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`. */}
-        <div class="grow" data-value={text()}>
+            `.grow` in `App.module.css`. */}
+        <div class={app.grow} data-value={text()}>
           <textarea
             rows="1"
             aria-label="Brief"

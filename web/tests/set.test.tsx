@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Response as Decided } from "../src/api/types";
 // The page's own vocabulary, and the four components that keep names of their
 // own beside it.
+import app from "../src/App.module.css";
 import contents from "../src/set/Contents.module.css";
 import closing from "../src/set/Postscript.module.css";
 import setPage from "../src/set/SetPage.module.css";
@@ -243,7 +244,7 @@ describe("reading a Set", () => {
     const page = await reading(WAITING);
 
     const heading = page.querySelector("h2#questions")!;
-    expect(heading.className).toBe("section-heading");
+    expect(heading.className).toBe(app.sectionHeading);
     expect(heading.textContent).toBe("Questions");
 
     for (const id of ["q1", "q2", "q3"]) {
@@ -362,7 +363,7 @@ describe("the record of a settled Set", () => {
     expect(section.id, "the id the table of contents jumps to").toBe(
       "postscript",
     );
-    expect(section.querySelector("h2.section-heading")!.textContent).toBe(
+    expect(section.querySelector(`h2.${app.sectionHeading}`)!.textContent).toBe(
       "Postscript",
     );
 
@@ -544,7 +545,7 @@ describe("the record of a settled Set", () => {
         ("Answered" in set.standing &&
           (set.standing.Answered.response.comment ?? "") !== "");
 
-      expect(texts(page, "h2.section-heading")).toEqual([
+      expect(texts(page, `h2.${app.sectionHeading}`)).toEqual([
         "Preface",
         ...(set.diff === null ? [] : ["Diff"]),
         "Questions",
