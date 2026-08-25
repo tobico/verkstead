@@ -14,9 +14,9 @@
 //!
 //! **What ends that session is the submit rather than the click.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
-//! whatever is still in it — see [`crate::runner::launch_in_turn`], which waits
-//! for a session that cannot be displaced and ends one that can. So a steer into
-//! a target something runs in ends what was running, at once or once a review
+//! whatever is still in it — see the runner's `launch_in_turn`, which waits for
+//! a session that cannot be displaced and ends one that can. So a steer into a
+//! target something runs in ends what was running, at once or once a review
 //! waiting on an ask has finished; a steer into Done launches nothing and ends
 //! nothing. **Interrupt current task** is what ends it where it stands instead:
 //! the wait saved in the first case, and the only ending there is in the second.
@@ -537,7 +537,9 @@ impl Standing {
 ///
 /// The one question that target turns on, said once here because the modal
 /// draws by it and the submit refuses by it — see
-/// [`ConversationSteered::NoInstruction`]. Two things can stand, and the
+/// [`ConversationSteered::NoInstruction`], which is what a steer into
+/// Implementing is refused with where nothing stands and nothing was written.
+/// Two things can stand, and the
 /// direction is what says which of them this run would be:
 ///
 /// - **a backlog with work left in it**, which is `.tasks/` asked exactly as

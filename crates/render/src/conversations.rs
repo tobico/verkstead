@@ -1791,10 +1791,12 @@ pub enum SteerOpened {
 
 /// Where a steer can send a Conversation.
 ///
-/// Draft and Closed are not among them and never will be: each has a way in of
+/// Draft and Aborted are not among them and never will be: each has a way in of
 /// its own, and a steer is for the four states the work is *done in*. A target
-/// the modal offers is a target something runs for, which is why Implementing is
-/// offered only where the branch holds something to carry on.
+/// the modal offers is a target something can be set going in, which is why
+/// Wrapping is offered only where the work is already on a pull request — the
+/// one of the four that is drawn out at all, an instruction being writable
+/// anywhere and Done needing nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
