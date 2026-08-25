@@ -26,6 +26,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal } from "solid-js";
 
 import { Modal } from "../Modal";
+import { QuietButton } from "../QuietButton";
 import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
@@ -120,9 +121,7 @@ export function RepoList() {
           the other end of its line. */}
       <div class={app.sectionHead}>
         <h2>Repos</h2>
-        <button class={styles.opens} type="button" onClick={() => setOpen(true)}>
-          Add a repo
-        </button>
+        <QuietButton onClick={() => setOpen(true)}>Add a repo</QuietButton>
       </div>
 
       <Switch>

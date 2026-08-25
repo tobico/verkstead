@@ -35,6 +35,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { Modal } from "../Modal";
+import { QuietButton } from "../QuietButton";
 import { createProfile, deleteProfile, editProfile, listProfiles } from "../api/client";
 import type {
   Broken,
@@ -229,9 +230,7 @@ export function ProfileList(): JSX.Element {
           the other end of its line. */}
       <div class={app.sectionHead}>
         <h2>Agent profiles</h2>
-        <button class={styles.opens} type="button" onClick={add}>
-          Add a profile
-        </button>
+        <QuietButton onClick={add}>Add a profile</QuietButton>
       </div>
 
       <Show when={refusedRemoval()}>
@@ -422,12 +421,10 @@ function ProfileRow(props: {
         </Show>
       </div>
       <div class={styles.actions}>
-        <button type="button" onClick={props.edit}>
-          Edit
-        </button>
-        <button type="button" class={styles.remove} onClick={props.remove}>
+        <QuietButton onClick={props.edit}>Edit</QuietButton>
+        <QuietButton class={styles.remove} onClick={props.remove}>
           Remove
-        </button>
+        </QuietButton>
       </div>
     </li>
   );

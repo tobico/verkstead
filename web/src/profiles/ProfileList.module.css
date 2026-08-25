@@ -19,21 +19,6 @@
   font-size: 1.1rem;
 }
 
-/* The button on the heading that opens the form, and the two on every row,
-   drawn alike because they are the same size of act: one adds a profile where
-   the others change one or take it away. */
-.opens,
-.actions button {
-  padding: 0.35rem 0.75rem;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
 .list {
   list-style: none;
   margin: 0;

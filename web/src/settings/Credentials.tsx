@@ -36,6 +36,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { Modal } from "../Modal";
+import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
 import type {
@@ -205,13 +206,7 @@ export function Credentials(): JSX.Element {
               on the other end of its line — as the two lists below have. */}
           <div class={app.sectionHead}>
             <h2>GitHub and git author</h2>
-            <button
-              class={styles.opens}
-              type="button"
-              onClick={() => setOpen(true)}
-            >
-              Edit
-            </button>
+            <QuietButton onClick={() => setOpen(true)}>Edit</QuietButton>
           </div>
 
           {/* What a token that is not there costs, said here rather than found

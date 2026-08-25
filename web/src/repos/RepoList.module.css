@@ -19,19 +19,6 @@
   font-size: 1.1rem;
 }
 
-/* The button on the heading that opens the form, drawn as the quiet outline
-   every section of this page heads its list with. */
-.opens {
-  padding: 0.35rem 0.75rem;
-  font: inherit;
-  font-size: 0.9rem;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
 .list {
   list-style: none;
   margin: 0;
