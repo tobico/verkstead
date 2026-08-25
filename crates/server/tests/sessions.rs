@@ -1101,8 +1101,9 @@ impl Bench {
     /// Fix both Pairings on a Conversation, which is what every one of these
     /// has to have settled before anything will start in it.
     ///
-    /// Each role gets a Profile of its own listing one model, so the model half
-    /// of the pick is the one that Profile carries — see [`profile`].
+    /// Each role gets a Profile of its own, paired with the first of the models
+    /// that Profile lists — see [`profile`], which lists two so that a pick can
+    /// move off this one without moving off the Profile.
     async fn under_both_pairings(&self, id: i64) {
         for role in ["grilling", "implementation"] {
             let profile = profile(&self.app, self.watched.path(), role).await;
@@ -1325,8 +1326,13 @@ fn handoff(view: &ConversationView) -> Option<&verkstead_render::HandoffEvent> {
     })
 }
 
-/// An Agent Profile saved from a pair inside `watched`, on a model that is
+/// An Agent Profile saved from a pair inside `watched`, on models that are
 /// worth reading back.
+///
+/// Two of them, `claude-<name>-5` and `claude-<name>-4.8`. The first is what
+/// every Conversation here is paired with; the second is there so that a pick
+/// can change the *model* under a Profile that does not change, which is a
+/// different pick and not the same one made twice.
 async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
     let claude_dir = watched.join(name).join(".claude");
     let config_file = watched.join(name).join(".claude.json");
@@ -1340,7 +1346,7 @@ async fn profile(app: &Router, watched: &Path, name: &str) -> i64 {
             "name": name,
             "claude_dir": claude_dir,
             "config_file": config_file,
-            "models": [format!("claude-{name}-5")],
+            "models": [format!("claude-{name}-5"), format!("claude-{name}-4.8")],
         }),
     )
     .await;
@@ -11723,6 +11729,46 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
             .next_back()
             == Some("model=claude-grilling-5"),
         "the last fix session ran under what the steer settled: {dispatched:?}",
+    );
+
+    // And a second steer under the *same* Profile on another of its models,
+    // which is a different pick rather than the same one made twice: the picker
+    // offers one row per Profile-and-model, so a steer judged by the Profile
+    // alone would answer Steered to this and change nothing.
+    let ran = fixes(&fixture.view().await);
+
+    assert!(matches!(fixture.steer().await, SteerOpened::Opened { .. }));
+    assert_eq!(
+        fixture
+            .steer_under("Wrapping", picked, "claude-grilling-4.8")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(
+        fixture
+            .view()
+            .await
+            .implementation_pairing
+            .and_then(|pairing| pairing.model),
+        Some("claude-grilling-4.8".to_owned()),
+        "the model moved under a Profile that did not",
+    );
+
+    fixture
+        .until(|view| (fixes(view) > ran).then_some(()))
+        .await;
+
+    let dispatched = std::fs::read_to_string(&written).unwrap();
+
+    assert!(
+        dispatched
+            .lines()
+            .filter(|line| line.starts_with("model="))
+            .next_back()
+            == Some("model=claude-grilling-4.8"),
+        "and the fix session after it ran on the model the steer settled rather \
+         than on the one the Profile was already paired with: {dispatched:?}",
     );
 }
 

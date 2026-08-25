@@ -441,7 +441,14 @@ fn settling<'a>(
     // The Conversation's own is left exactly as it is rather than rewritten with
     // itself: a re-choice takes the model row away and puts it back, and a
     // Pairing that did not change is not something to rewrite.
-    if fixed(conversation, role) == Some(choice.profile_id) {
+    //
+    // Both halves, because both halves are what a pick is. The picker offers one
+    // row per Profile-and-model, so the same Profile on another of its models is
+    // a different pick — and a comparison that asked about the Profile alone
+    // would answer *Steered* to a change of model and write none of it.
+    if fixed(conversation, role).is_some_and(|pairing| {
+        pairing.profile.id == choice.profile_id && pairing.model.as_deref() == Some(&choice.model)
+    }) {
         return None;
     }
 
@@ -530,15 +537,17 @@ fn role(target: SteerTarget) -> Option<Role> {
     }
 }
 
-/// What the Conversation has settled for that role already, as the Profile it
-/// names.
-fn fixed(conversation: &Conversation, role: Role) -> Option<i64> {
-    let pairing = match role {
-        Role::Grilling => &conversation.grilling_pairing,
-        Role::Implementation => &conversation.implementation_pairing,
-    };
-
-    pairing.as_ref().map(|pairing| pairing.profile.id)
+/// What the Conversation has settled for that role already, whole.
+///
+/// Both halves rather than the Profile it names, because both are what a pick is
+/// held against — see [`settling`]. A Pairing carrying no model is a Profile
+/// chosen before pairings existed, which is half a choice and so never the same
+/// choice as one made now.
+fn fixed(conversation: &Conversation, role: Role) -> Option<&store::Pairing> {
+    match role {
+        Role::Grilling => conversation.grilling_pairing.as_ref(),
+        Role::Implementation => conversation.implementation_pairing.as_ref(),
+    }
 }
 
 /// Make sure there is somewhere to work, and say what had to be made.
