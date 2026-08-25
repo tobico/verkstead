@@ -21,6 +21,7 @@ import type { ConversationView, PullRequestEvent } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
+import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
 export function PullRequest(props: {
@@ -48,15 +49,11 @@ export function PullRequest(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Pull request</h1>
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
-      </div>
+      <PaneHead
+        back={{ to: "Timeline", go: props.back }}
+        title="Pull request"
+        close={props.close}
+      />
 
       <div class="pull-request-summary">
         <p class="title">{props.opened.title}</p>

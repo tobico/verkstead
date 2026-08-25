@@ -16,7 +16,7 @@ shrinks each step until the last task deletes it.
 - [x] 01: Carve the global sheets — [details](01-carve-global-sheets.md)
 - [x] 02: Rename the renderer's own classes — [details](02-rename-renderer-classes.md)
 - [x] 03: Status components — [details](03-status-components.md)
-- [ ] 04: Pane chrome component — [details](04-pane-chrome-component.md)
+- [x] 04: Pane chrome component — [details](04-pane-chrome-component.md)
 - [ ] 05: Root and small components — [details](05-root-and-small-components.md)
 - [ ] 06: The set/ directory — [details](06-set-directory.md)
 - [ ] 07: Timeline and event rows — [details](07-timeline-and-event-rows.md)

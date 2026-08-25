@@ -31,6 +31,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Sheet } from "../set/Sheet";
 import { Unreadable } from "../set/Unreadable";
+import { PaneHead } from "./PaneHead";
 
 /// Either row a Set gets on the Timeline. What they have in common is the only
 /// thing this pane needs — which Set to fetch — and what comes back is what says
@@ -51,17 +52,11 @@ export function Asked(props: {
     freshness: { reconcile: "id" },
   }));
 
+  // No title: the Set draws its own heading, and a pane titled over the top of
+  // it would name the same thing twice. The Close is the way back to what the
+  // conversation is, which is what this pane shows when no event is open.
   const head = (
-    <div class="pane-head">
-      <button type="button" class="pane-back" onClick={props.back}>
-        ← Timeline
-      </button>
-      {/* The way back to what the conversation is, which is what this pane
-          shows when no event is open. */}
-      <button type="button" class="close-event" onClick={props.close}>
-        Close
-      </button>
-    </div>
+    <PaneHead back={{ to: "Timeline", go: props.back }} close={props.close} />
   );
 
   return (

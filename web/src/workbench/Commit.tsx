@@ -52,6 +52,7 @@ import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
 import { files, spied } from "../set/outline";
+import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
 /// What the diff section is reached by, from the nav's own heading line. Its
@@ -173,17 +174,13 @@ export function Commit(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Commit</h1>
-        {/* The way back to what the conversation is, which is what this pane
-            shows when no event is open. */}
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
-      </div>
+      {/* The Close is the way back to what the conversation is, which is what
+          this pane shows when no event is open. */}
+      <PaneHead
+        back={{ to: "Timeline", go: props.back }}
+        title="Commit"
+        close={props.close}
+      />
 
       <div class="commit-header">
         <p class="subject">{props.commit.subject}</p>

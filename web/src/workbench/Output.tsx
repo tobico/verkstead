@@ -64,6 +64,7 @@ import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Mark } from "./Mark";
+import { PaneHead } from "./PaneHead";
 import { Screen } from "./Screen";
 import type {
   AgentOutputEvent,
@@ -222,12 +223,10 @@ export function Output(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Agent output</h1>
-
+      {/* No Close beside the switch: "← Timeline" is the way out of this pane on
+          a narrow window, and a header with two ways off it would be one row
+          asking the same question twice. */}
+      <PaneHead back={{ to: "Timeline", go: props.back }} title="Agent output">
         {/* The two ways of reading the one session, beside the title rather than
             across the pane under it: two words is all the width it ever needs,
             and the header is where a pane's own controls belong. Buttons that
@@ -271,7 +270,7 @@ export function Output(props: {
             Screen
           </button>
         </div>
-      </div>
+      </PaneHead>
 
       {/* The same metric the Timeline row shows, and absent for the same
           reason: a session with no Transcript has no turns to count. A finished

@@ -46,6 +46,10 @@ import notices from "../src/notices.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+// The pane chrome, both ways: the hashed names to query the page by, and the
+// source to read the rules that jsdom lays nothing out for.
+import paneHead from "../src/workbench/PaneHead.module.css";
+import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 import {
   CLAMPED_LINES,
   MANUAL_TASK_REFUSAL,
@@ -2189,10 +2193,17 @@ describe("the panes on a narrow window", () => {
 
   /// Every pane's header stays where it is put, whichever of the two ways the
   /// window is scrolling — the page below 60rem, the pane itself above it.
-  /// Layout again, so the rules are what is read.
+  /// Layout again, so the rules are what is read. Two of them, the header's own
+  /// and the timeline's wrapper's, until the wrapper moves to a module too.
   it("keeps a pane's header at the top while the pane scrolls", () => {
+    expect(paneHeadCss).toContain(
+      ":global(.pane) > .head {\n" +
+        "  position: sticky;\n" +
+        "  top: 0;\n" +
+        "  z-index: 1;\n",
+    );
     expect(stylesheet).toContain(
-      ".pane > .pane-head,\n.pane > .pane-chrome {\n" +
+      ".pane > .pane-chrome {\n" +
         "  position: sticky;\n" +
         "  top: 0;\n" +
         "  z-index: 1;\n",
@@ -2203,17 +2214,18 @@ describe("the panes on a narrow window", () => {
   /// paper fading to nothing, hung in the gap the header already kept below
   /// itself so that at rest it covers no part of the first thing in the pane.
   it("fades the record out under whatever is stuck", () => {
-    expect(stylesheet).toContain(
-      ".pane > .pane-head::after,\n.pane > .pane-chrome::after {\n" +
-        '  content: "";\n' +
-        "  position: absolute;\n" +
-        "  top: 100%;\n" +
-        "  right: 0;\n" +
-        "  left: 0;\n" +
-        "  height: 1rem;\n" +
-        "  background: linear-gradient(var(--paper), transparent);\n" +
-        "  pointer-events: none;\n}",
-    );
+    const fade =
+      '  content: "";\n' +
+      "  position: absolute;\n" +
+      "  top: 100%;\n" +
+      "  right: 0;\n" +
+      "  left: 0;\n" +
+      "  height: 1rem;\n" +
+      "  background: linear-gradient(var(--paper), transparent);\n" +
+      "  pointer-events: none;\n}";
+
+    expect(paneHeadCss).toContain(":global(.pane) > .head::after {\n" + fade);
+    expect(stylesheet).toContain(".pane > .pane-chrome::after {\n" + fade);
   });
 });
 
@@ -3515,17 +3527,19 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, ".agent-output"));
 
-    await drawn(container, ".details-pane .pane-head .record-switch");
-    await drawn(container, ".details-pane .pane-head .pane-back");
+    await drawn(container, `.details-pane .${paneHead.head} .record-switch`);
+    await drawn(container, `.details-pane .${paneHead.head} .${paneHead.back}`);
 
-    expect(container.querySelector(".details-pane .close-event")).toBeNull();
+    expect(
+      container.querySelector(`.details-pane .${paneHead.close}`),
+    ).toBeNull();
   });
 
   /// Sharing that row is what the switch's width is now about: as wide as its
   /// two labels, and off onto a line of its own when the title leaves it no
   /// room. Both are the stylesheet's, and jsdom lays nothing out.
   it("sizes the switch to its labels and wraps rather than overflowing", () => {
-    expect(stylesheet).toContain(".pane-head {\n  display: flex;\n  flex-wrap: wrap;");
+    expect(paneHeadCss).toContain(".head {\n  display: flex;\n  flex-wrap: wrap;");
     expect(stylesheet).toContain(
       ".record-switch {\n" +
         "  position: relative;\n" +
@@ -4090,7 +4104,7 @@ describe("aborting a conversation", () => {
 
     const menu = await openActions(container);
     expect(menu.querySelector(".abort")).toBeTruthy();
-    expect(container.querySelector(".pane-head .abort")).toBe(
+    expect(container.querySelector(`.${paneHead.head} .abort`)).toBe(
       menu.querySelector(".abort"),
     );
   });
@@ -5118,7 +5132,7 @@ describe("a commit on the timeline", () => {
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
     await drawn(container, ".details-pane .diffFiles");
 
-    fireEvent.click(await drawn(container, ".details-pane .close-event"));
+    fireEvent.click(await drawn(container, `.details-pane .${paneHead.close}`));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Details").textContent).toBe(""),
@@ -5750,10 +5764,10 @@ describe("the pinned task list", () => {
     // One block, with the header in it: that is what makes them stay together
     // with no strip of scrolling record between them.
     expect(chrome).not.toBeNull();
-    expect(chrome!.querySelector(".pane-head")).not.toBeNull();
+    expect(chrome!.querySelector(`.${paneHead.head}`)).not.toBeNull();
 
     expect(stylesheet).toContain(
-      ".pane > .pane-head,\n.pane > .pane-chrome {\n  position: sticky;\n  top: 0;",
+      ".pane > .pane-chrome {\n  position: sticky;\n  top: 0;",
     );
   });
 
@@ -5769,8 +5783,8 @@ describe("the pinned task list", () => {
     // Both are inside the one stuck block, so which is over which is settled
     // between them rather than against the record.
     expect(menu.closest(".pane-chrome")).not.toBeNull();
-    expect(stylesheet).toContain(
-      ".pane-chrome > .pane-head {\n  position: relative;\n  z-index: 1;\n}",
+    expect(paneHeadCss).toContain(
+      ":global(.pane-chrome) > .head {\n  position: relative;\n  z-index: 1;\n}",
     );
   });
 
@@ -6194,7 +6208,7 @@ describe("a conversation blocked on the human", () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    const badge = await drawn(container, ".pane-head .blocked");
+    const badge = await drawn(container, `.${paneHead.head} .blocked`);
 
     expect(badge.textContent).toBe("Blocked on you");
     expect(STOPPED.blocked_on).toBe(SAID.id);

@@ -93,6 +93,7 @@ import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
+import { PaneHead } from "./PaneHead";
 import { Pause } from "./Pause";
 import { Setup } from "./Setup";
 import { keeping } from "./settling";
@@ -356,15 +357,13 @@ export function Timeline(props: {
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
       <div class="pane-chrome">
-        <div class="pane-head">
-          {/* The way back out of this level, which is the whole of what a narrow
-              window offers instead of the pane beside it. Drawn always and
-              hidden by the stylesheet where all three panes are on screen at
-              once. */}
-          <button type="button" class="pane-back" onClick={props.back}>
-            ← Conversations
-          </button>
-          <h1>{props.conversation.branch}</h1>
+        {/* The way back out of this level, which is the whole of what a narrow
+            window offers instead of the pane beside it. Drawn always and hidden
+            by the pane head where all three panes are on screen at once. */}
+        <PaneHead
+          back={{ to: "Conversations", go: props.back }}
+          title={props.conversation.branch}
+        >
           {/* What the work has stopped on, said where the conversation is named
               rather than only down in the list: a timeline is long by the time a
               run gets far enough to stop, and a badge the human had to go
@@ -398,7 +397,7 @@ export function Timeline(props: {
               Details →
             </button>
           </Show>
-        </div>
+        </PaneHead>
 
         <Pinned
           conversation={props.conversation}

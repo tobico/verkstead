@@ -57,6 +57,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { SPOKEN } from "./Mark";
+import { PaneHead } from "./PaneHead";
 
 export function Conversations(props: {
   selected: string;
@@ -194,20 +195,28 @@ export function Conversations(props: {
 
   return (
     <>
-      <div class="pane-head">
-        {/* The mark rather than a title: this pane is where Verkstead is entered
-            and the list under it says what it is a list of. The icon is served
-            from `assets/`, which vite copies to the site root untouched, and it
-            is the same file the favicon is.
+      {/* The mark rather than a title: this pane is where Verkstead is entered
+          and the list under it says what it is a list of. The icon is served
+          from `assets/`, which vite copies to the site root untouched, and it is
+          the same file the favicon is.
 
-            No alt text on it, because the word it stands beside is the alt text:
-            a screen reader that read both would say the name twice. */}
-        <h1 class="wordmark">
-          <img src="/icons/verkstead.svg" alt="" />
-          Verkstead
-        </h1>
+          No alt text on it, because the word it stands beside is the alt text: a
+          screen reader that read both would say the name twice.
+
+          `wordmark` is the class the pane head is handed for its `<h1>`, and it
+          is styled with the rest of what this pane draws — no way back either,
+          this being the level every other pane is entered from. */}
+      <PaneHead
+        heading="wordmark"
+        title={
+          <>
+            <img src="/icons/verkstead.svg" alt="" />
+            Verkstead
+          </>
+        }
+      >
         <WorkbenchActions />
-      </div>
+      </PaneHead>
 
       <NewConversation open={props.open} />
 
