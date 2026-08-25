@@ -199,6 +199,12 @@ pub(crate) async fn resume(
                 state.clone(),
                 conversation_id,
                 driving,
+                // Everything the human has already answered, always: this press
+                // is a relaunch of the interview that died, and one that opened
+                // by asking again what they had already decided would cost them
+                // the interview twice. A steer is where that becomes a choice —
+                // see [`crate::steering`].
+                crate::grillings::Digest::Prime,
             ));
         }
 

@@ -489,6 +489,48 @@ impl Grilling {
         .await
     }
 
+    /// And the submit into Grilling, which is the one target that carries a
+    /// payload: the Brief of the round it opens where the human wrote one, and
+    /// whether the session is primed with everything they have already answered.
+    async fn steer_grilling(&self, brief: Option<&str>, digest: bool) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": "Grilling",
+                "interrupt": false,
+                "brief": brief,
+                "digest": digest,
+            }),
+        )
+        .await
+    }
+
+    /// What the next session to start printed, waited for from a Timeline that
+    /// held `before` of them.
+    ///
+    /// Two waits rather than one: a session appears on the Timeline as it
+    /// starts, and what it was primed with is on its terminal a moment later.
+    async fn printed_after(&self, before: usize) -> String {
+        let started = self
+            .until(|view| {
+                let running = outputs(view);
+                (running.len() > before).then(|| running[before].id)
+            })
+            .await;
+
+        let said = self
+            .until(|view| {
+                outputs(view)
+                    .into_iter()
+                    .find(|output| output.id == started && output.lines > 1)
+                    .map(|output| output.id)
+            })
+            .await;
+
+        self.capture(said).await.replace("\r\n", "\n")
+    }
+
     /// The same submit with a Pairing picked: what the work runs under from
     /// here, which is recorded as the Conversation's own.
     async fn steer_under(&self, target: &str, profile_id: i64, model: &str) -> ConversationSteered {
@@ -10970,17 +11012,124 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 
-/// A Conversation whose Worktree was forgotten rather than deleted is refused by
-/// name: there is nowhere to work, and no path to make one at.
+/// A steer into Grilling starts the interview again on the round's own Brief,
+/// and primes it with everything already answered only where the human asked
+/// for that.
 ///
-/// The one way to get here, and the reason the refusal is not the same one a
-/// deleted directory gets: aborting takes the Worktree off the record while
-/// leaving the pull request on it, so the target is offered and there is nothing
-/// under it. What a directory that has merely gone gets is a rebuild — see
-/// [`steering_a_conversation_whose_worktree_has_gone_makes_it_again`] — because
-/// there the record still says where it was.
+/// Two steers, because the choice is the point. The first writes a brief and
+/// leaves the digest off, which is the ordinary steer: a fresh brief is what the
+/// press is usually for, and priming it with the whole of the last interview
+/// would be steering into the argument that has just been left behind. The
+/// second writes none and asks for the digest, so what it starts on is the Brief
+/// the first one wrote — the round's own, whichever round that is — with what
+/// the human settled under it.
+///
+/// The session running is left alone both times: **Interrupt current task** is
+/// unticked, so the steer waits its turn and the grilling that follows is the
+/// one that goes next.
 #[tokio::test]
-async fn steering_a_conversation_with_no_worktree_on_the_record_says_so() {
+async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() {
+    let fixture = grilling(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+        sleep 300
+        "#,
+    )
+    .await;
+
+    // What the interview being left behind got through: one Set, answered.
+    let answered = fixture.ask(ASKED_ALREADY).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                answered,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "and burst on top of it" }
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture
+            .steer_grilling(Some("# Retries\n\nThe backoff is wrong.\n"), false)
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/grilling/SKILL.md"),
+        "a grilling steered into is a grilling: {printed:?}",
+    );
+    assert!(
+        printed.contains("The backoff is wrong."),
+        "on the Brief the modal has just written: {printed:?}",
+    );
+    assert!(
+        !printed.contains("The API has none."),
+        "which is the round's own rather than the one before it: {printed:?}",
+    );
+    assert!(
+        !printed.contains("Per key — and burst on top of it"),
+        "and told nothing of the interview it was steered out of: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Grilling),
+            ("moved", Lifecycle::Grilling),
+        ],
+    );
+
+    let before = outputs(&view).len();
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture.steer_grilling(None, true).await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("The backoff is wrong."),
+        "the round's own Brief again, which is the one the steer before it \
+         wrote: {printed:?}",
+    );
+    assert!(
+        printed.contains("Per key — and burst on top of it"),
+        "and this time everything already answered, because this time they \
+         asked for it: {printed:?}",
+    );
+}
+
+/// A closed Conversation is a source like any other: its Worktree was deleted
+/// and its branch kept, so the steer checks the branch out again into one and
+/// carries on.
+///
+/// The furthest a Worktree can be from a running one on a Conversation that has
+/// been worked — aborting takes the directory away *and* takes it off the record
+/// — and it is the one steering has to make from nothing but the branch. Where
+/// the record still names a directory the steer rebuilds what it names; here
+/// there is nothing to name, so the path is chosen the way a first grilling
+/// chooses one.
+///
+/// Wrapping, because aborting leaves the pull request on the record: what is
+/// steered into is a wrap-up that has everything under it but somewhere to work.
+#[tokio::test]
+async fn steering_a_closed_conversation_checks_its_branch_out_again() {
     let prompts = tempfile::tempdir().unwrap();
     let written = prompts.path().join("fix-prompts");
 
@@ -10994,6 +11143,8 @@ async fn steering_a_conversation_with_no_worktree_on_the_record_says_so() {
     worked_to_empty(&fixture).await;
     fixture.stopped().await;
 
+    let branch = fixture.view().await.branch.clone();
+
     assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
     assert!(
         fixture.view().await.worktree.is_none(),
@@ -11006,14 +11157,33 @@ async fn steering_a_conversation_with_no_worktree_on_the_record_says_so() {
     );
     assert_eq!(
         fixture.steer_into("Wrapping", false).await,
-        ConversationSteered::NowhereToWork,
+        ConversationSteered::Steered,
     );
 
-    assert_eq!(
-        fixture.view().await.state,
-        Lifecycle::Aborted,
-        "and nothing moved: the refusal comes before anything is done",
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+
+    let worktree = PathBuf::from(
+        view.worktree
+            .expect("the steer made one and recorded it")
+            .path,
     );
+
+    assert!(
+        worktree.join("README.md").exists(),
+        "it is back, with everything the branch was holding",
+    );
+    assert_eq!(
+        git(&worktree, &["symbolic-ref", "HEAD"]).trim(),
+        format!("refs/heads/{branch}"),
+        "on the branch aborting kept rather than on one cut afresh",
+    );
+
+    // And the wrap-up going on in it, which is the reading that says the
+    // directory is a worktree rather than a copy of one: a sandbox is given the
+    // git directory the checkout points back into.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 
 /// The Pairing picked in the modal is recorded as the *Conversation's*, and it

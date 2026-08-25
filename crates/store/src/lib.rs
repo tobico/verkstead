@@ -50,7 +50,7 @@ pub use captures::{Summary, append_capture, capture, start_capture, summarise_ca
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
-    Implementing, Lifecycle, Rebuilding, Reopening, Role, SetOnTimeline, Settling, Staged,
+    Implementing, Lifecycle, Rebuilding, Reopening, Role, SetOnTimeline, Settling, Staged, Steer,
     Steering, TimelineEvent, abort_conversation, adopting, ask, asked_from, conversations,
     implement_again, last_proposal, load_conversation, note, pick_direction, record_handoff,
     record_manual_task, rename_branch, reopen_conversation, review_asked, save_brief,

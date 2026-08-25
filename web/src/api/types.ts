@@ -546,7 +546,7 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NowhereToWork" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -1621,17 +1621,44 @@ interrupt: boolean,
  * that arrives with neither this nor a Pairing of its own is refused by
  * name.
  */
-pairing: ProfileChoice | null, };
+pairing: ProfileChoice | null, 
+/**
+ * The new round's Brief, for a steer into Grilling.
+ *
+ * It lands as a Brief Event of its own, frozen the moment it does: a Brief
+ * freezes when its round leaves Draft, and a round steered into has no
+ * Draft to leave. A second Brief beside the first rather than an edit of
+ * it — what the earlier round was built from stays on the record.
+ *
+ * Absent is the ordinary case and not a refusal: the session starts on the
+ * Brief that is already there, and the steer leaves nothing but its own
+ * Event behind.
+ */
+brief: string | null, 
+/**
+ * Whether the session is primed with everything the human has already
+ * answered.
+ *
+ * The digest a relaunched grilling assembles for itself — every answered
+ * Question Set of the Conversation, in the order it was asked — offered
+ * here as a choice rather than always sent. A fresh brief is often the
+ * point of the steer, and priming it with the whole of the last interview
+ * would be steering into the argument that has just been left behind.
+ *
+ * Nothing anywhere else reads it: a target that starts no grilling starts
+ * nothing to prime.
+ */
+digest: boolean, };
 
 /**
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. The two
- * that are not here yet arrive with the tasks that build what each of them
- * launches — a target the modal offers is a target something runs for.
+ * its own, and a steer is for the four states the work is *done in*. The one
+ * that is not here yet arrives with the task that builds what it launches — a
+ * target the modal offers is a target something runs for.
  */
-export type SteerTarget = "Wrapping" | "Done";
+export type SteerTarget = "Grilling" | "Wrapping" | "Done";
 
 /**
  * What became of the human's Response.

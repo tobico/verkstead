@@ -11,19 +11,41 @@
 //! something runs in without the Pairing those sessions run under would be a
 //! move only half made.
 //!
-//! Nothing else here is about what runs afterwards. The state, the two Events
-//! and the Pairing are the whole of what the store has to say about a steer;
-//! recreating a Worktree, clearing a stop and launching are the server's, and
-//! are asked of it there.
+//! And the round a steer into Grilling opens: the Brief the human wrote for it,
+//! frozen where it lands, the wrap-up bookkeeping of the round before it
+//! forgotten, and the Worktree and base commit the steer had to make written
+//! beside the move.
+//!
+//! Nothing here is about what runs afterwards, and nothing here *makes*
+//! anything. Checking a branch out, clearing a stop and launching a session are
+//! the server's, and are asked of it there; what this is about is that the
+//! record of one steer is written whole or not at all.
 
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    AgentType, Event, Lifecycle, ProfileFacts, Role, Settling, Steering, create_profile,
-    load_conversation, open_database, register_repo, save_brief, start_conversation,
-    start_grilling, steer_conversation, timeline,
+    AgentType, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering, WaitingOn,
+    create_profile, fix_attempts, load_conversation, open_database, record_fix_attempt,
+    register_repo, save_brief, settle_wrap_up, start_conversation, start_grilling,
+    steer_conversation, timeline, wrap_up_settled,
 };
+
+/// The plainest steer there is: the move and nothing beside it.
+///
+/// What every one here starts from, with whatever it is about written over the
+/// top of it. A steer settles a Pairing, opens a round with a Brief and records
+/// the Worktree it had to make only where the human's press said so, and the
+/// ordinary press says none of it.
+fn into(target: Lifecycle) -> Steer<'static> {
+    Steer {
+        target,
+        pairing: None,
+        brief: None,
+        worktree: None,
+        base_commit: None,
+    }
+}
 
 /// A pool over a fresh database, plus the directory keeping it alive.
 async fn fresh_pool() -> (tempfile::TempDir, SqlitePool) {
@@ -96,6 +118,23 @@ async fn state(pool: &SqlitePool, id: i64) -> Lifecycle {
         .state
 }
 
+/// Every Brief on its Timeline, oldest first.
+///
+/// All of them rather than the newest: a round steered into gets a Brief of its
+/// own, and what says it is a second one beside the first is that the first is
+/// still there.
+async fn briefs(pool: &SqlitePool, id: i64) -> Vec<String> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Brief(markdown) => Some(markdown),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Its Timeline as the kinds that say where the work went: the states it was
 /// steered into and the states it moved to, in the order they landed.
 async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, Lifecycle)> {
@@ -117,7 +156,7 @@ async fn a_steer_moves_the_conversation_and_leaves_the_two_events_of_one() {
     let id = grilling(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, Lifecycle::Done, None)
+        steer_conversation(&pool, id, into(Lifecycle::Done))
             .await
             .unwrap(),
         Steering::Steered,
@@ -147,7 +186,7 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     let draft = drafting(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, draft, Lifecycle::Done, None)
+        steer_conversation(&pool, draft, into(Lifecycle::Done))
             .await
             .unwrap(),
         Steering::Steered,
@@ -155,7 +194,7 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     assert_eq!(state(&pool, draft).await, Lifecycle::Done);
 
     assert_eq!(
-        steer_conversation(&pool, draft, Lifecycle::Done, None)
+        steer_conversation(&pool, draft, into(Lifecycle::Done))
             .await
             .unwrap(),
         Steering::Steered,
@@ -187,12 +226,14 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
         steer_conversation(
             &pool,
             id,
-            Lifecycle::Wrapping,
-            Some(Settling {
-                role: Role::Implementation,
-                profile_id: profile,
-                model: "opus-4.8",
-            }),
+            Steer {
+                pairing: Some(Settling {
+                    role: Role::Implementation,
+                    profile_id: profile,
+                    model: "opus-4.8",
+                }),
+                ..into(Lifecycle::Wrapping)
+            },
         )
         .await
         .unwrap(),
@@ -238,12 +279,14 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
         steer_conversation(
             &pool,
             id,
-            Lifecycle::Wrapping,
-            Some(Settling {
-                role: Role::Implementation,
-                profile_id: 404,
-                model: "opus-5",
-            }),
+            Steer {
+                pairing: Some(Settling {
+                    role: Role::Implementation,
+                    profile_id: 404,
+                    model: "opus-5",
+                }),
+                ..into(Lifecycle::Wrapping)
+            },
         )
         .await
         .unwrap(),
@@ -262,12 +305,167 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
     );
 }
 
+/// A steer into Grilling opens a round, and what the human wrote in the modal is
+/// that round's Brief: a second Brief Event beside the first rather than an edit
+/// of it, frozen the moment it lands.
+///
+/// Frozen because the round it opens is past drafting, which is the only state a
+/// Brief can be edited in — so the same [`save_brief`] that would have written
+/// over a draft's own is refused on this one.
+#[tokio::test]
+async fn a_steer_into_grilling_with_a_brief_opens_a_round_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                brief: Some("# Retries\n\nThe backoff is wrong.\n"),
+                ..into(Lifecycle::Grilling)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(
+        briefs(&pool, id).await,
+        [
+            "# Rate limiting\n".to_owned(),
+            "# Retries\n\nThe backoff is wrong.\n".to_owned(),
+        ],
+        "the round before it was built from what it was built from, and that \
+         stays on the record beside the new one",
+    );
+
+    assert_eq!(
+        ladder(&pool, id).await,
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Grilling),
+            ("moved", Lifecycle::Grilling),
+        ],
+    );
+
+    assert_eq!(
+        save_brief(&pool, id, "# Something else\n").await.unwrap(),
+        Edited::NotDrafting,
+        "and it is frozen: the round it opened has no Draft to leave",
+    );
+}
+
+/// And one without leaves the Steer Event alone: the round starts on the Brief
+/// that is already there.
+#[tokio::test]
+async fn a_steer_into_grilling_without_one_writes_no_brief() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Grilling))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(
+        briefs(&pool, id).await,
+        ["# Rate limiting\n".to_owned()],
+        "the one the round is grilled on, and nothing written over it",
+    );
+}
+
+/// The round before a steered-into grilling is over, so its wrap-up bookkeeping
+/// is forgotten — the same forgetting a reopened Conversation does.
+///
+/// A round that inherited the one before it would reach Wrapping with everything
+/// wrap-up waits on already settled and would be over the moment it arrived. The
+/// steers that open no round leave all of it exactly where it is: a wrap-up
+/// steered back into wrapping up is the *same* round, looked at again.
+#[tokio::test]
+async fn a_steer_into_grilling_forgets_the_round_before_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+    record_fix_attempt(&pool, id, "Rust").await.unwrap();
+
+    steer_conversation(&pool, id, into(Lifecycle::Wrapping))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        wrap_up_settled(&pool, id).await.unwrap(),
+        [WaitingOn::Review],
+        "a wrap-up steered into wrapping up is the same round, looked at again",
+    );
+    assert_eq!(fix_attempts(&pool, id, "Rust").await.unwrap(), 1);
+
+    steer_conversation(&pool, id, into(Lifecycle::Grilling))
+        .await
+        .unwrap();
+
+    assert!(
+        wrap_up_settled(&pool, id).await.unwrap().is_empty(),
+        "and the round that starts here waits on all of it from nothing",
+    );
+    assert_eq!(fix_attempts(&pool, id, "Rust").await.unwrap(), 0);
+}
+
+/// What the steer had to make before anything could run in it: the Worktree it
+/// checked out, and — for a Draft, which has never had a branch — the commit
+/// that branch was cut from.
+///
+/// Recorded here rather than made here. Git and the filesystem are the server's
+/// to reach, and after this there is a fact about what the work branched from
+/// rather than a rule about what it would have.
+#[tokio::test]
+async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
+    let (_dir, pool) = fresh_pool().await;
+    let draft = drafting(&pool).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            draft,
+            Steer {
+                worktree: Some(Path::new("/state/worktrees/rate-limiting")),
+                base_commit: Some("c0ffee"),
+                ..into(Lifecycle::Grilling)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    let conversation = load_conversation(&pool, draft)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(
+        conversation.worktree.as_deref(),
+        Some(Path::new("/state/worktrees/rate-limiting")),
+    );
+    assert_eq!(
+        conversation.base_commit.as_deref(),
+        Some("c0ffee"),
+        "the column held the branch the human picked while drafting, and now \
+         holds what that resolved to",
+    );
+}
+
 #[tokio::test]
 async fn there_is_no_conversation_to_steer() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        steer_conversation(&pool, 404, Lifecycle::Done, None)
+        steer_conversation(&pool, 404, into(Lifecycle::Done))
             .await
             .unwrap(),
         Steering::NoSuchConversation,
@@ -282,7 +480,7 @@ async fn a_steer_survives_the_database_being_reopened() {
     let id = {
         let pool = open_database(&database).await.unwrap();
         let id = grilling(&pool).await;
-        steer_conversation(&pool, id, Lifecycle::Done, None)
+        steer_conversation(&pool, id, into(Lifecycle::Done))
             .await
             .unwrap();
         pool.close().await;

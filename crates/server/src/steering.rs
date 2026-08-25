@@ -20,30 +20,41 @@
 //! each has a way in of its own. So every refusal here is about the *target*:
 //! work that cannot be set going from what the record holds.
 //!
-//! **What is missing is made again.** A Worktree whose directory has gone is
-//! checked out afresh from the branch, exactly as a pressed Resume does it — the
-//! branch holds everything that was committed, and a Conversation stuck behind a
-//! deleted directory is the very thing this button is for.
+//! **What is missing is made again**, and the further from a running state the
+//! source is the more of it there is to make. A Worktree whose directory has
+//! gone is checked out afresh from the branch, exactly as a pressed Resume does
+//! it — the branch holds everything that was committed, and a Conversation stuck
+//! behind a deleted directory is the very thing this button is for. A closed
+//! Conversation kept its branch and lost its Worktree, so it gets one back on
+//! the branch. And a Draft has neither, so the branch is cut where a grill start
+//! would have cut it: off the base the human fixed, resolved at this moment. See
+//! [`somewhere`], which is the one place any of it is decided.
 //!
-//! **The record is two Events and a Pairing.** The Steer is the human's — *I
-//! moved this* — the machine's plain Moved line stands under it, which is the
-//! order the moment happened in, and the Pairing the modal settled is written
-//! beside them: steering re-settles what runs the work rather than picking for
-//! one session. See [`store::steer_conversation`], which writes all of it in one
-//! transaction.
+//! **The record is two Events, a Pairing and whatever was made.** The Steer is
+//! the human's — *I moved this* — the machine's plain Moved line stands under
+//! it, which is the order the moment happened in, and beside them go the Pairing
+//! the modal settled and the Worktree and base commit the steer had to make:
+//! steering re-settles what runs the work rather than picking for one session.
+//! See [`store::steer_conversation`], which writes all of it in one transaction.
 //!
-//! **What each target starts is the ordinary recompute.** Into Wrapping it is
-//! the wrap-up's own watchers over whatever the branch now holds, with the fix
-//! attempts forgotten — which is what a pressed Resume already does there, and
-//! it is reused rather than forked. Into Done there is nothing to start at all.
+//! **What each target starts is the ordinary recompute.** Into Grilling it is a
+//! fresh grilling on the round's own Brief, primed with the digest of what has
+//! already been answered where the human asked for it — which is
+//! [`crate::grillings::again`], the relaunch a pressed Resume makes, reused
+//! rather than forked. Into Wrapping it is the wrap-up's own watchers over
+//! whatever the branch now holds, with the fix attempts forgotten, which is what
+//! that press does there. Into Done there is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
+
+use std::path::PathBuf;
 
 use verkstead_render::{ConversationSteered, SteerOpened, SteerSubmission, SteerTarget};
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::grillings::Digest;
 use crate::profiles::Unlisted;
 use crate::store::{self, Conversation, Lifecycle, Role, Settling};
 
@@ -91,10 +102,10 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 /// they said it.
 ///
 /// In order: refuse what cannot be done at all; end what is running where
-/// **Interrupt current task** was ticked; make the Worktree again where the
-/// directory it names has gone; clear the stop the click left; move the
-/// Conversation, recording the Steer and the Pairing as one act; and then start
-/// whatever the target needs starting.
+/// **Interrupt current task** was ticked; make whatever the work needs and has
+/// not got — a Worktree, and the branch under it; clear the stop the click left;
+/// move the Conversation, recording the Steer, the Brief, the Pairing and what
+/// was just made as one act; and then start whatever the target needs starting.
 ///
 /// **The refusals go first**, before anything is ended, rebuilt or cleared. The
 /// browser is holding the request open for the answer, and a refusal that had
@@ -147,21 +158,47 @@ pub(crate) async fn submit(
         );
     }
 
-    if !usable(&conversation, submission.target).await? {
-        return Ok(ConversationSteered::WorktreeRefused);
-    }
+    let made = match somewhere(state, &conversation, submission.target).await? {
+        Making::Refused(refusal) => return Ok(refusal),
+        Making::Ready(made) => made,
+    };
 
     clear(state, conversation_id).await?;
 
-    let pairing = settling(&conversation, submission);
+    let steer = store::Steer {
+        target,
+        pairing: settling(&conversation, submission),
+        brief: brief(submission),
+        worktree: made.worktree.as_deref(),
+        base_commit: made.base_commit.as_deref(),
+    };
 
-    match store::steer_conversation(&state.pool, conversation_id, target, pairing).await? {
+    match store::steer_conversation(&state.pool, conversation_id, steer).await? {
         store::Steering::NoSuchConversation => return Ok(ConversationSteered::NoSuchConversation),
         store::Steering::NoSuchProfile => return Ok(ConversationSteered::NoSuchProfile),
         store::Steering::Steered => {}
     }
 
     match submission.target {
+        // A grilling from the beginning, which is the only kind there is: an
+        // interview lives in the session having it, so there is never one to
+        // pick up. What that session is primed with is the round's own Brief —
+        // the one the modal just wrote, or the one that was already there — and
+        // the digest of everything answered where the human asked for it. See
+        // [`crate::grillings::again`], which is the same launch a pressed Resume
+        // makes and which holds the registration until its session has one.
+        SteerTarget::Grilling => {
+            tokio::spawn(crate::grillings::again(
+                state.clone(),
+                conversation_id,
+                driving,
+                match submission.digest {
+                    true => Digest::Prime,
+                    false => Digest::Skip,
+                },
+            ));
+        }
+
         // The wrap-up's four watchers over the top of whatever the branch now
         // holds, with the fix attempts forgotten: exactly what a pressed Resume
         // does for a wrapping Conversation, reused rather than forked. Each of
@@ -224,16 +261,6 @@ async fn refusal(
         return Ok(Some(ConversationSteered::NoPullRequest));
     }
 
-    // And somewhere to run: every state past drafting has a Worktree, so one
-    // missing from the record is a record that cannot be true. There is nothing
-    // to make one from either — the path is Verkstead's own to have chosen, and
-    // nothing here knows which one it chose. Whether the directory is still
-    // *there* is a different question, asked after the refusals and answered by
-    // making it again — see [`usable`].
-    if submission.target.runs() && conversation.worktree.is_none() {
-        return Ok(Some(ConversationSteered::NowhereToWork));
-    }
-
     let Some(role) = role(submission.target) else {
         return Ok(None);
     };
@@ -258,6 +285,29 @@ async fn refusal(
     Ok(fixed(conversation, role)
         .is_none()
         .then_some(ConversationSteered::NoPairing))
+}
+
+/// The new round's Brief to write with the move, or `None` where there is none
+/// to write.
+///
+/// Whitespace alone counts as none: a textarea the human tabbed through is a
+/// steer without a brief, and a Brief Event holding a blank line would be a
+/// round that says it was started from nothing in particular. What is written is
+/// what they typed, though, exactly as the drafting field saves it — a document
+/// is kept as its author left it.
+///
+/// Only where a round is being opened. A brief that arrived beside another
+/// target is a page sending a field it should not have drawn, and what a Brief
+/// Event under a wrap-up would mean is nothing at all.
+fn brief(submission: &SteerSubmission) -> Option<&str> {
+    if submission.target != SteerTarget::Grilling {
+        return None;
+    }
+
+    submission
+        .brief
+        .as_deref()
+        .filter(|brief| !brief.trim().is_empty())
 }
 
 /// The Pairing to write with the move, or `None` where there is none to write.
@@ -291,9 +341,12 @@ fn settling<'a>(
 ///
 /// The wrap-up's watchers dispatch fix sessions, review sessions and comment
 /// sessions, and every one of them is the work itself: they run under the
-/// implementation Pairing, the same one the backlog was worked under.
+/// implementation Pairing, the same one the backlog was worked under. A grilling
+/// is the other one, which is what an interview runs under whatever else has
+/// happened since.
 fn role(target: SteerTarget) -> Option<Role> {
     match target {
+        SteerTarget::Grilling => Some(Role::Grilling),
         SteerTarget::Wrapping => Some(Role::Implementation),
         SteerTarget::Done => None,
     }
@@ -310,40 +363,127 @@ fn fixed(conversation: &Conversation, role: Role) -> Option<i64> {
     pairing.as_ref().map(|pairing| pairing.profile.id)
 }
 
-/// Make sure there is a Worktree to work in, and say whether there is.
+/// Make sure there is somewhere to work, and say what had to be made.
 ///
-/// `true` without looking at anything where the target runs nothing: Done needs
+/// Nothing made and nothing looked at where the target runs nothing: Done needs
 /// no directory, and a steer into it must not turn on whether one is still
 /// there.
 ///
-/// Otherwise the same two calls Resume makes, in the same order and for the same
-/// reason: a directory deleted, hollowed out or dropped from the repository's
-/// list of worktrees is a Conversation stuck for good, and a worktree is derived
-/// state — the branch holds everything that was committed. Nothing healthy is
-/// touched, uncommitted changes and all. See [`crate::worktrees::healthy`].
+/// Otherwise the three cases, cheapest first, and which one a Conversation is in
+/// is a fact about it rather than a choice:
+///
+/// - **A Worktree git can still answer about is left exactly as it stands**,
+///   uncommitted changes and all — see [`crate::worktrees::healthy`], which is
+///   the same reading a pressed Resume makes.
+/// - **A branch with no Worktree on it gets one**: a directory deleted, hollowed
+///   out or dropped from the repository's list of worktrees, and a closed
+///   Conversation whose Worktree was taken away and whose branch was kept. A
+///   worktree is derived state, so it is made again rather than refused on.
+/// - **A branch that was never made is cut**, off the base the human fixed while
+///   drafting or the Repo's default branch where they fixed none — resolved at
+///   this moment, exactly as [`crate::conversations::start_grilling`] resolves
+///   it, because what they picked is a branch and what they meant by picking it
+///   is wherever it stands now.
+///
+/// Which is why the path is chosen here where the record holds none: it is
+/// chosen the way a first grilling chooses one, and this is a first grilling for
+/// everything but the Conversation's name.
+///
+/// [`crate::worktrees::branch_taken`] rather than `branch_exists` for the one
+/// question that decides between the last two: cutting a branch over somebody
+/// else's work is the mistake pressing the button again cannot undo, so a read
+/// git would not answer counts as a branch that is there.
 ///
 /// Off the runtime's threads, a checkout of a large repository being no quick
 /// call and every part of this blocking.
-async fn usable(conversation: &Conversation, target: SteerTarget) -> anyhow::Result<bool> {
+async fn somewhere(
+    state: &AppState,
+    conversation: &Conversation,
+    target: SteerTarget,
+) -> anyhow::Result<Making> {
     if !target.runs() {
-        return Ok(true);
+        return Ok(Making::Ready(Made::default()));
     }
 
-    let Some(worktree) = conversation.worktree.clone() else {
-        // Refused before this by [`refusal`], which reads the same field: there
-        // is no path to make one at, Verkstead's own choice of path being
-        // nothing this knows.
-        return Ok(false);
-    };
+    let path = conversation.worktree.clone().unwrap_or_else(|| {
+        crate::worktrees::worktree_path(
+            &state.data_dir,
+            conversation.id,
+            &conversation.repo.name,
+            &conversation.branch,
+        )
+    });
 
     let repo = conversation.repo.path.clone();
     let branch = conversation.branch.clone();
 
-    Ok(tokio::task::spawn_blocking(move || {
-        crate::worktrees::healthy(&repo, &worktree, &branch)
-            || crate::worktrees::rebuild(&repo, &worktree, &branch)
+    // What a branch that has never been cut comes off, named rather than
+    // resolved: a drafting Conversation's column holds the *branch* the human
+    // picked, and where they picked none the rule is the Repo's default branch.
+    let named = conversation
+        .base_commit
+        .clone()
+        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+    let made = tokio::task::spawn_blocking({
+        let path = path.clone();
+
+        move || {
+            if crate::worktrees::healthy(&repo, &path, &branch) {
+                return Ok(None);
+            }
+
+            if crate::worktrees::branch_taken(&repo, &branch) {
+                return crate::worktrees::rebuild(&repo, &path, &branch)
+                    .then_some(None)
+                    .ok_or(ConversationSteered::WorktreeRefused);
+            }
+
+            let Some(commit) = crate::worktrees::resolve(&repo, &named) else {
+                return Err(ConversationSteered::NoBaseCommit);
+            };
+
+            crate::worktrees::add(&repo, &path, &branch, &commit)
+                .then_some(Some(commit))
+                .ok_or(ConversationSteered::WorktreeRefused)
+        }
     })
-    .await?)
+    .await?;
+
+    Ok(match made {
+        // The path either way, healthy or made: the record may never have held
+        // one, and writing back the one it did hold changes nothing.
+        Ok(base_commit) => Making::Ready(Made {
+            worktree: Some(path),
+            base_commit,
+        }),
+        Err(refusal) => Making::Refused(refusal),
+    })
+}
+
+/// What making somewhere to work came to.
+enum Making {
+    Ready(Made),
+
+    /// Git would not, and the human is told which way it would not — see
+    /// [`ConversationSteered::WorktreeRefused`] and
+    /// [`ConversationSteered::NoBaseCommit`].
+    Refused(ConversationSteered),
+}
+
+/// What the steer has to record about where the work will run.
+///
+/// Both `None` for a target nothing runs in, which is what [`Default`] is here
+/// for: a steer into Done makes nothing and writes nothing about a directory.
+#[derive(Default)]
+struct Made {
+    /// Where the work goes on.
+    worktree: Option<PathBuf>,
+
+    /// What the branch was cut from, where this is what cut it. `None` on every
+    /// Conversation that had a branch already: what it branched from was
+    /// resolved once, and it is not resolved again.
+    base_commit: Option<String>,
 }
 
 /// The state a target names.
@@ -354,6 +494,7 @@ async fn usable(conversation: &Conversation, target: SteerTarget) -> anyhow::Res
 /// *from*, and only some of them are somewhere to steer *to*.
 fn target(target: SteerTarget) -> Lifecycle {
     match target {
+        SteerTarget::Grilling => Lifecycle::Grilling,
         SteerTarget::Wrapping => Lifecycle::Wrapping,
         SteerTarget::Done => Lifecycle::Done,
     }

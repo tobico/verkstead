@@ -1,18 +1,21 @@
-//! Starting a grilling again on a Conversation whose grilling session died.
+//! Starting a grilling again: on a Conversation whose grilling session died, and
+//! on one the human has steered into a round of its own.
 //!
 //! The one relaunch that cannot pick up where the last one left off. A run's
 //! driver reads what is next off the repository and a wrap-up's watchers ask the
 //! pull request, so both of those take up work that is written down somewhere —
 //! but a grilling is an interview, and an interview lives in the session having
 //! it. Nothing survives the process it ran in, so what a retried grilling is, is
-//! a fresh one: the same Brief, from the beginning.
+//! a fresh one: the round's Brief, from the beginning.
 //!
-//! **Except for what was already settled.** The Questions the dead session asked
-//! and the Answers the human gave are on the Timeline, which is the one part of
-//! an interview that does outlive it — so they go into the prompt as a digest
-//! under the Brief, in the order they were asked. A grilling that opened by
-//! asking again what the human had already decided would be a retry that cost
-//! them the interview twice.
+//! **Except for what was already settled**, where the press says so. The
+//! Questions the dead session asked and the Answers the human gave are on the
+//! Timeline, which is the one part of an interview that does outlive it — so
+//! they go into the prompt as a digest under the Brief, in the order they were
+//! asked. A retry that opened by asking again what the human had already decided
+//! would cost them the interview twice, which is why Resume always carries it;
+//! a steer is the human opening a round on their own account, so there it is a
+//! choice — see [`Digest`].
 //!
 //! **And except for what was left hanging.** A session that died mid-question
 //! leaves a **Blocking Ask** open with nothing waiting on the Answer: the human
@@ -36,20 +39,36 @@ use crate::exchanges::exchange;
 use crate::skills;
 use crate::store;
 
-/// Grill the work again, because the human pressed Resume on a Conversation
-/// nothing was grilling.
+/// Whether the fresh session is primed with everything the human has already
+/// answered.
 ///
-/// Nothing is carried from the press: Resume steers nothing, steering the work
-/// being what a Manual Task is for. What the fresh session is given is the Brief
-/// and the digest of what has already been settled, which is the whole of what
-/// survived the interview.
+/// A choice because a steer made it one. Resume is a relaunch of the interview
+/// that died, so it carries what that interview settled and always will; a steer
+/// into Grilling is the human opening a round on their own account, often on a
+/// brief they have just written, and priming that with the whole of the last
+/// interview would be steering into the argument they have just left behind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Digest {
+    /// Under the Brief, in the order it was asked.
+    Prime,
+
+    /// The Brief alone, which is where every grilling starts.
+    Skip,
+}
+
+/// Grill the work again, because the human pressed Resume on a Conversation
+/// nothing was grilling — or steered one into Grilling.
+///
+/// Nothing else is carried from either press. What the fresh session is given is
+/// the Brief of the round it is in and, where `digest` says so, what has already
+/// been settled — which is the whole of what survives an interview.
 ///
 /// `driving` is the registration the press took as it arrived, held across the
 /// launch and let go once the session is registered.
 /// What drives a grilling is its session and nothing else — see
 /// [`crate::drivers`] — so this is a handover to the session rather than to a
 /// task of Verkstead's, and it is over the moment there is one.
-pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving) {
+pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving, digest: Digest) {
     // Waited for rather than tried for: the human presses Resume whenever they
     // get to it, and nothing is holding a request open on what it starts. So
     // whatever is running — a Manual Task they set going while the work stood
@@ -71,7 +90,12 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 
     orphaned(&state, conversation_id, &timeline).await;
 
-    let prompt = skills::grilling_again(&brief(&timeline), &settled(&timeline));
+    // The round's own Brief either way — the newest on the Timeline, which is
+    // the one the round this session belongs to was opened with.
+    let prompt = match digest {
+        Digest::Prime => skills::grilling_again(&brief(&timeline), &settled(&timeline)),
+        Digest::Skip => skills::grilling(&brief(&timeline)),
+    };
 
     // Read back here rather than carried from anywhere: a stall may be answered
     // the next morning, and where an agent is about to be let loose is the one
@@ -130,19 +154,23 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
     drop(driving);
 }
 
-/// Archive every Question Set the dead session left open, so that nothing is
-/// left for the human to answer into.
+/// Archive every Question Set left open, so that nothing is left for the human
+/// to answer into.
 ///
 /// An open Set is a question with a reader, and the reader has gone: the badge
 /// still says *blocked on you*, the Set still takes an Answer, and what the
 /// human writes goes nowhere. Archiving unanswered is what that Set has always
 /// meant — see [`store::archive_set`] — and this is Verkstead reaching for it on
 /// their behalf, because it knows something they cannot see: the session that
-/// asked is not there any more.
+/// asked is not there any more, or is about to not be.
+///
+/// The same on a steer, and for the same reason read forward rather than back: a
+/// session that is about to be replaced is a reader that has gone, and the
+/// question it left standing is one the human would be answering into nothing.
 ///
 /// Every one of them rather than the newest. One Worktree holds one agent, so
 /// more than one open at once is unusual, but they were all orphaned by the same
-/// death and none of them has anybody waiting on it.
+/// thing and none of them has anybody waiting on it.
 ///
 /// Nothing is refused for. A Set that will not archive is a Set the human can
 /// archive themselves from the page it is on, and stopping the relaunch over one

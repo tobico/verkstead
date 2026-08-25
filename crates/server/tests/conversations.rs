@@ -732,6 +732,24 @@ async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> Con
     .await
 }
 
+/// And the same submit into Grilling, which is the one target that carries a
+/// payload: the round's Brief where the human wrote one.
+///
+/// The digest is left off, that being the default and the one thing these cannot
+/// read back — what it primes is a session's prompt, and no session runs here.
+async fn steer_grilling(app: &Router, id: i64, brief: Option<&str>) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": false,
+            "brief": brief,
+        }),
+    )
+    .await
+}
+
 /// What a Conversation's Timeline says about where the work went, in order: the
 /// states the human steered it into and the states it moved to.
 ///
@@ -1319,6 +1337,234 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
     assert_eq!(
         steered(&view),
         [("steer", Lifecycle::Done), ("moved", Lifecycle::Done)],
+    );
+}
+
+/// A Draft steered into Grilling gets everything a pressed *Start grilling*
+/// would have given it: the branch cut off the base, the worktree checked out on
+/// it, and the commit it came off recorded.
+///
+/// The source with the least behind it, and the reason recreating is part of a
+/// steer at all. What the human fixed while drafting is a *branch*, and this is
+/// the moment it resolves to a commit — the same rule
+/// [`starting_a_grilling_makes_the_branch_and_the_worktree`] asks of the button.
+///
+/// And the round it opens is opened with the brief they typed in the modal: a
+/// second Brief beside the draft's own, frozen where it lands, because the round
+/// it belongs to has no Draft to leave.
+#[tokio::test]
+async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(
+        steered(&view),
+        [
+            ("steer", Lifecycle::Grilling),
+            ("moved", Lifecycle::Grilling)
+        ],
+    );
+    assert_eq!(
+        view.base_commit.as_deref(),
+        Some(tip.as_str()),
+        "the base the human left on the default branch, resolved at the steer",
+    );
+
+    // The branch is in the Repo's own git directory, cut where the base said.
+    assert_eq!(
+        git(
+            &repo,
+            &["rev-parse", &format!("refs/heads/{}", view.branch)]
+        )
+        .trim(),
+        tip,
+    );
+
+    let worktree = view
+        .worktree
+        .as_ref()
+        .expect("the steer checked one out and recorded it");
+    let path = PathBuf::from(&worktree.path);
+
+    assert!(!worktree.missing);
+    assert_eq!(path.parent(), Some(dir.path().join("worktrees").as_path()));
+    assert!(path.join("README.md").is_file());
+    assert_eq!(
+        git(&path, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+    );
+    assert!(
+        worktrees(&repo).contains(&path.canonicalize().unwrap()),
+        "git knows about it, which is what makes it a worktree: {:?}",
+        worktrees(&repo),
+    );
+
+    // And the round's own Brief, beside the one the draft was written with
+    // rather than over the top of it.
+    let briefs = briefs(&view);
+
+    assert_eq!(briefs.len(), 2);
+    assert_eq!(briefs[1].markdown, "# Retries\n\nThe backoff is wrong.\n");
+    assert!(
+        briefs.iter().all(|brief| brief.frozen),
+        "both of them: the round this opened is past drafting from the moment \
+         it opened",
+    );
+}
+
+/// And a steer without one leaves the Steer Event alone: the round starts on the
+/// Brief that is already there.
+#[tokio::test]
+async fn steering_into_grilling_without_a_brief_writes_none() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(
+        briefs(&view)
+            .iter()
+            .map(|brief| brief.markdown.as_str())
+            .collect::<Vec<_>>(),
+        [brief(&view).markdown.as_str()],
+        "the one it was drafted with, and nothing written over it",
+    );
+}
+
+/// The Pairing picked in the modal for a steer into Grilling is the *grilling*
+/// one, and it is recorded as the Conversation's own.
+///
+/// Which of the two follows the target, an interview running under the one and
+/// everything that builds running under the other — and the role not steered
+/// into is nobody's to re-settle here.
+#[tokio::test]
+async fn steering_into_grilling_settles_the_grilling_pairing() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let picked = profile(&app, watched.path(), "steering").await;
+    let building = opened(&app, id)
+        .await
+        .implementation_pairing
+        .expect("the fixture picks one per role");
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": false,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+    let interviewing = view
+        .grilling_pairing
+        .expect("the steer settled the role it was steered into");
+
+    assert_eq!(interviewing.profile.id, picked);
+    assert_eq!(
+        interviewing.model.as_deref(),
+        Some("claude-opus-5"),
+        "both halves of it: either alone is not something to launch a session with",
+    );
+    assert_eq!(
+        view.implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(building.profile.id),
+        "and the other is exactly where it was",
+    );
+}
+
+/// A closed Conversation is a source like any other: its Worktree was deleted
+/// and its branch kept, so a steer checks the branch out again into one.
+///
+/// The branch is what carries the work, and it is the half aborting leaves
+/// standing — so nothing is cut afresh here and nothing is started over. What
+/// the steer makes is the directory, at the path a first grilling would have
+/// chosen, on the branch that is already there.
+#[tokio::test]
+async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let branch = view.branch.clone();
+    let base = view.base_commit.clone();
+    let worked_in = PathBuf::from(view.worktree.unwrap().path);
+
+    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert!(!worked_in.exists(), "aborting took the directory away");
+    assert!(opened(&app, id).await.worktree.is_none());
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling);
+    assert_eq!(view.branch, branch, "on the branch aborting kept");
+    assert_eq!(
+        view.base_commit, base,
+        "and what it branched from is what it always branched from: nothing was \
+         cut here to resolve again",
+    );
+
+    let worktree = view.worktree.expect("the steer made one");
+
+    assert!(!worktree.missing);
+    assert_eq!(
+        git(
+            Path::new(&worktree.path),
+            &["symbolic-ref", "--short", "HEAD"]
+        )
+        .trim(),
+        branch,
+    );
+    assert!(
+        worktrees(&repo).contains(&PathBuf::from(&worktree.path).canonicalize().unwrap()),
+        "git knows about it: {:?}",
+        worktrees(&repo),
     );
 }
 

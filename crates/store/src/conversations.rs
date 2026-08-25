@@ -2499,6 +2499,14 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// it is what came of the act, which is the same order a Manual Task's
 /// instruction stands in above what its session went on to do.
 ///
+/// **A third where the steer opens a round**: the Brief the human wrote for it,
+/// under the move rather than above it, because the move is where the round
+/// boundary falls and the Brief belongs to the round that starts there — which
+/// is the order [`reopen_conversation`] writes those two in. Frozen where it
+/// lands, the round it opens being past drafting, and a second Brief Event
+/// beside the first rather than an edit of it: what the earlier round was built
+/// from stays on the record.
+///
 /// One transaction, as every move is: a Conversation that says Done always has
 /// the move on its Timeline to say when it got there, and one steered always has
 /// the human's own line above it.
@@ -2515,16 +2523,24 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// Pairing to settle, and a human who left the picker on what the Conversation
 /// already had has changed none.
 ///
-/// Nothing about the Worktree, the branch or the run is touched here. What has
-/// to exist before the work can go on is made against git and the filesystem
-/// before this is called, and what has to stop running is stopped before it —
-/// see the server's `steering` module, which is the only caller.
-pub async fn steer_conversation(
-    pool: &SqlitePool,
-    id: i64,
-    target: Lifecycle,
-    pairing: Option<Settling<'_>>,
-) -> Result<Steering> {
+/// **And what the steer had to make before it could move anything**, which is
+/// the Worktree it is to run in and — for a Draft, which has never had one — the
+/// commit its branch was cut from. Recorded here rather than made here: git and
+/// the filesystem are the server's to reach, and what this writes is the record
+/// of work that has already happened. See [`Steer`].
+///
+/// Nothing about the run is touched, and what has to stop running is stopped
+/// before this is called — see the server's `steering` module, which is the only
+/// caller.
+pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) -> Result<Steering> {
+    let Steer {
+        target,
+        pairing,
+        brief,
+        worktree,
+        base_commit,
+    } = steer;
+
     let mut tx = pool.begin().await.context("steering a Conversation")?;
 
     let steer = Event::Steer(target);
@@ -2557,7 +2573,70 @@ pub async fn steer_conversation(
         .await
         .with_context(|| format!("steering Conversation {id} into {}", target.stored()))?;
 
+    // What the branch was cut from, for the one source that had no branch: a
+    // Draft's column holds the base the human picked while drafting, which is a
+    // *branch* until the moment something resolves it. This is that moment, as
+    // [`start_grilling`] is for a Conversation that reached grilling the
+    // ordinary way — and after it there is a fact about what the work branched
+    // from rather than a rule about what it would have.
+    if let Some(base_commit) = base_commit {
+        sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
+            .bind(base_commit)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("recording what Conversation {id} branched from"))?;
+    }
+
+    // And where the work goes on, written over whatever was there: a
+    // Conversation that kept its directory is written the same path back, and
+    // one that never had it — a Draft, or a closed Conversation whose Worktree
+    // was deleted — is written the one the steer has just checked out.
+    if let Some(worktree) = worktree {
+        sqlx::query(
+            "INSERT INTO worktrees (conversation_id, path) VALUES (?, ?)
+             ON CONFLICT(conversation_id) DO UPDATE SET path = excluded.path",
+        )
+        .bind(id)
+        .bind(super::repos::text(worktree)?)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording the worktree of Conversation {id}"))?;
+    }
+
+    // A steer into Grilling opens a round, so the round before it is over and
+    // its wrap-up bookkeeping goes with it — the same forgetting a reopened
+    // Conversation does, for the same reason: a round that inherited the one
+    // before it would reach Wrapping with everything wrap-up waits on already
+    // settled, and would be over the moment it arrived. See
+    // [`super::wrap_up::forget_the_round`].
+    if target == Lifecycle::Grilling {
+        super::wrap_up::forget_the_round(&mut tx, id).await?;
+    }
+
     moved(&mut tx, id, target).await?;
+
+    // The new round's Brief under the move, which is the order
+    // [`reopen_conversation`] writes the two in and for its reason: the move is
+    // where the round boundary falls, and the Brief under it belongs to the
+    // round that starts there. Frozen from the moment it lands — the round it
+    // opens is past drafting, which is the only state [`save_brief`] will edit
+    // one in — and a second Brief Event beside the first rather than an edit of
+    // it.
+    if let Some(brief) = brief {
+        let event = Event::Brief(brief.to_owned());
+
+        sqlx::query(
+            "INSERT INTO timeline_events (conversation_id, at, kind, body)
+             VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?)",
+        )
+        .bind(id)
+        .bind(event.kind())
+        .bind(event.body())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("writing the steered round's Brief of Conversation {id}"))?;
+    }
 
     if let Some(pairing) = pairing
         && !settle(
@@ -2575,6 +2654,39 @@ pub async fn steer_conversation(
     tx.commit().await.context("steering a Conversation")?;
 
     Ok(Steering::Steered)
+}
+
+/// Everything one steer writes: where it goes, and whatever the human's press
+/// settled or the server had to make on the way.
+///
+/// One struct rather than a parameter list, because all of it is one act. A
+/// steer moves the Conversation, and the Brief the human wrote, the Pairing they
+/// picked and the Worktree that had to exist before any of it could run are
+/// parts of that move rather than things done beside it — a Conversation left
+/// wrapping under a Pairing that was not written, or grilling a round whose
+/// Brief did not land, would be a move only half made.
+///
+/// Everything but the target is `None` in the ordinary case, and each `None`
+/// says something different: no Brief is a steer into a round that starts on the
+/// Brief already there, no Pairing is a picker left on what the Conversation
+/// already had, and no Worktree or base commit is a target nothing runs in or a
+/// Conversation that had both already.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Steer<'a> {
+    /// Which state the human moved it into.
+    pub target: Lifecycle,
+
+    /// What the work runs under from here, where they picked something new.
+    pub pairing: Option<Settling<'a>>,
+
+    /// The new round's Brief, for a steer that opens one.
+    pub brief: Option<&'a str>,
+
+    /// Where the work goes on, for a target something runs in.
+    pub worktree: Option<&'a Path>,
+
+    /// And what its branch was cut from, where the steer is what cut it.
+    pub base_commit: Option<&'a str>,
 }
 
 /// A Pairing a steer settles: which of the two roles, and both halves of the

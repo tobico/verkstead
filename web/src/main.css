@@ -606,6 +606,52 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
+/* The new round's brief and what the interview is primed with, drawn only under
+   grilling. A textarea the size of a paragraph rather than of a document: what
+   goes here is a brief, and one long enough to need scrolling is one to write in
+   the drafting pane. */
+.steer-brief {
+  margin: 0 0 1rem;
+}
+
+.steer-brief > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steer-brief textarea {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  resize: vertical;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steer-brief .note {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The digest, which is a choice about the same round: kept in the brief's own
+   block rather than set apart, and drawn as the interrupt's checkbox is. */
+.steer-brief .steer-digest {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-top: 0.9rem;
+  font-weight: 600;
+}
+
+.steer-brief .steer-digest + .note {
+  margin-left: 1.5rem;
+}
+
 /* What the work runs under from here, drawn only under a target something runs
    in. A label above the control rather than beside it, as the setup pane's two
    pickers are: the line under it says the thing worth reading twice, which is

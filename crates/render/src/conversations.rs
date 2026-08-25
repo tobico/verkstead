@@ -1738,12 +1738,22 @@ pub enum SteerOpened {
 /// Where a steer can send a Conversation.
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
-/// its own, and a steer is for the four states the work is *done in*. The two
-/// that are not here yet arrive with the tasks that build what each of them
-/// launches — a target the modal offers is a target something runs for.
+/// its own, and a steer is for the four states the work is *done in*. The one
+/// that is not here yet arrives with the task that builds what it launches — a
+/// target the modal offers is a target something runs for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
+    /// A new round: the work grilled again, from whatever brief the human writes
+    /// in the modal and against as much of the last interview as they ask for.
+    ///
+    /// The target that recreates the most, because it is the one reachable from
+    /// the states that hold the least. A Draft has neither branch nor Worktree
+    /// and gets both, its base commit resolved as a grill start resolves one; a
+    /// closed Conversation kept its branch and lost its Worktree, and gets the
+    /// branch checked out again into one.
+    Grilling,
+
     /// The branch looked at again: the checks watched, the review run, the
     /// comments answered. No payload — the wrap-up's watchers work out for
     /// themselves what is left to do, which is what a pressed Resume already
@@ -1770,7 +1780,7 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Wrapping => true,
+            Self::Grilling | Self::Wrapping => true,
             Self::Done => false,
         }
     }
@@ -1804,6 +1814,33 @@ pub struct SteerSubmission {
     /// name.
     #[serde(default)]
     pub pairing: Option<ProfileChoice>,
+
+    /// The new round's Brief, for a steer into Grilling.
+    ///
+    /// It lands as a Brief Event of its own, frozen the moment it does: a Brief
+    /// freezes when its round leaves Draft, and a round steered into has no
+    /// Draft to leave. A second Brief beside the first rather than an edit of
+    /// it — what the earlier round was built from stays on the record.
+    ///
+    /// Absent is the ordinary case and not a refusal: the session starts on the
+    /// Brief that is already there, and the steer leaves nothing but its own
+    /// Event behind.
+    #[serde(default)]
+    pub brief: Option<String>,
+
+    /// Whether the session is primed with everything the human has already
+    /// answered.
+    ///
+    /// The digest a relaunched grilling assembles for itself — every answered
+    /// Question Set of the Conversation, in the order it was asked — offered
+    /// here as a choice rather than always sent. A fresh brief is often the
+    /// point of the steer, and priming it with the whole of the last interview
+    /// would be steering into the argument that has just been left behind.
+    ///
+    /// Nothing anywhere else reads it: a target that starts no grilling starts
+    /// nothing to prime.
+    #[serde(default)]
+    pub digest: bool,
 }
 
 /// What became of submitting one.
@@ -1843,10 +1880,14 @@ pub enum ConversationSteered {
     /// Or a model that Profile does not list, for the same reason.
     NoSuchModel,
 
-    /// There is no Worktree on the record to work in, and a target something
-    /// runs in needs one. Nothing here knows what path to make: it is
-    /// Verkstead's own to have chosen.
-    NowhereToWork,
+    /// The branch has never been made and nothing in the repository answers to
+    /// what it would come off.
+    ///
+    /// A Draft alone, which is the one source with no branch behind it: what it
+    /// branches from is the base the human fixed while drafting, or the Repo's
+    /// default branch where they fixed none, and a repository that has since
+    /// lost either is one they can point at another.
+    NoBaseCommit,
 
     /// What the record names is not a Worktree any more, and git would not make
     /// it again from the branch.

@@ -11,14 +11,18 @@
 //! is nothing to drive in done, so no pairing is picked and no payload is
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
-//! but it does need a pairing, because sessions run there. The two targets that
-//! carry a payload arrive with the tasks that build what each of them starts.
+//! but it does need a pairing, because sessions run there. **Grilling** is the
+//! one that carries a payload: a new brief, which is optional, and a choice
+//! about how much of the last interview the session is primed with. The one
+//! target left arrives with the task that builds what it starts.
 //!
 //! **The pairing is the conversation's, not the session's.** It is prefilled
 //! from what the conversation already runs the work under and what is picked is
 //! recorded as the conversation's own: steering re-settles what runs the work.
 //! A steered draft has none fixed yet, which is why the pick is part of the form
-//! rather than an error path.
+//! rather than an error path. Which of the two pairings is shown follows the
+//! target: a grilling runs under the grilling one, and everything that builds
+//! runs under the other.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
 //! rather than about the move. A session left alone is seen out to its own end,
@@ -53,7 +57,8 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
   NoPairing: "Pick the account and model the work runs under from here.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
-  NowhereToWork: "There is no worktree on the record to work in.",
+  NoBaseCommit:
+    "Nothing in the repository answers to what this branch would come off. Fix the base branch and steer it again.",
   WorktreeRefused:
     "Its worktree is not one any more, and git would not make it again from the branch.",
 };
@@ -61,23 +66,37 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
 /// Where a steer can send a conversation, and what each target means.
 ///
 /// Draft and closed are not here and never will be: each has a way in of its
-/// own. The other two targets arrive with the tasks that build what each of them
-/// launches — a target the modal offers is a target something runs for.
+/// own. The one target left arrives with the task that builds what it launches —
+/// a target the modal offers is a target something runs for.
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
-/// settled, and one nothing runs in needs none.
+/// settled, and one nothing runs in needs none. `role` is which of the two
+/// pairings that is, there being one for the interviewing and one for
+/// everything that builds.
+///
+/// In the order the work goes through them, because that is the order the human
+/// reads the pipeline in everywhere else.
 const TARGETS: {
   target: SteerTarget;
   label: string;
   note: string;
   runs: boolean;
+  role?: "grilling" | "implementation";
 }[] = [
+  {
+    target: "Grilling",
+    label: "Grilling",
+    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been closed.",
+    runs: true,
+    role: "grilling",
+  },
   {
     target: "Wrapping",
     label: "Wrapping up",
     note: "The branch looked at again: the checks watched, the review run, the comments answered. The fix attempts start over.",
     runs: true,
+    role: "implementation",
   },
   {
     target: "Done",
@@ -135,6 +154,11 @@ export function Steer(props: {
     () => offered().find((one) => one.target === target())?.runs ?? false,
   );
 
+  /// And which of the two pairings that picker is of.
+  const role = createMemo(
+    () => offered().find((one) => one.target === target())?.role,
+  );
+
   // The profile list is read here rather than passed in, so the picker is whole
   // wherever the modal is opened from — the setup pane does the same.
   const profiles = useReading(() => ({
@@ -150,9 +174,39 @@ export function Steer(props: {
   // What the work runs under from here, prefilled from what the conversation
   // already runs it under. The empty string is a conversation with none fixed
   // yet — a steered draft — which is a pick to make rather than an error.
-  const [picked, setPicked] = createSignal(
+  //
+  // One per role rather than one shared: the two are different choices about
+  // different work, and a pick made for a grilling that followed the human over
+  // to wrapping up would be the form answering a question they had not been
+  // asked.
+  const [grilling, setGrilling] = createSignal(
+    pairing.chosen(props.conversation.grilling_pairing),
+  );
+  const [implementation, setImplementation] = createSignal(
     pairing.chosen(props.conversation.implementation_pairing),
   );
+
+  /// The one the target picked runs under, and nothing where nothing runs.
+  const picked = createMemo(() =>
+    role() === "grilling" ? grilling() : role() ? implementation() : "",
+  );
+
+  const pick = (chosen: string) =>
+    role() === "grilling" ? setGrilling(chosen) : setImplementation(chosen);
+
+  /// The new round's brief, for a steer into grilling.
+  ///
+  /// Optional, and empty is the ordinary case: the round starts on the brief
+  /// that is already there. What is typed here lands as a brief of its own,
+  /// frozen the moment it does.
+  const [brief, setBrief] = createSignal("");
+
+  /// And whether the session is primed with everything already answered.
+  ///
+  /// Off to begin with, because the steer is usually a change of direction: a
+  /// fresh brief primed with the whole of the last interview would be steering
+  /// into the argument that has just been left behind.
+  const [digest, setDigest] = createSignal(false);
 
   const [interrupt, setInterrupt] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
@@ -166,6 +220,11 @@ export function Steer(props: {
         // settles no pairing, and a null there would be the form arguing with
         // itself about what it had picked.
         pairing: runs() && picked() ? pairing.choice(picked()) : null,
+        // And the payload of the one target that has one, for the same reason:
+        // a brief under a wrap-up would be a document about nothing, and a
+        // digest is what primes a grilling and nothing else.
+        brief: target() === "Grilling" && brief().trim() ? brief() : null,
+        digest: target() === "Grilling" && digest(),
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
@@ -229,6 +288,41 @@ export function Steer(props: {
           </For>
         </fieldset>
 
+        {/* Only under grilling, which is the one target that takes anything
+            written. Both are optional and both default to the quietest thing
+            they could mean: no brief is the round starting on the one already
+            there, and no digest is the interview starting from the brief alone. */}
+        <Show when={target() === "Grilling"}>
+          <div class="steer-brief">
+            <label for="steer-brief">A brief for the new round</label>
+            <textarea
+              id="steer-brief"
+              rows="6"
+              value={brief()}
+              onInput={(event) => setBrief(event.currentTarget.value)}
+              disabled={submit.isPending}
+              placeholder="Leave it empty to grill the brief that is already there."
+            />
+            <p class="note">
+              What you write lands as a brief of its own, frozen at once. The
+              brief the earlier round was built from stays on the timeline.
+            </p>
+
+            <label class="steer-digest">
+              <input
+                type="checkbox"
+                checked={digest()}
+                onChange={(event) => setDigest(event.currentTarget.checked)}
+              />
+              Prime it with everything you have already answered
+            </label>
+            <p class="note">
+              Every answered question set of this conversation, in the order it
+              was asked. Leave it off to start the interview fresh.
+            </p>
+          </div>
+        </Show>
+
         {/* Only where something runs in the state picked. What is settled here
             is the conversation's own pairing rather than one session's, which is
             what the line under it says: steering re-settles what runs the work.
@@ -245,8 +339,8 @@ export function Steer(props: {
               value={pairing.value}
               label={pairing.label}
               chosen={picked()}
-              pick={setPicked}
-              gone={() => setPicked("")}
+              pick={pick}
+              gone={() => pick("")}
               disabled={submit.isPending}
             />
             <p class="note">
