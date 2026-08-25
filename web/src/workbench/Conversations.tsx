@@ -56,6 +56,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
 // than by `Mark` because the sidebar has a state no running session has —
@@ -209,11 +210,11 @@ export function Conversations(props: {
           No alt text on it, because the word it stands beside is the alt text: a
           screen reader that read both would say the name twice.
 
-          `wordmark` is the class the pane head is handed for its `<h1>`, and it
-          is styled with the rest of what this pane draws — no way back either,
-          this being the level every other pane is entered from. */}
+          The wordmark is the class the pane head is handed for its `<h1>`, and
+          it is styled with the rest of what this pane draws — no way back
+          either, this being the level every other pane is entered from. */}
       <PaneHead
-        heading="wordmark"
+        heading={styles.wordmark}
         title={
           <>
             <img src="/icons/verkstead.svg" alt="" />
@@ -239,7 +240,7 @@ export function Conversations(props: {
           <Empty>Nothing is being worked on yet.</Empty>
         </Match>
         <Match when={conversations.data}>
-          <ul class="conversation-list" ref={list}>
+          <ul class={styles.conversationList} ref={list}>
             <For each={shown()}>
               {(entry) => (
                 <ConversationRow
@@ -293,7 +294,7 @@ export function Conversations(props: {
 function WorkbenchActions(): JSX.Element {
   return (
     <Menu
-      class="workbench-actions"
+      class={styles.workbenchActions!}
       label="Workbench actions"
       name="Workbench actions"
       trigger="⋯"
@@ -446,7 +447,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 
   return (
     <Menu
-      class="new-conversation"
+      class={styles.newConversation!}
       name="New conversation"
       closer={(close) => (shut = close)}
       opening={() => (taken = false)}
@@ -455,7 +456,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
           New conversation
           {/* Which way the menu will go, and no part of what the button
               says. */}
-          <span class="new-conversation-mark" aria-hidden="true">
+          <span aria-hidden="true">
             ▾
           </span>
         </>
@@ -467,7 +468,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
             <Match when={repos.data?.length === 0}>
               {/* Nothing to attach a Conversation to, so the only thing to
                   offer is the page that fixes that. */}
-              <Empty class="nothing">
+              <Empty class={styles.nothing}>
                 No repos are registered yet —{" "}
                 <A href="/settings">register one</A> to start a conversation.
               </Empty>
@@ -479,7 +480,6 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
                     <button
                       type="button"
                       role="menuitem"
-                      class="in-repo"
                       ref={(row) => at() === 0 && take(row)}
                       disabled={start.isPending}
                       onClick={() => start.mutate(repo.id)}
@@ -494,11 +494,11 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
 
           <Show when={roadmaps().length}>
             <div
-              class="menu-group"
+              class={styles.menuGroup}
               role="group"
               aria-labelledby="adopt-a-roadmap"
             >
-              <p class="menu-heading" id="adopt-a-roadmap">
+              <p class={styles.menuHeading} id="adopt-a-roadmap">
                 Adopt a roadmap
               </p>
               <For each={roadmaps()}>
@@ -506,7 +506,7 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
                   <button
                     type="button"
                     role="menuitem"
-                    class="adopt-roadmap"
+                    class={styles.adoptRoadmap}
                     disabled={adopt.isPending}
                     onClick={() =>
                       adopt.mutate({
@@ -515,11 +515,11 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
                       })
                     }
                   >
-                    <span class="what">
+                    <span class={styles.what}>
                       <code>{held.roadmap.name}</code>
-                      <span class="in">in {held.repo}</span>
+                      <span class={styles.in}>in {held.repo}</span>
                     </span>
-                    <span class="stage">
+                    <span class={styles.stage}>
                       next is stage {held.roadmap.stage}:{" "}
                       {held.roadmap.stage_title}
                     </span>
@@ -534,12 +534,12 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
               the menu is still open to say it in: a press that failed left
               nothing else on the screen to carry the news. */}
           <Show when={start.isError}>
-            <ErrorLine class="failure">
+            <ErrorLine class={styles.failure}>
               The conversation could not be started: {start.error?.message}
             </ErrorLine>
           </Show>
           <Show when={adopt.isError}>
-            <ErrorLine class="failure">
+            <ErrorLine class={styles.failure}>
               The conversation could not be started: {adopt.error?.message}
             </ErrorLine>
           </Show>
@@ -620,29 +620,29 @@ function ConversationRow(props: {
 
   return (
     <li
-      class="conversation-row"
+      class={styles.conversationRow}
       // Read by the drag to say which row the pointer is over, which is a
       // question about the rendered list rather than about the data behind it.
       data-id={props.entry.id}
       classList={{
-        selected: props.selected,
-        draft: props.entry.state === "Draft",
-        ended: ended(),
-        waiting: mark(props.entry) === "waiting",
-        held: props.held,
+        [styles.selected!]: props.selected,
+        [styles.draft!]: props.entry.state === "Draft",
+        [styles.ended!]: ended(),
+        [styles.waiting!]: mark(props.entry) === "waiting",
+        [styles.held!]: props.held,
       }}
     >
       <button
         type="button"
-        class="open"
+        class={styles.open}
         aria-current={props.selected ? "true" : undefined}
         aria-label={spoken(props.entry)}
         onClick={() => props.open(props.entry.id)}
       >
-        <span class="what">
-          <span class="title">{props.entry.branch}</span>
-          <span class="meta">
-            <span class="repo">{props.entry.repo}</span>
+        <span class={styles.what}>
+          <span class={styles.title}>{props.entry.branch}</span>
+          <span class={styles.meta}>
+            <span>{props.entry.repo}</span>
           </span>
         </span>
         {/* Drawn only where there is one, so a row with nothing to mark gives
@@ -667,7 +667,7 @@ function ConversationRow(props: {
           half the people using it could not reach. */}
       <button
         type="button"
-        class="grip"
+        class={styles.grip}
         aria-label={`Move ${props.entry.branch}`}
         onPointerDown={(event) => props.grab(event, props.entry.id)}
         onPointerMove={props.drag}
@@ -705,7 +705,9 @@ function moved(order: number[], id: number, to: number): number[] {
 /// rows are not all one height — a long branch name wraps — and a drag that
 /// guessed would put the row somewhere the human was not pointing.
 function under(list: HTMLUListElement, y: number): number {
-  const rows = [...list.querySelectorAll<HTMLElement>(".conversation-row")];
+  const rows = [
+    ...list.querySelectorAll<HTMLElement>(`.${styles.conversationRow}`),
+  ];
   const over =
     rows.find((row) => y < row.getBoundingClientRect().bottom) ?? rows.at(-1);
 

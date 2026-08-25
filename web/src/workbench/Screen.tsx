@@ -105,6 +105,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import styles from "./Screen.module.css";
+import shell from "./Workbench.module.css";
 
 /// The events that say the human is at this pane's keyboard.
 ///
@@ -429,7 +430,10 @@ export function Screen(props: {
             still running is redrawn at whatever size this pane is, so there is
             nothing to scroll to; the grid one left behind is fixed at the size
             it was printed for. */}
-        <div class={styles.screen} classList={{ [styles.live!]: live() }}>
+        <div
+          class={`${styles.screen} ${shell.paneScreen}`}
+          classList={{ [styles.live!]: live() }}
+        >
           <div class={styles.terminalHost} ref={host} />
           {/* What the human may do with this Screen, said under it. A Hold
               outranks everything else there is to say: it is the one thing here

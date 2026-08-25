@@ -8,10 +8,12 @@
    selector says only what it is about — the card an entry belongs to, and
    nothing about the rest of the app.
 
-   What is still read through `:global` is what has not moved yet: `.pane-chrome`
-   and the grid it sticks to belong to the Workbench, and `.conversation-actions`
-   is the hook `Menu.module.css` paints this menu's trigger and drop by. Both
-   become ordinary classes when those files move.
+   The block the header and the pinned cards are wrapped in is the Workbench's:
+   what a pane sticks to its top edge is the frame's business, so `Timeline.tsx`
+   wears `paneChrome` out of `Workbench.module.css` rather than naming a block of
+   its own. The ⋯ at the head of the pane is `Menu`'s chrome and this file's
+   paint — its trigger and its drop are that component's own elements, so they
+   are reached by what they are rather than by a class this module cannot spell.
 
    Two components draw into this vocabulary from their own files: `Pause`, whose
    card is one of the record's, and `Mark`, which is handed the class that says
@@ -62,10 +64,10 @@
 /* The pinned events, above the timeline and inside the chrome that holds the top
    of the pane: the fixed set — a task list, a stage list and a PR — each of
    which is the current state of something the work is against rather than a
-   moment in the record. What keeps them in view is `.pane-chrome`, which sticks
-   them and the header to the top edge as one block and carries the paper the
-   record passes behind; all this rule is now is the air they keep above and
-   below themselves.
+   moment in the record. What keeps them in view is the chrome block they share
+   with the header, which sticks the two of them to the top edge as one and
+   carries the paper the record passes behind; all this rule is now is the air
+   they keep above and below themselves.
 
    One card is ever inside it: with more than one pinned the carousel below is
    what is here, and the card is inside that. */
@@ -993,15 +995,40 @@
   border-color: #b3382c;
 }
 
+/* The ⋯ at the head of the pane: what can be done to the Conversation being
+   read. It sits at the right edge of the header beside the thing that header
+   names, and a mark is what fits there. The sidebar's ⋯ is the same mark in the
+   same slot and is painted the same way, in `Conversations.module.css`. */
+.conversationActions > button {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+.conversationActions > button[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* What can be done to the conversation as a whole: room under each action for
+   the sentence saying what it does, which is more than a row of a menu holds —
+   so this one is padded as a card rather than as a list. */
+.conversationActions > [role="menu"] {
+  width: 17rem;
+  padding: 0.75rem;
+}
+
 /* And a refusal inside the drop, a size down on the ones out on the page: the
    menu is a card of its own and the sentence under each button sets the type
    it is read at. */
-:global(.conversation-actions) .failure {
+.conversationActions .failure {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
 }
 
 /* What a stop that is waiting for a task to finish says while it waits. */
-:global(.conversation-actions) .waiting {
+.conversationActions .waiting {
   color: var(--ink);
 }

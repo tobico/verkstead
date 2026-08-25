@@ -29,7 +29,8 @@ import type {
 } from "../src/api/types";
 // The one menu, which is what the sidebar offers its repositories through.
 import menu from "../src/Menu.module.css";
-// The ring the sidebar's card turns while a session runs.
+// The sidebar's own rows, and the ring one of them turns while a session runs.
+import sidebar from "../src/workbench/Conversations.module.css";
 import marks from "../src/workbench/Mark.module.css";
 import { Picker } from "../src/picking";
 import {
@@ -147,14 +148,14 @@ describe("what a Nudge leaves standing", () => {
   it("keeps the row a session's spinner is spinning on", async () => {
     theWorkbench(whenever("/api/ui/conversations", json(BUSY)));
     const { container, client } = mount();
-    const spinner = await drawn(container, `.conversation-row .${marks.mark}.${marks.working}`);
+    const spinner = await drawn(container, `.${sidebar.conversationRow} .${marks.mark}.${marks.working}`);
 
     await nudged(client);
 
     // The same element, so the animation is where it was rather than back at
     // its first frame — which is what the merge on the conversations query is
     // for.
-    expect(container.querySelector(`.conversation-row .${marks.mark}.${marks.working}`)).toBe(
+    expect(container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.working}`)).toBe(
       spinner,
     );
   });
@@ -166,13 +167,13 @@ describe("what a Nudge leaves standing", () => {
   it("keeps the open menu's repo rows", async () => {
     theWorkbench();
     const { container, client } = mount();
-    fireEvent.click(await drawn(container, `.new-conversation > .${menu.trigger}`));
-    await drawn(container, ".in-repo");
-    const offered = nodes(container, ".in-repo");
+    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${menu.trigger}`));
+    await drawn(container, `.${menu.drop} > [role="menuitem"]`);
+    const offered = nodes(container, `.${menu.drop} > [role="menuitem"]`);
 
     await nudged(client);
 
-    survived(offered, nodes(container, ".in-repo"));
+    survived(offered, nodes(container, `.${menu.drop} > [role="menuitem"]`));
   });
 
   it("keeps both pairing pickers' options", async () => {
@@ -213,15 +214,15 @@ describe("what a picker shows and what it would send", () => {
   it("stops offering a repo that has been unregistered", async () => {
     const { holds } = theRepos();
     const { container, client } = mount();
-    fireEvent.click(await drawn(container, `.new-conversation > .${menu.trigger}`));
-    await drawn(container, ".in-repo");
+    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${menu.trigger}`));
+    await drawn(container, `.${menu.drop} > [role="menuitem"]`);
 
     holds([FIRST]);
     await nudged(client);
 
     await waitFor(() =>
       expect(
-        [...container.querySelectorAll(".in-repo")].map(
+        [...container.querySelectorAll(`.${menu.drop} > [role="menuitem"]`)].map(
           (row) => row.textContent,
         ),
       ).toEqual([FIRST.name]),

@@ -40,6 +40,8 @@ import marks from "../src/workbench/Mark.module.css";
 import outputPane from "../src/workbench/Output.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
+// The panes themselves, for the one an Event is opened into.
+import shell from "../src/workbench/Workbench.module.css";
 import { drawn } from "./bench";
 import {
   askedFor,
@@ -578,7 +580,7 @@ describe("what a Nudge is about", () => {
     await drawn(container, `.${timeline.agentOutput} .${marks.mark}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.turn}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}`);
     stream().opens();
     const before = { ...reads(fetching), [REST_OF_IT]: askedFor(fetching, REST_OF_IT) };
 
@@ -603,7 +605,7 @@ describe("what a Nudge is about", () => {
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
-    await drawn(container, `.details-pane .${prPane.commits}`);
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
 
@@ -624,7 +626,7 @@ describe("what a Nudge is about", () => {
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
-    await drawn(container, `.details-pane .${prPane.commits}`);
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
 

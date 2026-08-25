@@ -23,6 +23,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
+import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
 /// about it.
@@ -79,13 +80,13 @@ export function Adoption(props: {
   }));
 
   return (
-    <section class="adoption" aria-label="Adoption">
+    <section class={styles.adoption} aria-label="Adoption">
       <h2>Adopt a roadmap</h2>
 
-      <p class="roadmap">
+      <p class={styles.roadmap}>
         <code>{props.adopting.roadmap}</code>
         <Show when={props.adopting.title}>
-          {(title) => <span class="roadmap-title">{title()}</span>}
+          {(title) => <span class={styles.roadmapTitle}>{title()}</span>}
         </Show>
       </p>
 
@@ -104,7 +105,7 @@ export function Adoption(props: {
       >
         {(stage) => (
           <>
-            <p class="stage">
+            <p class={styles.stage}>
               Stage {stage().label}: {stage().title}
             </p>
             <Note>
@@ -119,7 +120,7 @@ export function Adoption(props: {
       <Show when={props.conversation.state === "Draft"}>
         <button
           type="button"
-          class="adopt"
+          class={styles.adopt}
           disabled={adopt.isPending}
           onClick={() => adopt.mutate()}
         >
@@ -133,11 +134,11 @@ export function Adoption(props: {
 
         <Show when={refused()}>
           {(outcome) => (
-            <ErrorLine class="failure">{ADOPT_REFUSAL[outcome()]}</ErrorLine>
+            <ErrorLine class={styles.failure}>{ADOPT_REFUSAL[outcome()]}</ErrorLine>
           )}
         </Show>
         <Show when={adopt.isError}>
-          <ErrorLine class="failure">
+          <ErrorLine class={styles.failure}>
             The stage could not be adopted: {adopt.error?.message}
           </ErrorLine>
         </Show>

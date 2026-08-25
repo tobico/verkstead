@@ -49,6 +49,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
+import styles from "./Setup.module.css";
 import { keeping } from "./settling";
 
 /// What each way of being refused a branch name says.
@@ -93,7 +94,7 @@ export function Setup(props: {
   const branched = () => props.conversation.worktree !== null;
 
   return (
-    <section class="conversation-setup" aria-label="Setup">
+    <section class={styles.conversationSetup} aria-label="Setup">
       {/* No branch field where the conversation is adopting a roadmap: a stage
           is worked on its own slug, so the name invented when the row was made
           is discarded when the stage is adopted, and naming it here would be a
@@ -129,12 +130,12 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
   }));
 
   return (
-    <section class="conversation-profiles" aria-label="Agent profiles">
+    <section class={styles.conversationProfiles} aria-label="Agent profiles">
       <h3>Agent profiles</h3>
 
       <Switch>
         <Match when={profiles.isError}>
-          <ErrorLine class="failure">
+          <ErrorLine class={styles.failure}>
             Could not read the agent profiles: {profiles.error?.message}
           </ErrorLine>
         </Match>
@@ -152,7 +153,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
                is not. The wrap is the pane's own width rather than the
                window's, because this card is drawn in a pane the human can
                narrow. */
-            <div class="pairings">
+            <div class={styles.pairings}>
               <PairingPicker
                 conversation={props.conversation}
                 saved={saved()}
@@ -194,7 +195,7 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         }
       >
         <Show when={props.conversation.ready_to_grill}>
-          <Note class="readiness ready">Ready to grill.</Note>
+          <Note class={`${styles.readiness} ${styles.ready}`}>Ready to grill.</Note>
         </Show>
       </Show>
     </section>
@@ -238,7 +239,7 @@ function PairingPicker(props: {
   }));
 
   return (
-    <div class="profile-choice">
+    <div class={styles.profileChoice}>
       <label for={`${props.role}-pairing`}>{props.label}</label>
       {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
           pairing while the mutation below would choose another — see
@@ -265,7 +266,7 @@ function PairingPicker(props: {
           which the picker draws as none. Said in words rather than left as a
           bare placeholder, because the conversation does have a profile. */}
       <Show when={props.chosen && !props.chosen.model}>
-        <Note class="unpaired">
+        <Note class={styles.unpaired}>
           {props.chosen?.profile.name} was chosen before models were picked
           beside them. Pick one to pair.
         </Note>
@@ -273,15 +274,15 @@ function PairingPicker(props: {
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
       <Show when={props.chosen?.profile.broken}>
-        {(broken) => <ErrorLine class="broken">{BROKEN[broken()]}</ErrorLine>}
+        {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
       </Show>
       <Show when={refused()}>
         {(outcome) => (
-          <ErrorLine class="failure">{CHOICE_REFUSAL[outcome()]}</ErrorLine>
+          <ErrorLine class={styles.failure}>{CHOICE_REFUSAL[outcome()]}</ErrorLine>
         )}
       </Show>
       <Show when={choose.isError}>
-        <ErrorLine class="failure">
+        <ErrorLine class={styles.failure}>
           The profile could not be chosen: {choose.error?.message}
         </ErrorLine>
       </Show>
@@ -365,7 +366,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <form
-      class="branch-name"
+      class={styles.branchName}
       onSubmit={(ev) => {
         // Nothing to press, so this is Enter in the field: the same save the
         // pause was about to make, made now.
@@ -374,7 +375,7 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
       }}
     >
       <label for="branch">Branch</label>
-      <div class="field-line">
+      <div class={styles.fieldLine}>
         <input
           id="branch"
           type="text"
@@ -395,11 +396,11 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           leave the human nothing. */}
       <Show when={refused()}>
         {(outcome) => (
-          <ErrorLine class="failure">{BRANCH_REFUSAL[outcome()]}</ErrorLine>
+          <ErrorLine class={styles.failure}>{BRANCH_REFUSAL[outcome()]}</ErrorLine>
         )}
       </Show>
       <Show when={rename.isError}>
-        <ErrorLine class="failure">
+        <ErrorLine class={styles.failure}>
           The branch could not be named: {rename.error?.message}
         </ErrorLine>
       </Show>
@@ -479,7 +480,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
   }));
 
   return (
-    <div class="base-branch">
+    <div class={styles.baseBranch}>
       <label for="base-branch">Base branch</label>
       {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
           branch while the mutation below would record another — see
@@ -505,7 +506,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
           fallback={
             <>
               The work branches from{" "}
-              <span class="default-branch">
+              <span class={styles.defaultBranch}>
                 {props.conversation.repo.default_branch}
               </span>{" "}
               as it stands when grilling starts.
@@ -515,7 +516,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
           {(branch) => (
             <>
               Pinned to{" "}
-              <span class="default-branch">{branch()}</span> — the work branches
+              <span class={styles.defaultBranch}>{branch()}</span> — the work branches
               from wherever it stands when grilling starts.
             </>
           )}
@@ -524,17 +525,17 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
       {/* The list is what there is to pick out of, so a read that failed is
           said rather than drawn as a repository with one branch. */}
       <Show when={branches.isError}>
-        <ErrorLine class="failure">
+        <ErrorLine class={styles.failure}>
           Could not read the repo's branches: {branches.error?.message}
         </ErrorLine>
       </Show>
       <Show when={refused()}>
         {(outcome) => (
-          <ErrorLine class="failure">{BASE_REFUSAL[outcome()]}</ErrorLine>
+          <ErrorLine class={styles.failure}>{BASE_REFUSAL[outcome()]}</ErrorLine>
         )}
       </Show>
       <Show when={record.isError}>
-        <ErrorLine class="failure">
+        <ErrorLine class={styles.failure}>
           The base branch could not be recorded: {record.error?.message}
         </ErrorLine>
       </Show>

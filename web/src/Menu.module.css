@@ -3,14 +3,15 @@
    they are dismissed the same way, and they stand off the page by the same
    shadow, which is what says a menu is in front of what it covers.
 
-   What is *not* the chrome is at the foot of this file: the three callers left
-   here each paint their own trigger and size their own drop, and those rules
-   are written against a class of the caller's and a class of this component's
-   at once. They are read through `:global` for as long as the caller half is
-   still in `main.css`. A caller that has migrated cannot be read that way any
-   more — its class is hashed too — so it paints its trigger and its drop from
-   its own module, reaching them by the elements they are; the Set page's
-   standing badge is the first, in `set/Standing.module.css`. */
+   What is *not* the chrome is each menu's own paint: the trigger it drops from
+   and the width of what it drops. Those rules are written against a class of the
+   caller's and a class of this component's at once, and a caller's class is
+   hashed, so they belong to the caller rather than here — it paints its trigger
+   and its drop from its own module, reaching them by the elements they are: the
+   trigger is the one button the menu holds directly, and the drop is the one
+   thing in it with a menu's role. Every caller does that now; `set/Standing`,
+   `workbench/Conversations` and `workbench/Timeline` are the three that paint
+   anything. */
 
 /* The anchor everything below hangs from. */
 .menu {
@@ -84,80 +85,5 @@
 .drop button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
-}
-
-/* A run of rows kept apart from the rest by a rule, where pressing one of them
-   does a different kind of thing than pressing the others. The two classes are
-   the sidebar's own — it is the caller that writes them on its rows — so they
-   go with `Conversations` when it moves. */
-.drop :global(.menu-group) {
-  margin-top: 0.3rem;
-  padding-top: 0.3rem;
-  border-top: 1px solid var(--edge);
-}
-
-.drop :global(.menu-heading) {
-  margin: 0;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-}
-
-/* The ⋯ trigger, of which there are two: what can be done to the Conversation
-   being read, and what there is beyond the conversations at all. Both sit at the
-   right edge of a pane's header beside the thing that header names, and a mark
-   is what fits there — so they are painted here, once, and the pair of them
-   cannot drift apart. */
-:global(.workbench-actions) > .trigger,
-:global(.conversation-actions) > .trigger {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
-
-:global(.workbench-actions) > .trigger[aria-expanded="true"],
-:global(.conversation-actions) > .trigger[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* Wider than the one word in it, so it reads as a menu with room for the next
-   entry rather than as a label that happened to appear under the mark. */
-:global(.workbench-actions) > .drop {
-  min-width: 9rem;
-}
-
-/* What can be done to the conversation as a whole: room under each action for
-   the sentence saying what it does, which is more than a row of a menu holds —
-   so this one is padded as a card rather than as a list. */
-:global(.conversation-actions) > .drop {
-  width: 17rem;
-  padding: 0.75rem;
-}
-
-/* Starting a conversation: the width of the pane, because it is the pane's one
-   action and the menu comes down the width of it. The mark is pushed to the far
-   end, where a dropdown's is. */
-:global(.new-conversation) > .trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 1rem;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-}
-
-/* As wide as the button it came down from, and over the list rather than in the
-   flow above it: opening it does not push the conversations down, which is the
-   whole of what the notices under the old box were doing. */
-:global(.new-conversation) > .drop {
-  left: 0;
 }
 

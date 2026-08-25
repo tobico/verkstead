@@ -18,10 +18,12 @@ import menu from "../src/Menu.module.css";
 import stylesheet from "../src/Menu.module.css?raw";
 // The two schemes' palettes, which is where the shadow itself is named.
 import tokens from "../src/styles/base.css?raw";
-// The one caller whose paint has already gone home to its own module, which
-// reaches this component's parts by the elements they are rather than by a
-// class it cannot spell.
+// The callers' paint, each in the module of the component that passes the
+// class: a caller's class is hashed, so it reaches this component's parts by
+// the elements they are rather than by a name it cannot spell.
 import standing from "../src/set/Standing.module.css?raw";
+import sidebar from "../src/workbench/Conversations.module.css?raw";
+import timeline from "../src/workbench/Timeline.module.css?raw";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -161,18 +163,36 @@ describe("a dropdown menu", () => {
   });
 });
 
-/// The two ⋯ triggers — the sidebar's and the Conversation's — are one rule
-/// rather than one each, for the same reason: they sit in the same place in
-/// their two pane headers and mean the same thing there, so a change to one of
-/// them is a change to both.
+/// The two ⋯ triggers — the sidebar's and the Conversation's — sit in the same
+/// place in their two pane headers and mean the same thing there, so they are
+/// painted alike. Each in its own caller's module, because the class the rule
+/// hangs off is that caller's and a caller's class is hashed; what used to be
+/// one rule is two that have to go on saying the same thing, and this is what
+/// says so.
 describe("the ⋯ at the head of a pane", () => {
-  it("is painted once for the two places there is one", () => {
-    expect(stylesheet).toContain(
-      ":global(.workbench-actions) > .trigger,\n" +
-        ":global(.conversation-actions) > .trigger {",
+  it("is painted the same in the two places there is one", () => {
+    expect(paint(".workbenchActions > button", sidebar)).toEqual(
+      paint(".conversationActions > button", timeline),
+    );
+  });
+
+  /// And what it says when the menu under it is down, which is the other half
+  /// of the same paint.
+  it("darkens the same while its menu is open", () => {
+    expect(
+      paint('.workbenchActions > button[aria-expanded="true"]', sidebar),
+    ).toEqual(
+      paint('.conversationActions > button[aria-expanded="true"]', timeline),
     );
   });
 });
+
+/// What one rule declares and nothing about which selector carries it, so that
+/// two rules written against two callers' classes can be held to saying the
+/// same thing.
+function paint(selector: string, sheet: string): string {
+  return block(selector, sheet).replace(`\n${selector} {`, "");
+}
 
 /// What one rule declares, read off a stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
@@ -201,17 +221,15 @@ describe("what every menu is drawn with", () => {
   /// The point of the unification: no menu carries a shadow of its own to drift
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
-    for (const caller of [
-      ":global(.new-conversation) > .drop",
-      ":global(.workbench-actions) > .drop",
-      ":global(.conversation-actions) > .drop",
-    ]) {
-      expect(block(caller)).not.toContain("box-shadow");
-    }
+    const callers: [string, string][] = [
+      ['.newConversation > [role="menu"]', sidebar],
+      ['.workbenchActions > [role="menu"]', sidebar],
+      ['.conversationActions > [role="menu"]', timeline],
+      ['.standing > [role="menu"]', standing],
+    ];
 
-    // And the caller that has migrated, in its own module.
-    expect(block(".standing > [role=\"menu\"]", standing)).not.toContain(
-      "box-shadow",
-    );
+    for (const [caller, sheet] of callers) {
+      expect(block(caller, sheet)).not.toContain("box-shadow");
+    }
   });
 });

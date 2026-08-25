@@ -101,6 +101,7 @@ import { PaneHead } from "./PaneHead";
 import { Pause } from "./Pause";
 import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
+import shell from "./Workbench.module.css";
 import { keeping } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
@@ -373,7 +374,7 @@ export function Timeline(props: {
           of them travel with it, so there is no strip of scrolling record
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
-      <div class="pane-chrome">
+      <div class={shell.paneChrome}>
         {/* The way back out of this level, which is the whole of what a narrow
             window offers instead of the pane beside it. Drawn always and hidden
             by the pane head where all three panes are on screen at once. */}
@@ -1781,11 +1782,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <Menu
-      // Still the plain name rather than a hashed one: the trigger and the drop
-      // are painted by `Menu.module.css`, which reaches this anchor through
-      // `:global`, and the sidebar's ⋯ is painted by the same pair of rules.
-      // The two move together, with the rest of the workbench shell.
-      class="conversation-actions"
+      class={styles.conversationActions!}
       label="Conversation actions"
       name="Conversation actions"
       closer={(close) => (shut = close)}

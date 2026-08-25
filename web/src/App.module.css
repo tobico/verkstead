@@ -6,11 +6,12 @@
    make rather than the page's, because the shell is the element being widened.
 
    The workbench is that one page: three panes side by side have nothing to do
-   with the measure, so they get the window instead. `.workbench` is the pane
-   grid's own class and is read through `:global` for as long as it is still in
-   `main.css`; the rule stays here when it moves, because what it changes is
-   this element. */
-.shell:has(:global(.workbench)) {
+   with the measure, so they get the window instead. The rule is here because
+   what it changes is this element, and it finds the workbench by what the
+   workbench is rather than by a class this module cannot spell: `data-pane` is
+   the frame's own record of which pane a narrow window is showing, and nothing
+   else in the app has one. */
+.shell:has([data-pane]) {
   max-width: none;
   padding: 0;
 }

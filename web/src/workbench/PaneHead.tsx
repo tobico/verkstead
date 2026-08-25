@@ -16,6 +16,7 @@
 import { Show, type JSX } from "solid-js";
 
 import styles from "./PaneHead.module.css";
+import shell from "./Workbench.module.css";
 
 export function PaneHead(props: {
   /// The pane this one was entered from, named as the way back reads it — "←
@@ -37,10 +38,14 @@ export function PaneHead(props: {
   close?: () => void;
 }): JSX.Element {
   return (
-    <div class={styles.head}>
+    <div class={`${styles.head} ${shell.paneChrome}`}>
       <Show when={props.back}>
         {(back) => (
-          <button type="button" class={styles.back} onClick={() => back().go()}>
+          <button
+            type="button"
+            class={`${styles.back} ${shell.paneBack}`}
+            onClick={() => back().go()}
+          >
             ← {back().to}
           </button>
         )}

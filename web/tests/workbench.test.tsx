@@ -41,7 +41,6 @@ import type {
   TranscriptView,
   Turn,
 } from "../src/api/types";
-import stylesheet from "../src/main.css?raw";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
@@ -53,9 +52,14 @@ import illegible from "../src/set/Unreadable.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
 // one session's record and the terminal it was printed on, and a pull request.
 import commitPane from "../src/workbench/Commit.module.css";
+// The sidebar, both ways: the hashed names its rows are queried by, and the
+// source of the rules that say what a card's state looks like.
+import sidebar from "../src/workbench/Conversations.module.css";
+import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
@@ -75,8 +79,14 @@ import screenPane from "../src/workbench/Screen.module.css";
 import screenCss from "../src/workbench/Screen.module.css?raw";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
+// What is still the human's to settle on the brief card.
+import setup from "../src/workbench/Setup.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
+// And the frame the three panes stand in, both ways: it holds the layout rules
+// jsdom lays nothing out for, and the pane names everything else is found by.
+import shell from "../src/workbench/Workbench.module.css";
+import shellCss from "../src/workbench/Workbench.module.css?raw";
 import {
   CLAMPED_LINES,
   MANUAL_TASK_REFUSAL,
@@ -207,14 +217,14 @@ function readAgain(): void {
 
 /// The frame, which is what says which level a narrow window is showing.
 function frame(container: ParentNode): HTMLElement {
-  return container.querySelector(".workbench")!;
+  return container.querySelector(`.${shell.workbench}`)!;
 }
 
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.conversation-actions > .${dropdown.trigger}`));
-  return drawn(container, `.conversation-actions > .${dropdown.drop}`);
+  fireEvent.click(await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`));
+  return drawn(container, `.${timeline.conversationActions} > .${dropdown.drop}`);
 }
 
 /// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
@@ -222,8 +232,8 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
 async function openWorkbenchActions(
   container: ParentNode,
 ): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.workbench-actions > .${dropdown.trigger}`));
-  return drawn(container, `.workbench-actions > .${dropdown.drop}`);
+  fireEvent.click(await drawn(container, `.${sidebar.workbenchActions} > .${dropdown.trigger}`));
+  return drawn(container, `.${sidebar.workbenchActions} > .${dropdown.drop}`);
 }
 
 /// Drop the new-conversation menu, which is where both ways of starting one
@@ -231,15 +241,15 @@ async function openWorkbenchActions(
 async function openNewConversation(
   container: ParentNode,
 ): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.new-conversation > .${dropdown.trigger}`));
-  return drawn(container, `.new-conversation > .${dropdown.drop}`);
+  fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${dropdown.trigger}`));
+  return drawn(container, `.${sidebar.newConversation} > .${dropdown.drop}`);
 }
 
 /// The repos in that menu, in the order they are offered — waited for, because
 /// the menu opens whether or not the list has arrived.
 async function repoRows(container: ParentNode): Promise<HTMLButtonElement[]> {
-  await drawn(container, ".in-repo");
-  return [...container.querySelectorAll<HTMLButtonElement>(".in-repo")];
+  await drawn(container, `.${dropdown.drop} > [role="menuitem"]`);
+  return [...container.querySelectorAll<HTMLButtonElement>(`.${dropdown.drop} > [role="menuitem"]`)];
 }
 
 /// The body the page put on the wire when it wrote to `path`.
@@ -311,7 +321,7 @@ describe("the workbench", () => {
     theWorkbench();
     const { container } = mount();
 
-    const heading = await drawn(container, ".conversations-pane h1");
+    const heading = await drawn(container, `.${shell.conversationsPane} h1`);
 
     expect(heading.textContent).toContain("Verkstead");
     expect(heading.textContent).not.toContain("Conversations");
@@ -337,7 +347,7 @@ describe("the workbench", () => {
       expect.anything(),
     );
     expect(
-      [...container.querySelectorAll(".conversation-row .title")].map(
+      [...container.querySelectorAll(`.${sidebar.conversationRow} .${sidebar.title}`)].map(
         (row) => row.textContent,
       ),
     ).toEqual(SIDEBAR.map((entry) => entry.branch));
@@ -351,7 +361,11 @@ describe("the workbench", () => {
       "li",
     )!;
 
-    expect(row.querySelector(".repo")!.textContent).toBe(DRAFTING.repo);
+    // The line of provenance under the name, which holds the repo and nothing
+    // else yet.
+    expect(row.querySelector(`.${sidebar.meta}`)!.textContent).toBe(
+      DRAFTING.repo,
+    );
 
     // And nothing about where it has got to, in words: that is drawn now — see
     // *how a card says where its conversation has got to*.
@@ -399,7 +413,7 @@ describe("the workbench", () => {
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
     expect(
-      container.querySelector(`.workbench-actions > .${dropdown.drop}`),
+      container.querySelector(`.${sidebar.workbenchActions} > .${dropdown.drop}`),
     ).toBeNull();
     expect(screen.queryByText("Settings")).toBeNull();
     // And the link that used to sit under the conversations is gone with it.
@@ -418,7 +432,7 @@ describe("the workbench", () => {
     await openNewConversation(container);
 
     await waitFor(() => screen.getByText(/No repos are registered yet/));
-    expect(container.querySelector(".in-repo")).toBeNull();
+    expect(container.querySelector(`.${dropdown.drop} > [role="menuitem"]`)).toBeNull();
     expect(screen.getByText("register one").getAttribute("href")).toBe(
       "/settings",
     );
@@ -449,8 +463,8 @@ function theSidebar(...rows: Array<Partial<ConversationEntry>>) {
 
 /// The cards of a sidebar drawn that way, in the order they were given.
 async function cards(container: ParentNode): Promise<HTMLElement[]> {
-  await drawn(container, ".conversation-row");
-  return [...container.querySelectorAll<HTMLElement>(".conversation-row")];
+  await drawn(container, `.${sidebar.conversationRow}`);
+  return [...container.querySelectorAll<HTMLElement>(`.${sidebar.conversationRow}`)];
 }
 
 /// How a card says where its Conversation has got to, now that it no longer says
@@ -503,9 +517,9 @@ describe("how a card says where its conversation has got to", () => {
 
     // The border is the card's own, so the row carries it and the stylesheet
     // says what it looks like — jsdom lays nothing out.
-    expect(card!.classList.contains("waiting")).toBe(true);
-    expect(stylesheet).toContain(
-      ".conversation-row.waiting .open {\n" +
+    expect(card!.classList.contains(sidebar.waiting!)).toBe(true);
+    expect(sidebarCss).toContain(
+      ".conversationRow.waiting .open {\n" +
         "  border-color: var(--accent);\n" +
         "  box-shadow: inset 0 0 0 1px var(--accent);\n" +
         "}",
@@ -562,22 +576,22 @@ describe("how a card says where its conversation has got to", () => {
     ];
     theWorkbench(whenever("/api/ui/conversations", () => json(rows)()));
     const { container, client } = mount();
-    await drawn(container, `.conversation-row .${marks.mark}.${marks.working}`);
+    await drawn(container, `.${sidebar.conversationRow} .${marks.mark}.${marks.working}`);
 
     rows = [{ ...rows[0]!, idle: true }];
     await nudged(client);
 
-    expect(container.querySelector(`.conversation-row .${marks.mark}.${marks.idle}`)).toBeTruthy();
-    expect(container.querySelector(`.conversation-row .${marks.mark}.${marks.working}`)).toBeNull();
+    expect(container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.idle}`)).toBeTruthy();
+    expect(container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.working}`)).toBeNull();
 
     // And back, on the session speaking again.
     rows = [{ ...rows[0]!, idle: false }];
     await nudged(client);
 
     expect(
-      container.querySelector(`.conversation-row .${marks.mark}.${marks.working}`),
+      container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.working}`),
     ).toBeTruthy();
-    expect(container.querySelector(`.conversation-row .${marks.mark}.${marks.idle}`)).toBeNull();
+    expect(container.querySelector(`.${sidebar.conversationRow} .${marks.mark}.${marks.idle}`)).toBeNull();
   });
 
   it("marks nothing on a conversation that is neither", async () => {
@@ -598,12 +612,12 @@ describe("how a card says where its conversation has got to", () => {
 
     const [card] = await cards(container);
 
-    expect(card!.classList.contains("draft")).toBe(true);
+    expect(card!.classList.contains(sidebar.draft!)).toBe(true);
     expect(card!.querySelector(`.${marks.mark}`)).toBeNull();
 
     // What "draft" means is the stylesheet's, and jsdom lays nothing out.
-    expect(stylesheet).toContain(
-      ".conversation-row.draft .open {\n  border-style: dotted;\n}",
+    expect(sidebarCss).toContain(
+      ".conversationRow.draft .open {\n  border-style: dotted;\n}",
     );
   });
 
@@ -614,9 +628,9 @@ describe("how a card says where its conversation has got to", () => {
     const { container } = mount();
 
     expect((await cards(container)).map((card) => card.className)).toEqual([
-      "conversation-row ended",
-      "conversation-row ended",
-      "conversation-row",
+      `${sidebar.conversationRow} ${sidebar.ended}`,
+      `${sidebar.conversationRow} ${sidebar.ended}`,
+      sidebar.conversationRow,
     ]);
   });
 
@@ -624,14 +638,14 @@ describe("how a card says where its conversation has got to", () => {
   /// two say is that a closed card recedes far enough to read as closed, and
   /// that being the open one is the accent border and nothing beside it.
   it("takes a closed card well down, and marks the open one with a border", () => {
-    expect(stylesheet).toContain(
-      ".conversation-row.ended .open {\n  opacity: 0.45;\n}",
+    expect(sidebarCss).toContain(
+      ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
-    expect(stylesheet).toContain(
-      ".conversation-row.selected .open {\n  border-color: var(--accent);\n}",
+    expect(sidebarCss).toContain(
+      ".conversationRow.selected .open {\n  border-color: var(--accent);\n}",
     );
     expect(
-      stylesheet,
+      sidebarCss,
       "the inset stripe is retired everywhere it was drawn",
     ).not.toContain("box-shadow: inset 0.2rem");
   });
@@ -746,7 +760,7 @@ describe("the order the human puts the sidebar in", () => {
   /// The branches the sidebar is showing, top first.
   async function order(container: ParentNode): Promise<(string | null)[]> {
     return (await cards(container)).map(
-      (card) => card.querySelector(".title")!.textContent,
+      (card) => card.querySelector(`.${sidebar.title}`)!.textContent,
     );
   }
 
@@ -759,7 +773,7 @@ describe("the order the human puts the sidebar in", () => {
   /// where it is now.
   function laidOut(rows: HTMLElement[], height = 60) {
     const list = rows[0]!.parentElement!;
-    const drawn = () => [...list.querySelectorAll<HTMLElement>(".conversation-row")];
+    const drawn = () => [...list.querySelectorAll<HTMLElement>(`.${sidebar.conversationRow}`)];
 
     for (const row of rows) {
       row.getBoundingClientRect = () => {
@@ -781,7 +795,7 @@ describe("the order the human puts the sidebar in", () => {
 
   /// Drag one row's grip to a height on the pane, and let go.
   function dragTo(card: HTMLElement, y: number) {
-    const grip = card.querySelector<HTMLElement>(".grip")!;
+    const grip = card.querySelector<HTMLElement>(`.${sidebar.grip}`)!;
 
     fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 0 });
     fireEvent.pointerMove(grip, { pointerId: 1, clientY: y });
@@ -828,7 +842,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "third", "second"]);
     await waitFor(() =>
@@ -843,7 +857,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[0]!.querySelector(".grip")!, { key: "ArrowUp" });
+    fireEvent.keyDown(rows[0]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "second", "third"]);
     expect(
@@ -861,7 +875,7 @@ describe("the order the human puts the sidebar in", () => {
 
     expect(
       (await cards(container)).map((card) =>
-        card.querySelector(".grip")!.getAttribute("aria-label"),
+        card.querySelector(`.${sidebar.grip}`)!.getAttribute("aria-label"),
       ),
     ).toEqual(["Move first", "Move second", "Move third"]);
   });
@@ -869,7 +883,7 @@ describe("the order the human puts the sidebar in", () => {
   /// Most answering happens on a phone, and a touch that starts on the grip has
   /// to drag the row rather than scroll the list out from under it.
   it("takes the touch that starts on a grip", () => {
-    expect(stylesheet).toContain("  cursor: grab;\n  touch-action: none;\n");
+    expect(sidebarCss).toContain("  cursor: grab;\n  touch-action: none;\n");
   });
 
   /// The order that was not saved is not the order to draw: what comes back is
@@ -885,7 +899,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(".grip")!, { key: "ArrowUp" });
+    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
 
     await waitFor(() =>
       screen.getByText(/The order could not be saved/, { exact: false }),
@@ -929,9 +943,9 @@ describe("the new conversation menu", () => {
   it("keeps the repos out of the sidebar until the button is pressed", async () => {
     theWorkbench();
     const { container } = mount();
-    await drawn(container, `.new-conversation > .${dropdown.trigger}`);
+    await drawn(container, `.${sidebar.newConversation} > .${dropdown.trigger}`);
 
-    expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull();
+    expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull();
   });
 
   it("closes once a repo has been chosen", async () => {
@@ -942,7 +956,7 @@ describe("the new conversation menu", () => {
     fireEvent.click((await repoRows(container))[0]!);
 
     await waitFor(() =>
-      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
+      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
     );
   });
 
@@ -956,10 +970,10 @@ describe("the new conversation menu", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() =>
-      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
+      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
     );
     expect(document.activeElement).toBe(
-      container.querySelector(`.new-conversation > .${dropdown.trigger}`),
+      container.querySelector(`.${sidebar.newConversation} > .${dropdown.trigger}`),
     );
   });
 
@@ -970,10 +984,10 @@ describe("the new conversation menu", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    fireEvent.click(await drawn(container, `.new-conversation > .${dropdown.backdrop}`));
+    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${dropdown.backdrop}`));
 
     await waitFor(() =>
-      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
+      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
     );
   });
 
@@ -1005,7 +1019,7 @@ describe("the new conversation menu", () => {
 
     fireEvent.click((await repoRows(container))[0]!);
 
-    const said = await drawn(container, `.new-conversation > .${dropdown.drop} .${notices.error}`);
+    const said = await drawn(container, `.${sidebar.newConversation} > .${dropdown.drop} .${notices.error}`);
     expect(said.textContent).toContain("down");
   });
 });
@@ -1018,13 +1032,13 @@ describe("the adopt-a-roadmap group", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    const group = await drawn(container, ".menu-group");
-    expect(group.querySelector(".menu-heading")!.textContent).toBe(
+    const group = await drawn(container, `.${sidebar.menuGroup}`);
+    expect(group.querySelector(`.${sidebar.menuHeading}`)!.textContent).toBe(
       "Adopt a roadmap",
     );
 
     const rows = [
-      ...group.querySelectorAll<HTMLButtonElement>(".adopt-roadmap"),
+      ...group.querySelectorAll<HTMLButtonElement>(`.${sidebar.adoptRoadmap}`),
     ];
     const flat = ABANDONED.flatMap((repo) =>
       repo.roadmaps.map((roadmap) => ({ repo: repo.repo, roadmap })),
@@ -1048,7 +1062,7 @@ describe("the adopt-a-roadmap group", () => {
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
     expect(container.querySelector(".abandoned")).toBeNull();
-    expect(container.querySelector(".adopt-roadmap")).toBeNull();
+    expect(container.querySelector(`.${sidebar.adoptRoadmap}`)).toBeNull();
   });
 
   /// Beneath the repos, which is the order the two are decided in: starting
@@ -1058,7 +1072,7 @@ describe("the adopt-a-roadmap group", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    const group = await drawn(container, ".menu-group");
+    const group = await drawn(container, `.${sidebar.menuGroup}`);
     expect((await repoRows(container))[0]!.compareDocumentPosition(group)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -1072,7 +1086,7 @@ describe("the adopt-a-roadmap group", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    expect(container.querySelector(".menu-group")).toBeNull();
+    expect(container.querySelector(`.${sidebar.menuGroup}`)).toBeNull();
   });
 
   /// Read again with everything else the page is showing, because the server
@@ -1084,7 +1098,7 @@ describe("the adopt-a-roadmap group", () => {
     );
     const { container } = mount();
     await openNewConversation(container);
-    await drawn(container, ".menu-group");
+    await drawn(container, `.${sidebar.menuGroup}`);
 
     const before = askedFor(fetching, "/api/ui/abandoned-roadmaps");
     readAgain();
@@ -1111,9 +1125,9 @@ describe("the adopt-a-roadmap group", () => {
     const { container, history } = mount();
     await openNewConversation(container);
 
-    const rows = await drawn(container, ".menu-group");
+    const rows = await drawn(container, `.${sidebar.menuGroup}`);
     fireEvent.click(
-      rows.querySelectorAll<HTMLButtonElement>(".adopt-roadmap")[1]!,
+      rows.querySelectorAll<HTMLButtonElement>(`.${sidebar.adoptRoadmap}`)[1]!,
     );
 
     await waitFor(() =>
@@ -1148,7 +1162,7 @@ describe("the adoption page", () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
-    const panel = await drawn(container, ".adoption");
+    const panel = await drawn(container, `.${adoption.adoption}`);
     expect(panel.textContent).toContain(ADOPTION.roadmap);
     expect(panel.textContent).toContain(ADOPTION.title);
     expect(panel.textContent).toContain(ADOPTION.stage!.label);
@@ -1165,7 +1179,7 @@ describe("the adoption page", () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
-    await drawn(container, ".adoption");
+    await drawn(container, `.${adoption.adoption}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
@@ -1181,7 +1195,7 @@ describe("the adoption page", () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
-    await drawn(container, ".adoption");
+    await drawn(container, `.${adoption.adoption}`);
 
     expect(screen.queryByLabelText("Brief")).toBeNull();
     expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
@@ -1222,7 +1236,7 @@ describe("the adoption page", () => {
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
     await waitFor(() =>
-      expect(container.querySelector(".adoption .stage")!.textContent).toContain(
+      expect(container.querySelector(`.${adoption.adoption} .${adoption.stage}`)!.textContent).toContain(
         ADOPTION.stage!.title,
       ),
     );
@@ -1232,7 +1246,7 @@ describe("the adoption page", () => {
     });
 
     await waitFor(() =>
-      expect(container.querySelector(".adoption .stage")!.textContent).toContain(
+      expect(container.querySelector(`.${adoption.adoption} .${adoption.stage}`)!.textContent).toContain(
         "Implementation",
       ),
     );
@@ -1251,10 +1265,10 @@ describe("the adoption page", () => {
     );
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
-    const panel = await drawn(container, ".adoption");
+    const panel = await drawn(container, `.${adoption.adoption}`);
     expect(panel.textContent).toContain(ADOPTION.roadmap);
     expect(panel.querySelector(`.${notices.empty}`)).toBeTruthy();
-    expect(panel.querySelector(".stage")).toBeNull();
+    expect(panel.querySelector(`.${adoption.stage}`)).toBeNull();
   });
 
   /// The press posts to the conversation's own adopt route with nothing in the
@@ -1271,7 +1285,7 @@ describe("the adoption page", () => {
     );
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
-    fireEvent.click(await drawn(container, ".adoption .adopt"));
+    fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
 
     await waitFor(() =>
       expect(
@@ -1294,7 +1308,7 @@ describe("the adoption page", () => {
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
     const before = askedFor(fetching, `/api/ui/conversations/${ADOPTING.id}`);
-    fireEvent.click(await drawn(container, ".adoption .adopt"));
+    fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
 
     await waitFor(() =>
       expect(
@@ -1323,10 +1337,10 @@ describe("the adoption page", () => {
       );
       const { container, unmount } = mount(`/conversations/${ADOPTING.id}`);
 
-      fireEvent.click(await drawn(container, ".adoption .adopt"));
+      fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
 
       await waitFor(() =>
-        expect(container.querySelector(`.adoption .${notices.error}`)!.textContent).toBe(
+        expect(container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent).toBe(
           ADOPT_REFUSAL[outcome],
         ),
       );
@@ -1631,17 +1645,20 @@ describe("a conversation's setup", () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const setup = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief} .conversation-setup`);
+    const card = await drawn(
+      container,
+      `.${timeline.timelineEvent} > .${timeline.brief} .${setup.conversationSetup}`,
+    );
 
-    expect(setup.querySelector(".branch-name")).toBeTruthy();
-    expect(setup.querySelector(".base-branch")).toBeTruthy();
-    expect(setup.querySelector(".conversation-profiles")).toBeTruthy();
+    expect(card.querySelector(`.${setup.branchName}`)).toBeTruthy();
+    expect(card.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
+    expect(card.querySelector(`.${setup.conversationProfiles}`)).toBeTruthy();
 
     // Under the words rather than over them: the brief is what the card is,
     // and while it is a draft the words are the field they are typed into.
     const body = container.querySelector(`.${timeline.brief} .grow`)!;
     expect(
-      body.compareDocumentPosition(setup) & Node.DOCUMENT_POSITION_FOLLOWING,
+      body.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -1654,7 +1671,7 @@ describe("a conversation's setup", () => {
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(container.querySelector(".conversation-setup")).toBeNull();
+    expect(container.querySelector(`.${setup.conversationSetup}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
@@ -1911,7 +1928,7 @@ describe("a conversation's setup", () => {
     expect(
       (screen.getByLabelText("Base branch") as HTMLSelectElement).value,
     ).toBe("");
-    expect(container.querySelector(`.base-branch .${notices.note}`)!.textContent).toContain(
+    expect(container.querySelector(`.${setup.baseBranch} .${notices.note}`)!.textContent).toContain(
       OPEN.repo.default_branch,
     );
   });
@@ -2069,7 +2086,7 @@ describe("a conversation's pairings", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
-    expect(container.querySelector(".readiness")).toBeNull();
+    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
     expect(screen.queryByText(/Not ready to grill/)).toBeNull();
 
     // The fixture's own conversation has both, and the server says so.
@@ -2082,8 +2099,8 @@ describe("a conversation's pairings", () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const row = await drawn(container, ".conversation-profiles .pairings");
-    expect(row.querySelectorAll(".profile-choice")).toHaveLength(2);
+    const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
+    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(2);
   });
 
   it("says it is ready when the server says so", async () => {
@@ -2091,7 +2108,7 @@ describe("a conversation's pairings", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText("Ready to grill."));
-    expect(container.querySelector(".readiness")!.classList).toContain("ready");
+    expect(container.querySelector(`.${setup.readiness}`)!.classList).toContain(setup.ready);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -2113,7 +2130,7 @@ describe("a conversation's pairings", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText("Its config file is gone."));
-    expect(container.querySelector(".readiness")).toBeNull();
+    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
   });
 
   it("says why a choice was refused, in words", async () => {
@@ -2204,33 +2221,28 @@ describe("the panes on a narrow window", () => {
   /// What `data-pane` means is the stylesheet's, and there is nothing to query
   /// it off: jsdom lays nothing out. So the rules themselves are what is read.
   it("is one pane at a time until the window is wide enough for more", () => {
-    expect(stylesheet).toContain(".workbench > .pane {\n  display: none;\n}");
-    expect(stylesheet).toContain(
-      '.workbench[data-pane="conversations"] > .conversations-pane,\n' +
-        '.workbench[data-pane="timeline"] > .timeline-pane,\n' +
-        '.workbench[data-pane="details"] > .details-pane {\n' +
+    expect(shellCss).toContain(".workbench > .pane {\n  display: none;\n}");
+    expect(shellCss).toContain(
+      '.workbench[data-pane="conversations"] > .conversationsPane,\n' +
+        '.workbench[data-pane="timeline"] > .timelinePane,\n' +
+        '.workbench[data-pane="details"] > .detailsPane {\n' +
         "  display: block;\n}",
     );
 
     // And side by side once there is room: the sidebar joins first, then the
     // third pane.
-    expect(stylesheet).toContain("@media (min-width: 60rem) {");
-    expect(stylesheet).toContain("@media (min-width: 80rem) {");
+    expect(shellCss).toContain("@media (min-width: 60rem) {");
+    expect(shellCss).toContain("@media (min-width: 80rem) {");
   });
 
   /// Every pane's header stays where it is put, whichever of the two ways the
   /// window is scrolling — the page below 60rem, the pane itself above it.
-  /// Layout again, so the rules are what is read. Two of them, the header's own
-  /// and the timeline's wrapper's, until the wrapper moves to a module too.
+  /// Layout again, so the rules are what is read. One rule now for both the
+  /// header and the block the timeline wraps it in: the two of them wear the
+  /// frame's own name for whatever a pane sticks to its top edge.
   it("keeps a pane's header at the top while the pane scrolls", () => {
-    expect(paneHeadCss).toContain(
-      ":global(.pane) > .head {\n" +
-        "  position: sticky;\n" +
-        "  top: 0;\n" +
-        "  z-index: 1;\n",
-    );
-    expect(stylesheet).toContain(
-      ".pane > .pane-chrome {\n" +
+    expect(shellCss).toContain(
+      ".pane > .paneChrome {\n" +
         "  position: sticky;\n" +
         "  top: 0;\n" +
         "  z-index: 1;\n",
@@ -2251,8 +2263,7 @@ describe("the panes on a narrow window", () => {
       "  background: linear-gradient(var(--paper), transparent);\n" +
       "  pointer-events: none;\n}";
 
-    expect(paneHeadCss).toContain(":global(.pane) > .head::after {\n" + fade);
-    expect(stylesheet).toContain(".pane > .pane-chrome::after {\n" + fade);
+    expect(shellCss).toContain(".pane > .paneChrome::after {\n" + fade);
   });
 });
 
@@ -2926,7 +2937,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const summary = await drawn(container, `.details-pane .${outputPane.captureSummary}`);
+    const summary = await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
 
     expect(summary.querySelector(`.${outputPane.turns}`)!.textContent).toBe(
       `${OUTPUT.turns} turns`,
@@ -2941,7 +2952,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const summary = await drawn(container, `.details-pane .${outputPane.captureSummary}`);
+    const summary = await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
 
     expect(summary.querySelector(`.${marks.mark}.${marks.idle}`)).toBeTruthy();
     expect(summary.textContent).not.toContain("running");
@@ -2957,9 +2968,9 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
     // The record itself, which says the pane is drawn and it is this session's.
-    await drawn(container, `.details-pane .${outputPane.recordSwitch}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.recordSwitch}`);
 
-    expect(container.querySelector(`.details-pane .${outputPane.captureSummary}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${outputPane.captureSummary}`)).toBeNull();
   });
 
   /// The fallback, and the whole details-pane story for a session whose backend
@@ -2971,7 +2982,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const shown = await drawn(container, `.details-pane .${outputPane.capture}`);
+    const shown = await drawn(container, `.${shell.detailsPane} .${outputPane.capture}`);
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
@@ -2988,11 +2999,11 @@ describe("a session's output on the timeline", () => {
 
     const showing = await drawn(
       container,
-      `.details-pane .${outputPane.recordSwitch} .${outputPane.transcriptTab}[aria-pressed="true"]`,
+      `.${shell.detailsPane} .${outputPane.recordSwitch} .${outputPane.transcriptTab}[aria-pressed="true"]`,
     );
 
     expect(showing.textContent).toBe("Transcript");
-    expect(container.querySelector(`.details-pane .${screenPane.screen}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${screenPane.screen}`)).toBeNull();
     expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
   });
 
@@ -3007,9 +3018,9 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -3033,14 +3044,14 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Read-only");
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.details-pane .${screenPane.screen} textarea`,
+      `.${shell.detailsPane} .${screenPane.screen} textarea`,
     );
     expect(typing.readOnly).toBe(true);
   });
@@ -3064,7 +3075,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     (await attached()).says(PAINTED);
-    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(0);
     // And the Capture with it, which is the read the Transcript's own answer
@@ -3079,15 +3090,15 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
     const first = askedFor(fetching, TRANSCRIPT_OF_IT);
 
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
-    await drawn(container, `.details-pane .${screenPane.screen}`);
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
 
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
-    await waitFor(() => drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`));
+    await waitFor(() => drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`));
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThanOrEqual(first);
   });
 
@@ -3104,9 +3115,9 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Waiting");
 
     (await attached()).says(PAINTED);
@@ -3123,13 +3134,13 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const prose = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
+    const prose = await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
     expect(prose.textContent).toContain("Looking at how the queue is drained");
     // Rendered by the server and put in the page as markup, which is what puts
     // no markdown parser on this side of the wire.
     expect(prose.querySelector("strong")!.textContent).toBe("drained");
-    expect(container.querySelector(`.details-pane .${outputPane.capture}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${outputPane.capture}`)).toBeNull();
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThan(0);
   });
 
@@ -3142,8 +3153,8 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const put = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.put}`);
-    const answered = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolCall}`);
+    const put = await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.put}`);
+    const answered = await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall}`);
 
     expect(put.textContent).toContain("What should the queue do");
     expect(answered.textContent).toContain("crates/server/src/queue.rs");
@@ -3160,13 +3171,13 @@ describe("a session's output on the timeline", () => {
 
     const reasoning = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.reasoning} details`,
     );
     const call = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall} details`,
     );
-    const prose = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
+    const prose = await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
     expect(reasoning.open).toBe(false);
     expect(call.open).toBe(false);
@@ -3189,7 +3200,7 @@ describe("a session's output on the timeline", () => {
 
     const pair = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall} details`,
     );
 
     expect(pair.querySelector("summary")!.textContent).toContain("Bash");
@@ -3209,10 +3220,10 @@ describe("a session's output on the timeline", () => {
     // And the answer is not also standing on its own under it, which is what
     // there being one card is.
     expect(
-      container.querySelectorAll(`.details-pane .${outputPane.turn}.${outputPane.toolCall}`),
+      container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall}`),
     ).toHaveLength(1);
     expect(
-      container.querySelector(`.details-pane .${outputPane.turn}.${outputPane.toolResult}`),
+      container.querySelector(`.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolResult}`),
     ).toBeNull();
   });
 
@@ -3263,10 +3274,10 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolCall}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall}`);
 
     const [worked, failed] = [
-      ...container.querySelectorAll(`.details-pane .${outputPane.turn}.${outputPane.toolCall} summary`),
+      ...container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall} summary`),
     ];
 
     expect(worked!.textContent).toContain("Count the tasks left");
@@ -3307,7 +3318,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const orphan = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolResult}`);
+    const orphan = await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolResult}`);
 
     expect(orphan.textContent).toContain("04-render.md");
   });
@@ -3361,7 +3372,7 @@ describe("a session's output on the timeline", () => {
 
     const waiting = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.toolCall} details`,
     );
     waiting.open = true;
 
@@ -3377,7 +3388,7 @@ describe("a session's output on the timeline", () => {
         waiting.querySelector(`pre.${outputPane.output}`)!.textContent,
       ).toContain("78 passed"),
     );
-    expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(1);
+    expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(1);
     expect(waiting.open).toBe(true);
   });
 
@@ -3391,7 +3402,7 @@ describe("a session's output on the timeline", () => {
 
     const kept = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.bookkeeping}`,
+      `.${shell.detailsPane} .${outputPane.bookkeeping}`,
     );
 
     expect(kept.open).toBe(false);
@@ -3401,7 +3412,7 @@ describe("a session's output on the timeline", () => {
     expect(kept.textContent).toContain("attachment");
 
     // And not among the turns, which is what folding it away is for.
-    expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
+    expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(
       rows(TRANSCRIPT.turns),
     );
   });
@@ -3417,7 +3428,7 @@ describe("a session's output on the timeline", () => {
 
     const unread = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.unread} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.unread} details`,
     );
 
     expect(unread.open).toBe(false);
@@ -3443,7 +3454,7 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     const reasoning = await drawn<HTMLDetailsElement>(
       container,
-      `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
+      `.${shell.detailsPane} .${outputPane.turn}.${outputPane.reasoning} details`,
     );
     reasoning.open = true;
 
@@ -3452,14 +3463,14 @@ describe("a session's output on the timeline", () => {
     // What the session has said since has been drawn under the fold, added to
     // what was already there rather than replacing it…
     await waitFor(() =>
-      expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
+      expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(
         rows(TRANSCRIPT.turns, MORE.turns),
       ),
     );
     // …and the fold is the same element it was, still open.
     expect(
       container.querySelector<HTMLDetailsElement>(
-        `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
+        `.${shell.detailsPane} .${outputPane.turn}.${outputPane.reasoning} details`,
       ),
     ).toBe(reasoning);
     expect(reasoning.open).toBe(true);
@@ -3477,17 +3488,17 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.bookkeeping}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.bookkeeping}`);
 
     await client.invalidateQueries();
 
     await waitFor(() =>
       expect(
-        container.querySelectorAll(`.details-pane .${outputPane.bookkeeping} li`),
+        container.querySelectorAll(`.${shell.detailsPane} .${outputPane.bookkeeping} li`),
       ).toHaveLength(TRANSCRIPT.bookkeeping.length + MORE.bookkeeping.length),
     );
     expect(
-      container.querySelectorAll(`.details-pane .${outputPane.bookkeeping}`),
+      container.querySelectorAll(`.${shell.detailsPane} .${outputPane.bookkeeping}`),
     ).toHaveLength(1);
   });
 
@@ -3518,14 +3529,14 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.turn}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}`);
 
     await client.invalidateQueries();
 
     // What was read whole is the record, not something to add to it: the
     // session's beginning is drawn once.
     await waitFor(() =>
-      expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
+      expect(container.querySelectorAll(`.${shell.detailsPane} .${outputPane.turn}`)).toHaveLength(
         rows(WHOLE_AGAIN.turns),
       ),
     );
@@ -3539,7 +3550,7 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
+    await drawn(container, `.${shell.detailsPane} .${outputPane.turn}.${outputPane.prose}`);
 
     expect(OUTPUT.running).toBe(false);
     const before = askedFor(fetching, TRANSCRIPT_OF_IT);
@@ -3559,11 +3570,11 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    await drawn(container, `.details-pane .${paneHead.head} .${outputPane.recordSwitch}`);
-    await drawn(container, `.details-pane .${paneHead.head} .${paneHead.back}`);
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${outputPane.recordSwitch}`);
+    await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${paneHead.back}`);
 
     expect(
-      container.querySelector(`.details-pane .${paneHead.close}`),
+      container.querySelector(`.${shell.detailsPane} .${paneHead.close}`),
     ).toBeNull();
   });
 
@@ -3593,11 +3604,11 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const transcript = await drawn(container, `.details-pane .${outputPane.transcriptTab}`);
-    const screen = await drawn(container, `.details-pane .${outputPane.screenTab}`);
+    const transcript = await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`);
+    const screen = await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`);
     const mark = await drawn<HTMLElement>(
       container,
-      `.details-pane .${outputPane.recordSwitch} .${outputPane.indicator}`,
+      `.${shell.detailsPane} .${outputPane.recordSwitch} .${outputPane.indicator}`,
     );
 
     // Presentation and nothing else: the two buttons already say which is
@@ -3690,7 +3701,7 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
     return { container, socket: await attached() };
   }
@@ -3706,7 +3717,7 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -3723,7 +3734,7 @@ describe("watching a live session's screen", () => {
     // Watching, and saying what typing into it would cost: the first keystroke
     // takes the Hold, and a pane that let one be typed without saying so would
     // be one that stopped Verkstead by surprise.
-    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Watching");
     expect(said.textContent).toContain("hand it back");
 
@@ -3784,8 +3795,8 @@ describe("watching a live session's screen", () => {
   /// header, rather than letting it run on down a page that scrolls. Read off
   /// the stylesheet, because jsdom lays nothing out.
   it("gives the Screen the pane's height rather than the page's", () => {
-    expect(screenCss).toContain(
-      ":global(.workbench) > :global(.details-pane):has(.screen) {\n" +
+    expect(shellCss).toContain(
+      ".workbench > .detailsPane:has(.paneScreen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n" +
         "  padding-bottom: 1.25rem;\n" +
@@ -3794,8 +3805,8 @@ describe("watching a live session's screen", () => {
     );
 
     // What is above the terminal keeps its size; the Screen takes the rest.
-    expect(screenCss).toContain(
-      ":global(.workbench) > :global(.details-pane):has(.screen) > :not(.screen) {\n" +
+    expect(shellCss).toContain(
+      ".workbench > .detailsPane:has(.paneScreen) > :not(.paneScreen) {\n" +
         "  flex: none;\n" +
         "}",
     );
@@ -3829,7 +3840,7 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).toContain(screenPane.live!);
 
     expect(screenCss).toContain(
@@ -3850,7 +3861,7 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).toContain(screenPane.live!);
 
     // The badge keeps its capitals, and asks for them where badges are.
@@ -3877,9 +3888,9 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).not.toContain(screenPane.live!);
   });
 
@@ -3891,12 +3902,12 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, `.details-pane .${screenPane.screen}`);
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
 
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
     await waitFor(() =>
-      expect(container.querySelector(`.details-pane .${screenPane.screen}`)).toBeNull(),
+      expect(container.querySelector(`.${shell.detailsPane} .${screenPane.screen}`)).toBeNull(),
     );
   });
 
@@ -3908,9 +3919,9 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
     await waitFor(() => expect(socket.closed).toBe(true));
     expect(Attached.opened).toHaveLength(1);
@@ -3926,9 +3937,9 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
     expect(Attached.opened).toHaveLength(0);
     expect(askedFor(fetching, SCREEN_OF_IT)).toBeGreaterThan(0);
@@ -3942,7 +3953,7 @@ describe("taking a live session's keyboard", () => {
   async function typeInto(container: ParentNode, key: string, code: number) {
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.details-pane .${screenPane.screen} .xterm-helper-textarea`,
+      `.${shell.detailsPane} .${screenPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.keyDown(typing, { key, keyCode: code, which: code });
@@ -3972,12 +3983,12 @@ describe("taking a live session's keyboard", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
     const socket = await attached();
     socket.says(PAINTED);
 
-    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
 
     return { container, socket };
   }
@@ -3993,12 +4004,12 @@ describe("taking a live session's keyboard", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
     const socket = await attached();
     socket.says(PAINTED);
 
-    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
     const before = grid.textContent;
 
     await typeInto(container, "Enter", 13);
@@ -4016,7 +4027,7 @@ describe("taking a live session's keyboard", () => {
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.details-pane .${screenPane.screen} .xterm-helper-textarea`,
+      `.${shell.detailsPane} .${screenPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.paste(typing, {
@@ -4038,7 +4049,7 @@ describe("taking a live session's keyboard", () => {
   it("sends what the mouse did as the mouse, which takes nothing", async () => {
     const { container, socket } = await watching();
 
-    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-screen`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-screen`);
 
     fireEvent.wheel(grid, { deltaY: 120 });
 
@@ -4070,10 +4081,10 @@ describe("taking a live session's keyboard", () => {
     const socket = await attached();
     socket.says(PAINTED);
 
-    const holding = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.holding}`);
+    const holding = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.holding}`);
     expect(holding.textContent).toContain("You have the keyboard");
 
-    fireEvent.click(await drawn(container, `.details-pane .${screenPane.handBack}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${screenPane.handBack}`));
 
     await waitFor(() =>
       expect(
@@ -4099,9 +4110,9 @@ describe("taking a live session's keyboard", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const holding = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.holding}`);
+    const holding = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.holding}`);
     expect(holding.textContent).toContain("the session has exited");
-    expect(await drawn(container, `.details-pane .${screenPane.handBack}`)).toBeTruthy();
+    expect(await drawn(container, `.${shell.detailsPane} .${screenPane.handBack}`)).toBeTruthy();
 
     // Its Screen is the one it last stood on, fetched: there is nothing left to
     // attach to, held or not.
@@ -4119,7 +4130,7 @@ describe("taking a live session's keyboard", () => {
 
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const badge = await drawn(container, `.timeline-pane .${timeline.blocked}`);
+    const badge = await drawn(container, `.${shell.timelinePane} .${timeline.blocked}`);
     expect(badge.textContent).toContain("Blocked on you");
   });
 });
@@ -4131,7 +4142,7 @@ describe("aborting a conversation", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await drawn(container, `.conversation-actions > .${dropdown.trigger}`);
+    await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`);
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.
@@ -4155,7 +4166,7 @@ describe("aborting a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.conversation-actions .${timeline.abort}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`));
 
     await waitFor(() =>
       expect(
@@ -4185,7 +4196,7 @@ describe("aborting a conversation", () => {
     await openActions(container);
 
     await waitFor(() => screen.getByText("This conversation has been aborted."));
-    expect(container.querySelector(`.conversation-actions .${timeline.abort}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.abort}`)).toBeNull();
   });
 
   it("says when the worktree could not be removed", async () => {
@@ -4199,7 +4210,7 @@ describe("aborting a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.conversation-actions .${timeline.abort}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`));
 
     await waitFor(() => screen.getByText(/could not be removed/));
   });
@@ -4319,8 +4330,8 @@ describe("reopening a conversation", () => {
     expect(briefs[1]!.querySelector("textarea")).toBeTruthy();
 
     // And the setup goes under the round being set up rather than under both.
-    expect(briefs[0]!.querySelector(".conversation-setup")).toBeNull();
-    expect(briefs[1]!.querySelector(".conversation-setup")).toBeTruthy();
+    expect(briefs[0]!.querySelector(`.${setup.conversationSetup}`)).toBeNull();
+    expect(briefs[1]!.querySelector(`.${setup.conversationSetup}`)).toBeTruthy();
   });
 
   /// A reader has to be able to tell which brief the work under it was built
@@ -4420,9 +4431,9 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.conversation-actions .${timeline.stop}`);
+    await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`);
     expect(
-      container.querySelector(`.conversation-actions .${timeline.forceStop}`),
+      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
     ).toBeNull();
   });
 
@@ -4434,10 +4445,10 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.conversation-actions .${timeline.abort}`);
-    expect(container.querySelector(`.conversation-actions .${timeline.stop}`)).toBeNull();
+    await drawn(container, `.${timeline.conversationActions} .${timeline.abort}`);
+    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
     expect(
-      container.querySelector(`.conversation-actions .${timeline.forceStop}`),
+      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
     ).toBeNull();
   });
 
@@ -4455,7 +4466,7 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.conversation-actions .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
 
     await waitFor(() => expect(sent(fetching, STOPPING)).toEqual({}));
   });
@@ -4469,7 +4480,7 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
     fireEvent.click(
-      await drawn(container, `.conversation-actions .${timeline.forceStop}`),
+      await drawn(container, `.${timeline.conversationActions} .${timeline.forceStop}`),
     );
 
     await waitFor(() => expect(sent(fetching, AT_ONCE)).toEqual({}));
@@ -4491,9 +4502,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.conversation-actions .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
 
-    const waiting = await drawn(container, `.conversation-actions .${timeline.waiting}`);
+    const waiting = await drawn(container, `.${timeline.conversationActions} .${timeline.waiting}`);
 
     expect(waiting.textContent).toContain("finishes its task first");
   });
@@ -4512,9 +4523,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.conversation-actions .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
 
-    const refused = await drawn(container, `.conversation-actions .${notices.error}`);
+    const refused = await drawn(container, `.${timeline.conversationActions} .${notices.error}`);
 
     expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyHalted);
     expect(refused.textContent).toContain("Resume");
@@ -5165,9 +5176,9 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, ".details-pane .diffFiles");
+    await drawn(container, `.${shell.detailsPane} .diffFiles`);
 
-    fireEvent.click(await drawn(container, `.details-pane .${paneHead.close}`));
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.close}`));
 
     await waitFor(() =>
       expect(screen.getByLabelText("Details").textContent).toBe(""),
@@ -5181,7 +5192,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const diff = await drawn(container, ".details-pane .diffFiles");
+    const diff = await drawn(container, `.${shell.detailsPane} .diffFiles`);
 
     // Put in the page as it arrived: the folds, the per-file anchors and the
     // highlighting are all the renderer's, and nothing here reads the diff.
@@ -5204,7 +5215,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const header = await drawn(container, `.details-pane .${commitPane.header}`);
+    const header = await drawn(container, `.${shell.detailsPane} .${commitPane.header}`);
 
     expect(header.textContent).toContain(COMMITS[0]!.subject);
     expect(header.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
@@ -5228,13 +5239,13 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.details-pane .${commitPane.summary}`);
+    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
 
     expect(summary.innerHTML).toBe("<p>A bucket per account.</p>");
 
     // Read in the order it is written in: what the commit says about itself,
     // then what it changed.
-    const diff = await drawn(container, ".details-pane .diff");
+    const diff = await drawn(container, `.${shell.detailsPane} .diff`);
 
     expect(
       summary.compareDocumentPosition(diff) &
@@ -5253,7 +5264,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.details-pane .${commitPane.summary}`);
+    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
 
     // The source block the renderer draws over — and what the reader is left
     // with if it never draws.
@@ -5296,7 +5307,7 @@ describe("a commit on the timeline", () => {
     /// this test is about, so waiting for the block alone would prove nothing.
     const showing = (words: string) =>
       waitFor(() => {
-        const block = container.querySelector(`.details-pane .${commitPane.summary}`);
+        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`);
         if (!block?.textContent?.includes(words)) {
           throw new Error(`the pane is not showing ${words} yet`);
         }
@@ -5343,7 +5354,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.details-pane .${commitPane.summary}`);
+    await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
 
     expect(drawing).not.toHaveBeenCalled();
   });
@@ -5355,9 +5366,9 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, ".details-pane .diffFiles");
+    await drawn(container, `.${shell.detailsPane} .diffFiles`);
 
-    expect(container.querySelector(`.details-pane .${commitPane.summary}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`)).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -5370,11 +5381,11 @@ describe("a commit on the timeline", () => {
     // place while the diff is in flight.
     await waitFor(() =>
       expect(
-        container.querySelector(`.details-pane .${notices.empty}`)!.textContent,
+        container.querySelector(`.${shell.detailsPane} .${notices.empty}`)!.textContent,
       ).toContain("changed no files"),
     );
 
-    expect(container.querySelector(".details-pane .diff")).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .diff`)).toBeNull();
   });
 
   /// A commit whose repository no longer has it is a 404, and the pane says the
@@ -5397,7 +5408,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const error = await drawn(container, `.details-pane .${notices.error}`);
+    const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(error.textContent).toContain(
       "there is no such commit on that Conversation",
@@ -5416,7 +5427,7 @@ describe("a commit on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
     const fold = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane details.diffFile",
+      `.${shell.detailsPane} details.diffFile`,
     );
     fold.open = false;
 
@@ -5426,7 +5437,7 @@ describe("a commit on the timeline", () => {
     expect(askedFor(fetching, DIFF_OF_IT)).toBe(before);
     expect(
       container.querySelector<HTMLDetailsElement>(
-        ".details-pane details.diffFile",
+        `.${shell.detailsPane} details.diffFile`,
       ),
     ).toBe(fold);
     expect(fold.open).toBe(false);
@@ -5470,7 +5481,7 @@ describe("the contents of a details pane", () => {
     Object.defineProperty(Element.prototype, "clientWidth", {
       configurable: true,
       get(this: Element) {
-        return this.classList.contains("details-pane") ? rem * 16 : 0;
+        return this.classList.contains(shell.detailsPane!) ? rem * 16 : 0;
       },
     });
   }
@@ -5513,7 +5524,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
 
     // The section the diff is, and then its folds — the same anchors the
     // renderer stamped on them, in the order the paths beside it name.
@@ -5540,7 +5551,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
 
     expect(
       [...nav.querySelectorAll(`a.${contents.link}`)].map((line) =>
@@ -5551,7 +5562,7 @@ describe("the contents of a details pane", () => {
     // And both lines land on something: the ids are the pane's own sections
     // rather than names the nav made up.
     for (const anchor of ["commit-summary", "commit-diff"]) {
-      const section = container.querySelector(`.details-pane #${anchor}`);
+      const section = container.querySelector(`.${shell.detailsPane} #${anchor}`);
       expect(section, `expected the pane to hold #${anchor}`).toBeTruthy();
 
       const landed = vi.fn();
@@ -5568,9 +5579,9 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
     const fold = container.querySelector<HTMLDetailsElement>(
-      ".details-pane #diff-2",
+      `.${shell.detailsPane} #diff-2`,
     )!;
     fold.open = false;
 
@@ -5588,7 +5599,7 @@ describe("the contents of a details pane", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.details-pane nav.${contents.contents}`);
+    await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
 
     await waitFor(() =>
       expect(watched).toEqual(
@@ -5604,7 +5615,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
     expect(nav.classList.contains(contents.paned!)).toBe(true);
     expect(nav.classList.contains(contents.roomy!)).toBe(false);
   });
@@ -5616,7 +5627,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
     expect(nav.classList.contains(contents.roomy!)).toBe(true);
   });
 
@@ -5629,7 +5640,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.questionSet}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
     expect(nav.classList.contains(contents.roomy!)).toBe(true);
   });
 
@@ -5642,7 +5653,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.questionSet}`));
 
-    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    const nav = await drawn(container, `.${shell.detailsPane} nav.${contents.contents}`);
     expect(nav.classList.contains(contents.roomy!)).toBe(false);
     expect(nav.querySelector(`.${contents.bar}`)).toBeTruthy();
   });
@@ -5796,15 +5807,15 @@ describe("the pinned task list", () => {
     const { container } = mount(`/conversations/${TASKED.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
-    const chrome = pinned.closest(".pane-chrome");
+    const chrome = pinned.closest(`.${shell.paneChrome}`);
 
     // One block, with the header in it: that is what makes them stay together
     // with no strip of scrolling record between them.
     expect(chrome).not.toBeNull();
     expect(chrome!.querySelector(`.${paneHead.head}`)).not.toBeNull();
 
-    expect(stylesheet).toContain(
-      ".pane > .pane-chrome {\n  position: sticky;\n  top: 0;",
+    expect(shellCss).toContain(
+      ".pane > .paneChrome {\n  position: sticky;\n  top: 0;",
     );
   });
 
@@ -5819,9 +5830,9 @@ describe("the pinned task list", () => {
 
     // Both are inside the one stuck block, so which is over which is settled
     // between them rather than against the record.
-    expect(menu.closest(".pane-chrome")).not.toBeNull();
-    expect(paneHeadCss).toContain(
-      ":global(.pane-chrome) > .head {\n  position: relative;\n  z-index: 1;\n}",
+    expect(menu.closest(`.${shell.paneChrome}`)).not.toBeNull();
+    expect(shellCss).toContain(
+      ".paneChrome > .paneChrome {\n  position: relative;\n  z-index: 1;\n}",
     );
   });
 
@@ -6376,7 +6387,7 @@ describe("the pinned pull request", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
 
-    const commits = await drawn(container, `.details-pane .${prPane.commits}`);
+    const commits = await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
 
     expect(
       [...commits.querySelectorAll(`.${prPane.carried} li`)].map((row) => [
@@ -6385,7 +6396,7 @@ describe("the pinned pull request", () => {
       ]),
     ).toEqual(CARRIED.commits.map((it) => [it.sha.slice(0, 7), it.subject]));
 
-    const comments = await drawn(container, `.details-pane .${prPane.comments}`);
+    const comments = await drawn(container, `.${shell.detailsPane} .${prPane.comments}`);
 
     expect(comments.querySelector(`.${prPane.author}`)!.textContent).toBe(
       CARRIED.comments[0]!.author,
@@ -6421,7 +6432,7 @@ describe("the pinned pull request", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
 
-    const error = await drawn(container, `.details-pane .${notices.error}`);
+    const error = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
 
     expect(error.textContent).toContain("is not logged in");
   });
@@ -6632,7 +6643,7 @@ describe("the pinned carousel", () => {
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const carousel = await drawn(container, `.${timeline.pinned} .${timeline.carousel}`);
-    expect(carousel.closest(".pane-chrome")).not.toBeNull();
+    expect(carousel.closest(`.${shell.paneChrome}`)).not.toBeNull();
     expect(carousel.closest(`.${timeline.timeline}`)).toBeNull();
 
     const dots = carousel.querySelector(`.${timeline.dots}`)!;
@@ -6641,7 +6652,7 @@ describe("the pinned carousel", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
 
-    await drawn(container, `.details-pane .${prPane.commits}`);
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
   });
 });

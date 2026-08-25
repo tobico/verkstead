@@ -23,6 +23,7 @@ import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
 import { Switch } from "../Switch";
+import shell from "../workbench/Workbench.module.css";
 import contents from "./Contents.module.css";
 import type { Entry, Section, Stands, Watched } from "./outline";
 import {
@@ -447,7 +448,7 @@ function roominess(nav: Accessor<HTMLElement | undefined>): Accessor<boolean> {
   const [roomy, setRoomy] = createSignal(false);
 
   createEffect(() => {
-    const pane = nav()?.closest(".details-pane");
+    const pane = nav()?.closest(`.${shell.detailsPane}`);
     if (pane === null || pane === undefined) {
       return;
     }

@@ -1,0 +1,151 @@
+/* What is still the human's to change while the brief is a draft: the branch,
+   the base commit and the two pairings. See `Setup.tsx`.
+
+   Drawn under the brief it belongs to, on the same card, which is why the block
+   opens with a rule rather than with a heading of its own. */
+
+/* Ruled off from the prose above it, because the brief is the card's headline
+   and this is the setup that follows it — and gone entirely once grilling
+   starts, which is why nothing here is ever drawn disabled. */
+.conversationSetup {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* The gap under the last of them is the card's own padding, rather than that
+   plus the one every section keeps below itself. */
+.conversationSetup > :last-child {
+  margin-bottom: 0;
+}
+
+/* The two fields the setup opens with: the branch, which keeps itself the way
+   the brief above it does, and the base commit with the button that records
+   it. */
+.branchName,
+.baseBranch {
+  margin-bottom: 1.5rem;
+}
+
+.branchName label,
+.baseBranch label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.fieldLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.fieldLine input {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* The branch named in the words under the dropdown, in the type a branch name
+   is written in. There are words there at all because the dropdown's first
+   entry is a rule rather than a branch: what it resolves to is not known until
+   grilling starts, so it is said underneath instead. */
+.baseBranch .defaultBranch {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* The same control the pairings are picked with, because it is the same kind of
+   choice: one of a short list the repository already holds. */
+.baseBranch select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.branchName .failure,
+.baseBranch .failure,
+.conversationProfiles .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* The two accounts the work runs under. Separate choices because they are
+   genuinely separate accounts and models, so they are drawn as two fields rather
+   than as one with a note about the other. */
+.conversationProfiles {
+  margin-bottom: 1.5rem;
+}
+
+.conversationProfiles h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* The two of them across one row where the pane is wide enough, and down the
+   page where it is not. The wrap does that on its own — each choice asks for
+   about half of a wide pane and refuses to go under a readable width, so a
+   narrow pane cannot fit two and puts the second on its own line. No breakpoint,
+   because the width that matters here is the pane's rather than the window's. */
+.pairings {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1rem;
+}
+
+.pairings > .profileChoice {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.profileChoice {
+  margin-bottom: 1rem;
+}
+
+.profileChoice label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.profileChoice select {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+/* A chosen profile whose pair has gone: the select still shows it, because it is
+   what was chosen, and the reason it will not do is said under it. */
+.profileChoice .broken {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* A profile chosen before models were paired with them, which is half a choice:
+   the select shows nothing, and this is what it is showing nothing about. */
+.profileChoice .unpaired {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Whether this conversation will grill. The server's rule rather than a count of
+   the two fields above, so it is stated rather than inferred. */
+.readiness.ready {
+  color: var(--added);
+}

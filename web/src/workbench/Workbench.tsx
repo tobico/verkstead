@@ -67,6 +67,7 @@ import { Document } from "./Document";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Timeline } from "./Timeline";
+import styles from "./Workbench.module.css";
 import {
   ALL_THREE,
   BESIDE,
@@ -196,7 +197,7 @@ function Divider(props: {
 }): JSX.Element {
   return (
     <div
-      class="pane-divider"
+      class={styles.divider}
       role="separator"
       aria-orientation="vertical"
       aria-label={props.label}
@@ -347,12 +348,15 @@ export function Workbench(): JSX.Element {
 
   return (
     <div
-      class="workbench"
+      class={styles.workbench}
       data-pane={pane()}
       ref={frame}
       style={columns()}
     >
-      <section class="pane conversations-pane" aria-label="Conversations">
+      <section
+        class={`${styles.pane} ${styles.conversationsPane}`}
+        aria-label="Conversations"
+      >
         <Conversations
           selected={selected()}
           open={(id) => navigate(`/conversations/${id}`)}
@@ -542,7 +546,10 @@ function Reading(props: {
 
   return (
     <>
-      <section class="pane timeline-pane" aria-label="Timeline">
+      <section
+        class={`${styles.pane} ${styles.timelinePane}`}
+        aria-label="Timeline"
+      >
         <Switch>
           <Match when={props.id === ""}>
             {/* The resting state of the workbench, and what it says is the one
@@ -573,7 +580,10 @@ function Reading(props: {
 
       {props.divider}
 
-      <section class="pane details-pane" aria-label="Details">
+      <section
+        class={`${styles.pane} ${styles.detailsPane}`}
+        aria-label="Details"
+      >
         {/* Nothing at all where nothing is open, which on a wide window is a
             blank column beside the record and on a narrow one is a level there
             is no way in to. */}
