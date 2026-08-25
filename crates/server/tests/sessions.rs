@@ -7057,10 +7057,17 @@ fn out_of_window(sentence: &str) -> String {
                     # session printed on, so the banner is looked at more than
                     # once — with claude's own spinner turning in front of it,
                     # which is what makes each repaint a different line.
+                    #
+                    # The glyphs are written as themselves rather than as `\x`
+                    # escapes, because `printf` is the shell's own and the
+                    # shells disagree about those: bash reads `\xe2` as a byte,
+                    # dash reads it as the character U+00E2 and prints that in
+                    # UTF-8. An escaped spinner therefore reaches the capture as
+                    # a letter wherever `/bin/sh` is dash — and a banner opening
+                    # with a letter is not decoration to be trimmed, so nothing
+                    # would read it as a limit at all.
                     for pass in 1 2; do
-                        for turning in \
-                            '\xe2\x9c\xbb' '\xe2\x9c\xbd' \
-                            '\xe2\x9c\xb3' '\xe2\x9c\xa2'
+                        for turning in '✻' '✽' '✳' '✢'
                         do
                             printf "$turning {sentence}\r\n"
                             sleep 0.125
@@ -7107,7 +7114,7 @@ async fn running_out(fixture: &Grilling) {
 #[tokio::test]
 async fn an_account_out_of_window_pauses_the_run_and_tells_the_devices() {
     let fixture = grilling(&out_of_window(
-        "Usage limit reached \\xc2\\xb7 continuing automatically at 2026-08-24T05:00:00Z \\xc2\\xb7 esc to cancel",
+        "Usage limit reached · continuing automatically at 2026-08-24T05:00:00Z · esc to cancel",
     ))
     .await;
 
@@ -7281,7 +7288,7 @@ async fn the_humans_press_starts_a_paused_run_again_where_it_stopped() {
 #[tokio::test]
 async fn the_window_coming_back_starts_a_paused_run_again_on_its_own() {
     let fixture = grilling_resuming(&out_of_window(
-        "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
+        "Usage limit reached · continuing automatically at 2020-01-01T00:00:00Z",
     ))
     .await;
 
