@@ -191,8 +191,7 @@ flowchart LR
 ## Execution and sandboxing
 
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
-  - **rw:**
- the conversation's worktree; the repo's common `.git` directory;
+  - **rw:** the conversation's worktree; the repo's common `.git` directory;
     the profile's claude pair at `~/.claude` and `~/.claude.json`
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
