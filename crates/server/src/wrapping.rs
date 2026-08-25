@@ -33,6 +33,11 @@
 //! as a Notice. That is the honest shape of it: the run has stopped, Verkstead
 //! cannot resolve it, and what to do about it is the human's — install `gh`, log
 //! in, or open the PR by hand, and resume.
+//!
+//! Which is advice Resume then has to be able to take: a pull request opened in
+//! a browser is one nothing on the branch knows about, so Resume asks GitHub
+//! about it before it spends anything — see [`asked`], and [`crate::runner`] for
+//! what an inline run makes of the answer.
 
 use std::path::PathBuf;
 
@@ -53,25 +58,8 @@ use crate::store;
 /// unattended run with nobody watching, and what it has to say it says on the
 /// Timeline.
 pub(crate) async fn opened(state: &AppState, conversation_id: i64, writing: Option<i64>) {
-    let Some((repo, branch)) = branch(state, conversation_id).await else {
+    let Some((branch, found)) = asked(state, conversation_id).await else {
         return;
-    };
-
-    let asked = {
-        let gh = state.github.clone();
-        let branch = branch.clone();
-
-        // Off the runtime's threads: this is a process, and one that goes to the
-        // network.
-        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &branch)).await
-    };
-
-    let found = match asked {
-        Ok(found) => found,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
-            return;
-        }
     };
 
     let opened = match found {
@@ -241,7 +229,17 @@ pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool 
 /// [`store::Halt::Deliberate`]: the work ran and left no pull request, so what
 /// is wrong is out here rather than in a driver that went away, and a restart
 /// looking again would find the same missing thing.
-async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Option<i64>) {
+///
+/// Which is also why Resume on an inline implementation stops here rather than
+/// launching over it — see [`crate::runner`]. A `gh` that cannot answer now is
+/// one the session would push into later, so the account it would spend is
+/// spent on the same missing thing.
+pub(crate) async fn stopped(
+    state: &AppState,
+    conversation_id: i64,
+    why: &str,
+    writing: Option<i64>,
+) {
     if let Err(error) = crate::halts::halt(
         state,
         conversation_id,
@@ -257,6 +255,43 @@ async fn stopped(state: &AppState, conversation_id: i64, why: &str, writing: Opt
             conversation_id,
             "a finish step left no pull request and the halt saying so could not be recorded"
         );
+    }
+}
+
+/// Ask the host's `gh` what pull request `conversation_id`'s branch has, and
+/// hand back the branch it asked about alongside the answer.
+///
+/// Whether there is one is a question two phases ask. [`opened`] asks it at the
+/// end of a run, where a pull request is what the work was carried to, and
+/// Resume on an inline implementation asks it before spending a session,
+/// because a branch that is already on a pull request has nothing left to
+/// implement — see [`crate::runner`]. What each makes of the answer is its own,
+/// so the answer is what this hands back rather than anything it does about it.
+///
+/// `None` where there was nothing to ask about or the asking itself fell over,
+/// both of which are in the log already: neither leaves a caller anything to
+/// say.
+pub(crate) async fn asked(
+    state: &AppState,
+    conversation_id: i64,
+) -> Option<(String, Result<store::PullRequest, github::Trouble>)> {
+    let (repo, branch) = branch(state, conversation_id).await?;
+
+    let asked = {
+        let gh = state.github.clone();
+        let branch = branch.clone();
+
+        // Off the runtime's threads: this is a process, and one that goes to the
+        // network.
+        tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &branch)).await
+    };
+
+    match asked {
+        Ok(found) => Some((branch, found)),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "asking gh for a pull request failed");
+            None
+        }
     }
 }
 

@@ -40,6 +40,7 @@ use verkstead_schema::Direction;
 
 use crate::AppState;
 use crate::drivers::Driving;
+use crate::github;
 use crate::repos::git;
 use crate::sessions::{Quiet, Session};
 use crate::skills;
@@ -415,17 +416,67 @@ pub(crate) async fn implementing_again(state: AppState, conversation_id: i64, dr
     }
 }
 
-/// Run an inline implementation again, in a fresh session.
+/// Run an inline implementation again — or, where the branch is already on a
+/// pull request, wrap that up instead.
 ///
-/// The whole of the work in one session, so there is nothing to read off the
-/// repository first: what the last one left behind is on the branch, and the
-/// branch is what the fresh session reads.
+/// The question in front of the session is the one [`roadmap_again`] asks a
+/// phase earlier: an inline implementation ends on a pull request, so a branch
+/// that already has one has nothing left to implement. Two ways it gets there,
+/// and neither of them is noticed by anything else — a session that pushed and
+/// opened the pull request before it died, and a human who opened one by hand
+/// off the halt's own advice. Asked of GitHub rather than of the branch,
+/// because a pull request is GitHub's fact and the branch cannot say whether
+/// there is one.
+///
+/// So `gh` is asked first, and what comes back decides between three things:
+///
+/// - a pull request, and the wrap-up takes it from here without a session being
+///   spent on work that is already done;
+/// - [`github::Trouble::NoPullRequest`], which is the ordinary case — the work
+///   really is unfinished, so a fresh session builds it exactly as before;
+/// - anything else, which is `gh` unable to answer at all, and that halts. A
+///   session launched into it could only dead-end on the same missing thing
+///   when it came to push, and the halt is what reaches the human on their
+///   phone.
 async fn inline_again(state: AppState, conversation_id: i64, driving: Driving) {
-    let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await else {
+    let Some((branch, found)) = crate::wrapping::asked(&state, conversation_id).await else {
         return;
     };
 
-    follow_inline(state, conversation_id, session, driving).await
+    match found {
+        Ok(opened) => {
+            tracing::info!(
+                conversation_id,
+                number = opened.number,
+                "the work is already on a pull request, so this wraps it up rather than \
+                 building it again"
+            );
+
+            // With no Event to read a tail off: there is no session behind this
+            // one, the last of them having gone before the human pressed
+            // Resume.
+            crate::wrapping::opened(&state, conversation_id, None).await
+        }
+        Err(github::Trouble::NoPullRequest) => {
+            let Some(session) = launch_in_turn(&state, conversation_id, Prompt::Implementing).await
+            else {
+                return;
+            };
+
+            follow_inline(state, conversation_id, session, driving).await
+        }
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "GitHub cannot be asked whether the work is on a pull request, so nothing \
+                 was started again",
+            );
+
+            crate::wrapping::stopped(&state, conversation_id, &trouble.why(), None).await
+        }
+    }
 }
 
 /// Write the roadmap again — or, where the branch already has one, look for the

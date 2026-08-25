@@ -914,6 +914,50 @@ printf 'no pull requests found for branch "%s"\n' "$3" >&2
 exit 1
 "#;
 
+/// And one that finds none until `opened` is there, and finds one once it is —
+/// the human going to GitHub and opening the pull request by hand, which is
+/// what a halt over a missing one tells them they can do.
+///
+/// Everything it answers once there is one is [`PULL_REQUEST`]'s, because
+/// finding it is what starts a wrap-up and a wrap-up asks about the rest.
+fn gh_opened_by_hand(opened: &Path) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[]'; exit 0; fi
+if [ ! -f {opened} ]; then
+    printf 'no pull requests found for branch "%s"\n' "$3" >&2
+    exit 1
+fi
+case "$5" in
+*statusCheckRollup*)
+    printf '{{"statusCheckRollup":[]}}'
+    ;;
+*commits*)
+    printf '{{"commits":[],"comments":[]}}'
+    ;;
+*comments*)
+    printf '{{"comments":[],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// And a `gh` that cannot answer anything at all, in the words the real one
+/// uses: an account that was never logged in, which is the ordinary way this
+/// goes wrong on a machine nobody is sitting at.
+///
+/// Different in kind from [`NO_PULL_REQUEST`], and that is the point of it:
+/// GitHub has not said there is no pull request, it has not been asked.
+const NOTHING_ASKABLE: &str = r#"
+printf 'gh: To use GitHub CLI, run: gh auth login\n' >&2
+exit 1
+"#;
+
 /// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
 /// program's own name, so what Verkstead passes lands in `$1` onwards.
 fn gh_stub(script: &str) -> Gh {
@@ -10827,6 +10871,304 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
     assert!(
         worktree.join(".tasks/01-count.md").exists(),
         "and it is the same task, because nothing reverted anything",
+    );
+}
+
+/// The inline stub the three Resume tests below run on: a grilling that writes
+/// its handoff and waits, a session that builds the work and exits, and a review
+/// that reads the branch and stays up.
+///
+/// Every branch prints the prompt it was run on, which is what makes *how many
+/// sessions were spent* a question the Timeline can answer: a session is an
+/// implementing one if its prompt sends it into the implementing skill.
+///
+/// The review stays up on purpose. What the first of the three asks about is a
+/// Conversation that has reached Wrapping, and a review that finished would let
+/// the wrap-up settle out from under the assertion.
+const AN_INLINE_RUN: &str = r#"
+printf 'prompt was: %s\n' "$2"
+
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'reading the whole branch\n'
+    sleep 300
+    ;;
+*implementing/SKILL.md*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    printf 'the limiter is in, the middleware is not\n'
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#;
+
+/// How many of a Conversation's sessions were implementing ones, read off what
+/// each of them was run on.
+///
+/// The count the Resume tests are really about: what a pull request already on
+/// the branch saves is an account, so *no session spent* has to be asserted as a
+/// number rather than as a state that happens to look right.
+async fn implementing_sessions(fixture: &Grilling) -> usize {
+    let running: Vec<i64> = outputs(&fixture.view().await)
+        .into_iter()
+        .map(|output| output.id)
+        .collect();
+
+    let mut spent = 0;
+
+    for event in running {
+        if fixture
+            .capture(event)
+            .await
+            .contains("implementing/SKILL.md")
+        {
+            spent += 1;
+        }
+    }
+
+    spent
+}
+
+/// Resume on an inline run whose branch is already on a pull request wraps that
+/// up, without spending a session on work that is already done.
+///
+/// The ending the halt over a missing pull request advises: open it by hand, and
+/// resume. Nothing else in Verkstead ever looks again, so before this the run
+/// stayed in Implementing however many times the human pressed the button, and
+/// each press cost an account a session that had nothing left to build.
+///
+/// Asked of GitHub rather than of the branch, which is why the `gh` here changes
+/// its answer mid-test while nothing about the repository does: the pull request
+/// was opened in a browser, and a branch cannot say that it was.
+#[tokio::test]
+async fn resuming_an_inline_run_whose_branch_has_a_pull_request_wraps_it_up_unspent() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-hand");
+
+    let fixture = grilling_spilling(spill, AN_INLINE_RUN, &gh_opened_by_hand(&opened)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The run stops where an inline run stops: the work is committed and there
+    // is no pull request on it.
+    let missing = fixture.halted().await;
+
+    assert!(
+        missing.html.contains("no pull request"),
+        "the run stopped on the pull request nothing opened: {:?}",
+        missing.html,
+    );
+    assert_eq!(
+        implementing_sessions(&fixture).await,
+        1,
+        "one session so far"
+    );
+
+    // And the human opens one from their phone, which is the whole of what they
+    // were told to do.
+    std::fs::write(&opened, "https://github.com/tobico/verkstead/pull/41\n").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the pull request the human opened is the one the Conversation wraps up",
+    );
+    assert_eq!(
+        implementing_sessions(&fixture).await,
+        1,
+        "and no second one was spent building work that was already on it",
+    );
+    assert_eq!(
+        commits(&fixture.view().await).len(),
+        1,
+        "which the branch says too: nothing built it again",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "and nothing is waiting on the human any more",
+    );
+}
+
+/// Resume where GitHub has no pull request for the branch builds the work again,
+/// exactly as it always did.
+///
+/// The ordinary case, and the one the reading in front of it must not change:
+/// *no pull request* is GitHub answering that the work is unfinished, so a fresh
+/// implementing session is started on the handoff the run has always had.
+#[tokio::test]
+async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
+    let fixture = grilling_asking(
+        r#"
+        printf 'prompt was: %s\n' "$2"
+
+        case "$2" in
+        *implementing/SKILL.md*)
+            if [ -f TRIED ]; then
+                sleep 300
+            else
+                printf 'once\n' > TRIED
+                printf 'a limiter\n' > limiter.md
+                git add limiter.md
+                git commit --quiet -m 'feat: rate limiting'
+                printf 'the limiter is in, the middleware is not\n'
+            fi
+            ;;
+        *)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+        NO_PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    fixture.halted().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let relaunched = fixture
+        .until(|view| {
+            let running = outputs(view);
+            (running.len() > before).then(|| running[before].id)
+        })
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id == relaunched && output.lines > 1)
+                .map(|output| output.id)
+        })
+        .await;
+
+    let printed = fixture.capture(said).await.replace("\r\n", "\n");
+
+    assert!(
+        printed.contains("~/.claude/skills/implementing/SKILL.md"),
+        "an inline run picked up again is an inline run: {printed:?}",
+    );
+    assert!(
+        printed.contains("A counter per key."),
+        "primed with the handoff the grilling wrote: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "and the work is being built, which is where it stopped",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "with nothing waiting on the human while something is driving it",
+    );
+}
+
+/// And Resume where `gh` cannot answer at all halts saying so, without spending
+/// a session on it.
+///
+/// The third answer, and the one that is neither of the other two: GitHub has
+/// not said there is no pull request, it has not been asked. A session launched
+/// into that would build whatever was left, reach the push its skill ends on,
+/// and dead-end on the same `gh` — so what happens instead is the halt, which is
+/// the one thing that reaches the human on their phone.
+#[tokio::test]
+async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
+    let fixture = grilling_asking(AN_INLINE_RUN, NOTHING_ASKABLE).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let first = fixture.halted().await;
+
+    assert!(
+        first.html.contains("not logged in"),
+        "the run stopped because nothing could be asked: {:?}",
+        first.html,
+    );
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let again = fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .find(|notice| notice.id != first.id)
+                .map(|notice| (*notice).clone())
+        })
+        .await;
+
+    assert!(
+        again.html.contains("not logged in"),
+        "and it stops on the same thing, named again: {:?}",
+        again.html,
+    );
+    assert!(
+        again.html.contains("pull request"),
+        "with the step it stopped in front of: {:?}",
+        again.html,
+    );
+    assert_eq!(
+        fixture.chosen().await,
+        Halt::Deliberate,
+        "what is missing is out here, so a restart looking again would find it",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        before,
+        "and nothing was launched into it: a session could only reach the same `gh`",
+    );
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "the work is where it was, because nothing about it got any further",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(again.id),
+        "and the human is what it is waiting on",
     );
 }
 
