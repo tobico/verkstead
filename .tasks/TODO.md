@@ -22,5 +22,5 @@ shrinks each step until the last task deletes it.
 - [x] 07: Timeline and event rows — [details](07-timeline-and-event-rows.md)
 - [x] 08: Detail panes — [details](08-detail-panes.md)
 - [x] 09: Workbench shell — [details](09-workbench-shell.md)
-- [ ] 10: Settings, profiles, repos — [details](10-settings-profiles-repos.md)
+- [x] 10: Settings, profiles, repos — [details](10-settings-profiles-repos.md)
 - [ ] 11: Delete main.css and audit — [details](11-delete-main-css-and-audit.md)

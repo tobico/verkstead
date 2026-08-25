@@ -30,6 +30,7 @@ import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import styles from "./RepoList.module.css";
 
 /// What each way of being refused says, once, wherever it is met.
 ///
@@ -113,7 +114,7 @@ export function RepoList() {
   };
 
   return (
-    <section class="repos">
+    <section class={styles.repos}>
       {/* The heading, with the one thing there is to do to the list under it on
           the other end of its line. */}
       <div class="section-head">
@@ -137,7 +138,7 @@ export function RepoList() {
         </Match>
         <Match when={repos.data}>
           {(registered) => (
-            <ul class="set-list">
+            <ul class={styles.list}>
               <For each={registered()}>{(repo) => <RepoRow repo={repo} />}</For>
             </ul>
           )}
@@ -147,7 +148,7 @@ export function RepoList() {
       {/* The form, drawn over the page. Every way it can be refused is said
           inside it, because a refusal is answered by correcting the path. */}
       <Modal
-        class="add-repo"
+        class={styles.form!}
         open={open()}
         close={shut}
         labelledBy="add-repo-title"
@@ -171,7 +172,7 @@ export function RepoList() {
             }}
           />
 
-          <div class="add-repo-buttons">
+          <div class={styles.buttons}>
             <button
               type="submit"
               disabled={register.isPending || path().trim() === ""}
@@ -180,20 +181,20 @@ export function RepoList() {
             </button>
             {/* Escape and a press on the backdrop are ways out this modal has,
                 and a button saying so is the one a thumb has. */}
-            <button type="button" class="cancel" onClick={shut}>
+            <button type="button" class={styles.cancel} onClick={shut}>
               Cancel
             </button>
           </div>
 
           <Show when={refused()}>
             {(outcome) => (
-              <ErrorLine class="failure">{REFUSAL[outcome()]}</ErrorLine>
+              <ErrorLine class={styles.failure}>{REFUSAL[outcome()]}</ErrorLine>
             )}
           </Show>
           {/* A server that could not answer at all, which is the one thing here
               that is an error rather than an outcome. */}
           <Show when={register.isError}>
-            <ErrorLine class="failure">
+            <ErrorLine class={styles.failure}>
               The repo could not be registered: {register.error?.message}
             </ErrorLine>
           </Show>
@@ -214,12 +215,12 @@ export function RepoList() {
 /// the same, because that is what it is going to be.
 function RepoRow(props: { repo: RepoEntry }) {
   return (
-    <li class="set-row repo-row">
+    <li class={styles.row}>
       <div>
-        <span class="title">{props.repo.name}</span>
-        <span class="meta">
-          <span class="path">{props.repo.path}</span>
-          <span class="branch">{props.repo.default_branch}</span>
+        <span class={styles.title}>{props.repo.name}</span>
+        <span class={styles.meta}>
+          <span class={styles.path}>{props.repo.path}</span>
+          <span class={styles.branch}>{props.repo.default_branch}</span>
         </span>
       </div>
     </li>

@@ -4,9 +4,9 @@
    one thing a page has that a details pane does not. */
 
 /* The way back out, in the same slot every page keeps it in. The settings page
-   draws the same link and still takes it from `main.css`; it gets a copy of
-   these four lines in its own module when it migrates, the way the two list
-   pages take a copy of the row they share. */
+   draws the same link from four lines of its own in
+   `settings/SettingsPage.module.css`, the way the two list pages each keep a
+   copy of the row they look alike in. */
 .back {
   display: inline-block;
   margin-bottom: 0.75rem;

@@ -45,6 +45,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import styles from "./ProfileList.module.css";
 
 /// What each way of being refused a save says, once, wherever it is met.
 ///
@@ -222,7 +223,7 @@ export function ProfileList(): JSX.Element {
   };
 
   return (
-    <section class="profiles">
+    <section class={styles.profiles}>
       {/* The heading, with the one thing there is to do to the list under it on
           the other end of its line. */}
       <div class="section-head">
@@ -257,7 +258,7 @@ export function ProfileList(): JSX.Element {
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
-            <ul class="set-list">
+            <ul class={styles.list}>
               <For each={saved()}>
                 {(profile) => (
                   <ProfileRow
@@ -277,7 +278,7 @@ export function ProfileList(): JSX.Element {
           above rather than anything of the modal: it is opened empty by the
           button on the heading, and opened filled in by a row. */}
       <Modal
-        class="edit-profile"
+        class={styles.form!}
         open={open()}
         close={shut}
         labelledBy="edit-profile-title"
@@ -344,21 +345,21 @@ export function ProfileList(): JSX.Element {
             onInput={(ev) => typed("config_file")(ev.currentTarget.value)}
           />
 
-          <div class="edit-profile-buttons">
+          <div class={styles.buttons}>
             <button type="submit" disabled={save.isPending}>
               {rewriting() === null ? "Save" : "Save changes"}
             </button>
             {/* Drawn whichever the form is about, unlike the inline one it
                 replaces: Escape and a press on the backdrop are ways out this
                 modal has, and a button saying so is the one a thumb has. */}
-            <button type="button" class="cancel" onClick={shut}>
+            <button type="button" class={styles.cancel} onClick={shut}>
               Cancel
             </button>
           </div>
 
           <Show when={refused()}>
             {(outcome) => (
-              <ErrorLine class="failure">
+              <ErrorLine class={styles.failure}>
                 {PROFILE_REFUSAL[outcome()]}
               </ErrorLine>
             )}
@@ -366,7 +367,7 @@ export function ProfileList(): JSX.Element {
           {/* A server that could not answer at all, which is the one thing here
               that is an error rather than an outcome. */}
           <Show when={save.isError}>
-            <ErrorLine class="failure">
+            <ErrorLine class={styles.failure}>
               The profile could not be saved: {save.error?.message}
             </ErrorLine>
           </Show>
@@ -390,37 +391,40 @@ function ProfileRow(props: {
 }): JSX.Element {
   return (
     <li
-      class="set-row profile-row"
-      classList={{ editing: props.editing, broken: props.profile.broken !== null }}
+      class={styles.row}
+      classList={{
+        [styles.editing!]: props.editing,
+        [styles.broken!]: props.profile.broken !== null,
+      }}
     >
       <div>
-        <span class="title">{props.profile.name}</span>
-        <span class="meta">
+        <span class={styles.title}>{props.profile.name}</span>
+        <span class={styles.meta}>
           {/* Every model, because the list is the whole of what a profile says
               it can run and a row showing one of them would be picking. */}
           <For each={props.profile.models}>
-            {(model) => <span class="model">{model}</span>}
+            {(model) => <span class={styles.model}>{model}</span>}
           </For>
-          <span class="agent-type">{props.profile.agent_type}</span>
+          <span>{props.profile.agent_type}</span>
         </span>
-        <span class="meta">
-          <span class="path">{props.profile.claude_dir}</span>
+        <span class={styles.meta}>
+          <span class={styles.path}>{props.profile.claude_dir}</span>
         </span>
-        <span class="meta">
-          <span class="path">{props.profile.config_file}</span>
+        <span class={styles.meta}>
+          <span class={styles.path}>{props.profile.config_file}</span>
         </span>
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
         <Show when={props.profile.broken}>
-          {(broken) => <ErrorLine class="broken">{BROKEN[broken()]}</ErrorLine>}
+          {(broken) => <ErrorLine class={styles.broken}>{BROKEN[broken()]}</ErrorLine>}
         </Show>
       </div>
-      <div class="profile-actions">
+      <div class={styles.actions}>
         <button type="button" onClick={props.edit}>
           Edit
         </button>
-        <button type="button" class="remove" onClick={props.remove}>
+        <button type="button" class={styles.remove} onClick={props.remove}>
           Remove
         </button>
       </div>

@@ -36,9 +36,13 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
+import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
+import repoList from "../src/repos/RepoList.module.css";
 import { Credentials } from "../src/settings/Credentials";
+import styles from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
+import page from "../src/settings/SettingsPage.module.css";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
@@ -87,7 +91,7 @@ function edit() {
 
 /// The form, or nothing at all where it has not been opened.
 function theForm(container: ParentNode): HTMLDialogElement | null {
-  return container.querySelector<HTMLDialogElement>("dialog.edit-credentials");
+  return container.querySelector<HTMLDialogElement>(`dialog.${styles.form}`);
 }
 
 /// The body the page put on the wire when it saved.
@@ -109,10 +113,10 @@ describe("the settings as they stand", () => {
 
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
 
-    expect(container.querySelector(".last-four")!.textContent).toBe(
+    expect(container.querySelector(`.${styles.lastFour}`)!.textContent).toBe(
       TOLD.github_token!.last_four,
     );
-    expect(container.querySelector(".when")!.textContent).toBe(
+    expect(container.querySelector(`.${styles.tokenStanding} span`)!.textContent).toBe(
       "2026-08-03 09:07 UTC",
     );
   });
@@ -125,10 +129,10 @@ describe("the settings as they stand", () => {
 
     await waitFor(() => screen.getByText(/Commits are by/));
 
-    expect(container.querySelector(".author-name")!.textContent).toBe(
+    expect(container.querySelector(`.${styles.authorName}`)!.textContent).toBe(
       TOLD.git_author.name,
     );
-    expect(container.querySelector(".author-email")!.textContent).toContain(
+    expect(container.querySelector(`.${styles.authorEmail}`)!.textContent).toContain(
       TOLD.git_author.email,
     );
   });
@@ -369,7 +373,7 @@ describe("saving", () => {
 
     await waitFor(() =>
       expect(
-        container.querySelector(".author-email")!.textContent,
+        container.querySelector(`.${styles.authorEmail}`)!.textContent,
       ).toContain("ada@analytical.engine"),
     );
   });
@@ -427,7 +431,7 @@ describe("saving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => screen.getByText(/GitHub says it is/));
-    expect(container.querySelector(".login")!.textContent).toBe("ada");
+    expect(container.querySelector(`.${styles.login}`)!.textContent).toBe("ada");
   });
 
   /// A token GitHub would not vouch for is saved all the same — it is pasted
@@ -543,7 +547,7 @@ describe("replacing and clearing the token", () => {
     // clearing is a save, and a save is what takes the form away.
     await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
     expect(theForm(container)).toBeNull();
-    expect(container.querySelector(".author-name")!.textContent).toBe(
+    expect(container.querySelector(`.${styles.authorName}`)!.textContent).toBe(
       TOLD.git_author.name,
     );
   });
@@ -584,9 +588,9 @@ describe("the settings page", () => {
 
     // Each is a section of the one page rather than a page of its own: there is
     // one heading over the lot and one way back to the workbench.
-    const page = container.querySelector(".list-page")!;
-    expect(page.querySelectorAll("h1")).toHaveLength(1);
-    expect(page.querySelectorAll(".back")).toHaveLength(1);
+    const column = container.querySelector(`.${page.listPage}`)!;
+    expect(column.querySelectorAll("h1")).toHaveLength(1);
+    expect(column.querySelectorAll(`.${page.back}`)).toHaveLength(1);
   });
 
   /// Summaries, lists and buttons: every form on this page is a modal now, so
@@ -598,25 +602,32 @@ describe("the settings page", () => {
 
     await waitFor(() => screen.getByText(REPOS[0]!.name));
 
-    for (const section of [".credentials", ".profiles", ".repos"]) {
+    // `section-head` is still page vocabulary rather than any module's, which
+    // is why it is the one name spelled out here.
+    const sections = [
+      styles.credentials,
+      profileList.profiles,
+      repoList.repos,
+    ];
+    for (const section of sections) {
       expect(
-        container.querySelector(`${section} > .section-head > button`),
-        `expected ${section} to head its own form`,
+        container.querySelector(`.${section} > .section-head > button`),
+        `expected .${section} to head its own form`,
       ).not.toBeNull();
     }
 
-    expect(container.querySelectorAll(".repos .repo-row")).toHaveLength(
-      REPOS.length,
-    );
-    expect(container.querySelectorAll(".profiles .profile-row")).toHaveLength(
-      PROFILES.length,
-    );
+    expect(
+      container.querySelectorAll(`.${repoList.repos} .${repoList.row}`),
+    ).toHaveLength(REPOS.length);
+    expect(
+      container.querySelectorAll(`.${profileList.profiles} .${profileList.row}`),
+    ).toHaveLength(PROFILES.length);
 
     // And nothing of any of the three forms until one is asked for.
     expect(container.querySelector("dialog")).toBeNull();
     expect(container.querySelectorAll("input")).toHaveLength(
       // The notifications switch on the heading's line, which is not a form.
-      container.querySelectorAll(".page-head input").length,
+      container.querySelectorAll(`.${page.pageHead} input`).length,
     );
   });
 
@@ -629,7 +640,7 @@ describe("the settings page", () => {
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
 
     expect(
-      container.querySelector(`.page-head .${notifications.notifications}`),
+      container.querySelector(`.${page.pageHead} .${notifications.notifications}`),
     ).not.toBeNull();
   });
 });
