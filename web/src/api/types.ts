@@ -538,6 +538,16 @@ waiting: boolean, };
 export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
 
 /**
+ * What became of submitting one.
+ *
+ * Named the way [`ManualTaskStarted`]'s refusals are, and the list is short for
+ * the reason the store's is: the human has looked at the work and said where it
+ * goes, so the state it is in is not something to be refused for. What the
+ * targets that launch something can be refused for arrives with them.
+ */
+export type ConversationSteered = "Steered" | "NoSuchConversation";
+
+/**
  * What became of pressing Stop or Force stop.
  *
  * One answer for both presses, because they ask for the same thing and differ
@@ -1544,6 +1554,71 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "A
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * A steer as the page receives it: when, and where the human sent it.
+ *
+ * No rendered body, like the move it stands above: what a steer says so far is
+ * the one state it named. The targets that carry a brief or an instruction with
+ * them arrive with the tasks that build them.
+ */
+export type SteerEvent = { id: number, 
+/**
+ * When it was steered, RFC 3339.
+ */
+at: string, 
+/**
+ * The state the human moved it into.
+ */
+target: Lifecycle, };
+
+/**
+ * What clicking Steer found, which is what the modal it opens is drawn from.
+ *
+ * The click is a press of its own rather than the first half of the submit: it
+ * stops the drive before the modal opens, so that nothing new is launched while
+ * the human composes and the world the modal was drawn against is the world the
+ * submit arrives in. Cancel leaves the Conversation stopped with Resume on
+ * offer, which is accepted rather than a bug — the click is what freezes it.
+ */
+export type SteerOpened = { "Opened": { 
+/**
+ * Whether a session is still running as the modal opens.
+ *
+ * What **Interrupt current task** is offered for: a session left alone
+ * is seen out to its own end, and the checkbox is the only way to end
+ * it where it stands. Where nothing is running there is nothing to
+ * interrupt, so the checkbox is not drawn at all.
+ */
+working: boolean, } } | "NoSuchConversation";
+
+/**
+ * What the human settled in the modal: where the Conversation goes, and what to
+ * do about anything still running.
+ */
+export type SteerSubmission = { 
+/**
+ * Which state to move it into.
+ */
+target: SteerTarget, 
+/**
+ * Whether to end the session that is running where it stands.
+ *
+ * `false` is the default and the ordinary case: the click already stopped
+ * the drive, so what is running finishes what it was doing and nothing is
+ * started after it. `true` is the human saying they will not wait.
+ */
+interrupt: boolean, };
+
+/**
+ * Where a steer can send a Conversation.
+ *
+ * Draft and Closed are not among them and never will be: each has a way in of
+ * its own, and a steer is for the four states the work is *done in*. The three
+ * that are not here yet arrive with the tasks that build what each of them
+ * launches — a target the modal offers is a target something runs for.
+ */
+export type SteerTarget = "Done";
+
+/**
  * What became of the human's Response.
  */
 export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Archived" | { "Rejected": Array<string> };
@@ -1611,7 +1686,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent };
 
 /**
  * What is to become of the configured token.

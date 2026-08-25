@@ -430,6 +430,15 @@ pub enum TimelineEvent {
     /// committed — so this is the instruction alone, which is the part of a
     /// Manual Task nothing else on the Timeline records.
     ManualTask(ManualTaskEvent),
+
+    /// A Steer the human pressed: which state they moved the Conversation into.
+    ///
+    /// Drawn beside the Moved line the same move wrote rather than instead of
+    /// it. The move says where the work got to and this says who put it there,
+    /// and a record with only the first could never be read back for the
+    /// difference between the pipeline arriving somewhere and a human deciding
+    /// it should be there.
+    Steer(SteerEvent),
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -758,6 +767,23 @@ pub struct ManualTaskEvent {
     /// Rendered and sanitized by the server on the way out, as every piece of
     /// markdown on this wire is.
     pub html: String,
+}
+
+/// A steer as the page receives it: when, and where the human sent it.
+///
+/// No rendered body, like the move it stands above: what a steer says so far is
+/// the one state it named. The targets that carry a brief or an instruction with
+/// them arrive with the tasks that build them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerEvent {
+    pub id: i64,
+
+    /// When it was steered, RFC 3339.
+    pub at: String,
+
+    /// The state the human moved it into.
+    pub target: Lifecycle,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -1396,6 +1422,11 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
     })
 }
 
+/// A Steer as an Event: the state the human sent the Conversation into.
+pub fn steer_event(id: i64, at: String, target: Lifecycle) -> TimelineEvent {
+    TimelineEvent::Steer(SteerEvent { id, at, target })
+}
+
 /// Starting a Conversation: the Repo it is against, and nothing else.
 ///
 /// The branch name is not the browser's to send. It is prefilled randomly, and a
@@ -1677,6 +1708,77 @@ pub enum Resumed {
     /// And the implementation Pairing has gone, which is what every session of
     /// the work itself runs under.
     NoImplementationPairing,
+}
+
+/// What clicking Steer found, which is what the modal it opens is drawn from.
+///
+/// The click is a press of its own rather than the first half of the submit: it
+/// stops the drive before the modal opens, so that nothing new is launched while
+/// the human composes and the world the modal was drawn against is the world the
+/// submit arrives in. Cancel leaves the Conversation stopped with Resume on
+/// offer, which is accepted rather than a bug — the click is what freezes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerOpened {
+    /// The drive has stopped — or there was never anything driving it — and the
+    /// modal may open.
+    Opened {
+        /// Whether a session is still running as the modal opens.
+        ///
+        /// What **Interrupt current task** is offered for: a session left alone
+        /// is seen out to its own end, and the checkbox is the only way to end
+        /// it where it stands. Where nothing is running there is nothing to
+        /// interrupt, so the checkbox is not drawn at all.
+        working: bool,
+    },
+
+    NoSuchConversation,
+}
+
+/// Where a steer can send a Conversation.
+///
+/// Draft and Closed are not among them and never will be: each has a way in of
+/// its own, and a steer is for the four states the work is *done in*. The three
+/// that are not here yet arrive with the tasks that build what each of them
+/// launches — a target the modal offers is a target something runs for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerTarget {
+    /// Finished with. Nothing runs, so there is no Pairing to settle and no
+    /// payload to carry: a steer into Done is the move alone.
+    Done,
+}
+
+/// What the human settled in the modal: where the Conversation goes, and what to
+/// do about anything still running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerSubmission {
+    /// Which state to move it into.
+    pub target: SteerTarget,
+
+    /// Whether to end the session that is running where it stands.
+    ///
+    /// `false` is the default and the ordinary case: the click already stopped
+    /// the drive, so what is running finishes what it was doing and nothing is
+    /// started after it. `true` is the human saying they will not wait.
+    pub interrupt: bool,
+}
+
+/// What became of submitting one.
+///
+/// Named the way [`ManualTaskStarted`]'s refusals are, and the list is short for
+/// the reason the store's is: the human has looked at the work and said where it
+/// goes, so the state it is in is not something to be refused for. What the
+/// targets that launch something can be refused for arrives with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationSteered {
+    /// Moved: the Steer Event is on the Timeline beside the move, and any stop
+    /// the click wrote is gone.
+    Steered,
+
+    NoSuchConversation,
 }
 
 /// What became of pressing Adopt.

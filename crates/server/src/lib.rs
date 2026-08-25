@@ -80,6 +80,9 @@ mod stages;
 /// The check that says when a Conversation has Stalled: in a driven state,
 /// with nothing driving it and nothing asking the human about it.
 mod stalls;
+/// The human steering a Conversation: the click that stops the drive and opens
+/// the modal, and the submit that moves the work where they said.
+mod steering;
 mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
 /// it is on, and Force stop, which does not.

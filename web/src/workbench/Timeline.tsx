@@ -59,6 +59,7 @@ import {
   saveBrief,
   startGrilling,
   startManualTask,
+  steerConversation,
   stopConversation,
 } from "../api/client";
 import type {
@@ -82,6 +83,8 @@ import type {
   QuestionSetEvent,
   Resumed,
   StageListEvent,
+  SteerEvent,
+  SteerOpened,
   TaskListEvent,
   TimelineEvent,
   UnreadableSetEvent,
@@ -93,6 +96,7 @@ import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
+import { Steer } from "./Steer";
 import { keeping } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
@@ -418,6 +422,9 @@ export function Timeline(props: {
                       moved={moved()}
                     />
                   )}
+                </Match>
+                <Match when={"Steer" in event && event.Steer}>
+                  {(steer) => <Steered steer={steer()} />}
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
@@ -1260,6 +1267,25 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
   );
 }
 
+/// A steer: the human saying where the work goes.
+///
+/// A line and not a card, like the move directly under it, and drawn as the pair
+/// they are — this says who decided, and the move says what came of it. Which is
+/// the whole reason there are two: a timeline of moves alone could never be read
+/// back for the difference between the pipeline arriving somewhere and somebody
+/// putting it there.
+///
+/// Named rather than arrowed, unlike the move: where it came *from* is the move
+/// above this one and is already on the page, and what a steer adds is the
+/// deciding.
+function Steered(props: { steer: SteerEvent }): JSX.Element {
+  return (
+    <p class="steered" classList={{ [props.steer.target.toLowerCase()]: true }}>
+      You steered this into {props.steer.target}
+    </p>
+  );
+}
+
 /// What a session has printed: how much of it there is, and the last thing it
 /// said.
 ///
@@ -1666,6 +1692,17 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
   const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
 
+  /// What the click found, once it has answered, and `null` while the modal is
+  /// shut. Held out here rather than in the menu's rows, because the menu's rows
+  /// are built when it opens and thrown away when it closes — and the modal
+  /// outlives the menu that opened it by design: the press shuts the menu.
+  const [steering, setSteering] = createSignal<{ working: boolean } | null>(
+    null,
+  );
+
+  /// And what the click said when there was nothing to open a modal about.
+  const [unsteerable, setUnsteerable] = createSignal(false);
+
   // The menu's own way to shut, held here because what closes this one is the
   // press coming back rather than the press going out.
   let shut = (): void => {};
@@ -1704,6 +1741,31 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     pressing(() => forceStopConversation(props.conversation.id)),
   );
 
+  /// Clicking Steer, which is a press before it is a modal: it stops the drive,
+  /// so that nothing new is launched while the human composes and the world the
+  /// modal is drawn against is the world the submit arrives in.
+  ///
+  /// The menu shuts on the way through — what opens over it is the modal, and a
+  /// dropdown left hanging behind one is a menu nobody can see to close.
+  const click = useMutation(() => ({
+    mutationFn: () => steerConversation(props.conversation.id),
+    onSuccess: (outcome: SteerOpened) => {
+      if (outcome === "NoSuchConversation") {
+        setUnsteerable(true);
+        reread();
+        return;
+      }
+
+      setUnsteerable(false);
+      setSteering({ working: outcome.Opened.working });
+      shut();
+
+      // The conversation has stopped, whatever the human goes on to decide, so
+      // the page behind the modal is already out of date.
+      reread();
+    },
+  }));
+
   const abort = useMutation(() => ({
     mutationFn: () => abortConversation(props.conversation.id),
     onSuccess: (outcome: ConversationAborted) => {
@@ -1720,93 +1782,136 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   }));
 
   return (
-    <Menu
-      class="conversation-actions"
-      label="Conversation actions"
-      name="Conversation actions"
-      closer={(close) => (shut = close)}
-      trigger="⋯"
-    >
-      {() => (
-        <>
-          <Show when={props.conversation.ready_to_stop}>
-            <div class="action">
-              <button
-                type="button"
-                role="menuitem"
-                class="stop"
-                disabled={stop.isPending}
-                onClick={() => stop.mutate()}
-              >
-                {stop.isPending ? "Stopping…" : "Stop"}
-              </button>
-              <p class="note">Stop after the current task until you resume.</p>
-              <Show when={stopped() === "Stopping"}>
-                <p class="note waiting">
-                  The session running now finishes its task first. Nothing will
-                  be started after it.
-                </p>
-              </Show>
-            </div>
-
-            <Show when={props.conversation.working}>
+    <>
+      <Menu
+        class="conversation-actions"
+        label="Conversation actions"
+        name="Conversation actions"
+        closer={(close) => (shut = close)}
+        trigger="⋯"
+      >
+        {() => (
+          <>
+            <Show when={props.conversation.ready_to_stop}>
               <div class="action">
                 <button
                   type="button"
                   role="menuitem"
-                  class="force-stop"
-                  disabled={force.isPending}
-                  onClick={() => force.mutate()}
+                  class="stop"
+                  disabled={stop.isPending}
+                  onClick={() => stop.mutate()}
                 >
-                  {force.isPending ? "Stopping…" : "Force stop"}
+                  {stop.isPending ? "Stopping…" : "Stop"}
                 </button>
-                <p class="note">End any running task and stop immediately.</p>
+                <p class="note">Stop after the current task until you resume.</p>
+                <Show when={stopped() === "Stopping"}>
+                  <p class="note waiting">
+                    The session running now finishes its task first. Nothing will
+                    be started after it.
+                  </p>
+                </Show>
               </div>
-            </Show>
-          </Show>
 
-          <Show
-            when={props.conversation.state !== "Aborted"}
-            fallback={<p class="note">This conversation has been aborted.</p>}
-          >
+              <Show when={props.conversation.working}>
+                <div class="action">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="force-stop"
+                    disabled={force.isPending}
+                    onClick={() => force.mutate()}
+                  >
+                    {force.isPending ? "Stopping…" : "Force stop"}
+                  </button>
+                  <p class="note">End any running task and stop immediately.</p>
+                </div>
+              </Show>
+            </Show>
+
+            {/* Drawn whatever state the conversation is in, unlike everything
+                around it: every state is somewhere to steer *from* — a draft
+                nothing has run in, a run in flight, work Verkstead has finished
+                with — and which states it can be steered *to* is the modal's to
+                offer. */}
             <div class="action">
               <button
                 type="button"
                 role="menuitem"
-                class="abort"
-                disabled={abort.isPending}
-                onClick={() => abort.mutate()}
+                class="steer"
+                disabled={click.isPending}
+                onClick={() => click.mutate()}
               >
-                {abort.isPending ? "Aborting…" : "Abort conversation"}
+                {click.isPending ? "Stopping…" : "Steer"}
               </button>
               <p class="note">
-                Permanently end the conversation and delete the worktree. The
-                branch stays where it is.
+                Stop the run and move this conversation somewhere else.
               </p>
+              <Show when={unsteerable()}>
+                <p class="error">This conversation is gone.</p>
+              </Show>
+              <Show when={click.isError}>
+                <p class="error">
+                  The conversation could not be stopped to steer it:{" "}
+                  {click.error?.message}
+                </p>
+              </Show>
             </div>
-          </Show>
 
-          <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
-            <p class="error">{STOP_REFUSAL[stopped()!]}</p>
-          </Show>
-          <Show when={stop.isError || force.isError}>
-            <p class="error">
-              The conversation could not be stopped:{" "}
-              {stop.error?.message ?? force.error?.message}
-            </p>
-          </Show>
+            <Show
+              when={props.conversation.state !== "Aborted"}
+              fallback={<p class="note">This conversation has been aborted.</p>}
+            >
+              <div class="action">
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="abort"
+                  disabled={abort.isPending}
+                  onClick={() => abort.mutate()}
+                >
+                  {abort.isPending ? "Aborting…" : "Abort conversation"}
+                </button>
+                <p class="note">
+                  Permanently end the conversation and delete the worktree. The
+                  branch stays where it is.
+                </p>
+              </div>
+            </Show>
 
-          <Show when={refused()}>
-            {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
-          </Show>
-          <Show when={abort.isError}>
-            <p class="error">
-              The conversation could not be aborted: {abort.error?.message}
-            </p>
-          </Show>
-        </>
-      )}
-    </Menu>
+            <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
+              <p class="error">{STOP_REFUSAL[stopped()!]}</p>
+            </Show>
+            <Show when={stop.isError || force.isError}>
+              <p class="error">
+                The conversation could not be stopped:{" "}
+                {stop.error?.message ?? force.error?.message}
+              </p>
+            </Show>
+
+            <Show when={refused()}>
+              {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+            </Show>
+            <Show when={abort.isError}>
+              <p class="error">
+                The conversation could not be aborted: {abort.error?.message}
+              </p>
+            </Show>
+          </>
+        )}
+      </Menu>
+
+      {/* Outside the menu, because the press that opens it shuts the menu: what
+          the human is looking at from here is one card over the page. */}
+      <Show when={steering()}>
+        {(opened) => (
+          <Steer
+            conversation={props.conversation}
+            working={opened().working}
+            close={() => setSteering(null)}
+          />
+        )}
+      </Show>
+    </>
   );
 }
 

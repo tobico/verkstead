@@ -327,6 +327,18 @@ pub enum Event {
     /// a Step — the unattended unit a done file ends — however much the two look
     /// alike from the session's end.
     ManualTask(String),
+
+    /// A Steer: the state the human moved the Conversation into.
+    ///
+    /// Its own kind beside the [`Event::Moved`] line the move writes, and the
+    /// two say different things about the same moment. A move is the machine
+    /// recording where the work got to; this is the human saying they put it
+    /// there, which is the one thing a Timeline of moves alone could never be
+    /// read back for.
+    ///
+    /// The target in the `body` column, exactly as a move holds the state it
+    /// went to: what a steer *is*, so far, is the one state it names.
+    Steer(Lifecycle),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -372,6 +384,7 @@ impl Event {
             Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
+            Self::Steer(_) => "steer",
         }
     }
 
@@ -396,6 +409,9 @@ impl Event {
             Self::Pause(_) => "",
             Self::Notice(markdown) => markdown,
             Self::ManualTask(instruction) => instruction,
+            // The state it was steered into, as a move holds the state it moved
+            // to: one word, and the whole of what a steer says.
+            Self::Steer(target) => target.stored(),
         }
     }
 
@@ -443,6 +459,7 @@ impl Event {
             }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
+            "steer" => Self::Steer(Lifecycle::read(&body)?),
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -600,6 +617,22 @@ pub enum Rebuilding {
     /// It is not wrapping up, so there is no wrap-up here to leave — it was
     /// aborted out from under the session, or it is being built already.
     NotWrapping,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// What became of steering one.
+///
+/// The shortest list of any move here, and that is the point of a steer: the
+/// human has looked at the work and said where it goes, so there is nothing
+/// about the state it is in for the store to refuse on. Every source is a source
+/// — a draft, a run in flight, a Conversation Verkstead has finished with — and
+/// the only thing left to be wrong about is which Conversation was named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Steering {
+    /// Recorded: the Steer Event, the state, and the move on the Timeline.
+    Steered,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -2412,6 +2445,70 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
     tx.commit().await.context("building the split-out work")?;
 
     Ok(Rebuilding::Started)
+}
+
+/// Steer a Conversation into `target`: the human's own Event, the state, and
+/// the move that says it got there.
+///
+/// The one move with no state it is refused from. Every other call here answers
+/// to a rung of the ladder — grilling starts from a draft, a rebuild leaves a
+/// wrap-up — because each of them is the pipeline moving the work along its own
+/// path. A steer is the human stepping outside that path, so the state it finds
+/// is not something to be right or wrong: a draft, a run in flight and a
+/// Conversation Verkstead has finished with are all somewhere to be steered
+/// from.
+///
+/// Two Events, in the order the moment happened in. The Steer goes first because
+/// it is the act — somebody decided this — and the Moved line follows it because
+/// it is what came of the act, which is the same order a Manual Task's
+/// instruction stands in above what its session went on to do.
+///
+/// One transaction, as every move is: a Conversation that says Done always has
+/// the move on its Timeline to say when it got there, and one steered always has
+/// the human's own line above it.
+///
+/// Nothing about the Worktree, the branch or the run is touched here. What has
+/// to exist before the work can go on is made against git and the filesystem
+/// before this is called, and what has to stop running is stopped before it —
+/// see the server's `steering` module, which is the only caller.
+pub async fn steer_conversation(pool: &SqlitePool, id: i64, target: Lifecycle) -> Result<Steering> {
+    let mut tx = pool.begin().await.context("steering a Conversation")?;
+
+    let steer = Event::Steer(target);
+
+    // Selected from `conversations` rather than trusting the id, as every other
+    // Event is written: a steer attributed to a Conversation that is not there
+    // would be on nobody's Timeline — and this is also what says whether there
+    // is anything here to move at all.
+    let landed = sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
+         FROM conversations WHERE id = ?",
+    )
+    .bind(steer.kind())
+    .bind(steer.body())
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting a steer on the Timeline of Conversation {id}"))?
+    .rows_affected();
+
+    if landed == 0 {
+        return Ok(Steering::NoSuchConversation);
+    }
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
+        .bind(target.stored())
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("steering Conversation {id} into {}", target.stored()))?;
+
+    moved(&mut tx, id, target).await?;
+
+    tx.commit().await.context("steering a Conversation")?;
+
+    Ok(Steering::Steered)
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.

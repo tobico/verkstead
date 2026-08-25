@@ -45,10 +45,10 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationAborted,
-    ConversationStopped, ConversationView, GrillingStarted, Lifecycle, ManualTaskEvent,
-    ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered,
-    Resumed, Shown, Size, Started, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn,
-    Watching,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
+    ManualTaskEvent, ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent,
+    Registered, Resumed, Shown, Size, Started, SteerOpened, Submitted, TaskListEvent,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::Nudge;
 use verkstead_server::handoffs::Handoffs;
@@ -459,6 +459,29 @@ impl Grilling {
             &self.app,
             &format!("/api/ui/conversations/{}/stop", self.id),
             &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// And click Steer, which is the row beside those in the same menu: it
+    /// stops the drive so that nothing launches while the human composes, and
+    /// says what it found running.
+    async fn steer(&self) -> SteerOpened {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer", self.id),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// And submit the modal that opened: where the work goes, and whether to end
+    /// what is running where it stands.
+    async fn steer_into(&self, target: &str, interrupt: bool) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({ "target": target, "interrupt": interrupt }),
         )
         .await
     }
@@ -7739,6 +7762,200 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
         Some(stopped.id),
         "and the Conversation is waiting on the human to start it again",
     );
+}
+
+/// Steer clicked while a task is being worked, with **Interrupt current task**
+/// ticked on the modal it opened: the session is ended where it stands and the
+/// Conversation is Done.
+///
+/// The click is what stops the drive, and it stops it the way Stop does — the
+/// session is left alone and nothing new is launched — so the checkbox is the
+/// only thing that ends one. What it costs is the step, exactly as Force stop's
+/// does: the task is left however far the session had got, uncommitted and all,
+/// and nothing is reverted.
+///
+/// And nothing at all starts afterwards, which is what steering into Done means:
+/// there is nothing to drive in Done, and the stop the click wrote is taken away
+/// rather than left as a badge on finished work that no press could answer.
+#[tokio::test]
+async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("never");
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // The first task's session, waiting at a gate nothing opens: a step in
+    // flight, which is the case the checkbox is for.
+    let working = fixture.attachable(2).await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: true },
+        "the click found a session running, which is what the checkbox is offered against",
+    );
+
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .any(|output| output.id == working && output.running),
+        "and left it alone: the click stops the drive, not the session",
+    );
+
+    assert_eq!(
+        fixture.steer_into("Done", true).await,
+        ConversationSteered::Steered,
+    );
+
+    fixture
+        .until(|view| {
+            outputs(view)
+                .iter()
+                .find(|output| output.id == working)
+                .filter(|output| !output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Implementing),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+        ],
+        "the human's own Event carrying the target, and the plain move under it",
+    );
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "the task the session was cut off in the middle of is still there: \
+         nothing was reverted and nothing was finished either",
+    );
+
+    // Long enough for the driver that was seeing the session out to have decided
+    // what its ending meant, and for anything else to have been launched.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        outputs(&view).len(),
+        2,
+        "the grilling and the one task: nothing was started to replace what was ended",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and nothing is waiting on the human: the stop the click wrote went with the move",
+    );
+    assert!(
+        !view.ready_to_resume && !view.ready_to_stop,
+        "there being nothing to drive in Done, and so neither press to offer",
+    );
+}
+
+/// The same steer with the checkbox left alone: the session finishes what it was
+/// doing, and nothing is launched behind it.
+///
+/// Which is the click's own promise carried through the submit. What holds the
+/// next launch off is not a stop any more — the steer took that away — but where
+/// the work now stands: nothing drives a Conversation Verkstead has finished
+/// with, so the driver seeing this session out finds a state with no next step
+/// in it. See `stopping::stopped`, which is the one question every launch asks.
+#[tokio::test]
+async fn steering_into_done_without_interrupt_sees_the_session_out() {
+    let spill = tempfile::tempdir().unwrap();
+    let gate = spill.path().join("go");
+    let fixture = grilling_spilling(spill, &two_tasks_waiting_at(&gate), PULL_REQUEST).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let working = fixture.attachable(2).await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture.steer_into("Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .any(|output| output.id == working && output.running),
+        "the session is still working the task it was on: nothing was cut short",
+    );
+
+    // What it was waiting for. From here it commits its task and idles, which is
+    // where the run would have launched the next one.
+    std::fs::write(&gate, "go").unwrap();
+
+    fixture
+        .until(|view| (commits(view).len() == 2).then_some(()))
+        .await;
+
+    // Long enough for the runner to have launched the next task if it were still
+    // going to, several times over.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.clone().unwrap().path);
+
+    assert_eq!(
+        commits(&view)
+            .iter()
+            .map(|commit| commit.subject.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            "chore: plan rate-limiting tasks".to_owned(),
+            "feat: 01-count.md".to_owned(),
+        ],
+        "the task the session was on landed: it was seen out rather than ended",
+    );
+    assert_eq!(
+        outputs(&view).len(),
+        2,
+        "and nothing was started after it, the work being finished with",
+    );
+    assert!(
+        worktree.join(".tasks/02-refuse.md").exists(),
+        "so the task nothing was launched for is still there",
+    );
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        view.blocked_on, None,
+        "and no badge came back on the far side of the session that was seen out",
+    );
+}
+
+/// What a Conversation's Timeline says about where the work went, in order: the
+/// states the human steered it into and the states it moved to.
+///
+/// Both kinds together, because what a steer leaves is the pair — the human's
+/// own line and the machine's move under it — and a reading that kept only one
+/// of them could not say they stand beside each other.
+fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Steer(steer) => Some(("steer", steer.target)),
+            TimelineEvent::Moved(moved) => Some(("moved", moved.state)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Stop pressed with nothing running: there is nothing to see out, so it stops

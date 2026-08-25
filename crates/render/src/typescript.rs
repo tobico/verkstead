@@ -19,12 +19,13 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
-    ConversationReopened, ConversationStopped, ConversationView, GrillingStarted,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
-    TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    ConversationReopened, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
+    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed,
+    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -152,6 +153,14 @@ fn the_viewers_types_are_written_from_these() {
     // answer with one outcome between them: the run is stopping, or the named
     // reason there was nothing to stop.
     ConversationStopped::export_all(&config).unwrap();
+
+    // And the two presses that steer it. The first takes no request shape — the
+    // click stops the drive and reports what it found running — and the second
+    // carries what the modal settled. The Steer's own Event rides on the
+    // `ConversationView` above, beside the move it wrote.
+    SteerOpened::export_all(&config).unwrap();
+    SteerSubmission::export_all(&config).unwrap();
+    ConversationSteered::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the two choices a Conversation makes of them.

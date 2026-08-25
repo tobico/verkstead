@@ -22,8 +22,8 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
-    ConversationReopened, ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
-    Registered, Started, TimelineEvent,
+    ConversationReopened, ConversationSteered, ConversationView, GrillingStarted, Lifecycle,
+    PinnedEvent, ProfileSaved, Registered, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -708,6 +708,47 @@ async fn reopen(app: &Router, id: i64) -> ConversationReopened {
     .await
 }
 
+/// Click Steer, which is the press that stops the drive and opens the modal.
+///
+/// Nothing goes with it, as nothing goes with either stop: which Conversation it
+/// is is the whole of what a click says.
+async fn steer(app: &Router, id: i64) -> SteerOpened {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And submit the modal it opened: where the work goes, and what to do about
+/// anything still running.
+async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({ "target": target, "interrupt": interrupt }),
+    )
+    .await
+}
+
+/// What a Conversation's Timeline says about where the work went, in order: the
+/// states the human steered it into and the states it moved to.
+///
+/// Both kinds together, because what a steer leaves is the pair — the human's
+/// own line and the machine's move under it — and a reading that kept only one
+/// of them could not say they stand beside each other.
+fn steered(view: &ConversationView) -> Vec<(&'static str, Lifecycle)> {
+    view.timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::Steer(steer) => Some(("steer", steer.target)),
+            TimelineEvent::Moved(moved) => Some(("moved", moved.state)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Everything a Conversation needs before it will grill: both Profiles chosen
 /// and a Brief written. Hands back the Conversation's id.
 async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
@@ -1155,6 +1196,195 @@ async fn reopening_a_conversation_that_is_not_there_says_so() {
     .await;
     assert_eq!(refused, ConversationReopened::NoSuchConversation);
 }
+/// Clicking Steer stops the drive, and cancelling leaves it stopped.
+///
+/// The click is a press of its own rather than the first half of the submit:
+/// nothing new launches while the human composes, so the world the modal was
+/// drawn against is the world the submit arrives in. Cancel is then no press at
+/// all — the Conversation stays where the click left it, with Resume drawn on it,
+/// which is accepted rather than a bug.
+///
+/// Nothing is running in these fixtures, so the click stops the run where it
+/// stands and says as much: what **Interrupt current task** is offered against is
+/// a session, and there is none.
+#[tokio::test]
+async fn clicking_steer_stops_the_drive_and_leaves_it_stopped_when_nothing_follows() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false },
+        "the modal opens with nothing to interrupt behind it",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling, "the click moves nothing");
+    assert!(
+        view.blocked_on.is_some(),
+        "the drive has stopped, and the Notice saying so is what the badge points at",
+    );
+    assert!(
+        view.ready_to_resume,
+        "so the one press that undoes a click nobody followed up is drawn on it",
+    );
+    assert!(
+        !view.ready_to_stop,
+        "and there is nothing left to stop: the click already did",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and nothing was steered, so nothing on the record says it was",
+    );
+}
+
+/// Submitting into Done: the Conversation moves, the human's own line stands
+/// beside the machine's move, and the stop the click wrote is gone.
+///
+/// Nothing runs in Done, so nothing is started and no Pairing is settled — a
+/// steer into Done is the move alone. Which is also why the stop has to go: a
+/// Conversation Verkstead has finished with cannot be resumed, so a badge left
+/// on one would be a badge with no press to answer it.
+#[tokio::test]
+async fn steering_into_done_moves_it_and_starts_nothing() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+        ],
+        "the human's own Event carrying the target, and the plain move under it",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "the stop the click wrote is gone: nothing is waiting on the human here",
+    );
+    assert!(
+        !view.ready_to_resume && !view.ready_to_stop,
+        "and there is nothing to drive in Done, so neither press is offered",
+    );
+}
+
+/// Every state is a source, which is the one thing that makes a steer different
+/// from every other move: a draft nothing has ever run in is somewhere to steer
+/// from as much as a run in flight.
+///
+/// The click finds nothing to stop there and opens the modal anyway. Nothing was
+/// driving a draft, so there is no drive to stop and nothing about that is a
+/// refusal.
+#[tokio::test]
+async fn a_draft_is_somewhere_to_steer_from_too() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(
+        view.blocked_on, None,
+        "there was no drive to stop, so nothing was written down as stopped",
+    );
+
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Done);
+    assert_eq!(
+        steered(&view),
+        [("steer", Lifecycle::Done), ("moved", Lifecycle::Done)],
+    );
+}
+
+/// Reopen is still what it was on a Conversation steered into Done.
+///
+/// The two stand beside each other until the stage after this one retires
+/// Reopen: a steer is the way *in* to a finished Conversation from here, and
+/// until then the press that opens a second round on one has to go on working
+/// against a Conversation a steer put there.
+#[tokio::test]
+async fn a_conversation_steered_into_done_can_still_be_reopened() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    assert_eq!(reopen(&app, id).await, ConversationReopened::Reopened);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(
+        briefs(&view).len(),
+        2,
+        "a second round, with a Brief of its own to write",
+    );
+    assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
+}
+
+/// Both presses answer for a Conversation that is not there, and for an id that
+/// could never name one — the id comes out of a URL the human may have typed.
+#[tokio::test]
+async fn steering_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(steer(&app, 404).await, SteerOpened::NoSuchConversation);
+    assert_eq!(
+        steer_into(&app, 404, "Done", false).await,
+        ConversationSteered::NoSuchConversation,
+    );
+
+    let refused: SteerOpened = post(
+        &app,
+        "/api/ui/conversations/nonsense/steer",
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(refused, SteerOpened::NoSuchConversation);
+
+    let refused: ConversationSteered = post(
+        &app,
+        "/api/ui/conversations/nonsense/steer/submit",
+        &serde_json::json!({ "target": "Done", "interrupt": false }),
+    )
+    .await;
+    assert_eq!(refused, ConversationSteered::NoSuchConversation);
+}
+
 /// Two branches and two worktrees for one piece of work is what starting twice
 /// would mean.
 #[tokio::test]

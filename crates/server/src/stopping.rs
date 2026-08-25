@@ -145,12 +145,21 @@ impl<'a> Decided<'a> {
 /// is nothing extra to ask: launching over one would spend an account that has
 /// nothing left to spend, and what says so is the stop on the Conversation.
 ///
+/// Which leaves one thing that is *not* a stop and stops a launch just the same:
+/// a Conversation in a state nothing drives. See [`undriven`] — a steer is what
+/// puts one there while something is still running, and there is no stop on the
+/// far side of that to find.
+///
 /// A store that will not answer reads as *stopped*, which is the right way round
 /// for the one thing this decides: what is on the other side of it is launching
 /// an agent, and something that could not tell whether the run had stopped
 /// should wait rather than spend an account guessing.
 pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
     if crate::stops::asked(state, conversation_id).await {
+        return true;
+    }
+
+    if undriven(state, conversation_id).await {
         return true;
     }
 
@@ -169,6 +178,54 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
             true
         }
     }
+}
+
+/// Whether the Conversation is in a state nothing drives, which is the other
+/// way there is nothing left to advance.
+///
+/// Drafting, done and aborted: the three the button beside this one refuses on
+/// too — see [`crate::resume::resume`] — because nothing was ever supposed to be
+/// driving any of them. Ordinarily nothing asks: a run is launched from inside
+/// the state it belongs to, and the state does not move underneath it.
+///
+/// A Steer is what moves it underneath one. The human steers a Conversation into
+/// Done while a session is still running, that session is seen out rather than
+/// cut off, and what was following it goes to its next launch with the stop
+/// already taken away — because the steer took it away, a Conversation Verkstead
+/// has finished with being no place for a badge nothing can answer. So *nothing
+/// new launches* has to be a fact about where the work now stands rather than a
+/// stop somebody remembered to leave behind.
+///
+/// A store that will not answer reads as *driven*, which is the opposite of how
+/// its neighbour reads its failures and right for the same reason: the caller
+/// stops on either `true`, and the stop below is the one that has evidence to
+/// say so.
+async fn undriven(state: &AppState, conversation_id: i64) -> bool {
+    let lifecycle = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state,
+        // Nothing to launch into and nothing to say about it: whatever took the
+        // Conversation away has said so already.
+        Ok(None) => return true,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading where a Conversation had got to before a launch failed");
+            return false;
+        }
+    };
+
+    if matches!(
+        lifecycle,
+        store::Lifecycle::Grilling | store::Lifecycle::Implementing | store::Lifecycle::Wrapping
+    ) {
+        return false;
+    }
+
+    tracing::info!(
+        conversation_id,
+        state = ?lifecycle,
+        "the Conversation is in a state nothing drives, so nothing was launched",
+    );
+
+    true
 }
 
 /// How much of what git made of the Worktree to keep.

@@ -29,12 +29,12 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
-    ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing,
-    Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
-    UpdateNotice, Verified,
+    ConversationEntry, ConversationReopened, ConversationSteered, ConversationStopped,
+    ConversationView, Cursor, GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission,
+    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -159,6 +159,17 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // not.
         .route("/api/ui/conversations/{id}/stop", post(stop))
         .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
+        // And the two presses that steer it, which are the row beside those in
+        // the same menu. Two rather than one because the click is an act of its
+        // own: it stops the drive so that nothing launches while the human
+        // composes, and answers with what it found running — see
+        // [`crate::steering`]. The submit under it carries what the modal
+        // settled, which is the only body of the four.
+        .route("/api/ui/conversations/{id}/steer", post(steer))
+        .route(
+            "/api/ui/conversations/{id}/steer/submit",
+            post(steer_submit),
+        )
         .route(
             "/api/ui/conversations/{id}/grilling-pairing",
             post(choose_grilling_pairing),
@@ -971,6 +982,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::ManualTask(instruction) => {
                         verkstead_render::manual_task_event(event.id, event.at, &instruction)
                     }
+                    // And where the human said the work goes, which is the one
+                    // Event that stands beside another: the move it wrote is
+                    // right under it, and the pair is the whole record of a
+                    // steer — who decided, and what became of it.
+                    store::Event::Steer(target) => {
+                        verkstead_render::steer_event(event.id, event.at, lifecycle(target))
+                    }
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
                     // a catch-all, so a kind added later has to be decided about
@@ -1471,6 +1489,51 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation where it stood failed");
             unavailable("the conversation could not be stopped")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the modal.
+///
+/// The click rather than the move. What comes back says the modal may open and
+/// whether a session is still running, which is what the **Interrupt current
+/// task** checkbox is offered against. Cancelling from here leaves the
+/// Conversation stopped with Resume on offer, which is what the click is for.
+async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(SteerOpened::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::click(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
+            unavailable("the conversation could not be stopped to steer it")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer/submit` — move it where the human
+/// said.
+///
+/// Answered as soon as the move is recorded rather than once anything the target
+/// needs is up, the way Resume is: what the browser is waiting for is *whether*
+/// it went, and the targets that launch something take as long as a launch
+/// takes.
+async fn steer_submit(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(submission): Json<SteerSubmission>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationSteered::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::submit(&state, id, &submission).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "steering a Conversation failed");
+            unavailable("the conversation could not be steered")
         }
     }
 }

@@ -553,6 +553,100 @@ textarea::placeholder {
   font-size: 0.9rem;
 }
 
+/* Steering a conversation: one question — where does this go? — with whatever
+   the target it picks needs under it, drawn over the page as the profile form
+   above is. The card is the modal's; what is here is the form inside it.
+
+   The run has already stopped by the time any of this is on the screen, which is
+   what the line under the heading says: the click froze the world, and cancel
+   leaves it frozen with resume on offer. */
+.steer-conversation h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.steer-conversation > form > .note {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The targets, as a group of radios with a line under each saying what it means
+   — the actions menu's arrangement, and for its reason: the words between two of
+   these are the difference between an hour of work and none. */
+.steer-targets {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+}
+
+.steer-targets legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.steer-target + .steer-target {
+  margin-top: 0.75rem;
+}
+
+.steer-target label,
+.steer-interrupt label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+.steer-target .note,
+.steer-interrupt .note {
+  margin: 0.25rem 0 0 1.5rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The one control here that is about the world rather than about the move, so it
+   is set apart from the targets by a rule rather than by spacing alone. */
+.steer-interrupt {
+  padding-top: 0.9rem;
+  margin-bottom: 1rem;
+  border-top: 1px solid var(--edge);
+}
+
+.steer-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.steer-buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.steer-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one that undoes rather than does, drawn as the outline of the one beside
+   it — as the profile form's cancel is. */
+.steer-buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.steer-conversation .error {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
 /* A saved profile is a list row with its two controls on the far end: nowhere to
    go, but two things to do to it. */
 .profile-row {
@@ -2122,6 +2216,22 @@ main:has(.workbench) {
   border-top: 1px solid var(--edge);
   padding-top: 0.6rem;
   margin-top: 0.4rem;
+}
+
+/* And the human saying where the work goes, which is the line the move under it
+   came of. Drawn like the move for that reason — the two are one moment read
+   twice — and in the ink the rest of the page is set in rather than the dim the
+   move takes: of the pair, this is the half somebody decided. */
+.timeline-event > .steered {
+  margin: 0;
+  padding: 0.15rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-align: center;
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
 
 /* And something Verkstead did on its own account, which reads as the same kind

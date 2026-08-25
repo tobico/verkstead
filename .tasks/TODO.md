@@ -15,7 +15,7 @@ Roadmap stage: [02: Steer](docs/roadmaps/steer/02-steer.md)
 
 ## Tasks
 
-- [ ] 01: Steer into Done — [details](01-steer-into-done.md)
+- [x] 01: Steer into Done — [details](01-steer-into-done.md)
 - [ ] 02: Steer into Wrapping — [details](02-steer-into-wrapping.md)
 - [ ] 03: Steer into Grilling — [details](03-steer-into-grilling.md)
 - [ ] 04: Continue what stands — [details](04-continue-what-stands.md)

@@ -25,6 +25,7 @@ import type {
   ConversationAborted,
   ConversationEntry,
   ConversationReopened,
+  ConversationSteered,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
@@ -34,7 +35,7 @@ import type {
   Resumed,
   Screen,
   Shown,
-
+  SteerOpened,
   Submitted,
   TimelineEvent,
   TranscriptView,
@@ -49,6 +50,7 @@ import {
   STOP_REFUSAL,
   SWIPE,
 } from "../src/workbench/Timeline";
+import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
   OPEN,
@@ -4203,11 +4205,11 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the abort, in the order of what each
-  /// one costs: pause after this task, stop now, end the conversation. Each says
-  /// what it does, because *stop* and *force stop* are two words apart and hours
-  /// of work apart.
-  it("offers the three ways of stopping, each saying what it does", async () => {
+  /// The two stops sit in the same menu as the steer and the abort, in the order
+  /// of what each one costs: pause after this task, stop now, move the work
+  /// somewhere else, end the conversation. Each says what it does, because
+  /// *stop* and *force stop* are two words apart and hours of work apart.
+  it("offers the four ways of stopping, each saying what it does", async () => {
     theGrillingStanding({ ready_to_stop: true, working: true });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -4216,7 +4218,7 @@ describe("stopping a conversation", () => {
       (button) => button.className,
     );
 
-    expect(offered).toEqual(["stop", "force-stop", "abort"]);
+    expect(offered).toEqual(["stop", "force-stop", "steer", "abort"]);
 
     expect(
       screen.getByText("Stop after the current task until you resume."),
@@ -4224,6 +4226,9 @@ describe("stopping a conversation", () => {
     ).toBeTruthy();
     expect(
       screen.getByText("End any running task and stop immediately."),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Stop the run and move this conversation somewhere else."),
     ).toBeTruthy();
     expect(
       screen.getByText(/Permanently end the conversation and delete the/),
@@ -4338,6 +4343,214 @@ describe("stopping a conversation", () => {
 
     expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(refused.textContent).toContain("Resume");
+  });
+});
+
+/// Where a steer is clicked, and where the modal it opens is submitted.
+const STEERING = `/api/ui/conversations/${GRILLING.id}/steer`;
+const STEER_SUBMIT = `/api/ui/conversations/${GRILLING.id}/steer/submit`;
+
+/// What the click answers with when it found a session still running, and when
+/// it found none — which is the whole of what the modal is drawn from.
+const OVER_A_SESSION = json({ Opened: { working: true } } satisfies SteerOpened);
+const OVER_NOTHING = json({ Opened: { working: false } } satisfies SteerOpened);
+
+/// Click Steer in the actions menu, and wait for the modal it opens.
+///
+/// The modal is looked for on the document rather than in the container: a
+/// native `dialog` opened with `showModal` is drawn in the top layer, which is
+/// not inside the page's own tree.
+async function openSteer(container: ParentNode): Promise<HTMLElement> {
+  const menu = await openActions(container);
+  fireEvent.click(await drawn(menu, ".steer"));
+  return drawn(document.body, ".steer-conversation");
+}
+
+describe("steering a conversation", () => {
+  /// Every state is somewhere to steer *from* — a draft nothing has run in, a
+  /// run in flight, work Verkstead has finished with — so the row is drawn
+  /// wherever the menu is, unlike the two stops beside it. Which states it can
+  /// be steered *to* is the modal's to offer.
+  it("offers the row whatever state the conversation is in", async () => {
+    theGrillingStanding({ ready_to_stop: false, working: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+
+    await drawn(container, ".conversation-actions .steer");
+    expect(container.querySelector(".conversation-actions .stop")).toBeNull();
+  });
+
+  /// The click is a press before it is a modal: it stops the drive, so nothing
+  /// new is launched while the human composes and the world the modal was drawn
+  /// against is the world the submit arrives in.
+  it("stops the drive on the click, and reads the conversation back", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const before = askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`);
+
+    await openSteer(container);
+
+    expect(sent(fetching, STEERING)).toEqual({});
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
+      ).toBeGreaterThan(before),
+    );
+  });
+
+  /// Only done is offered, the three targets that launch something arriving with
+  /// what each of them launches. Each says what it means, because the words
+  /// between two of these are the difference between an hour of work and none.
+  it("offers done and nothing else to steer into", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const offered = [...modal.querySelectorAll<HTMLInputElement>(
+      ".steer-target input",
+    )].map((input) => input.value);
+
+    expect(offered).toEqual(["Done"]);
+    expect(
+      screen.getByText(/Finished with. Nothing runs/),
+    ).toBeTruthy();
+  });
+
+  /// The checkbox is about the world rather than about the move, so it is drawn
+  /// against what the click found: with nothing running it would promise
+  /// something about a session that is not there.
+  it("offers the interrupt only where a session is running", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    const over = await openSteer(container);
+    expect(over.querySelector(".steer-interrupt")).toBeTruthy();
+    unmount();
+
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const quiet = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(quiet.container);
+    expect(modal.querySelector(".steer-interrupt")).toBeNull();
+  });
+
+  /// What the submit carries: where the work goes, and whether to end what is
+  /// running where it stands.
+  it("sends the target and the interrupt, and closes on the move", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    fireEvent.click(await drawn(modal, ".steer-interrupt input"));
+    fireEvent.click(await drawn(modal, ".steer-buttons .steer"));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Done",
+        interrupt: true,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(document.body.querySelector(".steer-conversation")).toBeNull(),
+    );
+  });
+
+  /// Cancel is no press at all: the conversation stays where the click left it,
+  /// stopped, with resume drawn on it. That is accepted rather than a bug — the
+  /// click is what froze the world while the human was composing.
+  it("sends nothing when it is cancelled, and leaves resume drawn", async () => {
+    // The conversation as the server says it stands once the click has landed:
+    // stopped, so there is nothing left to stop and one press that undoes it.
+    const fetching = theGrillingStanding(
+      { ready_to_stop: false, ready_to_resume: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    fireEvent.click(await drawn(modal, ".steer-buttons .cancel"));
+
+    await waitFor(() =>
+      expect(document.body.querySelector(".steer-conversation")).toBeNull(),
+    );
+
+    expect(
+      fetching.mock.calls.filter(([asked]) => String(asked) === STEER_SUBMIT),
+    ).toEqual([]);
+
+    const press = await drawn(container, ".resume .resume-conversation");
+    expect(press.textContent).toContain("Resume");
+  });
+
+  /// And a submit the server refused says so where it was pressed, rather than
+  /// closing as though it had gone.
+  it("says in words when the move was refused", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("NoSuchConversation" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    fireEvent.click(await drawn(modal, ".steer-buttons .steer"));
+
+    const refused = await drawn(document.body, ".steer-conversation .error");
+
+    expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
+  });
+
+  /// The record of one: the human's own line, and the machine's plain move under
+  /// it. A timeline of moves alone could never be read back for the difference
+  /// between the pipeline arriving somewhere and somebody putting it there.
+  it("draws the steer beside the move it wrote", async () => {
+    theGrillingStanding({
+      state: "Done",
+      timeline: [
+        ...GRILLING.timeline,
+        { Steer: { id: 9001, at: "2026-08-24T11:00:00Z", target: "Done" } },
+        { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const steered = await drawn(container, ".timeline-event > .steered");
+
+    expect(steered.textContent).toBe("You steered this into Done");
+
+    const moved = [
+      ...container.querySelectorAll(".timeline-event > .moved"),
+    ].map((line) => line.textContent);
+
+    expect(moved.at(-1)).toBe("Grilling → Done");
   });
 });
 

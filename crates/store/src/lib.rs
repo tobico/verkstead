@@ -50,13 +50,13 @@ pub use captures::{Summary, append_capture, capture, start_capture, summarise_ca
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
-    Implementing, Lifecycle, Rebuilding, Reopening, Role, SetOnTimeline, Staged, TimelineEvent,
-    abort_conversation, adopting, ask, asked_from, conversations, implement_again, last_proposal,
-    load_conversation, note, pick_direction, record_handoff, record_manual_task, rename_branch,
-    reopen_conversation, review_asked, save_brief, set_asked_from, set_base_commit,
+    Implementing, Lifecycle, Rebuilding, Reopening, Role, SetOnTimeline, Staged, Steering,
+    TimelineEvent, abort_conversation, adopting, ask, asked_from, conversations, implement_again,
+    last_proposal, load_conversation, note, pick_direction, record_handoff, record_manual_task,
+    rename_branch, reopen_conversation, review_asked, save_brief, set_asked_from, set_base_commit,
     set_grilling_pairing, set_implementation_pairing, set_state, split_out, stacks_on,
-    start_adoption, start_conversation, start_grilling, start_implementing, start_stage, timeline,
-    unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
+    start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
+    steer_conversation, timeline, unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};
