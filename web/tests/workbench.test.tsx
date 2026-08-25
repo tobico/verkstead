@@ -73,7 +73,7 @@ import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" }
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
-import halted from "./fixtures/conversation-halted.json" with { type: "json" };
+import stopped from "./fixtures/conversation-stopped.json" with { type: "json" };
 import paused from "./fixtures/conversation-paused.json" with { type: "json" };
 import reopened from "./fixtures/conversation-reopened.json" with { type: "json" };
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
@@ -4188,7 +4188,7 @@ const STOPPING = `/api/ui/conversations/${GRILLING.id}/stop`;
 const AT_ONCE = `/api/ui/conversations/${GRILLING.id}/force-stop`;
 
 /// The grilling conversation as the server would say it stands right now — a
-/// session running, or nothing running, or a run that has already halted.
+/// session running, or nothing running, or a run that has already stopped.
 function theGrillingStanding(
   over: Partial<ConversationView>,
   ...answers: Parameters<typeof serving>
@@ -4223,7 +4223,7 @@ describe("stopping a conversation", () => {
 
     ).toBeTruthy();
     expect(
-      screen.getByText("Halt any running tasks and stop immediately."),
+      screen.getByText("End any running task and stop immediately."),
     ).toBeTruthy();
     expect(
       screen.getByText(/Permanently end the conversation and delete the/),
@@ -4231,7 +4231,7 @@ describe("stopping a conversation", () => {
   });
 
   /// Force stop ends a session, so it is offered where there is one. With
-  /// nothing running the ordinary stop halts the run at once anyway, and a
+  /// nothing running the ordinary stop stops the run at once anyway, and a
   /// second button promising the same thing would be one to think about for
   /// nothing.
   it("offers no force stop where nothing is running", async () => {
@@ -4248,7 +4248,7 @@ describe("stopping a conversation", () => {
 
   /// And neither is offered on a conversation that has already stopped. Getting
   /// one going again is what resume is for; there is nothing here left to stop.
-  it("offers neither stop on a conversation that has already halted", async () => {
+  it("offers neither stop on a conversation that has already stopped", async () => {
     theGrillingStanding({ ready_to_stop: false, working: false });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -4325,7 +4325,7 @@ describe("stopping a conversation", () => {
       { ready_to_stop: true, working: true },
       whenever(
         STOPPING,
-        json("AlreadyHalted" satisfies ConversationStopped),
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
@@ -4336,7 +4336,7 @@ describe("stopping a conversation", () => {
 
     const refused = await drawn(container, ".conversation-actions .error");
 
-    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyHalted);
+    expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(refused.textContent).toContain("Resume");
   });
 });
@@ -5807,14 +5807,14 @@ describe("the pinned stage list", () => {
   });
 });
 
-/// A conversation whose driving has halted, and the notice saying what stopped.
-const STOPPED = halted as ConversationView;
+/// A conversation whose driving has stopped, and the notice saying what stopped.
+const STOPPED = stopped as ConversationView;
 
 /// The notice itself, off that payload: what stopped, why, and the evidence.
 const SAID = (() => {
   const event = STOPPED.timeline.find((entry) => "Notice" in entry);
   if (!event || !("Notice" in event)) {
-    throw new Error("the fixture should carry the notice of a halt");
+    throw new Error("the fixture should carry the notice of a stop");
   }
   return event.Notice;
 })();
@@ -5836,7 +5836,7 @@ function theStopped(
   );
 }
 
-describe("the notice of a halt", () => {
+describe("the notice of a stop", () => {
   /// Inline and whole, unlike a capture or a diff: what a stop has to say is a
   /// paragraph and two blocks of terminal text, gathered when the run stopped
   /// because a worktree and a session's output both move on. So it is on the
@@ -5907,7 +5907,7 @@ function thePaused(
 describe("a run stopped because an account ran out of window", () => {
   /// One stopped shape: the notice saying what stopped and why, the badge
   /// pointing at it, and the one Resume at the foot of the timeline. The same
-  /// three things a run stopped by a press draws — see the halt above.
+  /// three things a run stopped by a press draws — see the stop above.
   it("draws the card, the badge and the button every stop draws", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);

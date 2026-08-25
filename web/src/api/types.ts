@@ -520,7 +520,7 @@ working: boolean,
 idle: boolean, 
 /**
  * Whether something about this Conversation is waiting on the human: an ask
- * left open, or driving that has halted.
+ * left open, or driving that has stopped.
  *
  * Folded from every source before it leaves, so the viewer holds no list of
  * them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -552,7 +552,7 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
  * [`Stopped`]: ConversationStopped::Stopped
  * [`Stopping`]: ConversationStopped::Stopping
  */
-export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyHalted" | "NotDriven" | "NoSuchConversation";
+export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyStopped" | "NotDriven" | "NoSuchConversation";
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
@@ -610,7 +610,7 @@ ready_to_grill: boolean,
 ready_to_resume: boolean, 
 /**
  * And whether there is driving to stop: the Conversation is in a state
- * something ought to be driving, and it has not halted.
+ * something ought to be driving, and it has not stopped.
  *
  * What decides whether Stop and Force stop are offered. Not the mirror of
  * [`ready_to_resume`]: a Conversation between one step and the next has

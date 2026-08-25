@@ -200,7 +200,7 @@ async fn standing(state: &AppState, conversation_id: i64) -> Result<Option<Stand
 
     Ok(Some(if !ready(conversation.state, stopped) {
         Standing::Refused(if stopped {
-            ConversationStopped::AlreadyHalted
+            ConversationStopped::AlreadyStopped
         } else {
             ConversationStopped::NotDriven
         })

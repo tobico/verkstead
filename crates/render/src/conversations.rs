@@ -80,7 +80,7 @@ pub struct ConversationEntry {
     pub idle: bool,
 
     /// Whether something about this Conversation is waiting on the human: an ask
-    /// left open, or driving that has halted.
+    /// left open, or driving that has stopped.
     ///
     /// Folded from every source before it leaves, so the viewer holds no list of
     /// them. A Draft is never one of them: it is drawn as a draft, and that is
@@ -240,7 +240,7 @@ pub struct ConversationView {
     pub ready_to_resume: bool,
 
     /// And whether there is driving to stop: the Conversation is in a state
-    /// something ought to be driving, and it has not halted.
+    /// something ought to be driving, and it has not stopped.
     ///
     /// What decides whether Stop and Force stop are offered. Not the mirror of
     /// [`ready_to_resume`]: a Conversation between one step and the next has
@@ -1635,7 +1635,7 @@ pub enum ManualTaskStarted {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Resumed {
-    /// Driving has started again: the halt is cleared and what the lifecycle
+    /// Driving has started again: the stop is cleared and what the lifecycle
     /// and the branch say should be running is being launched.
     Resumed,
 
@@ -1788,19 +1788,19 @@ pub enum ConversationReopened {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationStopped {
-    /// It has stopped: the halt is written, the Notice is on the Timeline, and
+    /// It has stopped: the stop is written, the Notice is on the Timeline, and
     /// nothing more will be launched. Force stop always answers this, and so
     /// does a Stop pressed with nothing running to see out.
     Stopped,
 
     /// It is stopping: the session running now runs to its own end, and the
-    /// Conversation halts before anything else is started. What Stop answers
+    /// Conversation stops before anything else is started. What Stop answers
     /// where there was something to see out.
     Stopping,
 
-    /// It has stopped already, so the halt standing is the one that explains it.
+    /// It has stopped already, so the stop standing is the one that explains it.
     /// Getting going again is Resume's, not a second stop's.
-    AlreadyHalted,
+    AlreadyStopped,
 
     /// It is drafting, done or aborted, so nothing was ever driving it and there
     /// is nothing to stop.

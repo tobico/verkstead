@@ -143,7 +143,7 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
 export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   Stopped: "",
   Stopping: "",
-  AlreadyHalted:
+  AlreadyStopped:
     "This conversation has already stopped. Resume is what gets it going again.",
   NotDriven:
     "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
@@ -622,7 +622,7 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// it. That is the literal rule and it is deliberate: the gaps between an
 /// unattended run's steps, a wrapping lull, a grilling waiting on a pick, a
 /// finished conversation, a reopened one being written a second brief, and a
-/// conversation that has halted all show it, because the point of it is to get a
+/// conversation that has stopped all show it, because the point of it is to get a
 /// stuck conversation moving. After a server restart nothing is running anywhere,
 /// so it shows everywhere, and that is wanted too.
 ///
@@ -1664,7 +1664,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
-  const [halting, setHalting] = createSignal<ConversationStopped | null>(null);
+  const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
 
   // The menu's own way to shut, held here because what closes this one is the
   // press coming back rather than the press going out.
@@ -1686,7 +1686,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   const pressing = (stopping: () => Promise<ConversationStopped>) => ({
     mutationFn: stopping,
     onSuccess: (outcome: ConversationStopped) => {
-      setHalting(outcome);
+      setStopped(outcome);
 
       if (outcome === "Stopped") {
         shut();
@@ -1741,7 +1741,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
                 {stop.isPending ? "Stopping…" : "Stop"}
               </button>
               <p class="note">Stop after the current task until you resume.</p>
-              <Show when={halting() === "Stopping"}>
+              <Show when={stopped() === "Stopping"}>
                 <p class="note waiting">
                   The session running now finishes its task first. Nothing will
                   be started after it.
@@ -1760,7 +1760,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
                 >
                   {force.isPending ? "Stopping…" : "Force stop"}
                 </button>
-                <p class="note">Halt any running tasks and stop immediately.</p>
+                <p class="note">End any running task and stop immediately.</p>
               </div>
             </Show>
           </Show>
@@ -1786,8 +1786,8 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
             </div>
           </Show>
 
-          <Show when={halting() && STOP_REFUSAL[halting()!]}>
-            <p class="error">{STOP_REFUSAL[halting()!]}</p>
+          <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
+            <p class="error">{STOP_REFUSAL[stopped()!]}</p>
           </Show>
           <Show when={stop.isError || force.isError}>
             <p class="error">

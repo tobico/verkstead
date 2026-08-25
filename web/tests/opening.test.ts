@@ -18,7 +18,7 @@ const SET = {
 };
 
 /// And a run that stopped on something Verkstead decided to stop for.
-const HALT = {
+const STOP = {
   path: "/conversations/3",
   title: "Implementing the work stopped on rate-limiting",
   project: "verkstead",
@@ -43,7 +43,7 @@ describe("tapping a notification", () => {
     const sw = worker();
     const open = sw.opens();
 
-    await sw.pushes(HALT);
+    await sw.pushes(STOP);
     await sw.taps(sw.shown[0]!);
 
     expect(open.navigated).toEqual([`${ORIGIN}/conversations/3`]);
@@ -53,7 +53,7 @@ describe("tapping a notification", () => {
   it("opens a window where the human left none", async () => {
     const sw = worker();
 
-    await sw.pushes(HALT);
+    await sw.pushes(STOP);
     await sw.taps(sw.shown[0]!);
 
     // The ordinary case for a phone: the app is closed, and the notification is
@@ -94,7 +94,7 @@ describe("the notification a push shows", () => {
 
     await sw.pushes(SET);
     await sw.pushes(SET);
-    await sw.pushes(HALT);
+    await sw.pushes(STOP);
 
     const tags = sw.shown.map((notification) => notification.options.tag);
 

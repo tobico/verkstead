@@ -7556,12 +7556,12 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
 
     assert_eq!(
         fixture.stop().await,
-        ConversationStopped::AlreadyHalted,
+        ConversationStopped::AlreadyStopped,
         "a Conversation that has stopped is not one to stop again",
     );
     assert_eq!(
         fixture.force_stop().await,
-        ConversationStopped::AlreadyHalted,
+        ConversationStopped::AlreadyStopped,
         "whichever of the two is pressed",
     );
 

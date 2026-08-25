@@ -376,14 +376,14 @@ export function resume(id: number): Promise<Resumed> {
 /// Stop driving a conversation after the task it is on.
 ///
 /// Nothing new is started and nothing running is cut short: the session going
-/// now runs to its own end, and the conversation halts before the next launch.
+/// now runs to its own end, and the conversation stops before the next launch.
 /// Nothing is sent, for the reason nothing goes with a resume — which
 /// conversation it is is the whole of it.
 export function stopConversation(id: number): Promise<ConversationStopped> {
   return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
 }
 
-/// And stop it now: whatever is running is ended where it stands, and the halt
+/// And stop it now: whatever is running is ended where it stands, and the stop
 /// is written at once.
 ///
 /// The step is left however far the session had got, uncommitted work and all.

@@ -1996,7 +1996,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
 
     write(
-        "conversation-halted.json",
+        "conversation-stopped.json",
         &pin_worktree(
             &pin_health(&pin_timeline(
                 &get(&app, &format!("/api/ui/conversations/{tasked}")).await,
