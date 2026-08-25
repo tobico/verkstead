@@ -130,6 +130,8 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the grilling starts from.",
+  FetchFailed:
+    "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
   BranchExists: "That branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",

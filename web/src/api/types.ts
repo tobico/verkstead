@@ -746,7 +746,7 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * Brief, pick another commit, deal with a branch that is already there. A
  * single "cannot start" would leave them guessing which.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
 
 /**
  * What handing a Conversation's keyboard back came to.

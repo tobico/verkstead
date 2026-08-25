@@ -109,6 +109,56 @@ async fn workbench_with_store() -> (
     (watched, dir, app, pool, repo, repo_id)
 }
 
+/// A watched directory holding one registered repository that was *cloned* from
+/// an upstream, and the app over it.
+///
+/// The upstream is what "origin" means for the rest of a test: commits pushed
+/// on to it are commits the clone has not seen, which is the whole state these
+/// are about. It lives in the data directory's tempdir rather than the watched
+/// one so that nothing registers it by accident.
+///
+/// Hands back the watched directory, the data directory, the app, the clone,
+/// the upstream and the Repo's id.
+async fn workbench_with_origin() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Router,
+    PathBuf,
+    PathBuf,
+    i64,
+) {
+    let watched = tempfile::tempdir().unwrap();
+    let (dir, app, _pool) = app_watching(watched.path()).await;
+
+    let upstream = repository(dir.path().join("upstream"));
+    let repo = watched.path().join("verkstead");
+    git(
+        watched.path(),
+        &[
+            "clone",
+            &upstream.to_string_lossy(),
+            &repo.to_string_lossy(),
+        ],
+    );
+
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert_eq!(registered, Registered::Added);
+
+    let repo_id = listed_repos(&app).await;
+
+    (watched, dir, app, repo, upstream, repo_id)
+}
+
+/// Put another commit on `repo`'s checked-out branch, and say what it stands at.
+fn commit(repo: &Path, file: &str) -> String {
+    std::fs::write(repo.join(file), "# more\n").unwrap();
+    git(repo, &["add", file]);
+    git(repo, &["commit", "-m", "another"]);
+
+    git(repo, &["rev-parse", "HEAD"]).trim().to_owned()
+}
+
 /// The id of the one registered Repo.
 async fn listed_repos(app: &Router) -> i64 {
     let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
@@ -880,6 +930,105 @@ async fn a_picked_branch_is_resolved_where_it_stands_at_grill_start() {
         worktree.join("second.md").exists(),
         "the work should come off where the branch stands now"
     );
+}
+
+/// The default branch means what origin holds, so a start fetches before it
+/// resolves anything: a local `main` that has not been pulled for a week is a
+/// week behind the work the branch is meant to come off.
+#[tokio::test]
+async fn an_unpicked_base_comes_off_origins_tip_rather_than_the_local_branch() {
+    let (watched, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Origin moves on, and this checkout hears nothing about it: neither its own
+    // `main` nor its copy of origin's has any idea.
+    let moved_to = commit(&upstream, "second.md");
+    let behind = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    assert_ne!(behind, moved_to, "the clone should be behind at this point");
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.base_commit.as_deref(),
+        Some(moved_to.as_str()),
+        "the work should come off what origin is holding now"
+    );
+
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+    assert!(
+        worktree.join("second.md").exists(),
+        "and the checkout should hold it"
+    );
+
+    // The fetch moved the remote-tracking ref and nothing else: the human's own
+    // branch is exactly where they left it.
+    assert_eq!(git(&repo, &["rev-parse", "HEAD"]).trim(), behind);
+    assert_eq!(git(&repo, &["rev-parse", "main"]).trim(), behind);
+}
+
+/// A picked base is still resolved exactly as picked. The fetch only means that
+/// a picked remote-tracking branch stands where it now stands.
+#[tokio::test]
+async fn a_picked_base_is_still_the_one_the_work_comes_off() {
+    let (watched, _dir, app, repo, upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let held = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["branch", "release"]);
+    commit(&upstream, "second.md");
+
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        opened(&app, id).await.base_commit.as_deref(),
+        Some(held.as_str()),
+        "a local branch that was picked is not origin's default branch"
+    );
+}
+
+/// A repository with no remote has nothing to fetch and nothing to be stale
+/// against, so it comes off its own default branch and is never refused for it.
+#[tokio::test]
+async fn a_repo_with_no_remote_comes_off_its_local_default_branch() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let moved_to = commit(&repo, "second.md");
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        opened(&app, id).await.base_commit.as_deref(),
+        Some(moved_to.as_str())
+    );
+}
+
+/// Offline, or an authentication that has gone, refuses the press by name
+/// rather than quietly branching off refs nobody can vouch for. Something the
+/// human can go and fix, which is the whole reason it is named.
+#[tokio::test]
+async fn a_fetch_that_fails_refuses_the_start_by_name() {
+    let (watched, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let nowhere = dir.path().join("no-such-remote");
+    git(
+        &repo,
+        &["remote", "set-url", "origin", &nowhere.to_string_lossy()],
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::FetchFailed);
+
+    // And nothing was made on the way to finding out.
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
 }
 
 /// Each precondition refuses by its own name, because each of them is something
