@@ -65,10 +65,20 @@ stage:
    Wrapping afresh; Done nothing.
    - An instruction session that commits and goes quiet hands the pipeline
      on, and the branch's pull request is wrapped up again.
-4. **Workbench: the modal.** Menu row, target picker, payload fields shown
+4. **A skill for the instruction session.** Its own directory under
+   `crates/server/skills/`, a `const` and a builder in
+   `crates/server/src/skills.rs` beside `manual_task`, and a `Prompt` variant
+   in `runner.rs`. Not the manual-task skill reused: that one tells its
+   session it is *outside whatever else the Conversation is doing* and leaves
+   the branch to the human, which is the opposite of a session the pipeline
+   carries on from. Stage 03 retires the old one, so this is what is left
+   standing.
+   - The skill says the session commits what it changed and stops, and that
+     what follows is the pipeline's rather than its own.
+5. **Workbench: the modal.** Menu row, target picker, payload fields shown
    per target, Pairing pick, Interrupt checkbox; cancel leaves the stopped
    Conversation with Resume drawn.
-5. **The vocabulary this stage adds.** CONTEXT.md gains a **Steer** entry —
+6. **The vocabulary this stage adds.** CONTEXT.md gains a **Steer** entry —
    what it moves, what it recreates, what it records — and **Resume**'s is
    amended: it sends the reader to Manual Task for steering the work, which is
    Steer's job from here and stage 03's to retire.

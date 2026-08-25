@@ -43,7 +43,13 @@ stage:
    - A closed Conversation steered into Grilling gets a Worktree, a new
      round and a new Brief.
 3. **Retire Manual Task.** Remove `manual.rs`, the composer, and the folding
-   carve-out.
+   carve-out — and the skill with them: the `manual-task` directory under
+   `crates/server/skills/`, the `MANUAL_TASK` const, `skills::manual_task`
+   and that skill's own tests in `skills.rs`. Stage 02's instruction skill is
+   what is left standing, so check it is installed and launched before this
+   one goes.
+   - Nothing installs or names a manual-task skill; the instruction session
+     still launches.
 4. **Sweep what is left of the vocabulary.** CONTEXT.md's **Manual Task**
    entry, and the Abort and Reopen mentions woven through **Conversation**,
    **Worktree** and **Brief** — stages 01 and 02 took their own terms as they
@@ -56,6 +62,8 @@ stage:
 - Stage 02 landed and Steer actually covers the Manual Task uses — a quiet
   moment's one-off errand included — before the composer is deleted.
 - What still references `hold`, `pause`, `manual` and `abort` by then
-  (`grep`, not memory): push wording, skills, tests, the CLI's own guide.
+  (`grep`, not memory): push wording, tests, the CLI's own guide — and
+  `crates/server/skills/`, where the shipped skills are the one place a
+  retired term is also a file that gets installed.
 - Whether any Conversation in the wild sits mid-Manual-Task or held — the
   removal has to land on a quiet product, or read the old records gracefully.
