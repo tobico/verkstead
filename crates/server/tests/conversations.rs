@@ -1356,6 +1356,78 @@ async fn a_conversation_steered_into_done_can_still_be_reopened() {
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
 }
 
+/// Wrapping up is a move onto a pull request that is already there, so a submit
+/// naming it on work that is on none is refused by name.
+///
+/// A wrapping Conversation is defined by the pull request under it — the record
+/// writes the move and the pull-request row as one act — so there would be
+/// nothing to wrap up here. The modal does not offer the target on such a
+/// Conversation; this is that same rule asked again on arrival, the way every
+/// named refusal here is.
+///
+/// And the refusal comes before anything is done: the stop the click wrote is
+/// still there, and the Conversation is still grilling.
+#[tokio::test]
+async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Wrapping", false).await,
+        ConversationSteered::NoPullRequest,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling, "nothing moved");
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and nothing on the record says it was steered",
+    );
+    assert!(
+        view.blocked_on.is_some() && view.ready_to_resume,
+        "the click's stop is where it was, with the press that undoes it drawn: \
+         a refusal leaves the world as the click left it",
+    );
+}
+
+/// A draft has no pull request to be steered onto either, which is the same
+/// refusal read from the other end of the ladder.
+///
+/// Every state is somewhere to steer *from* — that much is unchanged — and it is
+/// the target that is refused rather than the source: nothing has ever run in
+/// this Conversation, so there is no branch, no pull request, and nothing to
+/// wrap up.
+#[tokio::test]
+async fn a_draft_has_no_pull_request_to_be_steered_onto() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Wrapping", false).await,
+        ConversationSteered::NoPullRequest,
+    );
+
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+
+    // And Done is still there to steer it into, the refusal being about the one
+    // target rather than about the Conversation.
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+}
+
 /// Both presses answer for a Conversation that is not there, and for an id that
 /// could never name one — the id comes out of a URL the human may have typed.
 #[tokio::test]

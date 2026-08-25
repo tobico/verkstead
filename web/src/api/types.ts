@@ -540,12 +540,13 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
 /**
  * What became of submitting one.
  *
- * Named the way [`ManualTaskStarted`]'s refusals are, and the list is short for
- * the reason the store's is: the human has looked at the work and said where it
- * goes, so the state it is in is not something to be refused for. What the
- * targets that launch something can be refused for arrives with them.
+ * Named the way [`ManualTaskStarted`]'s refusals are, and nothing here is about
+ * the state the Conversation was in: the human has looked at the work and said
+ * where it goes, so the source is not something to be refused for. What is left
+ * to be wrong about is the *target* — a state whose work cannot be set going
+ * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -1591,8 +1592,8 @@ export type SteerOpened = { "Opened": {
 working: boolean, } } | "NoSuchConversation";
 
 /**
- * What the human settled in the modal: where the Conversation goes, and what to
- * do about anything still running.
+ * What the human settled in the modal: where the Conversation goes, what runs
+ * the work there, and what to do about anything still running.
  */
 export type SteerSubmission = { 
 /**
@@ -1606,17 +1607,31 @@ target: SteerTarget,
  * the drive, so what is running finishes what it was doing and nothing is
  * started after it. `true` is the human saying they will not wait.
  */
-interrupt: boolean, };
+interrupt: boolean, 
+/**
+ * The Pairing the work runs under from here, for a target something runs
+ * in — and what is picked is recorded as the *Conversation's*, because
+ * steering re-settles what runs the work rather than picking for one
+ * session.
+ *
+ * Absent where the target runs nothing, and absent where the human left
+ * the picker on what the Conversation already had: both are a submit that
+ * changes no Pairing. A Conversation with none fixed yet — a steered draft
+ * — is why the pick is part of the modal rather than an error path, and one
+ * that arrives with neither this nor a Pairing of its own is refused by
+ * name.
+ */
+pairing: ProfileChoice | null, };
 
 /**
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. The three
+ * its own, and a steer is for the four states the work is *done in*. The two
  * that are not here yet arrive with the tasks that build what each of them
  * launches — a target the modal offers is a target something runs for.
  */
-export type SteerTarget = "Done";
+export type SteerTarget = "Wrapping" | "Done";
 
 /**
  * What became of the human's Response.

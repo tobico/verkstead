@@ -4366,6 +4366,14 @@ async function openSteer(container: ParentNode): Promise<HTMLElement> {
   return drawn(document.body, ".steer-conversation");
 }
 
+/// The states the modal is offering to send the conversation into, in the order
+/// it draws them.
+function targets(modal: ParentNode): string[] {
+  return [
+    ...modal.querySelectorAll<HTMLInputElement>(".steer-target input"),
+  ].map((input) => input.value);
+}
+
 describe("steering a conversation", () => {
   /// Every state is somewhere to steer *from* — a draft nothing has run in, a
   /// run in flight, work Verkstead has finished with — so the row is drawn
@@ -4403,25 +4411,86 @@ describe("steering a conversation", () => {
     );
   });
 
-  /// Only done is offered, the three targets that launch something arriving with
-  /// what each of them launches. Each says what it means, because the words
-  /// between two of these are the difference between an hour of work and none.
-  it("offers done and nothing else to steer into", async () => {
+  /// Wrapping up is a move onto a pull request that is already there rather than
+  /// a way of opening one, so it is offered only where the record holds one. A
+  /// target that could only be refused by name is worse than one that was never
+  /// offered.
+  ///
+  /// Each says what it means, because the words between two of these are the
+  /// difference between an hour of work and none.
+  it("offers wrapping up only where the work is on a pull request", async () => {
     theGrillingStanding(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(container))).toEqual(["Done"]);
+    expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
+    unmount();
+
+    theGrillingStanding(
+      { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const wrapped = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(wrapped.container);
+
+    expect(targets(modal)).toEqual(["Wrapping", "Done"]);
+    expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
+  });
+
+  /// The pairing is the conversation's rather than one session's, so it is
+  /// prefilled from what the work already runs under and what is picked is sent
+  /// to be recorded as the conversation's own.
+  ///
+  /// Drawn only under a target something runs in: done runs nothing, so there is
+  /// nothing there to pick.
+  it("prefills the pairing, and sends what is picked instead", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    // It opens on wrapping up, that being the first target offered, so the
+    // picker is drawn from the start — filled in with what the conversation
+    // already runs the work under.
     const modal = await openSteer(container);
-    const offered = [...modal.querySelectorAll<HTMLInputElement>(
-      ".steer-target input",
-    )].map((input) => input.value);
 
-    expect(offered).toEqual(["Done"]);
-    expect(
-      screen.getByText(/Finished with. Nothing runs/),
-    ).toBeTruthy();
+    const picker = (await drawn(modal, "#steer-pairing")) as HTMLSelectElement;
+    const own = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(picker.value).toBe(`${own.profile.id}:${own.model!}`),
+    );
+
+    // Nothing runs in done, so there is nothing there to pick.
+    fireEvent.click(await drawn(modal, '.steer-target input[value="Done"]'));
+    await waitFor(() =>
+      expect(modal.querySelector("#steer-pairing")).toBeNull(),
+    );
+
+    fireEvent.click(await drawn(modal, '.steer-target input[value="Wrapping"]'));
+
+    fireEvent.change(await drawn(modal, "#steer-pairing"), {
+      target: { value: `${PROFILES[0]!.id}:${PROFILES[0]!.models[0]!}` },
+    });
+    fireEvent.click(await drawn(modal, ".steer-buttons .steer"));
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Wrapping",
+        interrupt: false,
+        pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0] },
+      }),
+    );
   });
 
   /// The checkbox is about the world rather than about the move, so it is drawn
@@ -4471,6 +4540,9 @@ describe("steering a conversation", () => {
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
         target: "Done",
         interrupt: true,
+        // Nothing runs in done, so there is no pairing to settle and none is
+        // sent.
+        pairing: null,
       }),
     );
 

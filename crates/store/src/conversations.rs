@@ -624,18 +624,24 @@ pub enum Rebuilding {
 
 /// What became of steering one.
 ///
-/// The shortest list of any move here, and that is the point of a steer: the
-/// human has looked at the work and said where it goes, so there is nothing
-/// about the state it is in for the store to refuse on. Every source is a source
-/// — a draft, a run in flight, a Conversation Verkstead has finished with — and
-/// the only thing left to be wrong about is which Conversation was named.
+/// Nothing here is about the state the Conversation was in, and that is the
+/// point of a steer: the human has looked at the work and said where it goes, so
+/// every source is a source — a draft, a run in flight, a Conversation Verkstead
+/// has finished with. What is left to be wrong about is which Conversation was
+/// named, and which Profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Steering {
-    /// Recorded: the Steer Event, the state, and the move on the Timeline.
+    /// Recorded: the Steer Event, the state, the move on the Timeline, and the
+    /// Pairing where the human picked one.
     Steered,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
+
+    /// The Pairing picked names a Profile that is not there — removed between
+    /// the list the modal read and the pick it made from it. Nothing is moved:
+    /// the move and the Pairing are one act.
+    NoSuchProfile,
 }
 
 /// What became of aborting one.
@@ -1254,13 +1260,12 @@ pub async fn set_implementation_pairing(
 ///
 /// Refused past drafting, which is what fixes a Pairing when grilling starts:
 /// what runs the work is settled before the work starts, alongside the branch,
-/// the base commit and the Brief.
+/// the base commit and the Brief. The one thing that re-settles one afterwards
+/// is a steer, and it goes through [`settle`] rather than here — see
+/// [`steer_conversation`].
 ///
-/// The Profile is selected from `profiles` inside the statement rather than
-/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
-/// only when asked to, and a column naming a Profile that is not there is a
-/// session that fails to start with nobody watching. Whether the Profile lists
-/// the model is decided above the store, where the Profile is read as a row.
+/// Whether the Profile lists the model is decided above the store, where the
+/// Profile is read as a row.
 ///
 /// `model` is `None` for the one caller that carries a Pairing across rather
 /// than making one — see [`Pairing::model`] — and it takes the model row away,
@@ -1284,6 +1289,41 @@ async fn choose(
         .await
         .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
 
+    if !settle(&mut tx, id, role, profile_id, model).await? {
+        return Ok(Chosen::NoSuchProfile);
+    }
+
+    tx.commit()
+        .await
+        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
+
+    Ok(Chosen::Chosen)
+}
+
+/// Write one role's Pairing, both halves of it, inside somebody else's
+/// transaction.
+///
+/// `false` means there is no Profile with that id — the one thing this can be
+/// wrong about, and the caller's to name in its own words.
+///
+/// Apart from [`choose`] because a steer settles a Pairing too, and settles it
+/// past drafting: what runs the work is fixed when grilling starts, and steering
+/// is the human re-settling it from wherever the work has got to. What is common
+/// to the two is this — the Profile column and the model row, written together,
+/// because a Pairing is both halves and either alone is not something to launch
+/// a session with. See [`steer_conversation`].
+///
+/// The Profile is selected from `profiles` inside the statement rather than
+/// checked first, as a Conversation's Repo is: SQLite enforces a foreign key
+/// only when asked to, and a column naming a Profile that is not there is a
+/// session that fails to start with nobody watching.
+pub(crate) async fn settle(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    id: i64,
+    role: Role,
+    profile_id: i64,
+    model: Option<&str>,
+) -> Result<bool> {
     let changed = sqlx::query(&format!(
         "UPDATE conversations
          SET {} = (SELECT id FROM profiles WHERE id = ?)
@@ -1293,19 +1333,19 @@ async fn choose(
     .bind(profile_id)
     .bind(id)
     .bind(profile_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?
     .rows_affected();
 
     if changed == 0 {
-        return Ok(Chosen::NoSuchProfile);
+        return Ok(false);
     }
 
     sqlx::query("DELETE FROM pairing_models WHERE conversation_id = ? AND role = ?")
         .bind(id)
         .bind(role.stored())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .with_context(|| format!("clearing the model Conversation {id} had paired"))?;
 
@@ -1314,16 +1354,12 @@ async fn choose(
             .bind(id)
             .bind(role.stored())
             .bind(model)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await
             .with_context(|| format!("pairing {model:?} with Conversation {id}'s Profile"))?;
     }
 
-    tx.commit()
-        .await
-        .with_context(|| format!("choosing Profile {profile_id} for Conversation {id}"))?;
-
-    Ok(Chosen::Chosen)
+    Ok(true)
 }
 
 /// A Conversation's Timeline, oldest first — which is reading order, and which
@@ -2467,11 +2503,28 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// the move on its Timeline to say when it got there, and one steered always has
 /// the human's own line above it.
 ///
+/// **And the Pairing the human picked, where they picked one.** In the same
+/// transaction as the move, because it is the same act: steering re-settles what
+/// runs the work rather than picking for one session, and a Conversation that
+/// moved into a state something runs in without the Pairing that state's
+/// sessions run under would be a move only half made. Past drafting, which is
+/// the whole of why this does not go through [`set_implementation_pairing`] —
+/// see [`settle`].
+///
+/// `None` is the ordinary case twice over: a target nothing runs in has no
+/// Pairing to settle, and a human who left the picker on what the Conversation
+/// already had has changed none.
+///
 /// Nothing about the Worktree, the branch or the run is touched here. What has
 /// to exist before the work can go on is made against git and the filesystem
 /// before this is called, and what has to stop running is stopped before it —
 /// see the server's `steering` module, which is the only caller.
-pub async fn steer_conversation(pool: &SqlitePool, id: i64, target: Lifecycle) -> Result<Steering> {
+pub async fn steer_conversation(
+    pool: &SqlitePool,
+    id: i64,
+    target: Lifecycle,
+    pairing: Option<Settling<'_>>,
+) -> Result<Steering> {
     let mut tx = pool.begin().await.context("steering a Conversation")?;
 
     let steer = Event::Steer(target);
@@ -2506,9 +2559,40 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, target: Lifecycle) -
 
     moved(&mut tx, id, target).await?;
 
+    if let Some(pairing) = pairing
+        && !settle(
+            &mut tx,
+            id,
+            pairing.role,
+            pairing.profile_id,
+            Some(pairing.model),
+        )
+        .await?
+    {
+        return Ok(Steering::NoSuchProfile);
+    }
+
     tx.commit().await.context("steering a Conversation")?;
 
     Ok(Steering::Steered)
+}
+
+/// A Pairing a steer settles: which of the two roles, and both halves of the
+/// choice.
+///
+/// The model borrowed rather than owned, this being read straight off what the
+/// modal submitted and living exactly as long as the call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Settling<'a> {
+    /// Which role's Pairing is being re-settled: the one the state steered into
+    /// runs its sessions under.
+    pub role: Role,
+
+    pub profile_id: i64,
+
+    /// One of that Profile's models. Never absent: there is no default model
+    /// anywhere, so a Pairing is picked whole or not at all.
+    pub model: &'a str,
 }
 
 /// Put the handoff document the grilling wrote on a Conversation's Timeline.

@@ -606,6 +606,37 @@ textarea::placeholder {
   color: var(--ink-soft);
 }
 
+/* What the work runs under from here, drawn only under a target something runs
+   in. A label above the control rather than beside it, as the setup pane's two
+   pickers are: the line under it says the thing worth reading twice, which is
+   that this is settled on the conversation rather than on one run. */
+.steer-pairing {
+  margin: 0 0 1rem;
+}
+
+.steer-pairing label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.steer-pairing select {
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+.steer-pairing .note {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
 /* The one control here that is about the world rather than about the move, so it
    is set apart from the targets by a rule rather than by spacing alone. */
 .steer-interrupt {

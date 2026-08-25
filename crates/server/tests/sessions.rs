@@ -477,6 +477,9 @@ impl Grilling {
 
     /// And submit the modal that opened: where the work goes, and whether to end
     /// what is running where it stands.
+    ///
+    /// No Pairing, which is the human leaving the picker on what the
+    /// Conversation already runs the work under.
     async fn steer_into(&self, target: &str, interrupt: bool) -> ConversationSteered {
         post(
             &self.app,
@@ -484,6 +487,33 @@ impl Grilling {
             &serde_json::json!({ "target": target, "interrupt": interrupt }),
         )
         .await
+    }
+
+    /// The same submit with a Pairing picked: what the work runs under from
+    /// here, which is recorded as the Conversation's own.
+    async fn steer_under(&self, target: &str, profile_id: i64, model: &str) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": target,
+                "interrupt": false,
+                "pairing": { "profile_id": profile_id, "model": model },
+            }),
+        )
+        .await
+    }
+
+    /// The Agent Profile of that name, as the modal's picker reads the list.
+    async fn profile(&self, name: &str) -> i64 {
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+
+        profiles
+            .into_iter()
+            .find(|profile| profile.name == name)
+            .expect("the fixture saved a Profile per role")
+            .id
     }
 
     /// And Force stop, which is the same press without the waiting.
@@ -10867,6 +10897,275 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
     // A third fix session says both halves of it at once. Nothing advances past
     // a stop, so one dispatching at all is the stop gone; and two attempts is
     // every one the branch was allowed, so a third is the count forgotten.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+}
+
+/// Steering a halted wrap-up back into Wrapping does what that press does: the
+/// checks are watched again from no attempts spent, and the stop goes.
+///
+/// The same recompute rather than one of its own. A steer into Wrapping carries
+/// no payload — the wrap-up's four watchers work out for themselves what is left
+/// to do — so what it starts is what Resume starts, reused rather than forked.
+/// A third fix session is what says the counters were forgotten: two is every
+/// one the branch was allowed.
+///
+/// And the stop the click wrote has to be gone for any of it to happen. Nothing
+/// advances past a stop, so a watcher dispatching at all is the stop taken away.
+#[tokio::test]
+async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Rust"),
+        "the run stopped on the red check: {:?}",
+        stopped.html,
+    );
+    assert_eq!(fixes(&fixture.view().await), 2, "having had both its goes");
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "the run had already stopped, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture.steer_into("Wrapping", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Wrapping);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Implementing),
+            ("moved", Lifecycle::Wrapping),
+            ("steer", Lifecycle::Wrapping),
+            ("moved", Lifecycle::Wrapping),
+        ],
+        "the human's own line, and the plain move under it — into the state it \
+         was already in, because that is what they said",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone",
+    );
+
+    // A third fix session says the rest of it at once: nothing advances past a
+    // stop, so one dispatching at all is the stop gone; and two attempts is
+    // every one the branch was allowed, so a third is the count forgotten.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+}
+
+/// A Conversation whose Worktree was forgotten rather than deleted is refused by
+/// name: there is nowhere to work, and no path to make one at.
+///
+/// The one way to get here, and the reason the refusal is not the same one a
+/// deleted directory gets: aborting takes the Worktree off the record while
+/// leaving the pull request on it, so the target is offered and there is nothing
+/// under it. What a directory that has merely gone gets is a rebuild — see
+/// [`steering_a_conversation_whose_worktree_has_gone_makes_it_again`] — because
+/// there the record still says where it was.
+#[tokio::test]
+async fn steering_a_conversation_with_no_worktree_on_the_record_says_so() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    fixture.stopped().await;
+
+    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert!(
+        fixture.view().await.worktree.is_none(),
+        "aborting forgets the Worktree and leaves the pull request on the record",
+    );
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture.steer_into("Wrapping", false).await,
+        ConversationSteered::NowhereToWork,
+    );
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Aborted,
+        "and nothing moved: the refusal comes before anything is done",
+    );
+}
+
+/// The Pairing picked in the modal is recorded as the *Conversation's*, and it
+/// is what the sessions after the steer run under.
+///
+/// Steering re-settles what runs the work rather than picking for one session,
+/// which is a thing about the record and a thing about the world at once — so
+/// both are read: the Conversation says it runs under the new Pairing, and the
+/// fix session dispatched after the steer was launched on that Profile's model.
+///
+/// The grilling Profile is what it is re-settled to, that being the other
+/// Profile this fixture has. Nothing is odd about it: what the two roles run
+/// under is the human's, and a steer is the human saying so again.
+#[tokio::test]
+async fn steering_records_the_pairing_it_was_submitted_with() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    fixture.stopped().await;
+
+    let picked = fixture.profile("grilling").await;
+
+    assert_ne!(
+        Some(picked),
+        fixture
+            .view()
+            .await
+            .implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        "the work is running under the other one, so this is a change to make",
+    );
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+
+    // A pick judged the way the drafting pickers judge theirs: a Profile that
+    // has gone and a model it does not list are both a list that was edited
+    // between the read and the pick, and both are refused before anything moves.
+    assert_eq!(
+        fixture
+            .steer_under("Wrapping", 404, "claude-grilling-5")
+            .await,
+        ConversationSteered::NoSuchProfile,
+    );
+    assert_eq!(
+        fixture
+            .steer_under("Wrapping", picked, "claude-nothing-5")
+            .await,
+        ConversationSteered::NoSuchModel,
+    );
+
+    assert_eq!(
+        fixture
+            .steer_under("Wrapping", picked, "claude-grilling-5")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let paired = fixture
+        .view()
+        .await
+        .implementation_pairing
+        .expect("the steer settled one");
+
+    assert_eq!(paired.profile.id, picked);
+    assert_eq!(
+        paired.model.as_deref(),
+        Some("claude-grilling-5"),
+        "both halves of it: either alone is not something to launch a session with",
+    );
+
+    // And the world agrees with the record: the fix session the steer set going
+    // was launched on the model the Pairing names.
+    fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+
+    let dispatched = std::fs::read_to_string(&written).unwrap();
+
+    assert!(
+        dispatched
+            .lines()
+            .filter(|line| line.starts_with("model="))
+            .next_back()
+            == Some("model=claude-grilling-5"),
+        "the last fix session ran under what the steer settled: {dispatched:?}",
+    );
+}
+
+/// And a steer whose Worktree has gone makes it again from the branch before any
+/// of that.
+///
+/// The same recreation Resume does, and for the same reason: a directory
+/// deleted, hollowed out or dropped from the repository's list of worktrees is a
+/// Conversation stuck for good, every session launched into it failing the same
+/// way. A worktree is derived state — the branch holds everything that was
+/// committed — so it is made again rather than refused on.
+#[tokio::test]
+async fn steering_a_conversation_whose_worktree_has_gone_makes_it_again() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &a_backlog_then_fixes(&written),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    fixture.stopped().await;
+
+    let view = fixture.view().await;
+    let branch = view.branch.clone();
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+
+    // The registration in the repository outlives the directory, which is what
+    // leaves git refusing to check the branch out anywhere — and what nothing
+    // before this knew to clear.
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture.steer_into("Wrapping", false).await,
+        ConversationSteered::Steered,
+        "a worktree that has gone is one to make again, not a reason to refuse",
+    );
+
+    assert!(
+        worktree.join("README.md").exists(),
+        "it is back, with everything the branch was holding",
+    );
+    assert_eq!(
+        git(&worktree, &["symbolic-ref", "HEAD"]).trim(),
+        format!("refs/heads/{branch}"),
+        "checked out on the Conversation's own branch",
+    );
+
+    // And the point of all of it: the wrap-up going on in it. Which is the
+    // reading that would fail if the worktree were merely there — a sandbox is
+    // given the git directory the checkout points back into.
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 

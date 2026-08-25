@@ -6,16 +6,23 @@
 //! of the transition, the same line every other move leaves. A Timeline with
 //! only the second could never be read back for who decided.
 //!
-//! Nothing here is about what runs afterwards. The state and the two Events are
-//! the whole of what the store has to say about a steer; recreating a Worktree,
-//! clearing a stop and launching are the server's, and are asked of it there.
+//! And the Pairing where the human picked one, written in the same transaction:
+//! steering re-settles what runs the work, and a Conversation moved into a state
+//! something runs in without the Pairing those sessions run under would be a
+//! move only half made.
+//!
+//! Nothing else here is about what runs afterwards. The state, the two Events
+//! and the Pairing are the whole of what the store has to say about a steer;
+//! recreating a Worktree, clearing a stop and launching are the server's, and
+//! are asked of it there.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, Steering, load_conversation, open_database, register_repo, save_brief,
-    start_conversation, start_grilling, steer_conversation, timeline,
+    AgentType, Event, Lifecycle, ProfileFacts, Role, Settling, Steering, create_profile,
+    load_conversation, open_database, register_repo, save_brief, start_conversation,
+    start_grilling, steer_conversation, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -62,6 +69,24 @@ async fn grilling(pool: &SqlitePool) -> i64 {
     id
 }
 
+/// An Agent Profile to pair with, by name and with the models it lists.
+async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
+    create_profile(
+        pool,
+        &ProfileFacts {
+            name: name.to_owned(),
+            claude_dir: PathBuf::from(format!("/state/profiles/{name}")),
+            config_file: PathBuf::from(format!("/state/profiles/{name}.json")),
+            models: models.iter().map(|model| (*model).to_owned()).collect(),
+            agent_type: AgentType::Claude,
+        },
+    )
+    .await
+    .unwrap()
+    .expect("nothing is called that yet")
+    .id
+}
+
 /// Where a Conversation says it has got to.
 async fn state(pool: &SqlitePool, id: i64) -> Lifecycle {
     load_conversation(pool, id)
@@ -92,7 +117,7 @@ async fn a_steer_moves_the_conversation_and_leaves_the_two_events_of_one() {
     let id = grilling(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, id, Lifecycle::Done)
+        steer_conversation(&pool, id, Lifecycle::Done, None)
             .await
             .unwrap(),
         Steering::Steered,
@@ -122,7 +147,7 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     let draft = drafting(&pool).await;
 
     assert_eq!(
-        steer_conversation(&pool, draft, Lifecycle::Done)
+        steer_conversation(&pool, draft, Lifecycle::Done, None)
             .await
             .unwrap(),
         Steering::Steered,
@@ -130,7 +155,7 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     assert_eq!(state(&pool, draft).await, Lifecycle::Done);
 
     assert_eq!(
-        steer_conversation(&pool, draft, Lifecycle::Done)
+        steer_conversation(&pool, draft, Lifecycle::Done, None)
             .await
             .unwrap(),
         Steering::Steered,
@@ -149,12 +174,100 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     );
 }
 
+/// A Pairing picked in the modal is recorded as the Conversation's own — both
+/// halves of it — and it is recorded long past drafting, which is the whole of
+/// why a steer does not go through the drafting pickers' own call.
+#[tokio::test]
+async fn a_steer_settles_the_pairing_the_human_picked() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+    let profile = profile(&pool, "opus", &["opus-5", "opus-4.8"]).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Lifecycle::Wrapping,
+            Some(Settling {
+                role: Role::Implementation,
+                profile_id: profile,
+                model: "opus-4.8",
+            }),
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    let conversation = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(conversation.state, Lifecycle::Wrapping);
+
+    let paired = conversation
+        .implementation_pairing
+        .expect("the steer settled one");
+
+    assert_eq!(paired.profile.id, profile);
+    assert_eq!(
+        paired.model.as_deref(),
+        Some("opus-4.8"),
+        "both halves of it: either alone is not something to launch a session \
+         with",
+    );
+    assert!(
+        conversation.grilling_pairing.is_none(),
+        "and only the role steered into: the other is nobody's to re-settle here",
+    );
+}
+
+/// A Profile that went between the list the modal read and the pick it made from
+/// it takes the whole steer with it.
+///
+/// The move and the Pairing are one act, so a pick that cannot be written is a
+/// move that does not happen: a Conversation wrapping under a Profile that is
+/// not there would be work nothing could start.
+#[tokio::test]
+async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Lifecycle::Wrapping,
+            Some(Settling {
+                role: Role::Implementation,
+                profile_id: 404,
+                model: "opus-5",
+            }),
+        )
+        .await
+        .unwrap(),
+        Steering::NoSuchProfile,
+    );
+
+    assert_eq!(
+        state(&pool, id).await,
+        Lifecycle::Grilling,
+        "it is where it was",
+    );
+    assert_eq!(
+        ladder(&pool, id).await,
+        [("moved", Lifecycle::Grilling)],
+        "and nothing on the Timeline says otherwise",
+    );
+}
+
 #[tokio::test]
 async fn there_is_no_conversation_to_steer() {
     let (_dir, pool) = fresh_pool().await;
 
     assert_eq!(
-        steer_conversation(&pool, 404, Lifecycle::Done)
+        steer_conversation(&pool, 404, Lifecycle::Done, None)
             .await
             .unwrap(),
         Steering::NoSuchConversation,
@@ -169,7 +282,7 @@ async fn a_steer_survives_the_database_being_reopened() {
     let id = {
         let pool = open_database(&database).await.unwrap();
         let id = grilling(&pool).await;
-        steer_conversation(&pool, id, Lifecycle::Done)
+        steer_conversation(&pool, id, Lifecycle::Done, None)
             .await
             .unwrap();
         pool.close().await;

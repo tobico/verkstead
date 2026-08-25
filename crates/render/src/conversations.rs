@@ -19,7 +19,7 @@ use verkstead_schema::Direction;
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::{DiffView, PairingView, RepoEntry, Standing};
+use crate::{DiffView, PairingView, ProfileChoice, RepoEntry, Standing};
 
 /// Where a Conversation has got to.
 ///
@@ -1738,20 +1738,47 @@ pub enum SteerOpened {
 /// Where a steer can send a Conversation.
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
-/// its own, and a steer is for the four states the work is *done in*. The three
+/// its own, and a steer is for the four states the work is *done in*. The two
 /// that are not here yet arrive with the tasks that build what each of them
 /// launches — a target the modal offers is a target something runs for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
+    /// The branch looked at again: the checks watched, the review run, the
+    /// comments answered. No payload — the wrap-up's watchers work out for
+    /// themselves what is left to do, which is what a pressed Resume already
+    /// asks of them.
+    ///
+    /// Offered only where the record already holds a pull request. A wrapping
+    /// Conversation is defined by the one under it, so a steer here is a move
+    /// onto a pull request that is already there rather than a way of opening
+    /// one — see [`ConversationSteered::NoPullRequest`].
+    Wrapping,
+
     /// Finished with. Nothing runs, so there is no Pairing to settle and no
     /// payload to carry: a steer into Done is the move alone.
     Done,
 }
 
-/// What the human settled in the modal: where the Conversation goes, and what to
-/// do about anything still running.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+impl SteerTarget {
+    /// Whether work goes on in this state, which is what the rest of the modal's
+    /// shape follows from.
+    ///
+    /// A target something runs in needs a Pairing settled and a Worktree to run
+    /// in; one nothing runs in needs neither. Said once here because the page
+    /// draws the picker by it and the server refuses by it, and two readings of
+    /// the same question could come to different answers.
+    pub fn runs(self) -> bool {
+        match self {
+            Self::Wrapping => true,
+            Self::Done => false,
+        }
+    }
+}
+
+/// What the human settled in the modal: where the Conversation goes, what runs
+/// the work there, and what to do about anything still running.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SteerSubmission {
     /// Which state to move it into.
@@ -1763,14 +1790,29 @@ pub struct SteerSubmission {
     /// the drive, so what is running finishes what it was doing and nothing is
     /// started after it. `true` is the human saying they will not wait.
     pub interrupt: bool,
+
+    /// The Pairing the work runs under from here, for a target something runs
+    /// in — and what is picked is recorded as the *Conversation's*, because
+    /// steering re-settles what runs the work rather than picking for one
+    /// session.
+    ///
+    /// Absent where the target runs nothing, and absent where the human left
+    /// the picker on what the Conversation already had: both are a submit that
+    /// changes no Pairing. A Conversation with none fixed yet — a steered draft
+    /// — is why the pick is part of the modal rather than an error path, and one
+    /// that arrives with neither this nor a Pairing of its own is refused by
+    /// name.
+    #[serde(default)]
+    pub pairing: Option<ProfileChoice>,
 }
 
 /// What became of submitting one.
 ///
-/// Named the way [`ManualTaskStarted`]'s refusals are, and the list is short for
-/// the reason the store's is: the human has looked at the work and said where it
-/// goes, so the state it is in is not something to be refused for. What the
-/// targets that launch something can be refused for arrives with them.
+/// Named the way [`ManualTaskStarted`]'s refusals are, and nothing here is about
+/// the state the Conversation was in: the human has looked at the work and said
+/// where it goes, so the source is not something to be refused for. What is left
+/// to be wrong about is the *target* — a state whose work cannot be set going
+/// from what the record holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ConversationSteered {
@@ -1779,6 +1821,36 @@ pub enum ConversationSteered {
     Steered,
 
     NoSuchConversation,
+
+    /// Wrapping was named for a Conversation whose work is on no pull request.
+    ///
+    /// A wrapping Conversation is defined by the one under it — the store writes
+    /// the move and the pull-request row as one act — so there is no wrapping up
+    /// to steer into here. The modal does not offer the target on such a
+    /// Conversation at all; this is the same rule asked again on arrival, the
+    /// way every named refusal here is.
+    NoPullRequest,
+
+    /// Nothing says which account and model the work runs under from here:
+    /// neither a Pairing picked in the modal nor one the Conversation already
+    /// had.
+    NoPairing,
+
+    /// The Pairing picked names a Profile that is not there — it was removed
+    /// between the list the modal read and the pick it made from it.
+    NoSuchProfile,
+
+    /// Or a model that Profile does not list, for the same reason.
+    NoSuchModel,
+
+    /// There is no Worktree on the record to work in, and a target something
+    /// runs in needs one. Nothing here knows what path to make: it is
+    /// Verkstead's own to have chosen.
+    NowhereToWork,
+
+    /// What the record names is not a Worktree any more, and git would not make
+    /// it again from the branch.
+    WorktreeRefused,
 }
 
 /// What became of pressing Adopt.
