@@ -44,10 +44,10 @@ describe("the attached Diff", () => {
   it("is put in as the server rendered it, one fold per file", async () => {
     const diff = diffOf(await reading(WAITING));
 
-    const folds = diff.querySelectorAll<HTMLDetailsElement>("details.diff-file");
+    const folds = diff.querySelectorAll<HTMLDetailsElement>("details.diffFile");
     expect(folds, "one fold per file, whatever git knew of it").toHaveLength(2);
     expect([...folds].map((fold) => fold.id)).toEqual(["diff-1", "diff-2"]);
-    expect(texts(diff, "details.diff-file .diff-path")).toEqual([
+    expect(texts(diff, "details.diffFile .diffPath")).toEqual([
       "src/limits.rs",
       "notes.txt",
     ]);
@@ -58,8 +58,8 @@ describe("the attached Diff", () => {
     // server's, and this is the whole of what arrives.
     const diff = diffOf(await reading(WAITING));
 
-    expect(diff.querySelector(".diff-line.add")).toBeTruthy();
-    expect(diff.querySelector(".diff-line.del")).toBeTruthy();
+    expect(diff.querySelector(".diffLine.add")).toBeTruthy();
+    expect(diff.querySelector(".diffLine.del")).toBeTruthy();
     expect(
       diff.querySelector("span[class^='tok-']"),
       "expected the Rust file highlighted server-side",
@@ -75,7 +75,7 @@ describe("the attached Diff", () => {
 
   it("folds and unfolds each file", async () => {
     const diff = diffOf(await reading(WAITING));
-    const [first] = diff.querySelectorAll<HTMLDetailsElement>("details.diff-file");
+    const [first] = diff.querySelectorAll<HTMLDetailsElement>("details.diffFile");
 
     // Open as the server wrote them: a Diff is evidence, and evidence nobody
     // can see until they open it is not being shown.
@@ -84,7 +84,7 @@ describe("the attached Diff", () => {
     // The fold is the browser's own `details`, so what a test can ask is that
     // the page is still one — a summary to press, and the file's lines inside
     // it.
-    expect(first!.querySelector("summary .diff-path")!.textContent).toBe(
+    expect(first!.querySelector("summary .diffPath")!.textContent).toBe(
       "src/limits.rs",
     );
     first!.open = false;
@@ -110,7 +110,7 @@ describe("the attached Diff", () => {
     await waitFor(() => expect(container.querySelector("h1")).toBeTruthy());
 
     const first = container.querySelector<HTMLDetailsElement>(
-      "details.diff-file",
+      "details.diffFile",
     )!;
     first.open = false;
 
@@ -122,7 +122,7 @@ describe("the attached Diff", () => {
     await waitFor(() =>
       expect(container.querySelector("h1")!.textContent).toBe(RETITLED.title),
     );
-    expect(container.querySelector("details.diff-file")).toBe(first);
+    expect(container.querySelector("details.diffFile")).toBe(first);
     expect(first.open).toBe(false);
   });
 

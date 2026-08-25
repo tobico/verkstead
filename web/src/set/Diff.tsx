@@ -34,7 +34,7 @@ export function Diff(props: {
       </div>
       {/* The per-file anchors are stamped by the renderer, since this arrives
           already rendered. */}
-      <div class="diff-files" innerHTML={props.diff.html} />
+      <div class="diffFiles" innerHTML={props.diff.html} />
     </section>
   );
 }

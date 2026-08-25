@@ -4,19 +4,25 @@
 
    Both are HTML that `crates/render` writes and the page injects, so the class
    names are the renderer's and syntect's rather than any component's, and there
-   is no class of ours to hash. */
+   is no class of ours to hash.
+
+   The renderer's own names are camelCase, like every class we write. The
+   `tok-*` family at the foot of this file is the documented exception: only the
+   prefix is ours and the suffix is generated from a syntect scope, so renaming
+   it would mean post-processing generated HTML. Mermaid's DOM and xterm's are
+   the same exception for the same reason. */
 
 .diff {
   margin-bottom: 1.5rem;
 }
 
-.diff-files {
+.diffFiles {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
 }
 
-.diff-file {
+.diffFile {
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
@@ -25,7 +31,7 @@
   overflow: hidden;
 }
 
-.diff-file > summary {
+.diffFile > summary {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
@@ -34,7 +40,7 @@
   cursor: pointer;
 }
 
-.diff-path {
+.diffPath {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.85rem;
   font-weight: 600;
@@ -42,7 +48,7 @@
   overflow-wrap: anywhere;
 }
 
-.diff-status {
+.diffStatus {
   padding: 0.05rem 0.4rem;
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -52,7 +58,7 @@
   border-radius: 0.6rem;
 }
 
-.diff-stat {
+.diffStat {
   display: flex;
   gap: 0.4rem;
   margin-left: auto;
@@ -60,15 +66,15 @@
   font-size: 0.8rem;
 }
 
-.diff-stat .add {
+.diffStat .add {
   color: var(--added);
 }
 
-.diff-stat .del {
+.diffStat .del {
   color: var(--removed);
 }
 
-.diff-note {
+.diffNote {
   margin: 0;
   padding: 0.5rem 0.8rem;
   font-size: 0.85rem;
@@ -76,7 +82,7 @@
   border-top: 1px solid var(--edge);
 }
 
-.diff-hunk-header {
+.diffHunkHeader {
   margin: 0;
   padding: 0.3rem 0.8rem;
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -89,7 +95,7 @@
 }
 
 /* The scroll lives here — inside the file, never on the page. */
-.diff-lines {
+.diffLines {
   margin: 0;
   overflow-x: auto;
   font-family: ui-monospace, SFMono-Regular, monospace;
@@ -106,7 +112,7 @@
    to read. A line long enough to overflow even so is what the wrap switch is
    for. */
 @media (width < 40rem) {
-  .diff-lines {
+  .diffLines {
     font-size: 0.65rem;
   }
 
@@ -115,13 +121,13 @@
      and the hunk header above still says where the lines start. The marker
      stays — which side of the change a line is on is not something the colour
      alone should have to carry. */
-  .diff-number {
+  .diffNumber {
     display: none;
   }
 
   /* The gutter is the marker's alone once the numbers are gone, so a wrapped
      line hangs off the code and not off a column that is no longer drawn. */
-  .diff-file {
+  .diffFile {
     --diff-number-width: 0px;
   }
 }
@@ -131,7 +137,7 @@
    itself against the *visible* width instead — `code` is inline, so the `pre` was
    the containing block — and the wash behind a short line stopped at the right
    edge of the viewport and got left behind as soon as the hunk was scrolled. */
-.diff-lines > code {
+.diffLines > code {
   display: block;
   width: max-content;
   min-width: 100%;
@@ -139,14 +145,14 @@
 
 /* Each line is a block of its own so its background reaches the full scrolled
    width, not just as far as its text. */
-.diff-line {
+.diffLine {
   display: block;
   padding-right: 0.8rem;
 }
 
 /* The Diff git did not write has no line cells to hold its text off the edge, so
    the inset is the block's own. */
-.diff-verbatim > code {
+.diffVerbatim > code {
   padding: 0.3rem 0.8rem;
 }
 
@@ -161,7 +167,7 @@
 /* Named on the file rather than measured twice, because the wrap rules below
    have to indent by exactly the width of these two and a drift between them
    would show as code that does not line up with itself. */
-.diff-file {
+.diffFile {
   /* Four characters, and the same four for every file on the page: the width
      the reading column above reserves. Cut to each file's own highest line
      instead, it put the code of a hundred-line file and a thousand-line one in
@@ -173,7 +179,7 @@
   --diff-gutter: calc(var(--diff-number-width) + var(--diff-marker-width));
 }
 
-.diff-number {
+.diffNumber {
   display: inline-block;
   width: var(--diff-number-width);
   padding: 0 0.6rem;
@@ -182,7 +188,7 @@
   user-select: none;
 }
 
-.diff-line .marker {
+.diffLine .marker {
   display: inline-block;
   width: var(--diff-marker-width);
   padding-right: 0.5rem;
@@ -190,25 +196,25 @@
   user-select: none;
 }
 
-.diff-line.add {
+.diffLine.add {
   background: var(--added-wash);
 }
 
-.diff-line.del {
+.diffLine.del {
   background: var(--removed-wash);
 }
 
-.diff-line.add .marker {
+.diffLine.add .marker {
   color: var(--added);
 }
 
-.diff-line.del .marker {
+.diffLine.del .marker {
   color: var(--removed);
 }
 
 /* The aside about the lines gets the two cells the lines get, empty, so it starts
    where they start — nothing more to inset it by. */
-.diff-line.aside {
+.diffLine.aside {
   color: var(--ink-soft);
   font-style: italic;
 }
@@ -222,14 +228,14 @@
    Nothing about the colouring changes: the wash is on the line, and a line that
    is three rows tall is washed three rows deep. */
 
-.diff.wrapped .diff-lines {
+.diff.wrapped .diffLines {
   /* Nothing left to scroll to, so the box stops offering. */
   overflow-x: visible;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.diff.wrapped .diff-lines > code {
+.diff.wrapped .diffLines > code {
   width: auto;
 }
 
@@ -237,7 +243,7 @@
    two cells, and the negative indent pulls the first row — the one those cells
    are actually in — back out to the edge again. The remainder of a wrapped line
    then starts under the code above it rather than under the line numbers. */
-.diff.wrapped .diff-line {
+.diff.wrapped .diffLine {
   padding-left: var(--diff-gutter);
   text-indent: calc(-1 * var(--diff-gutter));
 }
@@ -245,15 +251,17 @@
 /* `text-indent` is inherited and an inline-block is a block container of its own,
    so without this the two cells would each pull their own contents out to the
    left along with the line. */
-.diff.wrapped .diff-number,
-.diff.wrapped .diff-line .marker {
+.diff.wrapped .diffNumber,
+.diff.wrapped .diffLine .marker {
   text-indent: 0;
 }
 
 /* Token colouring, on top of the +/- wash. The classes are syntect's scope
    atoms: an outer span carries the broad scope and inner ones refine it, so the
    more specific colour wins by being nested. Anything not named here keeps the
-   line's own colour, which is what an unhighlighted file gets throughout. */
+   line's own colour, which is what an unhighlighted file gets throughout.
+
+   Kebab-case, and staying that way — see the head of this file. */
 
 .tok-comment {
   color: var(--tok-comment);
@@ -289,7 +297,7 @@
      come to exactly a card edge and a Gutter and the code starts on the axis.
      The numbers are set against the marker rather than out at the card edge, so
      whatever room this leaves over shows as air to their left. */
-  .diff-file {
+  .diffFile {
     --diff-number-width: calc(1rem + var(--gutter) - var(--diff-marker-width));
   }
 }

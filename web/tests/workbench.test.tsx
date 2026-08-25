@@ -5115,7 +5115,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
-    await drawn(container, ".details-pane .diff-files");
+    await drawn(container, ".details-pane .diffFiles");
 
     fireEvent.click(await drawn(container, ".details-pane .close-event"));
 
@@ -5131,17 +5131,17 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const diff = await drawn(container, ".details-pane .diff-files");
+    const diff = await drawn(container, ".details-pane .diffFiles");
 
     // Put in the page as it arrived: the folds, the per-file anchors and the
     // highlighting are all the renderer's, and nothing here reads the diff.
-    const folds = [...diff.querySelectorAll("details.diff-file")];
+    const folds = [...diff.querySelectorAll("details.diffFile")];
 
     expect(folds.map((fold) => fold.id)).toEqual(["diff-1", "diff-2"]);
-    expect(folds[0]!.querySelector(".diff-path")!.textContent).toBe(
+    expect(folds[0]!.querySelector(".diffPath")!.textContent).toBe(
       COMMIT_PANE.diff!.paths[0],
     );
-    expect(diff.querySelector(".diff-line.add")).toBeTruthy();
+    expect(diff.querySelector(".diffLine.add")).toBeTruthy();
     expect(diff.querySelector(".tok-storage")).toBeTruthy();
     expect(askedFor(fetching, DIFF_OF_IT)).toBeGreaterThan(0);
   });
@@ -5305,7 +5305,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
-    await drawn(container, ".details-pane .diff-files");
+    await drawn(container, ".details-pane .diffFiles");
 
     expect(container.querySelector(".details-pane .commit-summary")).toBeNull();
   });
@@ -5366,7 +5366,7 @@ describe("a commit on the timeline", () => {
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
     const fold = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane details.diff-file",
+      ".details-pane details.diffFile",
     );
     fold.open = false;
 
@@ -5376,7 +5376,7 @@ describe("a commit on the timeline", () => {
     expect(askedFor(fetching, DIFF_OF_IT)).toBe(before);
     expect(
       container.querySelector<HTMLDetailsElement>(
-        ".details-pane details.diff-file",
+        ".details-pane details.diffFile",
       ),
     ).toBe(fold);
     expect(fold.open).toBe(false);

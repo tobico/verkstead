@@ -244,7 +244,7 @@ export function Commit(props: {
                   </div>
                   {/* The per-file folds and their anchors are stamped by the
                       renderer, since this arrives already rendered. */}
-                  <div class="diff-files" innerHTML={diff().html} />
+                  <div class="diffFiles" innerHTML={diff().html} />
                 </section>
               )}
             </Show>

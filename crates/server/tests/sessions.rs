@@ -6527,7 +6527,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>'
 
     assert_eq!(diff.paths, vec!["NOTES.md".to_owned()]);
     assert!(
-        diff.html.contains("<details class=\"diff-file\""),
+        diff.html.contains("<details class=\"diffFile\""),
         "the folds the renderer already gives an attached Diff: {}",
         diff.html
     );

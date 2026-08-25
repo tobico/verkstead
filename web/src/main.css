@@ -3317,7 +3317,7 @@ div.meta .error {
   .diff,
   #questions,
   .postscript,
-  .diff-file,
+  .diffFile,
   .question {
     scroll-margin-top: 3.5rem;
   }
@@ -3413,7 +3413,7 @@ div.meta .error {
   .diff,
   #questions,
   .postscript,
-  .diff-file,
+  .diffFile,
   .question {
     scroll-margin-top: 3.25rem;
   }
@@ -4531,5 +4531,5 @@ div.meta .error {
   }
 
   /* And the Diff's own gutter is cut to this one, so a line of code starts on
-     the axis the prose starts on — see `.diff-file` in `styles/diff.css`. */
+     the axis the prose starts on — see `.diffFile` in `styles/diff.css`. */
 }
