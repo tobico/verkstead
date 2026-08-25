@@ -27,6 +27,12 @@ import type {
 } from "../api/types";
 import { ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
+import styles from "./Pause.module.css";
+// The heading row every card of the record wears, read out of the module that
+// draws the rest of them: a Pause is one of the Timeline's cards, and its head
+// should be the same head. What this card says differently rides beside it on
+// classes of its own.
+import timeline from "./Timeline.module.css";
 
 /// What each way the wait ended is called.
 ///
@@ -69,23 +75,25 @@ export function Pause(props: {
 
   return (
     <article
-      class="pause"
-      classList={{ selected: props.selected, open: open() }}
+      class={styles.pause}
+      classList={{ [styles.selected!]: props.selected, [styles.open!]: open() }}
     >
-      <div class="event-head">
+      <div class={`${timeline.eventHead} ${styles.head}`}>
         <h2>Paused</h2>
         <Show when={open()}>
-          <span class="live">blocked on you</span>
+          <span class={`${timeline.live} ${styles.stopped}`}>
+            blocked on you
+          </span>
         </Show>
       </div>
 
-      <p class="what">
+      <p class={styles.what}>
         {props.waiting.profile} is out of window
         <Show when={props.waiting.resets_at}>
           {(resets) => <> until {utcStamp(resets())}</>}
         </Show>
       </p>
-      <p class="how">{props.waiting.said}</p>
+      <p class={styles.how}>{props.waiting.said}</p>
 
       <Show
         when={props.waiting.resumed}
@@ -97,7 +105,10 @@ export function Pause(props: {
         }
       >
         {(resumed) => (
-          <p class="resumed" classList={{ [resumed().by]: true }}>
+          <p
+            class={styles.resumed}
+            classList={{ [styles[resumed().by.toLowerCase()]!]: true }}
+          >
             {RESUMED_BY[resumed().by]}
           </p>
         )}
@@ -133,10 +144,10 @@ function Waiting(props: {
   }));
 
   return (
-    <div class="resuming">
+    <div class={styles.resuming}>
       <button
         type="button"
-        class="resume"
+        class={styles.resume}
         disabled={resume.isPending}
         onClick={() => resume.mutate()}
       >

@@ -29,6 +29,8 @@ import type {
 } from "../src/api/types";
 // The one menu, which is what the sidebar offers its repositories through.
 import menu from "../src/Menu.module.css";
+// The ring the sidebar's card turns while a session runs.
+import marks from "../src/workbench/Mark.module.css";
 import { Picker } from "../src/picking";
 import {
   OPEN,
@@ -145,14 +147,14 @@ describe("what a Nudge leaves standing", () => {
   it("keeps the row a session's spinner is spinning on", async () => {
     theWorkbench(whenever("/api/ui/conversations", json(BUSY)));
     const { container, client } = mount();
-    const spinner = await drawn(container, ".conversation-row .mark.working");
+    const spinner = await drawn(container, `.conversation-row .${marks.mark}.${marks.working}`);
 
     await nudged(client);
 
     // The same element, so the animation is where it was rather than back at
     // its first frame — which is what the merge on the conversations query is
     // for.
-    expect(container.querySelector(".conversation-row .mark.working")).toBe(
+    expect(container.querySelector(`.conversation-row .${marks.mark}.${marks.working}`)).toBe(
       spinner,
     );
   });

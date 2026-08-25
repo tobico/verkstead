@@ -105,8 +105,8 @@
 
    One rule, because they were always the same seven declarations said twice:
    `.pane-back` and `.close-event` were written apart and drawn alike. The way
-   *on* to the next level is still `.pane-forward` in `main.css`, being the
-   timeline's alone and drawn there. */
+   *on* to the next level is `.paneForward` in `Timeline.module.css`, being the
+   timeline's alone and drawn with the rest of it. */
 .back,
 .close {
   padding: 0;

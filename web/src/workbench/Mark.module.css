@@ -1,0 +1,91 @@
+/* The mark a session's liveness is said in, wherever it is said: a card in the
+   sidebar, a session's row on the Timeline, and the details pane that row
+   opens. See `Mark.tsx` for what the three states mean.
+
+   The vocabulary rather than one component's paint, which is why the sidebar
+   reads it too: `Conversations.tsx` draws its own mark — it has a fourth state,
+   `waiting`, that no running session has — and it draws it out of this module
+   so that a ring means the same thing in the list that it means on the row the
+   list opens.
+
+   What is *not* here is where a mark stands in the line it is on. That belongs
+   to whatever drew the line, and it arrives as the `class` Mark takes; the one
+   caller that has no module yet is read through `:global` until it does. */
+
+/* One size for every kind, so nothing resizes when a session finishes and
+   leaves an ask behind it. */
+.mark {
+  flex: none;
+  align-self: center;
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+}
+
+/* Something is waiting on the human: an ask left open, driving that has halted,
+   a run waiting an account's window out, or a direction to choose. An icon
+   rather than the dot it used to be — a shape reads at a glance where a dot has
+   to be looked at, and this is a list that is glanced down, so it is a size up
+   on the session marks beside it. The border around the whole card is the other
+   half of the same mark; see `.conversation-row.waiting`. The accent rather than
+   the `--stopped` red, because not one of the four is anything going wrong.
+
+   The sidebar's alone, which is why the card is named in the selector — and
+   named through `:global` for as long as the card itself is still `main.css`'s;
+   it becomes an ordinary class when the conversation list moves. */
+:global(.conversation-row) .mark.waiting {
+  display: grid;
+  place-items: center;
+  width: 1rem;
+  height: 1rem;
+  background: var(--accent);
+  border-radius: 50%;
+  color: var(--card);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* And a session getting on with it: a ring with one lit arc, turning slowly.
+   Low contrast on purpose — it is there to be caught out of the corner of an
+   eye rather than watched, and a sidebar of them should not be a sidebar of
+   things demanding to be read. */
+.mark.working {
+  border: 1.5px solid var(--edge);
+  border-top-color: var(--ink-soft);
+  border-radius: 50%;
+  animation: turning 1.4s linear infinite;
+}
+
+/* And one that is running and has stopped talking: the same ring with no lit
+   arc at all, which is an empty circle. Quieter than the turning one on purpose
+   — a session sitting on an ask is not doing anything, and the mark that says
+   so should not be the one that catches an eye. */
+.mark.idle {
+  border: 1.5px solid var(--edge);
+}
+
+@keyframes turning {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Held still where motion is unwelcome. What is left is a ring with a mark on
+   one side of it, which says a session is running as plainly as a turning one
+   does — all it loses is the liveliness. And it is still told apart from the
+   idle ring, because the lit arc is what the two differ by rather than the
+   turning. */
+@media (prefers-reduced-motion: reduce) {
+  .mark.working {
+    animation: none;
+  }
+}
+
+/* The mark at the right edge of a line rather than beside the metric before it:
+   what it says is about the row as a whole. The Timeline's row hands this in as
+   a class of its own; the Capture's summary has no module to hand one from yet,
+   so it is named here through `:global` until `Output.tsx` moves. */
+:global(.capture-summary) .mark {
+  margin-left: auto;
+}

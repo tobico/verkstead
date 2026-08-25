@@ -57,6 +57,12 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { SPOKEN } from "./Mark";
+// The rings and the badge a card carries at its right edge. Drawn here rather
+// than by `Mark` because the sidebar has a state no running session has —
+// something is waiting on you — but read out of the one module all the same,
+// so a ring means the same thing in the list that it means on the row it
+// opens.
+import marks from "./Mark.module.css";
 import { PaneHead } from "./PaneHead";
 
 export function Conversations(props: {
@@ -644,7 +650,10 @@ function ConversationRow(props: {
             it means, so there is nothing here for a screen reader to find. */}
         <Show when={mark(props.entry)}>
           {(which) => (
-            <span class={`mark ${which()}`} aria-hidden="true">
+            <span
+              class={`${marks.mark} ${marks[which()]}`}
+              aria-hidden="true"
+            >
               {which() === "waiting" ? WANTS_YOU : ""}
             </span>
           )}

@@ -34,6 +34,10 @@ import type {
 // The badge on a waiting Set, and the date a settled one carries.
 import sheet from "../src/set/Sheet.module.css";
 import standing from "../src/set/Standing.module.css";
+// The mark on a session's row, and the pinned card the timeline holds
+// above the record.
+import marks from "../src/workbench/Mark.module.css";
+import timeline from "../src/workbench/Timeline.module.css";
 import { drawn } from "./bench";
 import {
   askedFor,
@@ -569,9 +573,9 @@ describe("what a Nudge is about", () => {
     // pane reads to decide whether the record can still move: a Transcript
     // opened over a session that had already stopped is read once and never
     // again, whatever any Nudge says.
-    await drawn(container, ".agent-output .mark");
+    await drawn(container, `.${timeline.agentOutput} .${marks.mark}`);
 
-    fireEvent.click(await drawn(container, ".agent-output"));
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     await drawn(container, ".details-pane .turn");
     stream().opens();
     const before = { ...reads(fetching), [REST_OF_IT]: askedFor(fetching, REST_OF_IT) };
@@ -595,8 +599,8 @@ describe("what a Nudge is about", () => {
     window.history.pushState({}, "", `/conversations/${WRAPPED.id}`);
     const fetching = theWrapping();
     const { container } = render(() => <App />);
-    const pinned = await drawn(container, ".pinned .pull-request");
-    fireEvent.click(pinned.querySelector(".open-pull-request")!);
+    const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
     await drawn(container, ".details-pane .pr-commits");
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
@@ -616,8 +620,8 @@ describe("what a Nudge is about", () => {
     window.history.pushState({}, "", `/conversations/${WRAPPED.id}`);
     const fetching = theWrapping();
     const { container } = render(() => <App />);
-    const pinned = await drawn(container, ".pinned .pull-request");
-    fireEvent.click(pinned.querySelector(".open-pull-request")!);
+    const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
+    fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
     await drawn(container, ".details-pane .pr-commits");
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
