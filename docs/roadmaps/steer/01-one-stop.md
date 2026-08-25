@@ -66,6 +66,15 @@ stage:
    - Typing into a driven session's Screen changes nothing about when it ends;
      pressing Stop first is what holds the run off.
    - Nothing to hand back anywhere.
+5. **The vocabulary this stage retires.** CONTEXT.md: fold **Halt** and
+   **Pause** into one entry for the one stop, delete **Hold**, and follow the
+   cross-references out — **Stalled** is defined against both of the first
+   two, **Notice** and **Resume** name the Halt, and **Timeline** and
+   **Screen** carry the Hold's carve-outs. Naming the merged entry is part of
+   the task: *Stop* is already the press, so the state and the button need
+   telling apart.
+   - No entry describes a Hold, a self-resuming Pause, or two kinds of stop.
+   - No *Avoid* line sends a reader to a term this stage retired.
 
 ## Re-verify at start
 

@@ -44,9 +44,12 @@ stage:
      round and a new Brief.
 3. **Retire Manual Task.** Remove `manual.rs`, the composer, and the folding
    carve-out.
-4. **Sweep the vocabulary.** CONTEXT.md, `docs/design/verkstead.md` and UI
-   strings: Halt, Pause, Hold, Manual Task, Abort and Reopen entries replaced
-   by the one stop, Steer and Close.
+4. **Sweep what is left of the vocabulary.** CONTEXT.md's **Manual Task**
+   entry, and the Abort and Reopen mentions woven through **Conversation**,
+   **Worktree** and **Brief** — stages 01 and 02 took their own terms as they
+   went, so what is left here is this stage's three. Then
+   `docs/design/verkstead.md` and the UI strings across the lot.
+   - No retired term survives in either document.
 
 ## Re-verify at start
 

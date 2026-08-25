@@ -68,6 +68,11 @@ stage:
 4. **Workbench: the modal.** Menu row, target picker, payload fields shown
    per target, Pairing pick, Interrupt checkbox; cancel leaves the stopped
    Conversation with Resume drawn.
+5. **The vocabulary this stage adds.** CONTEXT.md gains a **Steer** entry —
+   what it moves, what it recreates, what it records — and **Resume**'s is
+   amended: it sends the reader to Manual Task for steering the work, which is
+   Steer's job from here and stage 03's to retire.
+   - Steer's entry is written against the same states the modal offers.
 
 ## Re-verify at start
 
