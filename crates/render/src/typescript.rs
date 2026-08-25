@@ -18,7 +18,7 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
+    BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
     ConversationReopened, ConversationSteered, ConversationStopped, ConversationView,
     GrillingStarted, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
     NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
@@ -89,7 +89,7 @@ fn the_viewers_types_are_written_from_these() {
     // in the path, and there is nothing else to say about any of them — so it is
     // the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
-    ConversationAborted::export_all(&config).unwrap();
+    ConversationClosed::export_all(&config).unwrap();
     ConversationReopened::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's

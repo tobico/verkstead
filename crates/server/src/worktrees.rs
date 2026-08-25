@@ -1,5 +1,5 @@
 //! Where a Conversation's work is done: the branch it is on and the worktree it
-//! is checked out in, made when grilling starts and removed when it is aborted.
+//! is checked out in, made when grilling starts and removed when it is closed.
 //!
 //! Worktrees live under Verkstead's own data directory rather than inside a
 //! Watched Path. The Watched Paths are the boundary on what the *human* may
@@ -11,7 +11,7 @@
 //!
 //! The branch is made in the Repo's own git directory, not in the worktree —
 //! `git worktree add -b` does both at once, which is the point of asking git for
-//! this rather than checking a tree out by hand. Aborting removes the worktree
+//! this rather than checking a tree out by hand. Closing removes the worktree
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
 
@@ -278,7 +278,7 @@ pub(crate) fn common_git_dir(worktree: &Path) -> Option<PathBuf> {
 /// Take the worktree at `path` away, and tell `repo` it has gone.
 ///
 /// True when there is no longer a worktree there, which includes there never
-/// having been one: aborting twice is not an error, and neither is aborting a
+/// having been one: closing twice is not an error, and neither is closing a
 /// Conversation whose directory the human already deleted by hand.
 ///
 /// `--force` because the whole point is to stop: a worktree with uncommitted

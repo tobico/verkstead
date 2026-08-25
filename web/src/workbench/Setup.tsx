@@ -82,7 +82,7 @@ export function Setup(props: {
 }): JSX.Element {
   /// Whether the branch this work is done on has been made already, which is
   /// what a worktree says: one is made with the branch and forgotten only by
-  /// aborting.
+  /// closing.
   ///
   /// A drafting conversation that has one is a reopened one — a second round on
   /// a branch that has been worked. The branch and the base commit are settled

@@ -268,7 +268,7 @@ mod tests {
         handoffs.remove(7);
         assert!(!path.exists());
 
-        // A Conversation aborted twice, which is not an error anywhere else
+        // A Conversation closed twice, which is not an error anywhere else
         // either.
         handoffs.remove(7);
     }

@@ -182,7 +182,7 @@ pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
     unsettle(state, conversation_id).await;
 
     // Asked with the Worktree in hand, for the reason the review asks twice: a
-    // Conversation aborted while this looked has nowhere left to work.
+    // Conversation closed while this looked has nowhere left to work.
     if !crate::wrapping::still_going(state, conversation_id).await {
         return false;
     }
@@ -484,7 +484,7 @@ async fn stopped(
 /// do about it is answerable without opening the Set again.
 ///
 /// [`store::Decision::Deliberate`]: what to do is Resume, which is the fixes in one
-/// session, or the human making them, or aborting the run with the branch
+/// session, or the human making them, or closing the Conversation with the branch
 /// exactly as the session left it.
 ///
 /// The comments are not forgotten here, unlike the other stop's: they were

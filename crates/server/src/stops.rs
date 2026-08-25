@@ -1,4 +1,4 @@
-//! The human stopping a Conversation on purpose: the two presses beside Abort,
+//! The human stopping a Conversation on purpose: the two presses beside Close,
 //! and what each of them costs.
 //!
 //! Resume's opposite number, and shaped the same way — one act, recomputed from
@@ -21,7 +21,7 @@
 //!
 //! Nothing here touches the Worktree, the branch, or a Question Set left
 //! standing. A stop is driving stopping rather than work being thrown away —
-//! that is Abort, which is a different press and says so.
+//! that is Close, which is a different press and says so.
 
 use anyhow::Result;
 use verkstead_render::ConversationStopped;

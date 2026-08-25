@@ -674,7 +674,7 @@ async fn follow_inline(
 
     let ended = session.ended().await;
 
-    // Verkstead ended it — the human aborted the Conversation or force-stopped
+    // Verkstead ended it — the human closed the Conversation or force-stopped
     // it, or the account it was spending ran out of window. Whichever it was,
     // the stop is already on the record and nothing was left to land, so there
     // is nothing to ask about. Answered before the branch is read, since a run
@@ -1134,7 +1134,7 @@ async fn proposing(
     let event_id = session.event_id;
     let ended = session.ended().await;
 
-    // Verkstead ended it — the human aborted or force-stopped the Conversation
+    // Verkstead ended it — the human closed or force-stopped the Conversation
     // out from under the wrap-up, or the account ran out of window. Either way
     // the stop is already on the record, so there is nothing to ask about. See
     // [`crate::sessions::Ended::on_purpose`].
@@ -1301,7 +1301,7 @@ async fn see_out(
         return Some(event_id);
     }
 
-    // Verkstead ended it — the human aborted the Conversation out from under
+    // Verkstead ended it — the human closed the Conversation out from under
     // the run, so the worktree has gone and the step reads as not landed
     // whatever it did; or they force-stopped it; or the account it was spending
     // ran out of window. Every one of the three has already written the stop
@@ -1685,7 +1685,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
 }
 
 /// Where the Conversation's work is being done, or `None` where there is nowhere
-/// left to work — an aborted Conversation, or one that has gone.
+/// left to work — a closed Conversation, or one that has gone.
 async fn worktree(state: &AppState, conversation_id: i64) -> Option<PathBuf> {
     match store::load_conversation(&state.pool, conversation_id).await {
         Ok(Some(conversation)) => match conversation.worktree {

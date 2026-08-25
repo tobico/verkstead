@@ -87,7 +87,7 @@ pub(crate) async fn resume(
         return Ok(Resumed::NoSuchConversation);
     };
 
-    // Nothing drives a Conversation that is drafting, done or aborted, so there
+    // Nothing drives a Conversation that is drafting, done or closed, so there
     // is nothing to start driving again. The button is not drawn on one — this
     // is the same rule asked again on arrival, the way every named refusal here
     // is.
@@ -284,7 +284,7 @@ pub(crate) async fn resume(
         // Refused above, where the refusal belongs: before the stop is read and
         // before a registration is taken. Answered again here because the match
         // has to be whole, and answered the same way.
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => {
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => {
             return Ok(Resumed::NotDriven);
         }
     }

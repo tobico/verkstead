@@ -37,7 +37,7 @@ pub enum Lifecycle {
 
     /// Off the ladder rather than on it: the work stopped wherever it had got
     /// to. Reachable from every other state, and leading nowhere.
-    Aborted,
+    Closed,
 }
 
 /// One row of the conversations sidebar.
@@ -291,7 +291,7 @@ pub struct ConversationView {
 
     /// The worktree the grilling was given to work in, once there is one.
     ///
-    /// `null` both before grilling starts and after aborting — the two ways a
+    /// `null` both before grilling starts and after closing — the two ways a
     /// Conversation has none, which are the same fact about it.
     pub worktree: Option<Worktree>,
 
@@ -398,7 +398,7 @@ pub enum TimelineEvent {
     Brief(BriefEvent),
 
     /// The Conversation moved, and this is the state it moved to. Starting to
-    /// grill and aborting are both this Event, because both are the work
+    /// grill and closing are both this Event, because both are the work
     /// changing hands and the state is the only thing that differs.
     Moved(MovedEvent),
 
@@ -1610,7 +1610,7 @@ pub enum GrillingStarted {
 
     NoSuchConversation,
 
-    /// It is past drafting, so it has been started once already — or aborted.
+    /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 
     /// No Agent Profile is chosen for the grilling session.
@@ -1677,7 +1677,7 @@ pub enum ManualTaskStarted {
 
     NoSuchConversation,
 
-    /// It is drafting or aborted, so it has no Worktree for a session to run in.
+    /// It is drafting or closed, so it has no Worktree for a session to run in.
     /// The two states the composer is never offered in.
     NowhereToWork,
 
@@ -1721,7 +1721,7 @@ pub enum Resumed {
 
     NoSuchConversation,
 
-    /// It is drafting, done or aborted, so nothing was ever supposed to be
+    /// It is drafting, done or closed, so nothing was ever supposed to be
     /// driving it. None of the three is a Conversation standing still.
     NotDriven,
 
@@ -1791,7 +1791,7 @@ pub enum SteerOpened {
 
 /// Where a steer can send a Conversation.
 ///
-/// Draft and Aborted are not among them and never will be: each has a way in of
+/// Draft and Closed are not among them and never will be: each has a way in of
 /// its own, and a steer is for the four states the work is *done in*. A target
 /// the modal offers is a target something can be set going in, which is why
 /// Wrapping is offered only where the work is already on a pull request — the
@@ -2034,7 +2034,7 @@ pub enum Adopted {
 
     NoSuchConversation,
 
-    /// It is past drafting, so it has been adopted once already — or aborted.
+    /// It is past drafting, so it has been adopted once already — or closed.
     NotDrafting,
 
     /// It is adopting nothing, which is every Conversation that began with a
@@ -2101,7 +2101,7 @@ pub enum ConversationReopened {
     NoSuchConversation,
 
     /// It is not Done, so there is no finished round to open another after.
-    /// Aborted is off the ladder, and every other state is somewhere the work
+    /// Closed is off the ladder, and every other state is somewhere the work
     /// has got to.
     NotDone,
 
@@ -2141,23 +2141,23 @@ pub enum ConversationStopped {
     /// Getting going again is Resume's, not a second stop's.
     AlreadyStopped,
 
-    /// It is drafting, done or aborted, so nothing was ever driving it and there
+    /// It is drafting, done or closed, so nothing was ever driving it and there
     /// is nothing to stop.
     NotDriven,
 
     NoSuchConversation,
 }
 
-/// What became of aborting one.
+/// What became of closing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ConversationAborted {
-    /// Stopped: the worktree is gone and the branch is not.
-    Aborted,
+pub enum ConversationClosed {
+    /// Closed: the worktree is gone and the branch is not.
+    Closed,
 
-    /// It was aborted already, which is not an error — what was asked for holds
+    /// It was closed already, which is not an error — what was asked for holds
     /// either way.
-    AlreadyAborted,
+    AlreadyClosed,
 
     NoSuchConversation,
 

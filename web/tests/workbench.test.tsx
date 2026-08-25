@@ -22,7 +22,7 @@ import type {
   BriefEvent,
   Capture,
   CommitPane,
-  ConversationAborted,
+  ConversationClosed,
   ConversationEntry,
   ConversationReopened,
   ConversationSteered,
@@ -576,8 +576,8 @@ describe("how a card says where its conversation has got to", () => {
 
   /// Which of the two it was is the details pane's to say. The sidebar's business
   /// is that there is nothing here to do.
-  it("dims finished and aborted work identically", async () => {
-    theSidebar({ state: "Done" }, { state: "Aborted" }, { state: "Wrapping" });
+  it("dims finished and closed work identically", async () => {
+    theSidebar({ state: "Done" }, { state: "Closed" }, { state: "Wrapping" });
     const { container } = mount();
 
     expect((await cards(container)).map((card) => card.className)).toEqual([
@@ -3945,7 +3945,7 @@ describe("putting something into a live session's screen", () => {
   });
 });
 
-describe("aborting a conversation", () => {
+describe("closing a conversation", () => {
   /// Behind a menu on the header, because it throws a worktree away and the
   /// header is somewhere the cursor passes on the way to everything else.
   it("is not one click away", async () => {
@@ -3956,31 +3956,31 @@ describe("aborting a conversation", () => {
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.
-    expect(container.querySelector(".abort")).toBeNull();
+    expect(container.querySelector(".close")).toBeNull();
 
     const menu = await openActions(container);
-    expect(menu.querySelector(".abort")).toBeTruthy();
-    expect(container.querySelector(".pane-head .abort")).toBe(
-      menu.querySelector(".abort"),
+    expect(menu.querySelector(".close")).toBeTruthy();
+    expect(container.querySelector(".pane-head .close")).toBe(
+      menu.querySelector(".close"),
     );
   });
 
-  it("posts to the conversation's own abort route", async () => {
+  it("posts to the conversation's own close route", async () => {
     const fetching = theGrilling(
       whenever(
-        `/api/ui/conversations/${GRILLING.id}/abort`,
-        json("Aborted" satisfies ConversationAborted),
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("Closed" satisfies ConversationClosed),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, ".conversation-actions .abort"));
+    fireEvent.click(await drawn(container, ".conversation-actions .close"));
 
     await waitFor(() =>
       expect(
-        sent(fetching, `/api/ui/conversations/${GRILLING.id}/abort`),
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/close`),
       ).toEqual({}),
     );
   });
@@ -3999,28 +3999,28 @@ describe("aborting a conversation", () => {
     expect(screen.getByText(/The branch stays where it is/)).toBeTruthy();
   });
 
-  it("offers nothing to abort on one that is aborted already", async () => {
-    theWorkbenchWith({ state: "Aborted", ready_to_grill: false });
+  it("offers nothing to close on one that is closed already", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
 
-    await waitFor(() => screen.getByText("This conversation has been aborted."));
-    expect(container.querySelector(".conversation-actions .abort")).toBeNull();
+    await waitFor(() => screen.getByText("This conversation has been closed."));
+    expect(container.querySelector(".conversation-actions .close")).toBeNull();
   });
 
   it("says when the worktree could not be removed", async () => {
     theGrilling(
       whenever(
-        `/api/ui/conversations/${GRILLING.id}/abort`,
-        json("WorktreeStuck" satisfies ConversationAborted),
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("WorktreeStuck" satisfies ConversationClosed),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, ".conversation-actions .abort"));
+    fireEvent.click(await drawn(container, ".conversation-actions .close"));
 
     await waitFor(() => screen.getByText(/could not be removed/));
   });
@@ -4057,7 +4057,7 @@ describe("reopening a conversation", () => {
     ).toBeTruthy();
   });
 
-  /// Done and nowhere else. Aborted is off the ladder and stays there, and every
+  /// Done and nowhere else. Closed is off the ladder and stays there, and every
   /// other state is somewhere the work has got to.
   it("is offered on done and on no other state", async () => {
     for (const state of [
@@ -4065,7 +4065,7 @@ describe("reopening a conversation", () => {
       "Grilling",
       "Implementing",
       "Wrapping",
-      "Aborted",
+      "Closed",
     ] as const) {
       theWorkbenchWith({ state });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
@@ -4205,7 +4205,7 @@ function theGrillingStanding(
 }
 
 describe("stopping a conversation", () => {
-  /// The two stops sit in the same menu as the steer and the abort, in the order
+  /// The two stops sit in the same menu as the steer and the close, in the order
   /// of what each one costs: pause after this task, stop now, move the work
   /// somewhere else, end the conversation. Each says what it does, because
   /// *stop* and *force stop* are two words apart and hours of work apart.
@@ -4218,7 +4218,7 @@ describe("stopping a conversation", () => {
       (button) => button.className,
     );
 
-    expect(offered).toEqual(["stop", "force-stop", "steer", "abort"]);
+    expect(offered).toEqual(["stop", "force-stop", "steer", "close"]);
 
     expect(
       screen.getByText("Stop after the current task until you resume."),
@@ -4259,7 +4259,7 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, ".conversation-actions .abort");
+    await drawn(container, ".conversation-actions .close");
     expect(container.querySelector(".conversation-actions .stop")).toBeNull();
     expect(
       container.querySelector(".conversation-actions .force-stop"),
@@ -5363,15 +5363,15 @@ describe("a grilling that has handed over", () => {
     expect(moved).toEqual(["Draft → Grilling", "Grilling → Implementing"]);
   });
 
-  /// A move records only the state it went to, and an abort is off the ladder
+  /// A move records only the state it went to, and a close is off the ladder
   /// rather than on it — so what it stopped in is the move before it, which is
   /// the whole of what makes the line worth reading.
-  it("names the state an abort stopped in", async () => {
+  it("names the state a close stopped in", async () => {
     theBuilding({
-      state: "Aborted",
+      state: "Closed",
       timeline: [
         ...BUILDING.timeline,
-        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Aborted" } },
+        { Moved: { id: 9001, at: "2026-08-24T11:00:00Z", state: "Closed" } },
       ],
     });
     const { container } = mount(`/conversations/${BUILDING.id}`);
@@ -5382,7 +5382,7 @@ describe("a grilling that has handed over", () => {
       ...container.querySelectorAll(".timeline-event > .moved"),
     ].map((line) => line.textContent);
 
-    expect(moved.at(-1)).toBe("Implementing → Aborted");
+    expect(moved.at(-1)).toBe("Implementing → Closed");
   });
 
   it("draws the handoff the grilling wrote as the document it is", async () => {

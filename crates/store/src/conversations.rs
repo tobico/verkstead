@@ -54,8 +54,8 @@ fn direction_read(word: &str) -> Result<Direction> {
 /// the Conversation is still drafting — need the states they refuse on behalf of
 /// to exist before the stage that reaches them does.
 ///
-/// [`Lifecycle::Aborted`] is off the ladder rather than on it. Every other state
-/// is somewhere the work has got to, and aborting is the work stopping wherever
+/// [`Lifecycle::Closed`] is off the ladder rather than on it. Every other state
+/// is somewhere the work has got to, and closing is the work stopping wherever
 /// it was — which is why it is reachable from all of them and leads nowhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifecycle {
@@ -79,9 +79,9 @@ pub enum Lifecycle {
     /// [`reopen_conversation`].
     Done,
 
-    /// Stopped, from wherever it had got to. The worktree is gone; the branch is
+    /// Closed, from wherever it had got to. The worktree is gone; the branch is
     /// not, because a branch is cheap and may hold work worth reading.
-    Aborted,
+    Closed,
 }
 
 impl Lifecycle {
@@ -94,13 +94,19 @@ impl Lifecycle {
             Self::Implementing => "implementing",
             Self::Wrapping => "wrapping",
             Self::Done => "done",
-            Self::Aborted => "aborted",
+            Self::Closed => "closed",
         }
     }
 
     /// The state a stored word names. A word this does not know is a database
     /// written by a Verkstead this one does not understand, which is worth
     /// saying rather than guessing past.
+    ///
+    /// `aborted` is read beside `closed`, because that is what the state was
+    /// called while the press was Abort. A migration rewrites the rows it can
+    /// reach — see [`super::migrations`] — and this reads the ones it never
+    /// did: a database restored from a backup taken before it ran, or a row
+    /// somebody wrote by hand.
     pub(crate) fn read(word: &str) -> Result<Self> {
         Ok(match word {
             "draft" => Self::Draft,
@@ -108,7 +114,7 @@ impl Lifecycle {
             "implementing" => Self::Implementing,
             "wrapping" => Self::Wrapping,
             "done" => Self::Done,
-            "aborted" => Self::Aborted,
+            "closed" | "aborted" => Self::Closed,
             other => bail!("a Conversation is in the unknown state {other:?}"),
         })
     }
@@ -151,10 +157,10 @@ pub struct Conversation {
 
     /// Where the Conversation's worktree was put, once grilling has made one.
     ///
-    /// `None` before grilling starts and again after aborting — the two ways a
+    /// `None` before grilling starts and again after closing — the two ways a
     /// Conversation has no worktree, which are the same fact about it whatever
     /// put it there. Whether the directory is still on disk is not something the
-    /// store can say; see [`abort_conversation`] for who does.
+    /// store can say; see [`close_conversation`] for who does.
     pub worktree: Option<PathBuf>,
 
     /// The latest pick: how the human most recently said the work should be
@@ -238,7 +244,7 @@ pub enum Event {
     /// One kind for every move rather than one per destination: what the
     /// Timeline is recording is that the work changed hands, and the state it
     /// changed to is the only thing that differs between one move and the next.
-    /// Starting to grill and aborting both land here.
+    /// Starting to grill and closing both land here.
     Moved(Lifecycle),
 
     /// A session's output, summarised. The whole of it is the Capture beside
@@ -544,7 +550,7 @@ pub enum Grilling {
     /// There is no Conversation with that id.
     NoSuchConversation,
 
-    /// It is past drafting, so it has been started once already — or aborted.
+    /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 }
 
@@ -610,7 +616,7 @@ pub enum Implementing {
 
 /// What became of reopening a finished one.
 ///
-/// Reopening twice has no outcome of its own, unlike aborting twice: the first
+/// Reopening twice has no outcome of its own, unlike closing twice: the first
 /// press leaves the Conversation drafting, and a second finds a state that is
 /// not Done — which is [`Reopening::NotDone`], the round being open already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -620,7 +626,7 @@ pub enum Reopening {
     Reopened,
 
     /// It is not Done, so there is no finished round here to open another
-    /// after. Every other state is somewhere the work has got to, and Aborted
+    /// after. Every other state is somewhere the work has got to, and Closed
     /// is off the ladder rather than on it.
     NotDone,
 
@@ -641,7 +647,7 @@ pub enum Rebuilding {
     Started,
 
     /// It is not wrapping up, so there is no wrap-up here to leave — it was
-    /// aborted out from under the session, or it is being built already.
+    /// closed out from under the session, or it is being built already.
     NotWrapping,
 
     /// There is no Conversation with that id.
@@ -670,19 +676,19 @@ pub enum Steering {
     NoSuchProfile,
 }
 
-/// What became of aborting one.
+/// What became of closing one.
 ///
-/// Aborting twice is not an error, which is what [`Aborting::AlreadyAborted`] is
+/// Closing twice is not an error, which is what [`Closing::AlreadyClosed`] is
 /// for: it is a distinct outcome rather than a failure, because the thing the
 /// human asked for holds either way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Aborting {
-    /// Stopped: the worktree is forgotten, the state is [`Lifecycle::Aborted`],
+pub enum Closing {
+    /// Closed: the worktree is forgotten, the state is [`Lifecycle::Closed`],
     /// and the move is on the Timeline.
-    Aborted,
+    Closed,
 
-    /// It was aborted already. Nothing to record and nothing wrong.
-    AlreadyAborted,
+    /// It was closed already. Nothing to record and nothing wrong.
+    AlreadyClosed,
 
     /// There is no Conversation with that id.
     NoSuchConversation,
@@ -735,7 +741,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // as an archiving hangs off a Set: there is no migration machinery here and
     // `conversations` is STRICT and left alone. One worktree per Conversation,
     // by the primary key — and a Conversation that has none has no row, which is
-    // both the state before grilling and the state after aborting.
+    // both the state before grilling and the state after closing.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS worktrees (
              conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
@@ -855,8 +861,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// human pressing a separate chooser. The pick rides the closing Set now, so
 /// nothing ever waits there — and a Conversation *found* waiting there is
 /// stranded: its grilling session is over, and the chooser it was waiting on is
-/// gone. Aborted is what that is, which is where this puts it, with the move on
-/// its Timeline as every abort has one.
+/// gone. Closed is what that is, which is where this puts it, with the move on
+/// its Timeline as every close has one.
 ///
 /// The retired Events go with the state. A Timeline holding a move to `direction`
 /// or a `directed` Event is one this Verkstead cannot read at all — every state
@@ -865,24 +871,24 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 /// chose is the answered proposal Set, which stays exactly where it was.
 ///
 /// No compatibility path, which is what makes this a one-way collapse: this is a
-/// single-user tool, and in-flight Conversations are finished or aborted before
+/// single-user tool, and in-flight Conversations are finished or closed before
 /// upgrading. Safe to run against a database that has been through it — after the
 /// first run there is nothing left to match.
 async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
-    // Before the state is rewritten, while the rows to abort can still be found
+    // Before the state is rewritten, while the rows to close can still be found
     // by it.
     sqlx::query(
         "INSERT INTO timeline_events (conversation_id, at, kind, body)
          SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'moved', ?
          FROM conversations WHERE state = 'direction'",
     )
-    .bind(Lifecycle::Aborted.stored())
+    .bind(Lifecycle::Closed.stored())
     .execute(pool)
     .await
-    .context("recording the abort of every Conversation caught choosing a direction")?;
+    .context("recording the closing of every Conversation caught choosing a direction")?;
 
-    // The worktree row goes with it, as it does at [`abort_conversation`]: an
-    // aborted Conversation has none. The directory itself is not the store's to
+    // The worktree row goes with it, as it does at [`close_conversation`]: a
+    // closed Conversation has none. The directory itself is not the store's to
     // remove, and never was.
     sqlx::query(
         "DELETE FROM worktrees
@@ -893,10 +899,10 @@ async fn collapse_the_direction_state(pool: &SqlitePool) -> Result<()> {
     .context("forgetting the worktrees of the Conversations caught choosing a direction")?;
 
     sqlx::query("UPDATE conversations SET state = ? WHERE state = 'direction'")
-        .bind(Lifecycle::Aborted.stored())
+        .bind(Lifecycle::Closed.stored())
         .execute(pool)
         .await
-        .context("aborting every Conversation caught choosing a direction")?;
+        .context("closing every Conversation caught choosing a direction")?;
 
     sqlx::query(
         "DELETE FROM timeline_events
@@ -2117,7 +2123,7 @@ async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Edited>> {
 /// Whether this Conversation's branch has been made already.
 ///
 /// The worktree row is what says so: it is written when the branch and the
-/// checkout are made, and forgotten only by aborting. Drafting used to answer
+/// checkout are made, and forgotten only by closing. Drafting used to answer
 /// this on its own — a Conversation was drafting exactly until its branch
 /// existed — and a reopened round is the case that separated the two: it is
 /// drafting a second Brief on a branch that has already been worked.
@@ -2215,7 +2221,7 @@ pub async fn start_grilling(
     Ok(Grilling::Started)
 }
 
-/// Record that a Conversation has been aborted: its worktree is gone, and it has
+/// Record that a Conversation has been closed: its worktree is gone, and it has
 /// stopped wherever it had got to.
 ///
 /// The worktree is forgotten rather than remembered as removed, because there is
@@ -2224,10 +2230,10 @@ pub async fn start_grilling(
 /// server before this is called, for the reason the branch is created before
 /// [`start_grilling`] is: the record follows the work rather than promising it.
 ///
-/// Aborting one that is already aborted records nothing and is not an error. The
-/// human asked for it to be stopped, and it is.
-pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> {
-    let mut tx = pool.begin().await.context("aborting a Conversation")?;
+/// Closing one that is closed already records nothing and is not an error. The
+/// human asked for it to be closed, and it is.
+pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
+    let mut tx = pool.begin().await.context("closing a Conversation")?;
 
     let row: Option<(String,)> = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
         .bind(id)
@@ -2236,19 +2242,19 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
         .with_context(|| format!("reading the state of Conversation {id}"))?;
 
     let Some((state,)) = row else {
-        return Ok(Aborting::NoSuchConversation);
+        return Ok(Closing::NoSuchConversation);
     };
 
-    if Lifecycle::read(&state)? == Lifecycle::Aborted {
-        return Ok(Aborting::AlreadyAborted);
+    if Lifecycle::read(&state)? == Lifecycle::Closed {
+        return Ok(Closing::AlreadyClosed);
     }
 
     sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")
-        .bind(Lifecycle::Aborted.stored())
+        .bind(Lifecycle::Closed.stored())
         .bind(id)
         .execute(&mut *tx)
         .await
-        .with_context(|| format!("aborting Conversation {id}"))?;
+        .with_context(|| format!("closing Conversation {id}"))?;
 
     sqlx::query("DELETE FROM worktrees WHERE conversation_id = ?")
         .bind(id)
@@ -2256,17 +2262,17 @@ pub async fn abort_conversation(pool: &SqlitePool, id: i64) -> Result<Aborting> 
         .await
         .with_context(|| format!("forgetting the worktree of Conversation {id}"))?;
 
-    moved(&mut tx, id, Lifecycle::Aborted).await?;
+    moved(&mut tx, id, Lifecycle::Closed).await?;
 
-    tx.commit().await.context("aborting a Conversation")?;
+    tx.commit().await.context("closing a Conversation")?;
 
-    Ok(Aborting::Aborted)
+    Ok(Closing::Closed)
 }
 
 /// Record that a finished Conversation has been reopened: it is drafting a
 /// second Brief, on the branch the first round was built on.
 ///
-/// Done is the one state this is reachable from. Aborted is off the ladder and
+/// Done is the one state this is reachable from. Closed is off the ladder and
 /// stays there, and every other state is somewhere the work has got to — there
 /// is nothing to reopen about work that is still going on.
 ///
@@ -2418,7 +2424,7 @@ pub async fn pick_direction(pool: &SqlitePool, id: i64, direction: Direction) ->
 /// decision of its own.
 ///
 /// Refused for anything but Grilling, which is the only place a tail can be
-/// running. That refusal is what keeps a run that was aborted, or one whose pick
+/// running. That refusal is what keeps a run that was closed, or one whose pick
 /// was superseded, from moving a Conversation that has gone somewhere else since.
 ///
 /// One transaction, as every move is: a Conversation that says Implementing
@@ -2464,7 +2470,7 @@ pub async fn start_implementing(pool: &SqlitePool, id: i64) -> Result<Implementi
 /// second wrap.
 ///
 /// Refused for anything but Wrapping, for the reason every other move is refused
-/// outside the state it leaves: a Conversation aborted out from under the session
+/// outside the state it leaves: a Conversation closed out from under the session
 /// that wrote the backlog is not one to start building.
 ///
 /// **The review's settle goes with it**, in the same transaction. *Settled once
@@ -3012,7 +3018,7 @@ pub(crate) async fn moved(
 /// Move a Conversation on to another state.
 ///
 /// The blunt instrument, for the states no stage has arrived at yet. Starting to
-/// grill and aborting have their own calls, because each of them is a move plus
+/// grill and closing have their own calls, because each of them is a move plus
 /// everything else that has to be true at the same moment.
 pub async fn set_state(pool: &SqlitePool, id: i64, state: Lifecycle) -> Result<()> {
     let changed = sqlx::query("UPDATE conversations SET state = ? WHERE id = ?")

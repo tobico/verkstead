@@ -33,9 +33,9 @@ pub use answering::{Archived, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved,
-    Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
-    ConversationEntry, ConversationReopened, ConversationSteered, ConversationStopped,
-    ConversationView, GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted,
+    Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationClosed, ConversationEntry,
+    ConversationReopened, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted,
     ManualTaskSubmission, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,
     PinnedEvent, ProposalView, PullRequestComment, PullRequestCommit, PullRequestDetails,
     PullRequestEvent, PullRequestSummary, QuestionSetEvent, Resumed, Screen, SetRow, Shown, Size,

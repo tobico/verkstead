@@ -44,7 +44,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationAborted,
+    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationClosed,
     ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
     ManualTaskEvent, ManualTaskStarted, NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent,
     Registered, Resumed, Shown, Size, Started, SteerOpened, Submitted, TaskListEvent,
@@ -308,10 +308,10 @@ impl Grilling {
         .await
     }
 
-    async fn abort(&self) -> ConversationAborted {
+    async fn close(&self) -> ConversationClosed {
         post(
             &self.app,
-            &format!("/api/ui/conversations/{}/abort", self.id),
+            &format!("/api/ui/conversations/{}/close", self.id),
             &serde_json::json!({}),
         )
         .await
@@ -1659,7 +1659,7 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
         "following the log should not cost the Capture anything: {said:?}"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And the details pane reads that log as a conversation while the session is
@@ -1718,7 +1718,7 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
         view.bookkeeping
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// A session that keeps no log of itself leaves no Transcript, and nothing about
@@ -1804,7 +1804,7 @@ async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
         "the interface was drawing something else the whole time: {drawn:?}"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And the row's metric is how far that conversation has got: the turns on the
@@ -1874,7 +1874,7 @@ async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
         "the prose, the call and the answer — and not the backend's own line"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And beside the metric, whether that session is still talking — which is a
@@ -1940,7 +1940,7 @@ async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
         "the statement that woke it is the one the row now reads"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And the crossing is announced, because it is the one change a session makes
@@ -1993,7 +1993,7 @@ async fn a_session_falling_quiet_is_announced_to_the_open_pages() {
         "and the page reading it back on that Nudge finds it idle: {quiet:?}"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And it reads the last of it once the session has gone.
@@ -2069,7 +2069,7 @@ async fn what_a_session_prints_reaches_the_timeline_while_it_is_still_running() 
     let said = fixture.capture(summary.id).await;
     assert!(said.contains("Reading the brief."), "{said:?}");
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// What a terminal was sent is what the session said. Nothing is stripped on
@@ -2150,7 +2150,7 @@ async fn a_conversation_reports_that_it_is_working_while_its_session_runs() {
         "nothing is being asked, so the card turns rather than marks",
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     fixture.row_until(|row| (!row.working).then_some(())).await;
 }
@@ -2203,7 +2203,7 @@ async fn a_conversation_whose_session_has_gone_quiet_says_so_on_its_card() {
         .row_until(|row| (row.working && !row.idle).then_some(()))
         .await;
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And the crossing back out of the silence is announced, which is what the
@@ -2252,7 +2252,7 @@ async fn a_session_speaking_again_is_announced_to_the_open_pages() {
          ring: {woken:?}"
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// And the sidebar's dot, for the source a Conversation can only get to by
@@ -3392,7 +3392,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         "the task whose file has gone is done, and the one still to do is not",
     );
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
 /// One task and then the finish, which is the shortest whole backlog there is —
@@ -3832,7 +3832,7 @@ async fn the_checks_stop_being_asked_about_once_the_conversation_leaves_wrapping
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     // One more poll's worth, so that a watcher part way through a question has
     // finished asking it before the count is taken.
@@ -6733,7 +6733,7 @@ async fn a_commit_made_as_the_session_ends_still_lands() {
 /// The one ordering that matters when a Conversation is stopped: the agent is
 /// gone before the directory it was working in is.
 #[tokio::test]
-async fn aborting_ends_the_session_before_the_worktree_goes() {
+async fn closing_ends_the_session_before_the_worktree_goes() {
     // Somewhere a session can leave evidence of itself that outlives the
     // worktree about to be removed: a directory Sandbox Configuration binds
     // into every sandbox.
@@ -6763,7 +6763,7 @@ async fn aborting_ends_the_session_before_the_worktree_goes() {
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     let when_stopped = std::fs::metadata(&ticks).map(|it| it.len()).ok();
 
@@ -6778,17 +6778,17 @@ async fn aborting_ends_the_session_before_the_worktree_goes() {
     assert_eq!(
         std::fs::metadata(&ticks).map(|it| it.len()).ok(),
         when_stopped,
-        "the session was still writing after the abort said it had stopped"
+        "the session was still writing after the close said it had stopped"
     );
     assert!(
         !worktree.exists(),
-        "the worktree should be gone once the Conversation is aborted"
+        "the worktree should be gone once the Conversation is closed"
     );
     assert!(
         !output(&fixture.view().await)
             .expect("the Capture stays on the Timeline")
             .running,
-        "an aborted Conversation has no session running"
+        "a closed Conversation has no session running"
     );
 }
 
@@ -7433,15 +7433,15 @@ async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
     );
 }
 
-/// Aborting a conversation is not a run that went wrong.
+/// Closing a conversation is not a run that went wrong.
 ///
-/// The abort ends the session and takes the worktree away, so every signal the
+/// The close ends the session and takes the worktree away, so every signal the
 /// runner reads says the step did not land — the file is gone because the whole
 /// directory is. What tells it apart is that Verkstead is what ended the session:
 /// stopping here would be telling the human that driving stopped, about the thing
 /// they had just stopped themselves.
 #[tokio::test]
-async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
+async fn closing_a_run_is_not_something_to_ask_the_human_about() {
     let fixture = grilling(
         r#"
         case "$1" in
@@ -7463,7 +7463,7 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
-    // Once the breakdown session is up, so there is a run to abort mid-step.
+    // Once the breakdown session is up, so there is a run to close mid-step.
     fixture
         .until(|view| {
             outputs(view)
@@ -7473,7 +7473,7 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
         })
         .await;
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     // Long enough for the driver to have noticed its session go and decided what
     // that meant.
@@ -7488,9 +7488,9 @@ async fn aborting_a_run_is_not_something_to_ask_the_human_about() {
     );
     assert_eq!(
         view.blocked_on, None,
-        "and an aborted Conversation is not blocked on anybody",
+        "and a closed Conversation is not blocked on anybody",
     );
-    assert_eq!(view.state, Lifecycle::Aborted);
+    assert_eq!(view.state, Lifecycle::Closed);
 }
 
 /// A backlog whose task sessions wait at a gate the test opens, so that a press
@@ -10358,7 +10358,7 @@ async fn a_conversation_a_stopped_server_left_mid_run_is_driven_again_before_the
 
 /// A state nothing is supposed to be driving is never one standing still.
 ///
-/// Draft and Direction are waiting on the human, Done is finished and Aborted is
+/// Draft and Direction are waiting on the human, Done is finished and Closed is
 /// stopped. A sweep that stopped those would be telling the human about every
 /// Conversation they have ever had.
 #[tokio::test]
@@ -10368,7 +10368,7 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_halted() {
     fixture.quiet().await;
     fixture.stopped().await;
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
 
     let said = notices(&fixture.view().await).len();
 
@@ -10379,7 +10379,7 @@ async fn a_conversation_nothing_is_supposed_to_be_driving_is_never_halted() {
 
     assert_eq!(
         view.state,
-        Lifecycle::Aborted,
+        Lifecycle::Closed,
         "the work stopped where it was, which is not the same as standing still in it",
     );
     assert_eq!(
@@ -11700,13 +11700,13 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
 /// carries on.
 ///
 /// The furthest a Worktree can be from a running one on a Conversation that has
-/// been worked — aborting takes the directory away *and* takes it off the record
+/// been worked — closing takes the directory away *and* takes it off the record
 /// — and it is the one steering has to make from nothing but the branch. Where
 /// the record still names a directory the steer rebuilds what it names; here
 /// there is nothing to name, so the path is chosen the way a first grilling
 /// chooses one.
 ///
-/// Wrapping, because aborting leaves the pull request on the record: what is
+/// Wrapping, because closing leaves the pull request on the record: what is
 /// steered into is a wrap-up that has everything under it but somewhere to work.
 #[tokio::test]
 async fn steering_a_closed_conversation_checks_its_branch_out_again() {
@@ -11725,10 +11725,10 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
 
     let branch = fixture.view().await.branch.clone();
 
-    assert_eq!(fixture.abort().await, ConversationAborted::Aborted);
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
     assert!(
         fixture.view().await.worktree.is_none(),
-        "aborting forgets the Worktree and leaves the pull request on the record",
+        "closing forgets the Worktree and leaves the pull request on the record",
     );
 
     assert_eq!(
@@ -11757,7 +11757,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
     assert_eq!(
         git(&worktree, &["symbolic-ref", "HEAD"]).trim(),
         format!("refs/heads/{branch}"),
-        "on the branch aborting kept rather than on one cut afresh",
+        "on the branch closing kept rather than on one cut afresh",
     );
 
     // And the wrap-up going on in it, which is the reading that says the

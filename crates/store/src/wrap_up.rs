@@ -103,7 +103,7 @@ pub enum Finished {
     /// Something is still outstanding, so it stays where it is.
     StillWaiting,
 
-    /// It is not wrapping up any more — aborted out from under the watchers, or
+    /// It is not wrapping up any more — closed out from under the watchers, or
     /// finished by the poll before this one.
     NotWrapping,
 

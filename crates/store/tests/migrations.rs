@@ -9,6 +9,10 @@
 //! still open still stop their Conversation, and that opening the same database
 //! twice does not do it twice.
 //!
+//! And one rename: the state off the ladder was stored as `aborted` while the
+//! press was called Abort, in the state column and in the body of the move that
+//! says the work got there. Both become `closed`.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -17,8 +21,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Decision, Event, asked_to_stop, clear_stop, conversations, open_database, register_repo,
-    start_conversation, start_grilling, stop, stopped, timeline,
+    Decision, Event, Lifecycle, asked_to_stop, clear_stop, conversations, load_conversation,
+    open_database, register_repo, start_conversation, start_grilling, stop, stopped, timeline,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -641,5 +645,134 @@ async fn a_stop_read_across_is_not_read_across_twice() {
         stopped(&pool, id).await.unwrap(),
         None,
         "the run the human started again is still going",
+    );
+}
+
+/// The states a Conversation's moves say it went through, in Timeline order.
+async fn moves(pool: &SqlitePool, id: i64) -> Vec<Lifecycle> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Moved(state) => Some(state),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The state and the move that says the work got there both move to the word
+/// the press is called now, so the Conversation is described in one vocabulary
+/// rather than two.
+#[tokio::test]
+async fn a_conversation_that_was_aborted_reads_as_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, id) = before(dir.path()).await;
+
+    // The state and the Event as a Verkstead of before left them: the word in
+    // the column, and the same word as the body of the move.
+    sqlx::query("UPDATE conversations SET state = 'aborted' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-01T09:14:22.000Z', 'moved', 'aborted')",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Closed,
+    );
+    assert_eq!(
+        moves(&pool, id).await,
+        [Lifecycle::Grilling, Lifecycle::Closed]
+    );
+
+    let (stored,): (String,) = sqlx::query_as("SELECT state FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stored, "closed",
+        "the stored word moved rather than the reading"
+    );
+
+    let left: Vec<(String,)> = sqlx::query_as(
+        "SELECT body FROM timeline_events WHERE kind = 'moved' AND body = 'aborted'",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert!(left.is_empty(), "and the move's body moved with it");
+}
+
+/// A Brief that happens to hold the word is prose somebody wrote, not a state:
+/// the rename is the `moved` Events and the state column, and nothing wider.
+#[tokio::test]
+async fn a_brief_that_says_aborted_is_left_exactly_as_it_was() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, id) = before(dir.path()).await;
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-01T09:14:22.000Z', 'brief', 'aborted')",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let briefs: Vec<String> = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Brief(markdown) => Some(markdown),
+            _ => None,
+        })
+        .collect();
+
+    // The empty one the Conversation started with, and then this one.
+    assert_eq!(briefs.last().unwrap(), "aborted");
+}
+
+/// And the old word is still read, for a row no migration reached: a database
+/// restored from a backup taken before it ran, or one somebody wrote by hand.
+#[tokio::test]
+async fn the_old_word_is_still_a_state_this_verkstead_can_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, id) = before(dir.path()).await;
+
+    sqlx::query("UPDATE conversations SET state = 'aborted' WHERE id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, id).await.unwrap().unwrap().state,
+        Lifecycle::Closed,
     );
 }

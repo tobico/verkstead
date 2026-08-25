@@ -297,7 +297,7 @@ async fn a_grillings_tail_landing_is_what_starts_the_work() {
 }
 
 /// Nothing but a grilling has a tail to land. A Conversation that has moved on —
-/// aborted out from under the run, or already building the work — is not one to
+/// closed out from under the run, or already building the work — is not one to
 /// drag back to Implementing.
 #[tokio::test]
 async fn only_a_grilling_has_a_tail_to_land() {
@@ -734,11 +734,11 @@ async fn a_direction_survives_a_restart() {
 /// Verkstead.
 ///
 /// The state is gone and so are the two Events about it, and a Conversation
-/// found sitting in it comes out Aborted — its grilling session is over and the
+/// found sitting in it comes out Closed — its grilling session is over and the
 /// chooser it was waiting on does not exist any more. Written by hand, because
 /// this code cannot write that database any more: that is the whole point of it.
 #[tokio::test]
-async fn a_conversation_caught_choosing_a_direction_comes_out_aborted() {
+async fn a_conversation_caught_choosing_a_direction_comes_out_closed() {
     let dir = tempfile::tempdir().unwrap();
     let database = dir.path().join("verkstead.db");
 
@@ -767,16 +767,16 @@ async fn a_conversation_caught_choosing_a_direction_comes_out_aborted() {
 
     assert_eq!(
         conversation.state,
-        Lifecycle::Aborted,
+        Lifecycle::Closed,
         "there is no session to receive anything and no chooser left to press",
     );
     assert_eq!(
         conversation.worktree, None,
-        "and an aborted Conversation has no worktree, as every other abort leaves none",
+        "and a closed Conversation has no worktree, as every other close leaves none",
     );
     assert_eq!(
         moves(&pool, id).await,
-        [Lifecycle::Grilling, Lifecycle::Aborted],
-        "the retired move is off the Timeline and the abort is on it",
+        [Lifecycle::Grilling, Lifecycle::Closed],
+        "the retired move is off the Timeline and the close is on it",
     );
 }

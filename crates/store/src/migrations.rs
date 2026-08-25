@@ -16,16 +16,65 @@
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
-use super::stops::Decision;
+use super::{Lifecycle, stops::Decision};
 
 /// Run whatever this database still needs, in the order it needs them.
 pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
-    stops_recorded_the_old_way(pool).await
+    stops_recorded_the_old_way(pool).await?;
+    conversations_that_were_aborted(pool).await
 }
 
 /// The table the stops of before are kept in, named once: it is gone by the end
 /// of this module, and nothing else in the codebase knows the word.
 const OLD_TABLE: &str = "interruptions";
+
+/// The word the state off the ladder was stored as while the press was called
+/// Abort. Named once here, because this is the module that takes it away.
+const OLD_STATE: &str = "aborted";
+
+/// Rewrite the state of every Conversation that was aborted, and the move Event
+/// that says it got there, into the word the press is called now.
+///
+/// The lifecycle is stored as text and a `moved` Event carries the same text as
+/// its body, so the old name is written in two places per Conversation. Both
+/// move together: a Timeline whose card said Closed above a move that still said
+/// `aborted` would be one Conversation described in two vocabularies.
+///
+/// The Events are not history being rewritten. A move Event records *which state
+/// the work moved to*, and that state is the one this codebase calls Closed —
+/// the word in the column is the state's name rather than a note somebody typed,
+/// and a name is the kind of thing that gets corrected. What ADR-0006 keeps as
+/// written is what a session said, which nothing here touches.
+///
+/// Safe to run twice: after the first there are no rows left saying `aborted`.
+/// [`super::Lifecycle::read`] still knows the word regardless, for a database
+/// that never came through here.
+async fn conversations_that_were_aborted(pool: &SqlitePool) -> Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("renaming the state of every Conversation that was aborted")?;
+
+    sqlx::query("UPDATE conversations SET state = ? WHERE state = ?")
+        .bind(Lifecycle::Closed.stored())
+        .bind(OLD_STATE)
+        .execute(&mut *tx)
+        .await
+        .context("renaming the state of every Conversation that was aborted")?;
+
+    // `kind = 'moved'` and nothing wider: `aborted` was a lifecycle word, and a
+    // Brief or a handoff that happens to hold it is prose somebody wrote.
+    sqlx::query("UPDATE timeline_events SET body = ? WHERE kind = 'moved' AND body = ?")
+        .bind(Lifecycle::Closed.stored())
+        .bind(OLD_STATE)
+        .execute(&mut *tx)
+        .await
+        .context("renaming the move Event of every Conversation that was aborted")?;
+
+    tx.commit()
+        .await
+        .context("renaming the state of every Conversation that was aborted")
+}
 
 /// Rewrite the stops a Verkstead of before kept in a table of their own into the
 /// Notices and stops they are now, and take the table away.

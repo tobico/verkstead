@@ -477,9 +477,9 @@ diagrams: boolean,
 diff: DiffView | null, };
 
 /**
- * What became of aborting one.
+ * What became of closing one.
  */
-export type ConversationAborted = "Aborted" | "AlreadyAborted" | "NoSuchConversation" | "WorktreeStuck";
+export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";
 
 /**
  * One row of the conversations sidebar.
@@ -675,7 +675,7 @@ adopting: AdoptionView | null,
 /**
  * The worktree the grilling was given to work in, once there is one.
  *
- * `null` both before grilling starts and after aborting — the two ways a
+ * `null` both before grilling starts and after closing — the two ways a
  * Conversation has none, which are the same fact about it.
  */
 worktree: Worktree | null, 
@@ -802,7 +802,7 @@ html: string, };
  * the domain's, and the page says which one a Conversation is in rather than
  * assuming the only one it can currently be.
  */
-export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Aborted";
+export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Done" | "Closed";
 
 /**
  * What a Set still waiting on the human says about itself: whether an agent is
@@ -1717,7 +1717,7 @@ digest: boolean, };
 /**
  * Where a steer can send a Conversation.
  *
- * Draft and Aborted are not among them and never will be: each has a way in of
+ * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the four states the work is *done in*. A target
  * the modal offers is a target something can be set going in, which is why
  * Wrapping is offered only where the work is already on a pull request — the

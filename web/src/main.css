@@ -1463,7 +1463,7 @@ main:has(.workbench) {
   border-style: dotted;
 }
 
-/* Work that has stopped, finished and aborted alike — which of the two is the
+/* Work that has stopped, finished and closed alike — which of the two is the
    details pane's to say, and what the sidebar is saying is that there is nothing
    here to do. Still a row to press: a Done Conversation can be reopened.
 
@@ -2283,7 +2283,7 @@ main:has(.workbench) {
   border-radius: 0;
 }
 
-.timeline-event > .moved.aborted {
+.timeline-event > .moved.closed {
   color: #b3382c;
 }
 
@@ -3281,7 +3281,7 @@ main:has(.workbench) {
 
 /* The one that cannot be undone, in the colour of what cannot be undone. Both
    stops are reversed by a resume, and read as the ordinary buttons they are. */
-.conversation-actions .abort {
+.conversation-actions .close {
   color: #b3382c;
   border-color: #b3382c;
 }

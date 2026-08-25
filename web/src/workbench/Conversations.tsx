@@ -598,7 +598,7 @@ function ConversationRow(props: {
   step: (id: number, by: number) => void;
 }): JSX.Element {
   const ended = (): boolean =>
-    props.entry.state === "Done" || props.entry.state === "Aborted";
+    props.entry.state === "Done" || props.entry.state === "Closed";
 
   return (
     <li

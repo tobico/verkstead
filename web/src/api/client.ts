@@ -15,7 +15,7 @@ import type {
   BriefSaved,
   Capture,
   CommitPane,
-  ConversationAborted,
+  ConversationClosed,
   ConversationEntry,
   ConversationReopened,
   ConversationSteered,
@@ -329,8 +329,8 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 
 /// Stop a Conversation wherever it has got to: its worktree removed, its branch
 /// left where it is.
-export function abortConversation(id: number): Promise<ConversationAborted> {
-  return post<ConversationAborted>(`/api/ui/conversations/${id}/abort`, {});
+export function closeConversation(id: number): Promise<ConversationClosed> {
+  return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
 }
 
 /// Open a second round on a Conversation Verkstead has finished with: a new

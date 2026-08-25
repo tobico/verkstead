@@ -16,7 +16,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Event, Lifecycle, PullRequest, Rebuilding, Wrapping, abort_conversation, implement_again,
+    Event, Lifecycle, PullRequest, Rebuilding, Wrapping, close_conversation, implement_again,
     load_conversation, open_database, pick_direction, pull_request, record_pull_request,
     register_repo, save_brief, start_conversation, start_grilling, timeline,
 };
@@ -186,14 +186,14 @@ async fn a_conversation_that_is_already_wrapping_records_no_second_pull_request(
     assert_eq!(requests, 1, "one Conversation, one pull request");
 }
 
-/// A Conversation aborted out from under the run is not one to move into
+/// A Conversation closed out from under the run is not one to move into
 /// Wrapping, however far the session it was running had got.
 #[tokio::test]
-async fn an_aborted_conversation_is_not_moved_on_by_a_pull_request() {
+async fn a_closed_conversation_is_not_moved_on_by_a_pull_request() {
     let (_dir, pool) = fresh_pool().await;
     let id = implementing(&pool).await;
 
-    abort_conversation(&pool, id).await.unwrap();
+    close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
         record_pull_request(&pool, id, &opened()).await.unwrap(),
@@ -201,7 +201,7 @@ async fn an_aborted_conversation_is_not_moved_on_by_a_pull_request() {
     );
 
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
-    assert_eq!(conversation.state, Lifecycle::Aborted);
+    assert_eq!(conversation.state, Lifecycle::Closed);
 }
 
 #[tokio::test]
@@ -275,7 +275,7 @@ async fn a_second_wrap_reuses_the_pull_request_the_first_one_recorded() {
 }
 
 /// A Conversation that is not wrapping up has no wrap-up to leave, whether it is
-/// being built already or was aborted out from under the session that would have
+/// being built already or was closed out from under the session that would have
 /// split the work out.
 #[tokio::test]
 async fn only_a_wrapping_conversation_can_be_sent_back_to_be_built() {
@@ -288,7 +288,7 @@ async fn only_a_wrapping_conversation_can_be_sent_back_to_be_built() {
     );
 
     record_pull_request(&pool, id, &opened()).await.unwrap();
-    abort_conversation(&pool, id).await.unwrap();
+    close_conversation(&pool, id).await.unwrap();
 
     assert_eq!(
         implement_again(&pool, id).await.unwrap(),
@@ -296,7 +296,7 @@ async fn only_a_wrapping_conversation_can_be_sent_back_to_be_built() {
     );
     assert_eq!(
         load_conversation(&pool, id).await.unwrap().unwrap().state,
-        Lifecycle::Aborted,
+        Lifecycle::Closed,
     );
 
     assert_eq!(

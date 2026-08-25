@@ -290,7 +290,7 @@ pub(crate) enum Ended {
     Badly(String),
 
     /// Verkstead ended it, however it came to: its step had landed and it had
-    /// gone quiet, the human aborted the Conversation or pressed Force stop out
+    /// gone quiet, the human closed the Conversation or pressed Force stop out
     /// from under it, or the account it was spending ran out of window and the
     /// stop written for that ended it — see [`crate::limits`].
     Stopped,
@@ -326,7 +326,7 @@ impl Ended {
     /// write a second stop behind one already on the record.
     ///
     /// Three ways in, and the driver treats them alike. The step landed and the
-    /// session went quiet, so there is nothing to tell. The human aborted the
+    /// session went quiet, so there is nothing to tell. The human closed the
     /// Conversation or pressed Force stop, and the stop their press wrote is
     /// already there. Or the account ran out of window, and the stop
     /// [`crate::limits`] wrote before killing the sandbox is already there too —

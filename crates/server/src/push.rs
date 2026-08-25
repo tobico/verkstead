@@ -261,7 +261,7 @@ pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
 async fn say(pool: &SqlitePool, conversation_id: i64, news: &News) -> Result<()> {
     let Some(conversation) = verkstead_store::load_conversation(pool, conversation_id).await?
     else {
-        // Aborted and gone between the thing happening and this being sent.
+        // Closed and gone between the thing happening and this being sent.
         // There is nobody left to tell anything about it.
         return Ok(());
     };

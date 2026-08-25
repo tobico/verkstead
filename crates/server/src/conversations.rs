@@ -12,7 +12,7 @@
 //! the work is launched in it. Adopting is the same moment by the other door:
 //! a roadmap Verkstead did not write has its next stage started here, with the
 //! human's press standing in for the predecessor that would otherwise have
-//! started it — see [`adopt`]. Aborting is where both are given back: the
+//! started it — see [`adopt`]. Closing is where both are given back: the
 //! session ends, and then the worktree goes.
 
 use std::path::{Path, PathBuf};
@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationReopened,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, ConversationReopened,
     GrillingStarted, PairingView, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -861,11 +861,11 @@ fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
 /// Brief to write, somewhere to write it about, and the ordinary pipeline from
 /// grilling onward.
 ///
-/// Done and no other state. Aborted is off the ladder and stays there, and every
+/// Done and no other state. Closed is off the ladder and stays there, and every
 /// other state is somewhere the work has got to — there is nothing to reopen
 /// about work that is still going on.
 ///
-/// **The worktree is ordinarily still there**, because only aborting takes one
+/// **The worktree is ordinarily still there**, because only closing takes one
 /// away, so keeping it is the path and making one is the fallback: a directory
 /// that has gone — deleted by hand, or lost with a machine that was rebuilt — is
 /// checked out again *on the Conversation's existing branch*. A branch that has
@@ -892,7 +892,7 @@ pub(crate) async fn reopen(state: &AppState, id: i64) -> Result<ConversationReop
     }
 
     // Where the work was done. A Done Conversation has a worktree recorded —
-    // nothing but aborting forgets one — and the fallback is for a record that
+    // nothing but closing forgets one — and the fallback is for a record that
     // somehow lost it: a name is chosen the way a first round chooses one.
     let path = conversation.worktree.clone().unwrap_or_else(|| {
         worktrees::worktree_path(
@@ -949,11 +949,11 @@ pub(crate) async fn reopen(state: &AppState, id: i64) -> Result<ConversationReop
 /// made before one: what is recorded is what happened. A Conversation that said
 /// it had stopped while its directory was still on disk would be one nothing
 /// would ever come back and remove.
-pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAborted> {
+pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
     let Some(conversation) = store::load_conversation(pool, id).await? else {
-        return Ok(ConversationAborted::NoSuchConversation);
+        return Ok(ConversationClosed::NoSuchConversation);
     };
 
     state.sessions.end(id).await;
@@ -968,7 +968,7 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
                 conversation_id = id,
                 "a Conversation's worktree could not be removed"
             );
-            return Ok(ConversationAborted::WorktreeStuck);
+            return Ok(ConversationClosed::WorktreeStuck);
         }
     }
 
@@ -979,10 +979,10 @@ pub(crate) async fn abort(state: &AppState, id: i64) -> Result<ConversationAbort
     let handoffs = Handoffs::under(&state.data_dir);
     tokio::task::spawn_blocking(move || handoffs.remove(id)).await?;
 
-    Ok(match store::abort_conversation(pool, id).await? {
-        store::Aborting::Aborted => ConversationAborted::Aborted,
-        store::Aborting::AlreadyAborted => ConversationAborted::AlreadyAborted,
-        store::Aborting::NoSuchConversation => ConversationAborted::NoSuchConversation,
+    Ok(match store::close_conversation(pool, id).await? {
+        store::Closing::Closed => ConversationClosed::Closed,
+        store::Closing::AlreadyClosed => ConversationClosed::AlreadyClosed,
+        store::Closing::NoSuchConversation => ConversationClosed::NoSuchConversation,
     })
 }
 

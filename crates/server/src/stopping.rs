@@ -183,7 +183,7 @@ pub(crate) async fn stopped(state: &AppState, conversation_id: i64) -> bool {
 /// Whether the Conversation is in a state nothing drives, which is the other
 /// way there is nothing left to advance.
 ///
-/// Drafting, done and aborted: the three the button beside this one refuses on
+/// Drafting, done and closed: the three the button beside this one refuses on
 /// too — see [`crate::resume::resume`] — because nothing was ever supposed to be
 /// driving any of them. Ordinarily nothing asks: a run is launched from inside
 /// the state it belongs to, and the state does not move underneath it.

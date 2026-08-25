@@ -28,7 +28,7 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
+    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
     ConversationEntry, ConversationReopened, ConversationSteered, ConversationStopped,
     ConversationView, Cursor, GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission,
     NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
@@ -122,9 +122,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
-        .route("/api/ui/conversations/{id}/abort", post(abort))
+        .route("/api/ui/conversations/{id}/close", post(close))
         // And the press that opens a second round on one Verkstead has finished
-        // with. Beside aborting rather than in the menu with it: reopening throws
+        // with. Beside closing rather than in the menu with it: reopening throws
         // nothing away, and what it is is the next thing to do about a finished
         // piece of work — so it belongs at the end of the Timeline, where the
         // grilling start is.
@@ -557,7 +557,7 @@ async fn start_conversation(
 ///
 /// Refused for nothing. Every id is either a Conversation, which is placed, or
 /// not one, which is passed over — a viewer sends the list it drew, and by the
-/// time it lands a row may have been started or aborted. There is nothing to
+/// time it lands a row may have been started or closed. There is nothing to
 /// answer with beyond that it was taken, so it answers with nothing.
 ///
 /// The Nudge is what carries it to the other devices: an order is the list
@@ -1560,17 +1560,17 @@ async fn steer_submit(
     }
 }
 
-/// `POST /api/ui/conversations/{id}/abort` — stop it wherever it has got to.
-async fn abort(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+/// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
+async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(ConversationAborted::NoSuchConversation).into_response();
+        return Json(ConversationClosed::NoSuchConversation).into_response();
     };
 
-    match crate::conversations::abort(&state, id).await {
+    match crate::conversations::close(&state, id).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "aborting a Conversation failed");
-            unavailable("the conversation could not be aborted")
+            tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
+            unavailable("the conversation could not be closed")
         }
     }
 }
@@ -1709,7 +1709,7 @@ fn lifecycle(state: store::Lifecycle) -> Lifecycle {
         store::Lifecycle::Implementing => Lifecycle::Implementing,
         store::Lifecycle::Wrapping => Lifecycle::Wrapping,
         store::Lifecycle::Done => Lifecycle::Done,
-        store::Lifecycle::Aborted => Lifecycle::Aborted,
+        store::Lifecycle::Closed => Lifecycle::Closed,
     }
 }
 

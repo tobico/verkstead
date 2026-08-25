@@ -115,7 +115,7 @@ impl Drivers {
     /// why that is the cheaper way round.
     ///
     /// A state nothing is meant to be driving answers that it is fine as it
-    /// stands. Draft is waiting on the human, Done is finished and Aborted is
+    /// stands. Draft is waiting on the human, Done is finished and Closed is
     /// stopped: none of them is a Conversation standing still, so none of them
     /// is one this question is really about.
     pub(crate) fn driven(
@@ -131,7 +131,7 @@ impl Drivers {
                 working.contains(&conversation_id) || self.registered(conversation_id)
             }
             Lifecycle::Implementing | Lifecycle::Wrapping => self.registered(conversation_id),
-            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => true,
+            Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => true,
         }
     }
 
@@ -394,13 +394,13 @@ mod tests {
     }
 
     /// The states nothing is meant to be driving. Draft is waiting on the
-    /// human, Done is finished and Aborted is stopped: none of them is a
+    /// human, Done is finished and Closed is stopped: none of them is a
     /// Conversation standing still with nobody to move it.
     #[test]
     fn a_state_nothing_drives_is_never_one_standing_still() {
         let drivers = Drivers::new();
 
-        for state in [Lifecycle::Draft, Lifecycle::Done, Lifecycle::Aborted] {
+        for state in [Lifecycle::Draft, Lifecycle::Done, Lifecycle::Closed] {
             assert!(
                 drivers.driven(&working(&[]), CONVERSATION, state),
                 "{state:?} is not a state anything is supposed to be driving",

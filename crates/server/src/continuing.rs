@@ -62,7 +62,7 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
         conversation.worktree.clone(),
         conversation.base_commit.clone(),
     ) else {
-        // No Worktree is an aborted Conversation, and no base commit is one that
+        // No Worktree is a closed Conversation, and no base commit is one that
         // never started grilling. Neither can have written to a roadmap.
         return;
     };
@@ -408,15 +408,15 @@ async fn settle(
 /// Stop the half-made Conversation, where a stage got as far as a record and no
 /// further.
 ///
-/// Aborted rather than left drafting, because drafting is a Conversation waiting
+/// Closed rather than left drafting, because drafting is a Conversation waiting
 /// for a human to write a Brief and press a button — and this one is a stage
-/// nobody is going to start by hand. Aborting is the work stopping wherever it
+/// nobody is going to start by hand. Closing is the work stopping wherever it
 /// was, which is exactly what happened.
 ///
 /// Nothing was checked out by the time this can run, so there is nothing to
 /// clean up but the row.
 async fn gave_up(state: &AppState, id: i64) {
-    if let Err(error) = store::abort_conversation(&state.pool, id).await {
+    if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
     }
 }

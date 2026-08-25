@@ -153,7 +153,7 @@ pub(crate) async fn run(state: AppState, conversation_id: i64) {
     // Asked again on the other side of the wait, because everything it asked
     // about moves while it waits: the fix session that held the Worktree may have
     // been the last of its attempts, the review may have finished under it, and
-    // the Conversation may have been aborted out from under this altogether.
+    // the Conversation may have been closed out from under this altogether.
     match wanted(&state, conversation_id).await {
         Wanted::Nothing => {}
         Wanted::Review => reading(&state, conversation_id).await,
@@ -318,7 +318,7 @@ async fn carried_out(state: &AppState, conversation_id: i64) {
 /// of the backlog needs it.
 ///
 /// Anything but a move that was made leaves it where it is, with the reason in
-/// the log: a Conversation aborted out from under the session that wrote the
+/// the log: a Conversation closed out from under the session that wrote the
 /// backlog is not one to start building.
 async fn built_instead(state: &AppState, conversation_id: i64) {
     match store::implement_again(&state.pool, conversation_id).await {
@@ -703,7 +703,7 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 ///
 /// [`store::Decision::Deliberate`]: what to do about it is Resume, which reads the
 /// branch again in a session as fresh as the first, or taking the branch over,
-/// or aborting the run with it exactly as it stands.
+/// or closing the Conversation with the branch exactly as it stands.
 async fn abandoned(
     state: &AppState,
     conversation_id: i64,
@@ -785,7 +785,7 @@ async fn settle(state: &AppState, conversation_id: i64) {
 ///
 /// The evidence is the tail of what the session said, which is where a review
 /// that fell over says why — and what to do about it is Resume, read the branch
-/// themselves, or abort.
+/// themselves, or close the Conversation.
 ///
 /// [`store::Decision::Deliberate`], because a wrap-up that goes on without its
 /// review is a branch nobody read: Verkstead stops rather than pass a session
@@ -819,7 +819,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 /// do about it is answerable without opening the Set again.
 ///
 /// [`store::Decision::Deliberate`]: what to do is Resume, which is the doing over
-/// again in one session, or the human doing it themselves, or aborting the run
+/// again in one session, or the human doing it themselves, or closing the Conversation
 /// with the branch exactly as the session left it.
 ///
 /// `how` is how the session ended where it ended badly, and `writing` the Event

@@ -21,7 +21,7 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationAborted, ConversationEntry,
+    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, ConversationEntry,
     ConversationReopened, ConversationSteered, ConversationView, GrillingStarted, Lifecycle,
     PinnedEvent, ProfileSaved, Registered, Started, SteerOpened, TimelineEvent,
 };
@@ -690,10 +690,10 @@ async fn grill(app: &Router, id: i64) -> GrillingStarted {
     .await
 }
 
-async fn abort(app: &Router, id: i64) -> ConversationAborted {
+async fn close(app: &Router, id: i64) -> ConversationClosed {
     post(
         app,
-        &format!("/api/ui/conversations/{id}/abort"),
+        &format!("/api/ui/conversations/{id}/close"),
         &serde_json::json!({}),
     )
     .await
@@ -1192,7 +1192,7 @@ async fn a_second_round_grills_on_the_branch_the_first_one_worked() {
     assert_eq!(worktrees(&repo).len(), 2, "the repository and one worktree");
 }
 
-/// Reopening is offered on Done and nowhere else. Aborted is off the ladder and
+/// Reopening is offered on Done and nowhere else. Closed is off the ladder and
 /// stays there, and every other state is somewhere the work has got to.
 #[tokio::test]
 async fn a_conversation_that_is_not_finished_cannot_be_reopened() {
@@ -1204,7 +1204,7 @@ async fn a_conversation_that_is_not_finished_cannot_be_reopened() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
     assert_eq!(reopen(&app, id).await, ConversationReopened::NotDone);
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
     assert_eq!(reopen(&app, id).await, ConversationReopened::NotDone);
 
     assert_eq!(briefs(&opened(&app, id).await).len(), 1);
@@ -1705,7 +1705,7 @@ async fn steering_into_implementing_with_an_instruction_records_what_was_asked_f
 /// A closed Conversation is a source like any other: its Worktree was deleted
 /// and its branch kept, so a steer checks the branch out again into one.
 ///
-/// The branch is what carries the work, and it is the half aborting leaves
+/// The branch is what carries the work, and it is the half closing leaves
 /// standing — so nothing is cut afresh here and nothing is started over. What
 /// the steer makes is the directory, at the path a first grilling would have
 /// chosen, on the branch that is already there.
@@ -1720,8 +1720,8 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
     let base = view.base_commit.clone();
     let worked_in = PathBuf::from(view.worktree.unwrap().path);
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
-    assert!(!worked_in.exists(), "aborting took the directory away");
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert!(!worked_in.exists(), "closing took the directory away");
     assert!(opened(&app, id).await.worktree.is_none());
 
     assert_eq!(
@@ -1736,7 +1736,7 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
     let view = opened(&app, id).await;
 
     assert_eq!(view.state, Lifecycle::Grilling);
-    assert_eq!(view.branch, branch, "on the branch aborting kept");
+    assert_eq!(view.branch, branch, "on the branch closing kept");
     assert_eq!(
         view.base_commit, base,
         "and what it branched from is what it always branched from: nothing was \
@@ -1957,10 +1957,10 @@ async fn grilling_freezes_the_brief_and_the_branch_name() {
     );
 }
 
-/// Aborting takes the directory away and leaves the branch, because a branch is
+/// Closing takes the directory away and leaves the branch, because a branch is
 /// cheap and may hold work worth reading.
 #[tokio::test]
-async fn aborting_removes_the_worktree_and_keeps_the_branch() {
+async fn closing_removes_the_worktree_and_keeps_the_branch() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
     grill(&app, id).await;
@@ -1969,7 +1969,7 @@ async fn aborting_removes_the_worktree_and_keeps_the_branch() {
     let branch = view.branch.clone();
     let path = PathBuf::from(view.worktree.unwrap().path);
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
 
     assert!(!path.exists(), "the worktree directory should be gone");
     assert_eq!(
@@ -1988,45 +1988,45 @@ async fn aborting_removes_the_worktree_and_keeps_the_branch() {
     );
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Aborted);
+    assert_eq!(view.state, Lifecycle::Closed);
     assert_eq!(view.worktree, None);
-    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Aborted]);
+    assert_eq!(moves(&view), [Lifecycle::Grilling, Lifecycle::Closed]);
 }
 
 #[tokio::test]
-async fn aborting_twice_is_not_an_error() {
+async fn closing_twice_is_not_an_error() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
     grill(&app, id).await;
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
-    assert_eq!(abort(&app, id).await, ConversationAborted::AlreadyAborted);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert_eq!(close(&app, id).await, ConversationClosed::AlreadyClosed);
 
     assert_eq!(
         moves(&opened(&app, id).await),
-        [Lifecycle::Grilling, Lifecycle::Aborted]
+        [Lifecycle::Grilling, Lifecycle::Closed]
     );
 }
 
-/// Aborting is reachable from every state this stage can reach, including the
+/// Closing is reachable from every state this stage can reach, including the
 /// one where nothing was ever made.
 #[tokio::test]
-async fn a_drafting_conversation_can_be_aborted() {
+async fn a_drafting_conversation_can_be_closed() {
     let (_watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = started(&app, repo_id).await;
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
 
     let view = opened(&app, id).await;
-    assert_eq!(view.state, Lifecycle::Aborted);
+    assert_eq!(view.state, Lifecycle::Closed);
     assert_eq!(view.worktree, None);
     assert!(!view.ready_to_grill);
 }
 
-/// A worktree the human deleted by hand is still an abort that works: what was
+/// A worktree the human deleted by hand is still an close that works: what was
 /// asked for is that the directory be gone, and it is.
 #[tokio::test]
-async fn aborting_a_conversation_whose_worktree_has_already_gone_works() {
+async fn closing_a_conversation_whose_worktree_has_already_gone_works() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
     grill(&app, id).await;
@@ -2034,18 +2034,18 @@ async fn aborting_a_conversation_whose_worktree_has_already_gone_works() {
     let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
     std::fs::remove_dir_all(&path).unwrap();
 
-    assert_eq!(abort(&app, id).await, ConversationAborted::Aborted);
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Aborted);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Closed);
     assert_eq!(worktrees(&repo).len(), 1, "git should have let it go too");
 }
 
 #[tokio::test]
-async fn aborting_a_conversation_that_is_not_there_says_so() {
+async fn closing_a_conversation_that_is_not_there_says_so() {
     let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
 
     assert_eq!(
-        abort(&app, 404).await,
-        ConversationAborted::NoSuchConversation
+        close(&app, 404).await,
+        ConversationClosed::NoSuchConversation
     );
 }
 
@@ -2080,7 +2080,7 @@ async fn two_conversations_wanting_one_name_get_a_directory_each() {
     assert_eq!(grill(&app, first).await, GrillingStarted::Started);
 
     // The same branch name on a second Conversation. The branch itself is
-    // refused — Verkstead made that one — so the name is freed by aborting the
+    // refused — Verkstead made that one — so the name is freed by closing the
     // first, which keeps the directory taken.
     let second = started(&app, repo_id).await;
     write_brief(&app, second, "# Another\n").await;

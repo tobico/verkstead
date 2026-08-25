@@ -29,7 +29,7 @@
 //! and, on a conversation Verkstead has finished with, the press that opens a
 //! second round with a Brief of its own.
 //! Stopping the work is in neither place and not in the list: none of the three
-//! ways of doing it — stop after this task, stop now, abort the conversation —
+//! ways of doing it — stop after this task, stop now, close the conversation —
 //! is a step in the work, so all three hang off the header behind a menu, where
 //! what cannot be undone is not one stray click away.
 //!
@@ -51,7 +51,7 @@ import {
 } from "solid-js";
 
 import {
-  abortConversation,
+  closeConversation,
   forceStopConversation,
   listProfiles,
   reopenConversation,
@@ -67,7 +67,7 @@ import type {
   BriefEvent,
   BriefSaved,
   CommitEvent,
-  ConversationAborted,
+  ConversationClosed,
   ConversationReopened,
   ConversationStopped,
   ConversationView,
@@ -154,10 +154,10 @@ export const STOP_REFUSAL: Record<ConversationStopped, string> = {
   NoSuchConversation: "This conversation is gone.",
 };
 
-/// And each way of being refused an abort.
-export const ABORT_REFUSAL: Record<ConversationAborted, string> = {
-  Aborted: "",
-  AlreadyAborted: "",
+/// And each way of being refused a close.
+export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
+  Closed: "",
+  AlreadyClosed: "",
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
@@ -642,7 +642,7 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// stuck conversation moving. After a server restart nothing is running anywhere,
 /// so it shows everywhere, and that is wanted too.
 ///
-/// A conversation that has never been grilled and one that was aborted have no
+/// A conversation that has never been grilled and one that was closed have no
 /// worktree, so neither is ever offered it — there is nowhere for a session to
 /// run.
 ///
@@ -683,7 +683,7 @@ function ManualTaskComposer(props: {
   /// Whether the composer belongs on this conversation at all.
   ///
   /// A worktree to run in and nothing running is the whole of it: a conversation
-  /// that has never been grilled and one that was aborted have no worktree, so
+  /// that has never been grilled and one that was closed have no worktree, so
   /// neither is ever offered it, and a reopened one being written a second brief
   /// has one and is exactly where the escape hatch belongs.
   const offered = () =>
@@ -1642,7 +1642,7 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 /// The button that opens a second round on a conversation Verkstead has finished
 /// with.
 ///
-/// Drawn on `Done` and nowhere else. Aborted is off the ladder and stays there,
+/// Drawn on `Done` and nowhere else. Closed is off the ladder and stays there,
 /// and every other state is somewhere the work has got to — there is nothing to
 /// reopen about work that is still going on.
 ///
@@ -1709,7 +1709,7 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
 /// component's to get right.
 ///
 /// In order of what each costs: stop, which waits for the task the run is on;
-/// force stop, which does not; and abort, which is not a stop at all but the end
+/// force stop, which does not; and close, which is not a stop at all but the end
 /// of the conversation. Each says what it does under it, because *stop* and
 /// *force stop* are two words apart and hours of work apart.
 ///
@@ -1719,7 +1719,7 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
 function Actions(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const [refused, setRefused] = createSignal<ConversationAborted | null>(null);
+  const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
   const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
 
   /// What the click found, once it has answered, and `null` while the modal is
@@ -1796,15 +1796,15 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     },
   }));
 
-  const abort = useMutation(() => ({
-    mutationFn: () => abortConversation(props.conversation.id),
-    onSuccess: (outcome: ConversationAborted) => {
+  const close = useMutation(() => ({
+    mutationFn: () => closeConversation(props.conversation.id),
+    onSuccess: (outcome: ConversationClosed) => {
       if (outcome === "NoSuchConversation" || outcome === "WorktreeStuck") {
         setRefused(outcome);
         return;
       }
 
-      // Aborted or already aborted: what was asked for holds either way.
+      // Closed or already closed: what was asked for holds either way.
       setRefused(null);
       shut();
       reread();
@@ -1888,18 +1888,18 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
             </div>
 
             <Show
-              when={props.conversation.state !== "Aborted"}
-              fallback={<p class="note">This conversation has been aborted.</p>}
+              when={props.conversation.state !== "Closed"}
+              fallback={<p class="note">This conversation has been closed.</p>}
             >
               <div class="action">
                 <button
                   type="button"
                   role="menuitem"
-                  class="abort"
-                  disabled={abort.isPending}
-                  onClick={() => abort.mutate()}
+                  class="close"
+                  disabled={close.isPending}
+                  onClick={() => close.mutate()}
                 >
-                  {abort.isPending ? "Aborting…" : "Abort conversation"}
+                  {close.isPending ? "Closing…" : "Close conversation"}
                 </button>
                 <p class="note">
                   Permanently end the conversation and delete the worktree. The
@@ -1919,11 +1919,11 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
             </Show>
 
             <Show when={refused()}>
-              {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+              {(outcome) => <p class="error">{CLOSE_REFUSAL[outcome()]}</p>}
             </Show>
-            <Show when={abort.isError}>
+            <Show when={close.isError}>
               <p class="error">
-                The conversation could not be aborted: {abort.error?.message}
+                The conversation could not be closed: {close.error?.message}
               </p>
             </Show>
           </>

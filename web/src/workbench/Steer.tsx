@@ -85,7 +85,7 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
 
 /// Where a steer can send a conversation, and what each target means.
 ///
-/// Draft and aborted are not here and never will be: each has a way in of its
+/// Draft and Closed are not here and never will be: each has a way in of its
 /// own. Wrapping up is the one of the four that is not always offered, which is
 /// what `offered` below draws it out by: a conversation whose work is on no
 /// pull request has no wrap-up to be steered into.
@@ -108,7 +108,7 @@ const TARGETS: {
   {
     target: "Grilling",
     label: "Grilling",
-    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been aborted.",
+    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been closed.",
     runs: true,
     role: "grilling",
   },

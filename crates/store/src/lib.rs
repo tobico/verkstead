@@ -49,9 +49,9 @@ mod wrap_up;
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
-    Aborting, Chosen, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
+    Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
     Implementing, Lifecycle, Rebuilding, Reopening, Role, SetOnTimeline, Settling, Staged, Steer,
-    Steering, TimelineEvent, abort_conversation, adopting, ask, asked_from, conversations,
+    Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
     implement_again, last_proposal, load_conversation, note, pick_direction, record_handoff,
     record_manual_task, rename_branch, reopen_conversation, review_asked, save_brief,
     set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state,

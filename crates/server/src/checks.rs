@@ -134,7 +134,7 @@ async fn once(state: &AppState, conversation_id: i64, writing: Option<i64>) -> W
     };
 
     // The one thing that ends the watching by itself. Everything a Conversation
-    // leaves Wrapping for — Done, or aborted from the menu — arrives here as the
+    // leaves Wrapping for — Done, or closed from the menu — arrives here as the
     // same fact: this is not a wrap-up any more.
     if conversation.state != store::Lifecycle::Wrapping {
         return Watching::Done("the Conversation is not wrapping up any more");

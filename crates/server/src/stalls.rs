@@ -5,7 +5,7 @@
 //! Wrapping; nothing is registered as driving it — see [`crate::drivers`]; and
 //! nothing has stopped it on purpose. Each of the three is doing work. The state is
 //! what says something ought to be happening, so Draft and Direction waiting on
-//! the human, Done finished and Aborted stopped are none of them a Conversation
+//! the human, Done finished and Closed stopped are none of them a Conversation
 //! standing still. The register is what says nothing is, rather than a stopwatch
 //! — a wrapping Conversation idles for days under live watchers and is perfectly
 //! healthy, and so are the gaps between an unattended run's steps. And a stop is
@@ -215,7 +215,7 @@ pub(crate) fn driving(lifecycle: Lifecycle) -> &'static str {
         Lifecycle::Grilling => "grilling the work",
         Lifecycle::Implementing => "implementing the work",
         Lifecycle::Wrapping => "wrapping the work up",
-        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Aborted => "driving the Conversation",
+        Lifecycle::Draft | Lifecycle::Done | Lifecycle::Closed => "driving the Conversation",
     }
 }
 
