@@ -546,7 +546,7 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NothingToContinue" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -641,11 +641,15 @@ ready_to_stop: boolean,
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.
  *
- * What decides whether the steer modal offers Implementing at all, and the
- * server’s rule rather than something the page works out from the fields
- * around it — what stands is a reading of the Worktree as it is now, which
- * a page cannot make. Read the same way everything else pinned to the
- * Timeline is: a Conversation with no Worktree on disk has nothing
+ * What decides whether the steer modal offers *carrying on* — the target
+ * itself is offered on every Conversation there is, because an instruction
+ * can always be written. Where this is false the instruction is the whole
+ * of what that target can be, so the modal requires one.
+ *
+ * The server’s rule rather than something the page works out from the
+ * fields around it: what stands is a reading of the Worktree as it is now,
+ * which a page cannot make. Read the same way everything else pinned to
+ * the Timeline is — a Conversation with no Worktree on disk has nothing
  * standing, whatever its branch may hold.
  *
  * Checked again when the modal is submitted, as every refusal here is;
@@ -1571,11 +1575,15 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "A
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
- * A steer as the page receives it: when, and where the human sent it.
+ * A steer as the page receives it: when, where the human sent it, and what
+ * they wrote to send it there with.
  *
- * No rendered body, like the move it stands above: what a steer says so far is
- * the one state it named. The targets that carry a brief or an instruction with
- * them arrive with the tasks that build them.
+ * The one Event that is sometimes a move and sometimes a document. A steer
+ * into Wrapping or Done says nothing but the state, like the move it stands
+ * above; a steer into Implementing carries the instruction the session was set
+ * going on, which is the whole of what that session was asked to do. A steer
+ * into Grilling carries a document too, and that one arrives as a Brief Event
+ * of its own — it opens a round, and a round starts from a Brief.
  */
 export type SteerEvent = { id: number, 
 /**
@@ -1585,7 +1593,13 @@ at: string,
 /**
  * The state the human moved it into.
  */
-target: Lifecycle, };
+target: Lifecycle, 
+/**
+ * The instruction they steered it with, rendered and sanitized on the way
+ * out as every piece of markdown on this wire is — and `None` for every
+ * steer that carried nothing written.
+ */
+html: string | null, };
 
 /**
  * What clicking Steer found, which is what the modal it opens is drawn from.
@@ -1651,6 +1665,26 @@ pairing: ProfileChoice | null,
  * Event behind.
  */
 brief: string | null, 
+/**
+ * The hand-written work, for a steer into Implementing.
+ *
+ * It lands as the Steer Event's own body and a session is started on it —
+ * a driver of the Conversation rather than an errand beside it, so what
+ * follows a clean finish is whatever the branch then holds.
+ *
+ * **Required where nothing stands to be carried on**, and optional beside
+ * carrying on where something does: a branch with a backlog left in it has
+ * an answer to what is next, and a branch with nothing on it has none. A
+ * submit that names Implementing with neither is refused by name — see
+ * [`ConversationSteered::NoInstruction`].
+ *
+ * Whitespace alone is nothing written, exactly as the brief above it: a
+ * textarea somebody tabbed through is not an instruction.
+ *
+ * Nothing anywhere else reads it. A target that starts no session has
+ * nothing to write an instruction for.
+ */
+instruction: string | null, 
 /**
  * Whether the session is primed with everything the human has already
  * answered.

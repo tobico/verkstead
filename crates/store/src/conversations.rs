@@ -14,6 +14,7 @@
 //! have to be moved into it later, and a reopened round adds a second Brief
 //! Event rather than editing the first — which a column could not hold at all.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -328,7 +329,8 @@ pub enum Event {
     /// alike from the session's end.
     ManualTask(String),
 
-    /// A Steer: the state the human moved the Conversation into.
+    /// A Steer: the state the human moved the Conversation into, and whatever
+    /// they wrote to send it there with.
     ///
     /// Its own kind beside the [`Event::Moved`] line the move writes, and the
     /// two say different things about the same moment. A move is the machine
@@ -336,9 +338,17 @@ pub enum Event {
     /// there, which is the one thing a Timeline of moves alone could never be
     /// read back for.
     ///
-    /// The target in the `body` column, exactly as a move holds the state it
-    /// went to: what a steer *is*, so far, is the one state it names.
-    Steer(Lifecycle),
+    /// The target on the first line of the `body` column, exactly as a move
+    /// holds the state it went to, and the instruction under it where the
+    /// human wrote one — the hand-written work a steer into Implementing
+    /// carries, kept as they wrote it. A steer into Grilling carries a
+    /// document too and that one is not here: it opens a round, and what a
+    /// round starts from is a Brief Event like any other.
+    ///
+    /// One line and no instruction is every steer written before there was one
+    /// to write, and it reads back as the steer it was — ADR-0006's rule, and
+    /// the reason the target goes above the document rather than under it.
+    Steer(Lifecycle, Option<String>),
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -384,34 +394,42 @@ impl Event {
             Self::Pause(_) => super::pauses::PAUSE,
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
-            Self::Steer(_) => "steer",
+            Self::Steer(..) => "steer",
         }
     }
 
     /// What goes in the `body` column beside the kind.
-    fn body(&self) -> &str {
+    ///
+    /// Borrowed for every kind but one, which is what the `Cow` is for: a
+    /// steer's body is the state it named with the instruction under it, which
+    /// is two things joined rather than one thing held.
+    fn body(&self) -> Cow<'_, str> {
         match self {
-            Self::Brief(markdown) => markdown,
-            Self::Moved(state) => state.stored(),
+            Self::Brief(markdown) => Cow::Borrowed(markdown),
+            Self::Moved(state) => Cow::Borrowed(state.stored()),
             // Nothing: what a session printed is in the Capture tables, and
             // what the Timeline shows of it is read back from there too.
-            Self::AgentOutput(_) => "",
+            Self::AgentOutput(_) => Cow::Borrowed(""),
             // Nothing either, and for the nearer reason: a Set is a row in
             // `question_sets` already.
-            Self::QuestionSet(_) => "",
-            Self::Handoff(markdown) => markdown,
+            Self::QuestionSet(_) => Cow::Borrowed(""),
+            Self::Handoff(markdown) => Cow::Borrowed(markdown),
             // Nothing, for the Capture's reason: what a commit is, is a row
             // in `commits`.
-            Self::Commit(_) => "",
+            Self::Commit(_) => Cow::Borrowed(""),
             // Nothing either, and for the commit's reason.
-            Self::PullRequest(_) => "",
+            Self::PullRequest(_) => Cow::Borrowed(""),
             // Nothing either, and for the commit's reason again.
-            Self::Pause(_) => "",
-            Self::Notice(markdown) => markdown,
-            Self::ManualTask(instruction) => instruction,
+            Self::Pause(_) => Cow::Borrowed(""),
+            Self::Notice(markdown) => Cow::Borrowed(markdown),
+            Self::ManualTask(instruction) => Cow::Borrowed(instruction),
             // The state it was steered into, as a move holds the state it moved
-            // to: one word, and the whole of what a steer says.
-            Self::Steer(target) => target.stored(),
+            // to — with the instruction under it where the human wrote one, on
+            // lines of its own so that the word above it reads back whole.
+            Self::Steer(target, None) => Cow::Borrowed(target.stored()),
+            Self::Steer(target, Some(instruction)) => {
+                Cow::Owned(format!("{}\n{instruction}", target.stored()))
+            }
         }
     }
 
@@ -459,7 +477,15 @@ impl Event {
             }
             "notice" => Self::Notice(body),
             "manual-task" => Self::ManualTask(body),
-            "steer" => Self::Steer(Lifecycle::read(&body)?),
+            // The state off the first line and the instruction under it, split
+            // rather than parsed: an instruction is a document and may hold
+            // anything, so the only thing read out of it is where it starts.
+            "steer" => match body.split_once('\n') {
+                Some((target, instruction)) => {
+                    Self::Steer(Lifecycle::read(target)?, Some(instruction.to_owned()))
+                }
+                None => Self::Steer(Lifecycle::read(&body)?, None),
+            },
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -969,7 +995,7 @@ async fn started(
     )
     .bind(id)
     .bind(brief.kind())
-    .bind(brief.body())
+    .bind(brief.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| format!("writing the Brief of Conversation {id}"))?;
@@ -2315,7 +2341,7 @@ pub async fn reopen_conversation(pool: &SqlitePool, id: i64, worktree: &Path) ->
     )
     .bind(id)
     .bind(brief.kind())
-    .bind(brief.body())
+    .bind(brief.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| format!("writing the new round's Brief of Conversation {id}"))?;
@@ -2499,6 +2525,11 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// it is what came of the act, which is the same order a Manual Task's
 /// instruction stands in above what its session went on to do.
 ///
+/// **The Steer carries what the human wrote**, where a target takes anything
+/// written: the instruction a steer into Implementing sends a session off with
+/// is the Event's own body, so reading the Event back is reading the job that
+/// was set. See [`Event::Steer`] for how the two are held in the one column.
+///
 /// **A third where the steer opens a round**: the Brief the human wrote for it,
 /// under the move rather than above it, because the move is where the round
 /// boundary falls and the Brief belongs to the round that starts there — which
@@ -2523,6 +2554,13 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 /// Pairing to settle, and a human who left the picker on what the Conversation
 /// already had has changed none.
 ///
+/// **And how the work is being built, where nothing said yet.** Written only
+/// over a Conversation with no direction on it: a state something runs in with
+/// nothing saying how the work is built is a record a pressed Resume refuses on
+/// by name, and a steer that set a session going in one would leave the
+/// Conversation unable to be started again. What is already picked is left
+/// exactly as it is.
+///
 /// **And what the steer had to make before it could move anything**, which is
 /// the Worktree it is to run in and — for a Draft, which has never had one — the
 /// commit its branch was cut from. Recorded here rather than made here: git and
@@ -2537,13 +2575,15 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         target,
         pairing,
         brief,
+        instruction,
+        direction,
         worktree,
         base_commit,
     } = steer;
 
     let mut tx = pool.begin().await.context("steering a Conversation")?;
 
-    let steer = Event::Steer(target);
+    let steer = Event::Steer(target, instruction.map(str::to_owned));
 
     // Selected from `conversations` rather than trusting the id, as every other
     // Event is written: a steer attributed to a Conversation that is not there
@@ -2555,7 +2595,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
          FROM conversations WHERE id = ?",
     )
     .bind(steer.kind())
-    .bind(steer.body())
+    .bind(steer.body().into_owned())
     .bind(id)
     .execute(&mut *tx)
     .await
@@ -2604,6 +2644,27 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .with_context(|| format!("recording the worktree of Conversation {id}"))?;
     }
 
+    // And how the work is built from here, for a Conversation that has never
+    // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
+    // record's rather than the caller's: a direction already picked is the
+    // human's own answer to how their work is built, and a steer that wrote over
+    // it would be deciding that for them. What this is for is the Conversation
+    // that reaches Implementing without ever having been grilled — a steered
+    // draft, or one whose work is a hand-written instruction and nothing else —
+    // because a state something runs in with nothing saying how is a record
+    // Resume refuses on by name.
+    if let Some(direction) = direction {
+        sqlx::query(
+            "INSERT INTO directions (conversation_id, direction) VALUES (?, ?)
+             ON CONFLICT (conversation_id) DO NOTHING",
+        )
+        .bind(id)
+        .bind(direction_stored(direction))
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording how Conversation {id} is being built"))?;
+    }
+
     // A steer into Grilling opens a round, so the round before it is over and
     // its wrap-up bookkeeping goes with it — the same forgetting a reopened
     // Conversation does, for the same reason: a round that inherited the one
@@ -2632,7 +2693,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         )
         .bind(id)
         .bind(event.kind())
-        .bind(event.body())
+        .bind(event.body().into_owned())
         .execute(&mut *tx)
         .await
         .with_context(|| format!("writing the steered round's Brief of Conversation {id}"))?;
@@ -2668,9 +2729,11 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
 ///
 /// Everything but the target is `None` in the ordinary case, and each `None`
 /// says something different: no Brief is a steer into a round that starts on the
-/// Brief already there, no Pairing is a picker left on what the Conversation
-/// already had, and no Worktree or base commit is a target nothing runs in or a
-/// Conversation that had both already.
+/// Brief already there, no instruction is a steer that carries on what the
+/// branch already holds, no Pairing is a picker left on what the Conversation
+/// already had, no direction is a Conversation that has already said how its
+/// work is built, and no Worktree or base commit is a target nothing runs in or
+/// a Conversation that had both already.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Steer<'a> {
     /// Which state the human moved it into.
@@ -2681,6 +2744,26 @@ pub struct Steer<'a> {
 
     /// The new round's Brief, for a steer that opens one.
     pub brief: Option<&'a str>,
+
+    /// The hand-written work a steer into Implementing carries, which lands as
+    /// the Steer Event's own body rather than beside it.
+    ///
+    /// Not a Brief and not a Manual Task's instruction, however alike the three
+    /// look on the page. A Brief is what a round is grilled *about*; this is
+    /// one session's whole job, said by the human at the moment they steered —
+    /// so it belongs to the steer, and reading the Event back is reading what
+    /// they asked for.
+    pub instruction: Option<&'a str>,
+
+    /// How the work is being built from here, for a Conversation that has never
+    /// said.
+    ///
+    /// Written only where there is nothing to overwrite — see
+    /// [`steer_conversation`], which leaves a direction already picked exactly
+    /// as it found it. What says how the work is built is the human's own pick,
+    /// and a steer that rewrote one would be answering a question they had
+    /// already answered.
+    pub direction: Option<Direction>,
 
     /// Where the work goes on, for a target something runs in.
     pub worktree: Option<&'a Path>,
@@ -2725,7 +2808,7 @@ pub async fn record_handoff(pool: &SqlitePool, id: i64, markdown: &str) -> Resul
          FROM conversations WHERE id = ?",
     )
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .bind(id)
     .execute(pool)
     .await
@@ -2752,7 +2835,7 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
          FROM conversations WHERE id = ?",
     )
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .bind(id)
     .execute(pool)
     .await
@@ -2779,7 +2862,7 @@ pub async fn record_manual_task(pool: &SqlitePool, id: i64, instruction: &str) -
          FROM conversations WHERE id = ?",
     )
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .bind(id)
     .execute(pool)
     .await
@@ -2913,7 +2996,7 @@ pub(crate) async fn moved(
     )
     .bind(id)
     .bind(event.kind())
-    .bind(event.body())
+    .bind(event.body().into_owned())
     .execute(&mut *tx)
     .await
     .with_context(|| {

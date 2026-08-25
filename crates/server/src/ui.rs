@@ -811,7 +811,9 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
     // And whether a steer into Implementing would have anything to carry on: a
-    // backlog with work left in it, or a roadmap the branch has written. Off the
+    // backlog with work left in it, or a roadmap the branch has written. What
+    // the modal draws the *carrying on* by, the target itself being offered
+    // wherever an instruction can be written, which is everywhere. Off the
     // Worktree as it stands, which is where the pinned Events above are read
     // from and for the same reason — the repository owns those files. See
     // [`crate::steering::standing`], which is the rule the submit refuses by.
@@ -999,9 +1001,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // Event that stands beside another: the move it wrote is
                     // right under it, and the pair is the whole record of a
                     // steer — who decided, and what became of it.
-                    store::Event::Steer(target) => {
-                        verkstead_render::steer_event(event.id, event.at, lifecycle(target))
-                    }
+                    store::Event::Steer(target, instruction) => verkstead_render::steer_event(
+                        event.id,
+                        event.at,
+                        lifecycle(target),
+                        instruction.as_deref(),
+                    ),
                     // The one kind that is not in the list: it is drawn pinned
                     // above the Timeline instead. Dropped by name rather than by
                     // a catch-all, so a kind added later has to be decided about

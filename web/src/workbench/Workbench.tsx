@@ -54,6 +54,7 @@ import type {
   ConversationView,
   HandoffEvent,
   ManualTaskEvent,
+  SteerEvent,
   PullRequestEvent,
   QuestionSetEvent,
   UnreadableSetEvent,
@@ -93,7 +94,8 @@ type Opened =
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
-  | { manual: ManualTaskEvent };
+  | { manual: ManualTaskEvent }
+  | { steer: SteerEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
 /// common is the id the pane was opened by.
@@ -107,7 +109,8 @@ function which(
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
-  | ManualTaskEvent {
+  | ManualTaskEvent
+  | SteerEvent {
   if ("output" in open) {
     return open.output;
   }
@@ -123,7 +126,10 @@ function which(
   if ("handoff" in open) {
     return open.handoff;
   }
-  return "manual" in open ? open.manual : open.opened;
+  if ("manual" in open) {
+    return open.manual;
+  }
+  return "steer" in open ? open.steer : open.opened;
 }
 
 /// And each kind on its own, for the pane that draws it: the Event where this is
@@ -154,6 +160,10 @@ function handoffIn(open: Opened): HandoffEvent | undefined {
 
 function manualIn(open: Opened): ManualTaskEvent | undefined {
   return "manual" in open ? open.manual : undefined;
+}
+
+function steerIn(open: Opened): SteerEvent | undefined {
+  return "steer" in open ? open.steer : undefined;
 }
 
 /// Whether a media query holds, as something the page can be built out of.
@@ -497,6 +507,13 @@ function Reading(props: {
         if ("ManualTask" in entry) {
           return { manual: entry.ManualTask };
         }
+        // Only where it carries one. A steer into wrapping up or done says
+        // nothing but the state, so there is no document under it to open —
+        // which is why the Timeline draws one of those as a line rather than a
+        // card.
+        if ("Steer" in entry && entry.Steer.html !== null) {
+          return { steer: entry.Steer };
+        }
         return undefined;
       }),
       ...conversation.pinned.map((pinned): Opened | undefined =>
@@ -650,6 +667,20 @@ function Reading(props: {
                       <Document
                         heading="Manual task"
                         html={manual().html}
+                        empty="Nothing was asked for."
+                        back={() => props.pane("timeline")}
+                        close={props.close}
+                      />
+                    )}
+                  </Match>
+                  {/* The instruction a steer sent a session off with, read the
+                      way every other document the human writes is read. Nothing
+                      opens a steer that carried none. */}
+                  <Match when={steerIn(open())}>
+                    {(steer) => (
+                      <Document
+                        heading="Instruction"
+                        html={steer().html ?? ""}
                         empty="Nothing was asked for."
                         back={() => props.pane("timeline")}
                         close={props.close}

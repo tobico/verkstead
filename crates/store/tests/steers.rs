@@ -11,6 +11,10 @@
 //! something runs in without the Pairing those sessions run under would be a
 //! move only half made.
 //!
+//! And what the human wrote to steer with: the instruction a steer into
+//! Implementing sends its session off with, which is the Steer Event's own body
+//! rather than a document beside it.
+//!
 //! And the round a steer into Grilling opens: the Brief the human wrote for it,
 //! frozen where it lands, the wrap-up bookkeeping of the round before it
 //! forgotten, and the Worktree and base commit the steer had to make written
@@ -43,6 +47,8 @@ fn into(target: Lifecycle) -> Steer<'static> {
         target,
         pairing: None,
         brief: None,
+        instruction: None,
+        direction: None,
         worktree: None,
         base_commit: None,
     }
@@ -144,7 +150,7 @@ async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, Lifecycle)> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
-            Event::Steer(target) => Some(("steer", target)),
+            Event::Steer(target, _) => Some(("steer", target)),
             Event::Moved(state) => Some(("moved", state)),
             _ => None,
         })
@@ -492,6 +498,170 @@ async fn a_steer_into_implementing_leaves_the_direction_it_found() {
         .expect("the Conversation is there");
 
     assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert_eq!(conversation.direction, Some(Direction::TaskList));
+}
+
+/// Every instruction on its Timeline, in the order it was written.
+///
+/// The Steer Event's own body rather than an Event beside it, which is the whole
+/// of what says the record holds what was asked for: a steer read back is the
+/// state it named *and* the job it set.
+async fn instructions(pool: &SqlitePool, id: i64) -> Vec<Option<String>> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Steer(_, instruction) => Some(instruction),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A steer carrying an instruction leaves it on the Steer Event, word for word.
+///
+/// Kept as the human wrote it, markdown and all: what they typed is the whole of
+/// what the session it starts was asked to do, so a record that had tidied it
+/// would be a record of something slightly else.
+#[tokio::test]
+async fn a_steer_with_an_instruction_keeps_it_as_the_steers_own_body() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    let instruction = "Rebase this onto `main`.\n\nThen run the tests.\n";
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some(instruction),
+                direction: Some(Direction::Inline),
+                ..into(Lifecycle::Implementing)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    assert_eq!(
+        instructions(&pool, id).await,
+        [Some(instruction.to_owned())],
+        "the document the human wrote, on the Event that says they wrote it",
+    );
+
+    assert_eq!(
+        ladder(&pool, id).await,
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Implementing),
+            ("moved", Lifecycle::Implementing),
+        ],
+        "and the pair around it unchanged: the instruction rides on the human's \
+         own line rather than beside it",
+    );
+
+    assert!(
+        briefs(&pool, id).await.len() == 1,
+        "and nothing opened a round: an instruction is one session's job rather \
+         than what a round is grilled about",
+    );
+}
+
+/// A steer that carries no instruction leaves the Steer Event saying the state
+/// alone.
+///
+/// Which is every steer written before there was one to write, and how they read
+/// back — the target above the document rather than under it, so a body of one
+/// line is the steer it always was.
+#[tokio::test]
+async fn a_steer_with_nothing_written_says_the_state_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(instructions(&pool, id).await, [None]);
+}
+
+/// A Conversation that has never said how its work is built is recorded as
+/// building it inline.
+///
+/// An instruction session is the whole of the work in one session, which is what
+/// inline means — and a state something runs in with nothing saying how is a
+/// record a pressed Resume refuses on by name. So the steer settles it as it
+/// moves, and the Conversation it leaves behind is one that can be started
+/// again.
+#[tokio::test]
+async fn a_steer_records_how_the_work_is_built_where_nothing_said() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some("Fix the flaky test.\n"),
+                direction: Some(Direction::Inline),
+                ..into(Lifecycle::Implementing)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    let conversation = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(conversation.direction, Some(Direction::Inline));
+}
+
+/// And one that has said is left exactly as it was.
+///
+/// The rule is the record's rather than the caller's, which is what this asks:
+/// a direction offered over a Conversation that already picked one is not
+/// written. What says how the work is built is the human's own pick, and the
+/// instruction session that runs beside a backlog does not turn that backlog
+/// into an inline run.
+#[tokio::test]
+async fn a_steer_never_writes_over_how_the_work_is_already_built() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        pick_direction(&pool, id, Direction::TaskList)
+            .await
+            .unwrap(),
+        Directing::Writing,
+    );
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                instruction: Some("Fix the flaky test first.\n"),
+                direction: Some(Direction::Inline),
+                ..into(Lifecycle::Implementing)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    let conversation = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
     assert_eq!(conversation.direction, Some(Direction::TaskList));
 }
 

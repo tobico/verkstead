@@ -732,6 +732,21 @@ async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> Con
     .await
 }
 
+/// And the submit into Implementing with something written, which is the other
+/// payload: what the session it starts is sent off to do.
+async fn steer_instructed(app: &Router, id: i64, instruction: &str) -> ConversationSteered {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Implementing",
+            "interrupt": false,
+            "instruction": instruction,
+        }),
+    )
+    .await
+}
+
 /// And the same submit into Grilling, which is the one target that carries a
 /// payload: the round's Brief where the human wrote one.
 ///
@@ -1509,29 +1524,30 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     );
 }
 
-/// A steer into Implementing carries on what the branch already holds, so a
-/// branch holding nothing to carry on is refused by name.
+/// A steer into Implementing either carries on what the branch holds or does
+/// what the human wrote, so a submit with neither is refused by name.
 ///
 /// What stands is a backlog with work left in it or a roadmap the branch has
 /// written, and a Conversation still being grilled has neither: the session
 /// that would write one is the session the click just stopped. So the modal
-/// does not offer the target at all — [`ConversationView::ready_to_continue`]
-/// is what draws it — and the submit says the same thing again, this being the
-/// press that could have been made against a page read a moment earlier.
+/// requires the instruction there — [`ConversationView::ready_to_continue`] is
+/// what it reads that off — and the submit says the same thing again, this
+/// being the press that could have been made against a page read a moment
+/// earlier.
 ///
 /// Nothing moves on a refusal. The refusals are asked before anything is ended,
 /// rebuilt or cleared, so a Conversation refused here is exactly the one the
 /// click left: stopped, where it stood.
 #[tokio::test]
-async fn steering_into_implementing_with_nothing_to_continue_is_refused_by_name() {
+async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert!(
         !opened(&app, id).await.ready_to_continue,
-        "there is no backlog and no roadmap on the branch, so the modal draws \
-         the target out",
+        "there is no backlog and no roadmap on the branch, so the modal has \
+         nothing to offer carrying on",
     );
 
     assert_eq!(
@@ -1540,7 +1556,13 @@ async fn steering_into_implementing_with_nothing_to_continue_is_refused_by_name(
     );
     assert_eq!(
         steer_into(&app, id, "Implementing", false).await,
-        ConversationSteered::NothingToContinue,
+        ConversationSteered::NoInstruction,
+    );
+    assert_eq!(
+        steer_instructed(&app, id, "   \n").await,
+        ConversationSteered::NoInstruction,
+        "and a textarea somebody tabbed through is nothing written: whitespace \
+         alone is not an instruction",
     );
 
     let view = opened(&app, id).await;
@@ -1555,6 +1577,67 @@ async fn steering_into_implementing_with_nothing_to_continue_is_refused_by_name(
         view.blocked_on.is_some() && view.ready_to_resume,
         "the Conversation is where the click left it: stopped, with Resume on \
          offer",
+    );
+}
+
+/// A steer into Implementing with something written puts the instruction on the
+/// Steer Event and says how the work is built.
+///
+/// **The instruction is the Event's own body**, rendered like every other
+/// document the human writes: what the session was sent off to do is read back
+/// off the Timeline, above whatever it went on to print.
+///
+/// **And the direction is recorded as inline**, because there was none. An
+/// instruction session is the whole of the work in one session, which is what
+/// inline means — and a Conversation implementing with nothing saying how its
+/// work is built is one a pressed Resume refuses on by name, so a steer that
+/// left it unsaid would be a Conversation nobody could start again.
+#[tokio::test]
+async fn steering_into_implementing_with_an_instruction_records_what_was_asked_for() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_instructed(&app, id, "Rebase this onto `main`.\n").await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Implementing),
+            ("moved", Lifecycle::Implementing),
+        ],
+    );
+
+    let instruction = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.html.clone(),
+            _ => None,
+        })
+        .expect("the steer carries what was written on it");
+
+    assert!(
+        instruction.contains("Rebase this onto <code>main</code>."),
+        "rendered like every other document the human writes: {instruction:?}",
+    );
+
+    assert_eq!(
+        view.direction,
+        Some(verkstead_schema::Direction::Inline),
+        "an instruction session is the whole of the work in one session, and a \
+         Conversation that had never said how its work is built has now said",
     );
 }
 

@@ -35,19 +35,25 @@
 //! it, which is the order the moment happened in, and beside them go the Pairing
 //! the modal settled and the Worktree and base commit the steer had to make:
 //! steering re-settles what runs the work rather than picking for one session.
-//! See [`store::steer_conversation`], which writes all of it in one transaction.
+//! The Steer carries what was written with it, too: an instruction is the Event's
+//! own body, so reading it back is reading the job that was set. See
+//! [`store::steer_conversation`], which writes all of it in one transaction.
 //!
 //! **What each target starts is the ordinary recompute.** Into Grilling it is a
 //! fresh grilling on the round's own Brief, primed with the digest of what has
 //! already been answered where the human asked for it — which is
 //! [`crate::grillings::again`], the relaunch a pressed Resume makes, reused
-//! rather than forked. Into Implementing it is the next step read off the
-//! branch — the backlog's own answer to what is next, or the roadmap it has
-//! written — which is [`crate::runner::implementing_again`], the same relaunch,
-//! and it is offered only where something actually stands to be carried on; see
-//! [`standing`]. Into Wrapping it is the wrap-up's own watchers over whatever
-//! the branch now holds, with the fix attempts forgotten, which is what that
-//! press does there. Into Done there is nothing to start at all.
+//! rather than forked. Into Implementing it is one of two things: the next step
+//! read off the branch — the backlog's own answer to what is next, or the
+//! roadmap it has written, which is [`crate::runner::implementing_again`], the
+//! same relaunch — or, where the human wrote one, the instruction itself, in a
+//! session that drives the Conversation and hands the pipeline on when it is
+//! done; see [`crate::runner::instructed`]. One or the other and never neither:
+//! an instruction is required exactly where nothing stands to be carried on,
+//! which is what [`standing`] answers. Into Wrapping it is the wrap-up's own
+//! watchers over whatever the branch now holds, with the fix attempts
+//! forgotten, which is what that press does there. Into Done there is nothing
+//! to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
@@ -169,10 +175,14 @@ pub(crate) async fn submit(
 
     clear(state, conversation_id).await?;
 
+    let instruction = instruction(submission);
+
     let steer = store::Steer {
         target,
         pairing: settling(&conversation, submission),
         brief: brief(submission),
+        instruction,
+        direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
         base_commit: made.base_commit.as_deref(),
     };
@@ -203,24 +213,42 @@ pub(crate) async fn submit(
             ));
         }
 
-        // The next step read off the branch, which is the direction's to say:
-        // the backlog's own answer to what is next, or the roadmap the branch
-        // has written. Exactly what a pressed Resume does for an implementing
-        // Conversation, reused rather than forked — see
-        // [`crate::runner::implementing_again`], which reads the branch again
-        // for itself a moment after this and holds the registration until its
-        // session has one.
+        // One of two, and which of them is what the human wrote rather than
+        // anything read off the branch.
         //
-        // Nothing here can come to nothing: [`standing`] has already refused a
-        // steer with nothing to carry on, which is the reading this one is the
-        // second of.
-        SteerTarget::Implementing => {
-            tokio::spawn(crate::runner::implementing_again(
-                state.clone(),
-                conversation_id,
-                driving,
-            ));
-        }
+        // Nothing here can come to nothing either way: [`standing`] has already
+        // refused a steer with neither an instruction nor anything to carry on,
+        // which is the reading this one is the second of.
+        SteerTarget::Implementing => match instruction {
+            // A session started on the instruction, driving the Conversation
+            // while it runs and handing the pipeline on from whatever the branch
+            // then holds. See [`crate::runner::instructed`], which is what makes
+            // this a driver rather than the errand beside the work a Manual Task
+            // is.
+            Some(instruction) => {
+                tokio::spawn(crate::runner::instructed(
+                    state.clone(),
+                    conversation_id,
+                    instruction.to_owned(),
+                    driving,
+                ));
+            }
+
+            // Or the next step read off the branch, which is the direction's to
+            // say: the backlog's own answer to what is next, or the roadmap the
+            // branch has written. Exactly what a pressed Resume does for an
+            // implementing Conversation, reused rather than forked — see
+            // [`crate::runner::implementing_again`], which reads the branch
+            // again for itself a moment after this and holds the registration
+            // until its session has one.
+            None => {
+                tokio::spawn(crate::runner::implementing_again(
+                    state.clone(),
+                    conversation_id,
+                    driving,
+                ));
+            }
+        },
 
         // The wrap-up's four watchers over the top of whatever the branch now
         // holds, with the fix attempts forgotten: exactly what a pressed Resume
@@ -284,11 +312,14 @@ async fn refusal(
         return Ok(Some(ConversationSteered::NoPullRequest));
     }
 
-    // And a steer into Implementing carries on what the branch already holds, so
-    // a branch holding nothing to carry on is a target with nothing to start.
-    // The modal does not offer it there either — [`standing`] is what draws it,
-    // and this is that same reading asked again on arrival.
+    // And a steer into Implementing either carries on what the branch already
+    // holds or does what the human wrote, so a branch holding nothing to carry
+    // on and a modal holding nothing written is a session with no job. The modal
+    // requires the instruction there rather than offering the submit —
+    // [`standing`] is what it draws that by, and this is that same reading asked
+    // again on arrival.
     if submission.target == SteerTarget::Implementing
+        && instruction(submission).is_none()
         && !standing(
             conversation.direction,
             conversation.worktree.clone(),
@@ -296,7 +327,7 @@ async fn refusal(
         )
         .await
     {
-        return Ok(Some(ConversationSteered::NothingToContinue));
+        return Ok(Some(ConversationSteered::NoInstruction));
     }
 
     let Some(role) = role(submission.target) else {
@@ -348,6 +379,53 @@ fn brief(submission: &SteerSubmission) -> Option<&str> {
         .filter(|brief| !brief.trim().is_empty())
 }
 
+/// The hand-written work to send a session off with, or `None` where the human
+/// wrote none.
+///
+/// Whitespace alone counts as none, exactly as the brief above it: a textarea
+/// somebody tabbed through is a steer that carries on what stands rather than an
+/// instruction to do nothing. What is written is what they typed, trimmed at the
+/// ends the way every document reaching a prompt is.
+///
+/// Only where a session could be started on it. An instruction that arrived
+/// beside another target is a page sending a field it should not have drawn, and
+/// what a wrap-up would do with one is nothing at all.
+fn instruction(submission: &SteerSubmission) -> Option<&str> {
+    if submission.target != SteerTarget::Implementing {
+        return None;
+    }
+
+    submission
+        .instruction
+        .as_deref()
+        .map(str::trim)
+        .filter(|instruction| !instruction.is_empty())
+}
+
+/// How the work is built from here, or `None` where the Conversation has already
+/// said.
+///
+/// The one thing a steer settles that the human did not pick, and it is settled
+/// rather than asked because there is only one answer it could have: an
+/// instruction session is the whole of the work in one session, which is what
+/// **inline** means. A Conversation that has been grilled has already picked,
+/// and what it picked is left exactly as it is — see
+/// [`store::steer_conversation`], which will not write over one.
+///
+/// Written at all because of what comes after the steer rather than what comes
+/// with it. A Conversation implementing with nothing saying how its work is
+/// built is a record a pressed Resume refuses on by name, so a steer that set a
+/// session going in one would leave the Conversation unable to be started again
+/// the moment that session ended.
+fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<Direction> {
+    instruction?;
+
+    conversation
+        .direction
+        .is_none()
+        .then_some(Direction::Inline)
+}
+
 /// The Pairing to write with the move, or `None` where there is none to write.
 ///
 /// `None` twice over: a target nothing runs in settles nothing, and a human who
@@ -392,7 +470,7 @@ fn settling<'a>(
 /// distinction rather than an omission: its work is the one session, so there
 /// is nothing on the branch to pick up where it left off. What such a
 /// Conversation is steered into Implementing with is an instruction of the
-/// human's own, and until that lands the target is refused on one by name.
+/// human's own, which is what this false answer asks the modal for.
 ///
 /// Read of the Worktree as it stands rather than of the branch behind it,
 /// which is how everything else pinned to a Timeline is read: a Conversation

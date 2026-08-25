@@ -732,6 +732,200 @@ async fn follow_inline(
     .await;
 }
 
+/// Do the one thing the human wrote when they steered the Conversation into
+/// Implementing, and then carry the pipeline on from what the branch holds.
+///
+/// **A driver rather than an errand**, which is the whole of what tells this
+/// from the Manual Task it replaces. The registration it is handed says the
+/// Conversation is being driven for as long as this runs, so nothing sweeps it
+/// as standing still; it is judged by the rules every other session here is
+/// judged by, so one that ends badly stops the Conversation with the ordinary
+/// Notice; and what follows a clean finish is [`onwards`] rather than nothing.
+///
+/// **Ended on committed plus quiet**, which is a fix session's rule rather than
+/// a backlog step's, and for its reason: an instruction can ask for anything, so
+/// there is no path to watch and no done file to read — what there is, is a
+/// commit, which is the one report an agent cannot half make. Work does not
+/// always stop at the commit, so the session is ended only once it has printed
+/// nothing for the grace period, and anything it prints puts the whole grace
+/// back on the clock.
+///
+/// **And a session that commits nothing stops the Conversation**, exactly as an
+/// inline implementation that commits nothing does. An interactive agent that
+/// decides there is nothing to do exits zero, so a clean exit is not by itself a
+/// report that anything happened — and the pipeline reads the branch to decide
+/// what is next, so a branch nothing was written to is one there is nothing
+/// honest to carry on from.
+pub(crate) async fn instructed(
+    state: AppState,
+    conversation_id: i64,
+    instruction: String,
+    driving: Driving,
+) {
+    // Taken before the session starts, so it is a count of what the branch
+    // carried before the instruction rather than one that includes what it goes
+    // on to do.
+    let already = match store::recorded_commits(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded.len(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
+            return;
+        }
+    };
+
+    let Some(mut session) =
+        launch_in_turn(&state, conversation_id, Prompt::Instruction(instruction)).await
+    else {
+        return;
+    };
+
+    let event_id = session.event_id;
+    let quiet = session.quiet.clone();
+    let pace = state.sessions.pace();
+
+    let ended = tokio::select! {
+        ended = session.ended() => Some(ended),
+        () = committed_and_quiet(&state, conversation_id, already, &quiet, pace) => None,
+    };
+
+    let Some(ended) = ended else {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "an instruction session has committed and gone quiet, so it is being ended",
+        );
+
+        state.sessions.end(conversation_id).await;
+
+        return onwards(state, conversation_id, event_id, driving).await;
+    };
+
+    // The session is over on its own account. It may have committed as its last
+    // act and exited before a poll caught it, which is the ordinary shape of a
+    // session that finishes rather than idles — so the record is asked once more
+    // before this is read as an instruction that came to nothing. Asked
+    // whichever way it ended, exactly as a step's landing is: what was committed
+    // is committed, and an agent that did the work and then fell over on its way
+    // out has left the human nothing to decide about.
+    let landed = match store::recorded_commits(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded.len() > already,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading what an instruction session committed failed");
+            return;
+        }
+    };
+
+    if landed {
+        return onwards(state, conversation_id, event_id, driving).await;
+    }
+
+    // Verkstead ended it — the human closed the Conversation or force-stopped it
+    // out from under the instruction, or the account it was spending ran out of
+    // window. Each of the three has already written the stop this would
+    // otherwise write. See [`crate::sessions::Ended::on_purpose`].
+    if ended.on_purpose() {
+        tracing::info!(
+            conversation_id,
+            event_id,
+            "the instruction session was stopped from outside, so nothing is asked about it",
+        );
+        return;
+    }
+
+    // How it ended, where the ending itself was the problem; otherwise the
+    // nothing it committed is, which is the case no exit status could have
+    // shown.
+    let how = ended
+        .badly()
+        .unwrap_or_else(|| "the session ended without committing anything".to_owned());
+
+    stop(
+        &state,
+        conversation_id,
+        crate::stopping::Decided::Verkstead,
+        "doing what the instruction said",
+        &how,
+        Some(event_id),
+    )
+    .await;
+}
+
+/// Carry the pipeline on from whatever the branch holds, once an instruction
+/// session has done what it was sent to do.
+///
+/// The point of an instruction session being a driver at all: the human wrote
+/// one thing, and what happens after it is the machine's rather than theirs.
+/// What that is, is read off the branch and nowhere else, exactly as every other
+/// turn of a run reads it.
+///
+/// **The backlog first**, because a list with work left in it is an answer to
+/// what is next that nothing else can give — and it is the answer even where the
+/// branch is already on a pull request, which is the shape a wrap-up that split
+/// its findings out into tasks leaves behind. The finish that follows the last
+/// task wraps the pull request up again, so nothing is skipped by going this way
+/// round.
+///
+/// **Then the pull request**, asked of `gh` the way the finish step asks — see
+/// [`crate::wrapping::opened`], which finds it, moves the Conversation into
+/// Wrapping over the record it already had, and starts the wrap-up's watchers
+/// afresh.
+///
+/// **And a stop where the branch holds neither**, because there is nothing left
+/// that could be started and a Conversation left implementing with nothing
+/// driving it would be one the stall sweep stopped a minute later with a worse
+/// sentence. `writing` is the Event the session printed into, so the Notice
+/// carries the tail of what it last said.
+async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: Driving) {
+    let Some(worktree) = worktree(&state, conversation_id).await else {
+        return;
+    };
+
+    if anything_to_work(&worktree).await {
+        tracing::info!(
+            conversation_id,
+            "the instruction is done and the backlog holds more, so the run carries on",
+        );
+
+        return carry_on(state, conversation_id, driving).await;
+    }
+
+    // Held until the wrap-up's own watchers have registrations of their own, or
+    // until the stop is written: dropping first would leave a moment where a
+    // sweep could find the Conversation undriven and stop it all over again.
+    let _driving = driving;
+
+    match store::pull_request(&state.pool, conversation_id).await {
+        Ok(Some(_)) => {
+            tracing::info!(
+                conversation_id,
+                "the instruction is done and the branch is on a pull request, so it is \
+                 wrapped up again",
+            );
+
+            crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
+        }
+        Ok(None) => {
+            tracing::info!(
+                conversation_id,
+                "the instruction is done and the branch holds nothing to carry on with",
+            );
+
+            stop(
+                &state,
+                conversation_id,
+                crate::stopping::Decided::Verkstead,
+                "carrying the work on from what the instruction left",
+                "the branch holds no backlog to work and no pull request to wrap up",
+                Some(writing),
+            )
+            .await;
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading whether the branch is on a pull request failed");
+        }
+    }
+}
+
 /// Follow the grilling session as it stages the work into a roadmap.
 ///
 /// The roadmap's counterpart to [`follow_breakdown`], and the same move: the
@@ -1326,12 +1520,21 @@ enum Prompt {
     /// The implementation skill, which is the whole of an inline run.
     Implementing,
 
+    /// The instruction skill, carrying the hand-written work a steer into
+    /// Implementing sent the session off with.
+    ///
+    /// Its own skill rather than the manual task's, because the two say
+    /// opposite things about what happens next: a manual task leaves the branch
+    /// to the human, and this is a session the pipeline carries on from — see
+    /// [`instructed`].
+    Instruction(String),
+
     /// The addressing skill, carrying the feedback the fix session is for.
     ///
-    /// The one prompt that has something in it, because it is the one session
+    /// One of the prompts that has something in it, because it is a session
     /// launched *about* something rather than about the work as a whole: the
-    /// other three are told where the work is written down and read it for
-    /// themselves.
+    /// ones that carry nothing are told where the work is written down and read
+    /// it for themselves.
     Addressing(String),
 
     /// The reviewing skill, which the one session a wrap-up starts with runs
@@ -1430,6 +1633,9 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 Prompt::Staging => skills::staging(&brief),
                 Prompt::NextTask => skills::next_task(&brief, handoff),
                 Prompt::Implementing => skills::implementing(&brief, handoff),
+                Prompt::Instruction(instruction) => {
+                    skills::instruction(&brief, handoff, instruction)
+                }
                 Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
                 Prompt::Reviewing(said) => skills::reviewing(&brief, handoff, said.as_deref()),
                 Prompt::Responding(said) => skills::responding(&brief, handoff, said),

@@ -2054,13 +2054,15 @@ main:has(.workbench) {
   font-size: 1.1rem;
 }
 
-/* The three documents on a timeline — the frozen brief, the handoff the grilling
-   wrote, and the instruction a manual task was set going with. All three are
-   prose, and read at the measure like every other block of it, on the card and
-   in the pane the card opens. */
+/* The documents on a timeline — the frozen brief, the handoff the grilling
+   wrote, and the two instructions a session can be set going with: a manual
+   task's, and the one a steer carried. All of them are prose, and read at the
+   measure like every other block of it, on the card and in the pane the card
+   opens. */
 .brief-body,
 .handoff-body,
 .manual-task-body,
+.steer-body,
 .document {
   max-width: var(--measure);
 }
@@ -2299,7 +2301,8 @@ main:has(.workbench) {
    came of. Drawn like the move for that reason — the two are one moment read
    twice — and in the ink the rest of the page is set in rather than the dim the
    move takes: of the pair, this is the half somebody decided. */
-.timeline-event > .steered {
+.timeline-event > .steered,
+.steered-with > .steered {
   margin: 0;
   padding: 0.15rem 0 0;
   font-size: 0.85rem;
@@ -2309,6 +2312,15 @@ main:has(.workbench) {
   background: none;
   border: 0;
   border-radius: 0;
+}
+
+/* Except where it carried an instruction, which makes it a card rather than a
+   line: what a session was sent off to do is a document like the brief and the
+   handoff, and is read the same way. The line stays what it was and becomes the
+   card's heading, so the pair under it still reads as one moment. */
+.steered-with > .steered {
+  padding: 0 0 0.6rem;
+  text-align: left;
 }
 
 /* And something Verkstead did on its own account, which reads as the same kind

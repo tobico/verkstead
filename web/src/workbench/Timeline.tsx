@@ -424,7 +424,16 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"Steer" in event && event.Steer}>
-                  {(steer) => <Steered steer={steer()} />}
+                  {(steer) => (
+                    <Steered
+                      steer={steer()}
+                      selected={props.selected === steer().id}
+                      open={() => {
+                        props.select(steer().id);
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"Handoff" in event && event.Handoff}>
                   {(handoff) => (
@@ -1278,11 +1287,32 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// Named rather than arrowed, unlike the move: where it came *from* is the move
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
-function Steered(props: { steer: SteerEvent }): JSX.Element {
-  return (
+///
+/// **A card where it carries an instruction**, which is a steer into
+/// implementing that wrote one: the instruction is what a session was sent off
+/// to do, so it is a document like the brief and the handoff and is read the
+/// same way — clamped here, whole in the details pane. A steer that carried
+/// nothing written stays the line it always was, there being nothing to open.
+function Steered(props: {
+  steer: SteerEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  const line = () => (
     <p class="steered" classList={{ [props.steer.target.toLowerCase()]: true }}>
       You steered this into {props.steer.target}
     </p>
+  );
+
+  return (
+    <Show when={props.steer.html} fallback={line()}>
+      {(html) => (
+        <Openable kind="steered-with" selected={props.selected} open={props.open}>
+          {line()}
+          <Clamped class="steer-body" html={html()} />
+        </Openable>
+      )}
+    </Show>
   );
 }
 

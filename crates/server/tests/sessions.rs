@@ -506,6 +506,21 @@ impl Grilling {
         .await
     }
 
+    /// And the submit into Implementing with something written, which is the
+    /// other payload: what the session it starts is sent off to do.
+    async fn steer_instructed(&self, instruction: &str) -> ConversationSteered {
+        post(
+            &self.app,
+            &format!("/api/ui/conversations/{}/steer/submit", self.id),
+            &serde_json::json!({
+                "target": "Implementing",
+                "interrupt": false,
+                "instruction": instruction,
+            }),
+        )
+        .await
+    }
+
     /// What the next session to start printed, waited for from a Timeline that
     /// held `before` of them.
     ///
@@ -11128,6 +11143,318 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
     // stop, so one dispatching at all is the stop gone; and two attempts is
     // every one the branch was allowed, so a third is the count forgotten.
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+}
+
+/// The same backlog and wrap-up, plus a session that plays the instruction a
+/// steer sends: it prints what it was given and commits, which is what one
+/// reports through.
+///
+/// Told apart from every other session here by the skill its prompt names,
+/// because that is the fact under it: an instruction session runs under the same
+/// implementation Profile the tasks did and differs only in what it was sent to
+/// do — and in which skill it was sent there inside.
+fn a_backlog_then_an_instruction(reviews: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{REVIEW_AND_FIND_NOTHING}
+    ;;
+*responding/SKILL.md*)
+{RESPOND_AND_FIND_NOTHING}
+    ;;
+*instruction/SKILL.md*)
+    printf 'prompt was: %s\n' "$2"
+    printf 'and the burst is unbounded\n' >> notes.md
+    git add -A
+    git commit --quiet -m 'docs: note what the limiter still does not do'
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+    )
+}
+
+/// Steering a Conversation Verkstead has finished with into Implementing with an
+/// instruction hands the pipeline on: the work is done, and the branch's pull
+/// request is wrapped up again.
+///
+/// The exception this whole control was built for. The work went to a pull
+/// request, the wrap-up settled and the Conversation finished — and then there
+/// is one more thing to do on the branch. Nothing on it stands to be carried on,
+/// the backlog having been worked to empty and taken away, so the instruction is
+/// the whole of what the target can be, and what the human writes is what the
+/// session is sent off with.
+///
+/// **And then the pipeline, rather than a Conversation left where the session
+/// stopped.** That is the whole difference between this and the Manual Task it
+/// replaces: what follows a clean finish is read off the branch — no backlog
+/// here, and a pull request — so the wrap-up starts again over what was just
+/// committed.
+#[tokio::test]
+async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_an_instruction(&reviews),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        !view.ready_to_continue,
+        "the backlog was worked to empty and taken away, so nothing on the \
+         branch stands to be carried on — which is what makes the instruction \
+         the whole of this target",
+    );
+
+    let before = outputs(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false },
+        "everything had finished, so the click found nothing to interrupt",
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("Note what the limiter still does not do.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/instruction/SKILL.md"),
+        "the session is put inside the instruction skill rather than the manual \
+         task's, which says the opposite about what follows it: {printed:?}",
+    );
+    assert!(
+        printed.contains("Note what the limiter still does not do."),
+        "and it is started on what the human wrote: {printed:?}",
+    );
+
+    // The second move into wrapping is the whole assertion: the pull request is
+    // the one the finish step opened, so what says it is being wrapped up again
+    // is the Conversation arriving there a second time. Waited for rather than
+    // read once — a wrap-up with nothing outstanding settles itself and goes
+    // straight on to Done, so the state a moment later is as likely to be that.
+    let view = fixture
+        .until(|view| (moves_into(view, Lifecycle::Wrapping) > 1).then(|| view.clone()))
+        .await;
+
+    assert!(
+        commits(&view)
+            .iter()
+            .any(|commit| commit.subject.starts_with("docs: note what the limiter")),
+        "with what the instruction committed under it: {:?}",
+        commits(&view),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped anywhere in it: {:?}",
+        notices(&view),
+    );
+
+    let steer = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.html.clone(),
+            _ => None,
+        })
+        .expect("the steer carries what was written on it");
+
+    assert!(
+        steer.contains("Note what the limiter still does not do."),
+        "and the instruction is on the record as the Steer's own body, which is \
+         what says what this session was for: {steer:?}",
+    );
+}
+
+/// The same steer over a backlog that still has work in it: the instruction is
+/// done first, and then the next task is worked.
+///
+/// Two things at once, and both are what makes an instruction session a driver
+/// rather than an errand beside the work. **The pipeline carries on from it** —
+/// what is next is read off `.tasks/` the moment the session goes quiet, exactly
+/// as it is after every other turn of the run. And **it is registered as driving
+/// while it runs**, which is what the brisk stall sweep here asks: a Conversation
+/// with a session in it and nothing on the register is one the sweep stops, so an
+/// instruction session that ran unregistered would be stopped out from under
+/// itself.
+///
+/// The direction is left exactly as it found it, too. What says how the work is
+/// being built is the human's own pick, and a Conversation working a backlog goes
+/// on working one.
+#[tokio::test]
+async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
+    let fixture = grilling_swept(
+        r#"
+        case "$2" in
+        *instruction/SKILL.md*)
+            printf 'prompt was: %s\n' "$2"
+            printf 'a note\n' >> notes.md
+            git add -A
+            git commit --quiet -m 'docs: note the window it counts against'
+            sleep 300
+            ;;
+        *)
+            case "$1" in
+            claude-grilling-5)
+                mkdir -p .tasks
+                printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+                printf '# 01. Count the requests\n' > .tasks/01-count.md
+                git add .tasks
+                git commit --quiet -m 'chore: plan the rate limiter'
+                printf 'the backlog is written\n'
+                sleep 300
+                ;;
+            *)
+                if [ ! -f TRIED ]; then
+                    printf 'once\n' > TRIED
+                    printf 'this task is beyond me\n'
+                    exit 1
+                else
+                    printf 'prompt was: %s\n' "$2"
+                    sleep 300
+                fi
+                ;;
+            esac
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture.stopped().await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.ready_to_continue,
+        "the branch holds a backlog with work left in it, so carrying on is \
+         offered — and the instruction stands beside it rather than in its place",
+    );
+
+    let before = outputs(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/instruction/SKILL.md"),
+        "what the human wrote goes first, whatever the branch holds: {printed:?}",
+    );
+
+    let printed = fixture.printed_after(before + 1).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "and then the run carries on where it stood, which is the fork that \
+         reads the backlog: {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        view.direction,
+        Some(Direction::TaskList),
+        "with the direction left exactly as the steer found it: a Conversation \
+         that has said how its work is built has said",
+    );
+    assert_eq!(
+        notices(&view).len(),
+        1,
+        "and nothing stopped after the one the steer answered — an instruction \
+         session is registered as driving, so the sweep leaves it alone: {:?}",
+        notices(&view),
+    );
+}
+
+/// An instruction session that ends badly stops the Conversation, with the
+/// ordinary Notice saying what it was doing.
+///
+/// Judged by the ordinary end-of-session rules, which is the other half of being
+/// a driver rather than an errand: the human wrote the instruction and walked
+/// away, so being told is the only thing that reaches them — and nothing carries
+/// the pipeline on over a session that did not finish.
+#[tokio::test]
+async fn an_instruction_session_that_ends_badly_stops_the_conversation() {
+    let fixture = grilling(
+        r#"
+        case "$2" in
+        *instruction/SKILL.md*)
+            printf 'I cannot do that\n'
+            exit 1
+            ;;
+        *)
+            printf 'grilling\n'
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(
+        fixture.steer_instructed("Rebase this onto `main`.\n").await,
+        ConversationSteered::Steered,
+    );
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("Doing what the instruction said"),
+        "the Notice says what it was doing when it stopped: {:?}",
+        stopped.html,
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.blocked_on.is_some() && view.ready_to_resume,
+        "and the Conversation is stopped with Resume on offer, which is what a \
+         session that ended badly leaves anywhere",
+    );
 }
 
 /// A steer into Grilling starts the interview again on the round's own Brief,

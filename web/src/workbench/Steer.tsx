@@ -11,12 +11,13 @@
 //! is nothing to drive in done, so no pairing is picked and no payload is
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
-//! but it does need a pairing, because sessions run there. **Implementing**
-//! needs none either, for the same kind of reason: what is next is the branch's
-//! own answer, and it is offered only where the branch has something to carry
-//! on. **Grilling** is the one that carries a payload: a new brief, which is
-//! optional, and a choice about how much of the last interview the session is
-//! primed with.
+//! but it does need a pairing, because sessions run there. **Grilling** carries
+//! a payload: a new brief, which is optional, and a choice about how much of
+//! the last interview the session is primed with. **Implementing** carries the
+//! other one: an instruction, which is what the session it starts is sent off
+//! to do — optional where the branch has something to carry on, because writing
+//! nothing there means carry it on, and required where it has not, because
+//! there is otherwise nothing for that session to be about.
 //!
 //! **The pairing is the conversation's, not the session's.** It is prefilled
 //! from what the conversation already runs the work under and what is picked is
@@ -56,8 +57,8 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
   NoSuchConversation: "This conversation is gone.",
   NoPullRequest:
     "This work is on no pull request, so there is no wrap-up to steer it into.",
-  NothingToContinue:
-    "There is nothing on this branch to carry on: no backlog with work left in it, and no roadmap it has written.",
+  NoInstruction:
+    "There is nothing on this branch to carry on — no backlog with work left in it, and no roadmap it has written — so write what to do.",
   NoPairing: "Pick the account and model the work runs under from here.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
@@ -70,8 +71,9 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
 /// Where a steer can send a conversation, and what each target means.
 ///
 /// Draft and closed are not here and never will be: each has a way in of its
-/// own. A target the modal offers is a target something runs for, which is what
-/// `offered` below draws two of them out by.
+/// own. Wrapping up is the one of the four that is not always offered, which is
+/// what `offered` below draws it out by: a conversation whose work is on no
+/// pull request has no wrap-up to be steered into.
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
@@ -98,7 +100,7 @@ const TARGETS: {
   {
     target: "Implementing",
     label: "Implementing",
-    note: "The work built on from where the branch stands: the next task of the backlog, or the roadmap it has written. Nothing to write — what is next is the branch’s own answer.",
+    note: "The work built: what you write here done first, and then whatever the branch holds — the next task of its backlog, or the pull request wrapped up again.",
     runs: true,
     role: "implementation",
   },
@@ -141,20 +143,17 @@ export function Steer(props: {
   const queries = useQueryClient();
 
   /// The targets this conversation can actually be sent to. Wrapping up is
-  /// drawn out where the work is on no pull request, and implementing where
-  /// there is nothing on the branch to carry on: a target that would be refused
-  /// by name is worse than one that was never offered.
+  /// drawn out where the work is on no pull request: a target that would be
+  /// refused by name is worse than one that was never offered.
+  ///
+  /// Implementing is not drawn out anywhere, however little the branch holds —
+  /// an instruction can always be written, and what that instruction says is
+  /// the one thing about this modal nothing can work out in advance.
   const offered = createMemo(() =>
     TARGETS.filter((offered) => {
       switch (offered.target) {
         case "Wrapping":
           return onAPullRequest(props.conversation);
-        // The server’s own reading of the branch rather than anything worked
-        // out from the pinned backlog here: what stands includes the finish step
-        // a list of ticked tasks still has to run, which no reading of the
-        // entries could see.
-        case "Implementing":
-          return props.conversation.ready_to_continue;
         default:
           return true;
       }
@@ -230,6 +229,24 @@ export function Steer(props: {
   /// into the argument that has just been left behind.
   const [digest, setDigest] = createSignal(false);
 
+  /// The hand-written work, for a steer into implementing.
+  ///
+  /// Required where the branch holds nothing to carry on and optional where it
+  /// does — the server’s own reading of the branch rather than anything worked
+  /// out from the pinned backlog here: what stands includes the finish step a
+  /// list of ticked tasks still has to run, which no reading of the entries
+  /// could see.
+  const [instruction, setInstruction] = createSignal("");
+
+  /// Whether the submit would be refused for want of one, which is what holds
+  /// the button shut rather than a message after the press.
+  const needsInstruction = createMemo(
+    () =>
+      target() === "Implementing" &&
+      !props.conversation.ready_to_continue &&
+      !instruction().trim(),
+  );
+
   const [interrupt, setInterrupt] = createSignal(false);
   const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
 
@@ -247,6 +264,10 @@ export function Steer(props: {
         // digest is what primes a grilling and nothing else.
         brief: target() === "Grilling" && brief().trim() ? brief() : null,
         digest: target() === "Grilling" && digest(),
+        instruction:
+          target() === "Implementing" && instruction().trim()
+            ? instruction()
+            : null,
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
@@ -345,6 +366,33 @@ export function Steer(props: {
           </div>
         </Show>
 
+        {/* And under implementing, the other payload. Empty is carrying on from
+            what the branch holds, which is only something it can mean where
+            there is something there — so where there is not, the field is what
+            the target is, and the submit is held shut until it says something. */}
+        <Show when={target() === "Implementing"}>
+          <div class="steer-instruction">
+            <label for="steer-instruction">What to do first</label>
+            <textarea
+              id="steer-instruction"
+              rows="6"
+              value={instruction()}
+              onInput={(event) => setInstruction(event.currentTarget.value)}
+              disabled={submit.isPending}
+              placeholder={
+                props.conversation.ready_to_continue
+                  ? "Leave it empty to carry on with what the branch already holds."
+                  : "There is nothing on this branch to carry on, so say what to do."
+              }
+            />
+            <p class="note">
+              A session does what you write and commits it. What follows is
+              Verkstead’s: the next task of the backlog, or the pull request
+              wrapped up again.
+            </p>
+          </div>
+        </Show>
+
         {/* Only where something runs in the state picked. What is settled here
             is the conversation's own pairing rather than one session's, which is
             what the line under it says: steering re-settles what runs the work.
@@ -403,7 +451,9 @@ export function Steer(props: {
           <button
             type="submit"
             class="steer"
-            disabled={submit.isPending || (runs() && !picked())}
+            disabled={
+              submit.isPending || (runs() && !picked()) || needsInstruction()
+            }
           >
             {submit.isPending ? "Steering…" : "Steer"}
           </button>

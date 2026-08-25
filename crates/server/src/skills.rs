@@ -81,6 +81,16 @@ const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
 /// hand runs inside — the one skill nothing in the pipeline ever launches.
 const MANUAL_TASK: &str = "~/.claude/skills/manual-task/SKILL.md";
 
+/// And the instruction skill's, which the session a steer into Implementing
+/// writes its way into runs inside.
+///
+/// Beside the manual task's rather than the same one, because the two say
+/// opposite things about what happens next. A manual task is outside whatever
+/// else the Conversation is doing and leaves the branch to the human; an
+/// instruction session is the pipeline's own, and what follows it is whatever
+/// the branch then holds — see [`crate::runner::instructed`].
+const INSTRUCTION: &str = "~/.claude/skills/instruction/SKILL.md";
+
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
 pub struct Skills {
@@ -406,6 +416,35 @@ pub(crate) fn manual_task(instruction: &str) -> String {
         "Read {MANUAL_TASK} and do what I have asked for below, the way it says. \
          Nothing else in this session tells you how to reach me.\n\n\
          # What I have asked for\n\n{}\n",
+        instruction.trim()
+    )
+}
+
+/// What an instruction session is started on: the documents the work is written
+/// down in, and under them the instruction the human steered it with.
+///
+/// The documents *and* the instruction, which is the whole difference between
+/// this and [`manual_task`] at the prompt. A manual task is outside whatever
+/// else the Conversation is doing, so it is primed with nothing; this is a
+/// session the pipeline carries on from, working the same branch as everything
+/// before it — so it is told what the work is, and then told what it is for.
+///
+/// The instruction goes *last*, under the documents rather than over them, for
+/// the reason everything written under them goes there: it is the newest thing
+/// said and the least general. The documents say what the work is; this says
+/// what to do about it now.
+pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str) -> String {
+    let prompt = on_the_documents(
+        &format!(
+            "Read {INSTRUCTION} and do what I have asked for at the end of this prompt, the \
+             way it says."
+        ),
+        brief,
+        handoff,
+    );
+
+    format!(
+        "{prompt}\n# What I have asked for\n\n{}\n",
         instruction.trim()
     )
 }
@@ -1768,6 +1807,100 @@ mod tests {
         );
     }
 
+    /// What the instruction skill has to say that the manual-task skill it
+    /// stands beside says the opposite of: the pipeline carries on from here.
+    ///
+    /// The whole reason it is a skill of its own. A session told that what
+    /// happens to the branch next is the human's would be one that lined the
+    /// work up for somebody to come and look at it, and what actually follows an
+    /// instruction session is Verkstead reading the branch and starting the next
+    /// thing.
+    #[test]
+    fn the_instruction_skill_hands_what_follows_to_the_pipeline() {
+        let instruction = skill("instruction/SKILL.md");
+
+        assert!(
+            instruction.contains("The pipeline carries on after you"),
+            "what follows this session is the machine's rather than its own: {instruction}"
+        );
+        assert!(
+            !instruction.contains("the human's to decide"),
+            "which is the opposite of what the manual-task skill says about the same \
+             moment: {instruction}"
+        );
+        assert!(
+            !instruction.contains("gh pr create"),
+            "and it does not carry the branch anywhere itself: {instruction}"
+        );
+    }
+
+    /// And what it has to leave behind, which is the same thing every working
+    /// skill here leaves behind: a commit, made without asking anybody.
+    ///
+    /// Committing is also how this one *reports*. Nothing reads what an
+    /// instruction session prints to decide whether the work landed — what is
+    /// read is the branch — so a session that changed files and left them
+    /// uncommitted is one that stops the Conversation.
+    #[test]
+    fn the_instruction_skill_says_to_commit_and_then_stop() {
+        let instruction = skill("instruction/SKILL.md");
+
+        assert!(
+            instruction.contains("git commit"),
+            "committing what it changed is how the session reports: {instruction}"
+        );
+        assert!(
+            instruction.contains("Nothing waits on approval"),
+            "and there is no gate in front of it, as there is in front of none: \
+             {instruction}"
+        );
+        assert!(
+            instruction.contains("Keep to what was asked"),
+            "the scope is the instruction and nothing beside it: {instruction}"
+        );
+        assert!(
+            instruction.contains("do not start the next task"),
+            "and the step after this one belongs to the session Verkstead starts for \
+             it: {instruction}"
+        );
+    }
+
+    /// An instruction session is put inside its own skill by its prompt, and
+    /// primed with the documents *and* the instruction — which is the other half
+    /// of what tells it from a manual task.
+    ///
+    /// The documents because it works the same branch as everything before it,
+    /// and the instruction last because it is the newest thing said and the
+    /// least general: they say what the work is, and it says what to do about it
+    /// now.
+    #[test]
+    fn an_instruction_session_is_started_on_the_documents_and_the_instruction() {
+        let prompt = instruction(
+            "# Rate limiting\n\nThe API has none.\n",
+            Some("# What we settled\n\nIn-process counter.\n"),
+            "Move the counter into Redis.\n",
+        );
+
+        assert!(
+            prompt.contains(INSTRUCTION),
+            "the skill is named by the path it is mounted at: {prompt:?}"
+        );
+        assert!(
+            !prompt.contains(MANUAL_TASK) && !prompt.contains(IMPLEMENTING),
+            "and not the manual task's, which says the opposite about what follows, \
+             nor the inline implementation's: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("The API has none.") && prompt.contains("In-process counter."),
+            "both documents go in whole, this being a session on the same work as \
+             every other: {prompt:?}"
+        );
+        assert!(
+            prompt.ends_with("# What I have asked for\n\nMove the counter into Redis.\n"),
+            "and the instruction is the last thing said, under them: {prompt:?}"
+        );
+    }
+
     /// A grilling started again is the same grilling — the same skill and the
     /// same Brief — with the log of what has already been settled under it, so
     /// that it does not open by asking what the human answered yesterday.
@@ -1849,6 +1982,7 @@ mod tests {
         for name in [
             "implementing/SKILL.md",
             "manual-task/SKILL.md",
+            "instruction/SKILL.md",
             "addressing/SKILL.md",
             "reviewing/SKILL.md",
             "responding/SKILL.md",

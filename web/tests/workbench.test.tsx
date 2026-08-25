@@ -4425,7 +4425,11 @@ describe("steering a conversation", () => {
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(targets(await openSteer(container))).toEqual(["Grilling", "Done"]);
+    expect(targets(await openSteer(container))).toEqual([
+      "Grilling",
+      "Implementing",
+      "Done",
+    ]);
     expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
     unmount();
 
@@ -4437,25 +4441,54 @@ describe("steering a conversation", () => {
 
     const modal = await openSteer(wrapped.container);
 
-    expect(targets(modal)).toEqual(["Grilling", "Wrapping", "Done"]);
+    expect(targets(modal)).toEqual([
+      "Grilling",
+      "Implementing",
+      "Wrapping",
+      "Done",
+    ]);
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
   });
 
-  /// Implementing carries on what the branch already holds, so it is offered
-  /// only where something stands to be carried on: a backlog with work left in
-  /// it, or a roadmap the branch has written. The server says which — what
-  /// stands includes the finish step a list of ticked tasks still has to run,
-  /// which no reading of the entries here could see.
-  it("offers implementing only where there is something to carry on", async () => {
+  /// Implementing either carries on what the branch already holds or does what
+  /// the human writes, so the instruction is required exactly where nothing
+  /// stands to be carried on — and the submit is held shut until it says
+  /// something rather than offered and then refused.
+  ///
+  /// The server says whether anything stands: what does includes the finish step
+  /// a list of ticked tasks still has to run, which no reading of the entries
+  /// here could see.
+  it("requires the instruction where nothing stands to be carried on", async () => {
     theGrillingStanding(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
-    expect(targets(await openSteer(container))).toEqual(["Grilling", "Done"]);
+    const bare = await openSteer(container);
+
+    fireEvent.click(await drawn(bare, '.steer-target input[value="Implementing"]'));
+
+    const held = (await drawn(
+      bare,
+      ".steer-buttons .steer",
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(held.disabled).toBe(true));
+    expect(
+      (bare.querySelector("#steer-instruction") as HTMLTextAreaElement)
+        .placeholder,
+    ).toContain("nothing on this branch to carry on");
+
+    fireEvent.input(await drawn(bare, "#steer-instruction"), {
+      target: { value: "Rebase this onto main." },
+    });
+
+    await waitFor(() => expect(held.disabled).toBe(false));
     unmount();
 
+    // And where something does stand, writing nothing means carry it on: the
+    // field is still there, and the submit was never held shut.
     theGrillingStanding(
       { ready_to_stop: true, working: true, ready_to_continue: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
@@ -4464,8 +4497,63 @@ describe("steering a conversation", () => {
 
     const modal = await openSteer(standing.container);
 
-    expect(targets(modal)).toEqual(["Grilling", "Implementing", "Done"]);
-    expect(screen.getByText(/the next task of the backlog/)).toBeTruthy();
+    fireEvent.click(
+      await drawn(modal, '.steer-target input[value="Implementing"]'),
+    );
+
+    const press = (await drawn(
+      modal,
+      ".steer-buttons .steer",
+    )) as HTMLButtonElement;
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      (modal.querySelector("#steer-instruction") as HTMLTextAreaElement)
+        .placeholder,
+    ).toContain("carry on with what the branch already holds");
+  });
+
+  /// And the instruction is drawn under implementing alone: what a hand-written
+  /// job under a wrap-up would mean is nothing at all.
+  it("draws the instruction only under implementing", async () => {
+    const fetching = theGrillingStanding(
+      { ready_to_stop: true, working: false, ready_to_continue: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(
+        STEER_SUBMIT,
+        json("Steered" satisfies ConversationSteered),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+
+    expect(modal.querySelector("#steer-instruction")).toBeNull();
+
+    fireEvent.click(
+      await drawn(modal, '.steer-target input[value="Implementing"]'),
+    );
+
+    fireEvent.input(await drawn(modal, "#steer-instruction"), {
+      target: { value: "Note the window the count is against." },
+    });
+    fireEvent.click(await drawn(modal, ".steer-buttons .steer"));
+
+    const building = GRILLING.implementation_pairing!;
+
+    await waitFor(() =>
+      expect(sent(fetching, STEER_SUBMIT)).toEqual({
+        target: "Implementing",
+        interrupt: false,
+        pairing: { profile_id: building.profile.id, model: building.model },
+        // No round is being opened, so neither half of what one carries is
+        // sent.
+        brief: null,
+        digest: false,
+        instruction: "Note the window the count is against.",
+      }),
+    );
   });
 
   /// The pairing is the conversation's rather than one session's, so it is
@@ -4530,10 +4618,12 @@ describe("steering a conversation", () => {
         target: "Wrapping",
         interrupt: false,
         pairing: { profile_id: PROFILES[0]!.id, model: PROFILES[0]!.models[0] },
-        // No round is being opened, so neither half of what one carries is
-        // sent: a brief under a wrap-up would be a document about nothing.
+        // No round is being opened and no session is being written a job, so
+        // none of what those carry is sent: a brief under a wrap-up would be a
+        // document about nothing.
         brief: null,
         digest: false,
+        instruction: null,
       }),
     );
   });
@@ -4571,6 +4661,7 @@ describe("steering a conversation", () => {
         pairing: { profile_id: own.profile.id, model: own.model },
         brief: "# Retries\n\nThe backoff is wrong.\n",
         digest: true,
+        instruction: null,
       }),
     );
   });
@@ -4645,6 +4736,7 @@ describe("steering a conversation", () => {
         pairing: null,
         brief: null,
         digest: false,
+        instruction: null,
       }),
     );
 
@@ -4710,7 +4802,14 @@ describe("steering a conversation", () => {
       state: "Done",
       timeline: [
         ...GRILLING.timeline,
-        { Steer: { id: 9001, at: "2026-08-24T11:00:00Z", target: "Done" } },
+        {
+          Steer: {
+            id: 9001,
+            at: "2026-08-24T11:00:00Z",
+            target: "Done",
+            html: null,
+          },
+        },
         { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
       ],
     });
@@ -4725,6 +4824,42 @@ describe("steering a conversation", () => {
     ].map((line) => line.textContent);
 
     expect(moved.at(-1)).toBe("Grilling → Done");
+  });
+
+  /// And where it carries an instruction it is a card rather than a line: what
+  /// the session was sent off to do is a document like the brief and the
+  /// handoff, and is read the same way — clamped beside the move, whole in the
+  /// details pane.
+  it("draws the instruction a steer carried, and opens the whole of it", async () => {
+    theGrillingStanding({
+      state: "Implementing",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9003,
+            at: "2026-08-24T11:00:00Z",
+            target: "Implementing",
+            html: "<p>Note the window the count is against.</p>",
+          },
+        },
+        { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, ".timeline-event > .steered-with");
+
+    expect(card.textContent).toContain("You steered this into Implementing");
+    expect(card.querySelector(".steer-body")!.innerHTML).toBe(
+      "<p>Note the window the count is against.</p>",
+    );
+
+    fireEvent.click(card);
+
+    const pane = await drawn(container, ".details-pane .document");
+
+    expect(pane.textContent).toContain("Note the window the count is against.");
   });
 });
 

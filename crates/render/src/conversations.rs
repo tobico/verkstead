@@ -259,11 +259,15 @@ pub struct ConversationView {
     /// branch holds a backlog with work left in it, or a roadmap it has
     /// written.
     ///
-    /// What decides whether the steer modal offers Implementing at all, and the
-    /// server’s rule rather than something the page works out from the fields
-    /// around it — what stands is a reading of the Worktree as it is now, which
-    /// a page cannot make. Read the same way everything else pinned to the
-    /// Timeline is: a Conversation with no Worktree on disk has nothing
+    /// What decides whether the steer modal offers *carrying on* — the target
+    /// itself is offered on every Conversation there is, because an instruction
+    /// can always be written. Where this is false the instruction is the whole
+    /// of what that target can be, so the modal requires one.
+    ///
+    /// The server’s rule rather than something the page works out from the
+    /// fields around it: what stands is a reading of the Worktree as it is now,
+    /// which a page cannot make. Read the same way everything else pinned to
+    /// the Timeline is — a Conversation with no Worktree on disk has nothing
     /// standing, whatever its branch may hold.
     ///
     /// Checked again when the modal is submitted, as every refusal here is;
@@ -784,11 +788,15 @@ pub struct ManualTaskEvent {
     pub html: String,
 }
 
-/// A steer as the page receives it: when, and where the human sent it.
+/// A steer as the page receives it: when, where the human sent it, and what
+/// they wrote to send it there with.
 ///
-/// No rendered body, like the move it stands above: what a steer says so far is
-/// the one state it named. The targets that carry a brief or an instruction with
-/// them arrive with the tasks that build them.
+/// The one Event that is sometimes a move and sometimes a document. A steer
+/// into Wrapping or Done says nothing but the state, like the move it stands
+/// above; a steer into Implementing carries the instruction the session was set
+/// going on, which is the whole of what that session was asked to do. A steer
+/// into Grilling carries a document too, and that one arrives as a Brief Event
+/// of its own — it opens a round, and a round starts from a Brief.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SteerEvent {
@@ -799,6 +807,11 @@ pub struct SteerEvent {
 
     /// The state the human moved it into.
     pub target: Lifecycle,
+
+    /// The instruction they steered it with, rendered and sanitized on the way
+    /// out as every piece of markdown on this wire is — and `None` for every
+    /// steer that carried nothing written.
+    pub html: Option<String>,
 }
 
 /// A move as the page receives it: when, and to what.
@@ -1437,9 +1450,24 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
     })
 }
 
-/// A Steer as an Event: the state the human sent the Conversation into.
-pub fn steer_event(id: i64, at: String, target: Lifecycle) -> TimelineEvent {
-    TimelineEvent::Steer(SteerEvent { id, at, target })
+/// A Steer as an Event: the state the human sent the Conversation into, and the
+/// instruction they sent it with where they wrote one.
+///
+/// Rendered the way the Brief and a Manual Task's instruction are, and for the
+/// same reason: it is what the human asked for, written for somebody to read
+/// back.
+pub fn steer_event(
+    id: i64,
+    at: String,
+    target: Lifecycle,
+    instruction: Option<&str>,
+) -> TimelineEvent {
+    TimelineEvent::Steer(SteerEvent {
+        id,
+        at,
+        target,
+        html: instruction.map(crate::markdown::to_html),
+    })
 }
 
 /// Starting a Conversation: the Repo it is against, and nothing else.
@@ -1769,20 +1797,25 @@ pub enum SteerTarget {
     /// branch checked out again into one.
     Grilling,
 
-    /// The work built again, carrying on from what the branch already holds:
-    /// the next task of the backlog, or the roadmap the branch has written.
+    /// The work built: either carrying on from what the branch already holds —
+    /// the next task of the backlog, the roadmap it has written — or doing what
+    /// the human wrote in the modal.
     ///
-    /// Offered only where something actually stands to be carried on. Where
-    /// nothing does there is nothing for the recompute to pick up, and the
-    /// target is refused by name — see
-    /// [`ConversationSteered::NothingToContinue`] and
-    /// [`ConversationView::ready_to_continue`], which is the same rule the
-    /// modal draws by.
+    /// **The instruction is what makes this a target from anywhere.** Where
+    /// something stands, writing nothing carries it on and what is next is the
+    /// branch’s own answer, asked exactly as every other turn of the run asks
+    /// it — see [`ConversationView::ready_to_continue`], which is the rule the
+    /// modal offers that by. Where nothing stands there is nothing to pick up,
+    /// so an instruction is required and a submit without one is refused by
+    /// name — see [`ConversationSteered::NoInstruction`].
     ///
-    /// No payload: what is next is the branch’s own answer, asked exactly
-    /// as every other turn of the run asks it. And no direction settled either
-    /// — a steer that carries on what stands leaves what says how the work is
-    /// being built as it found it.
+    /// An instruction session is a driver rather than an errand: registered as
+    /// driving while it runs, judged by the ordinary end-of-session rules, and
+    /// on a clean finish the pipeline carries on from whatever the branch then
+    /// holds. Which is why a Conversation that has never said how its work is
+    /// built is recorded as building it inline as the steer lands — a state
+    /// something runs in with nothing saying how is a record a pressed Resume
+    /// refuses on.
     Implementing,
 
     /// The branch looked at again: the checks watched, the review run, the
@@ -1859,6 +1892,26 @@ pub struct SteerSubmission {
     #[serde(default)]
     pub brief: Option<String>,
 
+    /// The hand-written work, for a steer into Implementing.
+    ///
+    /// It lands as the Steer Event's own body and a session is started on it —
+    /// a driver of the Conversation rather than an errand beside it, so what
+    /// follows a clean finish is whatever the branch then holds.
+    ///
+    /// **Required where nothing stands to be carried on**, and optional beside
+    /// carrying on where something does: a branch with a backlog left in it has
+    /// an answer to what is next, and a branch with nothing on it has none. A
+    /// submit that names Implementing with neither is refused by name — see
+    /// [`ConversationSteered::NoInstruction`].
+    ///
+    /// Whitespace alone is nothing written, exactly as the brief above it: a
+    /// textarea somebody tabbed through is not an instruction.
+    ///
+    /// Nothing anywhere else reads it. A target that starts no session has
+    /// nothing to write an instruction for.
+    #[serde(default)]
+    pub instruction: Option<String>,
+
     /// Whether the session is primed with everything the human has already
     /// answered.
     ///
@@ -1899,16 +1952,18 @@ pub enum ConversationSteered {
     /// way every named refusal here is.
     NoPullRequest,
 
-    /// Implementing was named for a Conversation with nothing on its branch to
-    /// carry on: no backlog with work left in it, and no roadmap it has
-    /// written.
+    /// Implementing was named with nothing written, for a Conversation with
+    /// nothing on its branch to carry on: no backlog with work left in it, and
+    /// no roadmap it has written.
     ///
-    /// What a steer into Implementing does is pick up what stands, so a branch
-    /// where nothing does is one it has nothing to start. The modal does not
-    /// offer the target on such a Conversation at all — see
-    /// [`ConversationView::ready_to_continue`] — and this is the same rule
-    /// asked again on arrival.
-    NothingToContinue,
+    /// One or the other, never neither. A steer into Implementing either picks
+    /// up what stands or does what the human wrote, so a branch where nothing
+    /// stands and a modal where nothing was written is a session with no job.
+    /// The modal requires the instruction on such a Conversation rather than
+    /// offering the submit and refusing it — see
+    /// [`ConversationView::ready_to_continue`], which is what it draws that by
+    /// — and this is the same rule asked again on arrival.
+    NoInstruction,
 
     /// Nothing says which account and model the work runs under from here:
     /// neither a Pairing picked in the modal nor one the Conversation already
