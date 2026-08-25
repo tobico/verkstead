@@ -54,7 +54,6 @@ import {
   closeConversation,
   forceStopConversation,
   listProfiles,
-  reopenConversation,
   resume,
   saveBrief,
   startGrilling,
@@ -68,7 +67,6 @@ import type {
   BriefSaved,
   CommitEvent,
   ConversationClosed,
-  ConversationReopened,
   ConversationStopped,
   ConversationView,
   GrillingStarted,
@@ -209,16 +207,6 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Choose a grilling profile and model first, on the brief.",
   NoImplementationPairing:
     "Choose an implementation profile and model first, on the brief.",
-};
-
-/// And each way of being refused a second round.
-export const REOPEN_REFUSAL: Record<ConversationReopened, string> = {
-  Reopened: "",
-  NoSuchConversation: "This conversation is gone.",
-  NotDone:
-    "Only a finished conversation can be reopened, and this one is not finished.",
-  WorktreeRefused:
-    "The worktree is gone and git would not check the branch out again. The server log says why.",
 };
 
 /// The state a move came *from*: the state the move before it went to, and
@@ -522,20 +510,15 @@ export function Timeline(props: {
       </ol>
 
       {/* After everything that has happened, because it is what happens next.
-          Drawn outside the list: none of them is an event, and any of them would
-          be an event that moved every time one landed. Only one is ever drawn —
-          each is for a different state — so they read as the one thing there is
-          to do from here. Adopting a stage is one state's, and the other two are
-          the two ends of the ladder: starting a draft grilling, and opening a
-          second round on a conversation that is finished. */}
+          Drawn outside the list: neither is an event, and either would be an
+          event that moved every time one landed. Only one is ever drawn — each
+          is for a different state — so they read as the one thing there is to do
+          from here. What to do about a conversation that is finished is not
+          here: a steer is the way back into one, and it is in the menu on the
+          header, drawn whatever state the conversation is in. */}
       <Show
         when={props.conversation.adopting}
-        fallback={
-          <>
-            <StartGrilling conversation={props.conversation} />
-            <Reopen conversation={props.conversation} />
-          </>
-        }
+        fallback={<StartGrilling conversation={props.conversation} />}
       >
         {(adopting) => (
           <Adoption conversation={props.conversation} adopting={adopting()} />
@@ -637,8 +620,7 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// Drawn whenever there is a worktree to run in and no session is registered for
 /// it. That is the literal rule and it is deliberate: the gaps between an
 /// unattended run's steps, a wrapping lull, a grilling waiting on a pick, a
-/// finished conversation, a reopened one being written a second brief, and a
-/// conversation that has stopped all show it, because the point of it is to get a
+/// finished conversation, and a conversation that has stopped all show it, because the point of it is to get a
 /// stuck conversation moving. After a server restart nothing is running anywhere,
 /// so it shows everywhere, and that is wanted too.
 ///
@@ -684,8 +666,8 @@ function ManualTaskComposer(props: {
   ///
   /// A worktree to run in and nothing running is the whole of it: a conversation
   /// that has never been grilled and one that was closed have no worktree, so
-  /// neither is ever offered it, and a reopened one being written a second brief
-  /// has one and is exactly where the escape hatch belongs.
+  /// neither is ever offered it — and a conversation Verkstead has finished with
+  /// keeps its worktree, which is exactly where the escape hatch belongs.
   const offered = () =>
     props.conversation.worktree !== null && !props.conversation.working;
 
@@ -1639,65 +1621,6 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The button that opens a second round on a conversation Verkstead has finished
-/// with.
-///
-/// Drawn on `Done` and nowhere else. Closed is off the ladder and stays there,
-/// and every other state is somewhere the work has got to — there is nothing to
-/// reopen about work that is still going on.
-///
-/// Where `Start grilling` sits, and for the same reason: it is the next thing to
-/// do about this conversation, and the end of everything that has happened is
-/// where the next thing belongs. What it leaves is a brief with nothing in it and
-/// a conversation drafting again, so the button pressed after this one is that
-/// one.
-function Reopen(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<ConversationReopened | null>(null);
-
-  const reopen = useMutation(() => ({
-    mutationFn: () => reopenConversation(props.conversation.id),
-    onSuccess: (outcome: ConversationReopened) => {
-      setRefused(outcome === "Reopened" ? null : outcome);
-
-      // Either way: reopened is a timeline that has moved, and refused is a
-      // picture of the world this page read a moment ago — reading it again is
-      // both the correction and the explanation.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={props.conversation.state === "Done"}>
-      <div class="reopen">
-        <button
-          type="button"
-          class="reopen-conversation"
-          disabled={reopen.isPending}
-          onClick={() => reopen.mutate()}
-        >
-          {reopen.isPending ? "Reopening…" : "Reopen with a new brief"}
-        </button>
-        <p class="note">
-          A second round on the same branch. The brief above stays where it is —
-          this adds one to write, and the worktree comes back if it has gone.
-        </p>
-
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{REOPEN_REFUSAL[outcome()]}</p>}
-        </Show>
-        <Show when={reopen.isError}>
-          <p class="error">
-            The conversation could not be reopened: {reopen.error?.message}
-          </p>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
 /// What can be done to the conversation as a whole, rather than to any one
 /// event: a menu on the header, holding the three ways of ending what it is
 /// doing.
@@ -1991,9 +1914,9 @@ function Brief(props: {
   /// that cut a document off without offering the rest would be one that had
   /// hidden it.
   ///
-  /// The Brief's own flag rather than the Conversation's state, because a
-  /// reopened one has a frozen Brief and an open one on the same Timeline: what
-  /// froze is the round, and the server is what says which round each Brief
+  /// The Brief's own flag rather than the Conversation's state, because what
+  /// froze is the round and a Conversation steered into a second one has a Brief
+  /// per round on the same Timeline: the server is what says which round each
   /// belongs to. An adopting Conversation's stage brief comes down frozen from
   /// the start — it is nobody here's to write.
   const frozen = () => props.brief.frozen;
@@ -2129,11 +2052,9 @@ function Brief(props: {
           starts, so past that moment there is nothing here that could be
           changed.
 
-          Under *one* brief, though. A reopened conversation is drafting with a
-          frozen brief above its open one, and the setup belongs under the round
-          being set up rather than under both — while an adopting one is drafting
-          with a brief that is frozen from the start, because the stage brief is
-          nobody here's to write, and its setup is still the human's. */}
+          Under the brief being written, which on an adopting conversation is
+          one that is frozen: the stage brief is nobody here's to write, and its
+          setup is still the human's. */}
       <Show
         when={
           props.conversation.state === "Draft" &&

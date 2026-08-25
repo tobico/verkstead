@@ -2187,12 +2187,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         )),
     );
 
-    // And the same Conversation reopened, which is the one shape a viewer test
-    // cannot reach any other way: a second round starts on a Conversation
-    // Verkstead has finished with, and finishing one is a wrap-up settling
-    // everything it waits on. Walked there rather than written, because what a
-    // round boundary looks like is exactly what this fixture is for — the frozen
-    // Brief above it, the one being written below.
+    // And the same Conversation steered into a second round, which is the one
+    // shape a viewer test cannot reach any other way: the human sends work
+    // Verkstead has finished with back into grilling, and finishing one is a
+    // wrap-up settling everything it waits on. Walked there rather than written,
+    // because what a round boundary looks like is exactly what this fixture is
+    // for — the first round's Brief above it, the round steered into below.
     for waiting_on in verkstead_store::WAITED_ON {
         store::settle_wrap_up(&pool, wrapping, waiting_on)
             .await
@@ -2200,20 +2200,26 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     }
     store::finish_wrap_up(&pool, wrapping).await.unwrap();
 
-    store::reopen_conversation(
+    store::steer_conversation(
         &pool,
         wrapping,
-        std::path::Path::new("/var/lib/verkstead/worktrees/verkstead-rate-limiting"),
+        verkstead_store::Steer {
+            target: store::Lifecycle::Grilling,
+            pairing: None,
+            brief: Some("# Rate limiting, per account\n\n"),
+            instruction: None,
+            direction: None,
+            worktree: Some(std::path::Path::new(
+                "/var/lib/verkstead/worktrees/verkstead-rate-limiting",
+            )),
+            base_commit: None,
+        },
     )
     .await
     .unwrap();
 
-    store::save_brief(&pool, wrapping, "# Rate limiting, per account\n\n")
-        .await
-        .unwrap();
-
     write(
-        "conversation-reopened.json",
+        "conversation-second-round.json",
         &pin_health(&pin_timeline(
             &get(&app, &format!("/api/ui/conversations/{wrapping}")).await,
         )),

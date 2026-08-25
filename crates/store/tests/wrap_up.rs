@@ -11,13 +11,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Ask, Event, Finished, Lifecycle, Reopening, Settlements, Submission, WAITED_ON,
-    WaitingOn, addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts,
+    Archiving, Ask, Event, Finished, Lifecycle, Settlements, Steer, Steering, Submission,
+    WAITED_ON, WaitingOn, addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts,
     forget_addressed_comments, forget_fix_attempts, implement_again, last_proposal,
     load_conversation, load_response, load_set, open_database, pick_direction,
     record_addressed_comments, record_commit, record_fix_attempt, record_pull_request,
-    register_repo, reopen_conversation, review_asked, save_brief, settle_wrap_up, split_out,
-    start_conversation, start_grilling, submit_response, timeline, unlanded_batch_fixes,
+    register_repo, review_asked, save_brief, settle_wrap_up, split_out, start_conversation,
+    start_grilling, steer_conversation, submit_response, timeline, unlanded_batch_fixes,
     unlanded_fixes, unsettle_wrap_up, wrap_up_settled,
 };
 
@@ -297,7 +297,7 @@ async fn a_wrap_up_with_all_three_settled_is_done_and_the_move_is_on_the_timelin
 /// a session answered stays answered, where every check and every review belongs
 /// to the round that ran them.
 #[tokio::test]
-async fn reopening_forgets_what_the_round_before_it_settled() {
+async fn a_second_round_forgets_what_the_round_before_it_settled() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
@@ -312,10 +312,22 @@ async fn reopening_forgets_what_the_round_before_it_settled() {
     assert_eq!(finish_wrap_up(&pool, id).await.unwrap(), Finished::Done);
 
     assert_eq!(
-        reopen_conversation(&pool, id, Path::new("/state/worktrees/rate-limiting"))
-            .await
-            .unwrap(),
-        Reopening::Reopened
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                target: Lifecycle::Grilling,
+                pairing: None,
+                brief: Some("# Rate limiting, per account\n"),
+                instruction: None,
+                direction: None,
+                worktree: Some(Path::new("/state/worktrees/rate-limiting")),
+                base_commit: None,
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered
     );
 
     assert_eq!(

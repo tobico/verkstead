@@ -24,7 +24,6 @@ import type {
   CommitPane,
   ConversationClosed,
   ConversationEntry,
-  ConversationReopened,
   ConversationSteered,
   ConversationStopped,
   ConversationView,
@@ -77,7 +76,9 @@ import building from "./fixtures/conversation-building.json" with { type: "json"
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import stopped from "./fixtures/conversation-stopped.json" with { type: "json" };
 import paused from "./fixtures/conversation-paused.json" with { type: "json" };
-import reopened from "./fixtures/conversation-reopened.json" with { type: "json" };
+import secondRound from "./fixtures/conversation-second-round.json" with {
+  type: "json",
+};
 import answeredSet from "./fixtures/set-answered.json" with { type: "json" };
 import answeringSet from "./fixtures/set-answering.json" with { type: "json" };
 import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
@@ -603,7 +604,7 @@ describe("how a card says where its conversation has got to", () => {
     ).not.toContain("box-shadow: inset 0.2rem");
   });
 
-  /// Dimmed and still a row to press: a Done Conversation can be reopened.
+  /// Dimmed and still a row to press: a Done Conversation can be steered.
   it("opens a dimmed conversation like any other", async () => {
     theSidebar({ state: "Done" });
     const { container, history } = mount();
@@ -4026,136 +4027,52 @@ describe("closing a conversation", () => {
   });
 });
 
-/// A conversation Verkstead has finished with, opened again for a second brief
-/// round: the frozen brief above the round boundary, and the one being written
-/// under it.
-describe("reopening a conversation", () => {
-  const REOPENED = reopened as ConversationView;
+/// A conversation Verkstead had finished with, steered into a second round: the
+/// first round's brief above the boundary and the round steered into below it.
+///
+/// A steer is the one way back into work that is over — nothing under the
+/// timeline offers a second door — so what these ask is that the round it opens
+/// reads as one, and that a finished conversation still has the steer to press.
+describe("a second round", () => {
+  const SECOND = secondRound as ConversationView;
 
-  /// The workbench with the reopened conversation opened instead of the drafting
+  /// The workbench with the steered conversation opened instead of the drafting
   /// one.
-  function theReopened(...answers: Parameters<typeof serving>) {
+  function theSecondRound(...answers: Parameters<typeof serving>) {
     return theWorkbench(
-      whenever(`/api/ui/conversations/${REOPENED.id}`, json(REOPENED)),
+      whenever(`/api/ui/conversations/${SECOND.id}`, json(SECOND)),
       ...answers,
     );
   }
 
-  /// Where `Start grilling` sits, and for the same reason: it is the next thing
-  /// to do about this conversation, and the end of everything that has happened
-  /// is where the next thing belongs.
-  it("offers the press under the timeline once the work is finished", async () => {
-    theWorkbenchWith({ state: "Done" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const press = await drawn(container, ".reopen .reopen-conversation");
-    expect(press.textContent).toContain("Reopen");
-
-    expect(
-      container.querySelector(".timeline")!.compareDocumentPosition(press) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  /// Done and nowhere else. Closed is off the ladder and stays there, and every
-  /// other state is somewhere the work has got to.
-  it("is offered on done and on no other state", async () => {
-    for (const state of [
-      "Draft",
-      "Grilling",
-      "Implementing",
-      "Wrapping",
-      "Closed",
-    ] as const) {
-      theWorkbenchWith({ state });
-      const { container, unmount } = mount(`/conversations/${OPEN.id}`);
-
-      await drawn(container, ".timeline");
-      expect(container.querySelector(".reopen")).toBeNull();
-      unmount();
-    }
-  });
-
-  it("posts to the conversation's own reopen route", async () => {
-    const fetching = theWorkbenchWith(
-      { state: "Done" },
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/reopen`,
-        json("Reopened" satisfies ConversationReopened),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
-
-    await waitFor(() =>
-      expect(
-        sent(fetching, `/api/ui/conversations/${OPEN.id}/reopen`),
-      ).toEqual({}),
-    );
-  });
-
-  /// What the human is owed before pressing it: the frozen brief is not touched,
-  /// and the branch is the one the work is already on.
-  it("says the brief above it stays where it is", async () => {
-    theWorkbenchWith({ state: "Done" });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const panel = await drawn(container, ".reopen");
-    expect(panel.textContent).toContain("second round on the same branch");
-    expect(panel.textContent).toContain("stays where it is");
-  });
-
-  it("says when the branch could not be checked out again", async () => {
-    theWorkbenchWith(
-      { state: "Done" },
-      whenever(
-        `/api/ui/conversations/${OPEN.id}/reopen`,
-        json("WorktreeRefused" satisfies ConversationReopened),
-        "POST",
-      ),
-    );
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    fireEvent.click(await drawn(container, ".reopen .reopen-conversation"));
-
-    await waitFor(() => screen.getByText(/would not check the branch out again/));
-  });
-
-  /// One round's brief is a record and the next one's is the field. Both are on
-  /// the timeline, and only one of them is written in — which is the whole
-  /// reason a brief carries its own `frozen` rather than reading the
-  /// conversation's state, since both of these are on a conversation that is
-  /// drafting.
-  it("draws the frozen brief beside the one being written", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+  /// One brief per round, both of them a record: the round steered into is past
+  /// drafting from the moment it lands, so neither is a field. What the first
+  /// round was built from stays on the timeline beside what the second is.
+  it("draws a brief for each round, neither of them a field", async () => {
+    theSecondRound();
+    const { container } = mount(`/conversations/${SECOND.id}`);
 
     await drawn(container, ".brief");
     const briefs = [...container.querySelectorAll(".brief")];
 
     expect(briefs).toHaveLength(2);
     expect(briefs[0]!.querySelector("textarea")).toBeNull();
-    expect(briefs[1]!.querySelector("textarea")).toBeTruthy();
+    expect(briefs[1]!.querySelector("textarea")).toBeNull();
 
-    // And the setup goes under the round being set up rather than under both.
-    expect(briefs[0]!.querySelector(".conversation-setup")).toBeNull();
-    expect(briefs[1]!.querySelector(".conversation-setup")).toBeTruthy();
+    // And no setup under either: the branch and the base commit were settled by
+    // the first round, and there is nothing here left to say about them.
+    expect(container.querySelector(".conversation-setup")).toBeNull();
   });
 
   /// A reader has to be able to tell which brief the work under it was built
-  /// from, which is the whole of what the boundary is for.
+  /// from, which is the whole of what the boundary is for. The human's own line
+  /// and the move under it are the pair that says so.
   it("says where the round boundary falls", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+    theSecondRound();
+    const { container } = mount(`/conversations/${SECOND.id}`);
 
-    const boundary = await drawn(container, ".timeline-event > .moved.draft");
-    expect(
-      boundary.textContent,
-      "the move says both states, as every move does — and nothing moves *to* \
-       drafting except a second round",
-    ).toBe("Done → Draft");
+    const boundary = await drawn(container, ".timeline-event > .steered");
+    expect(boundary.textContent).toBe("You steered this into Grilling");
 
     // And it is drawn between the two briefs, which is where the rounds part.
     const briefs = [...container.querySelectorAll(".brief")];
@@ -4170,18 +4087,21 @@ describe("reopening a conversation", () => {
 
     // What the boundary looks like is the stylesheet's, and jsdom lays nothing
     // out.
-    expect(stylesheet).toContain(".timeline-event > .moved.draft {");
+    expect(stylesheet).toContain(".timeline-event > .steered,");
   });
 
-  /// The second round runs the ordinary pipeline from grilling onward, so what
-  /// stands under the new brief is the press every first round starts with.
-  it("offers the ordinary start grilling under the new brief", async () => {
-    theReopened();
-    const { container } = mount(`/conversations/${REOPENED.id}`);
+  /// And the finished end of the ladder still reads as having something to do
+  /// from here: nothing stands under the timeline, and the steer that opens a
+  /// round like this one is in the menu on the header.
+  it("offers the steer and nothing else on a finished conversation", async () => {
+    theWorkbenchWith({ state: "Done" });
+    const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const start = await drawn(container, ".start-grilling .start");
-    expect(start.textContent).toContain("Start grilling");
-    expect(container.querySelector(".reopen")).toBeNull();
+    await drawn(container, ".timeline");
+    expect(container.querySelector(".start-grilling")).toBeNull();
+
+    await openActions(container);
+    await drawn(container, ".conversation-actions .steer");
   });
 });
 

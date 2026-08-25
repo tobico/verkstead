@@ -859,9 +859,9 @@ pub struct BriefEvent {
     ///
     /// The server's rule rather than something the page works out from the
     /// Conversation around it, as `ready_to_grill` is — and it is a fact about
-    /// one Brief rather than about the Conversation, because a reopened one has
-    /// a frozen Brief and an open one on the same Timeline. An adopting
-    /// Conversation's first Brief is frozen from the start: it is the stage
+    /// one Brief rather than about the Conversation, because a Conversation gets
+    /// one Brief per round and what is true of them differs: an adopting
+    /// Conversation's first Brief is frozen from the start — it is the stage
     /// brief, and nobody here writes it.
     pub frozen: bool,
 }
@@ -1557,7 +1557,7 @@ pub enum BriefSaved {
     Saved,
     NoSuchConversation,
 
-    /// The Conversation is past drafting, so its Brief is frozen: a reopened
+    /// The Conversation is past drafting, so its Brief is frozen: a steered
     /// round adds a new Brief rather than editing this one.
     NotDrafting,
 }
@@ -2043,7 +2043,8 @@ pub enum Adopted {
 
     /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
     /// rather than run under: every stage after it inherits both Profiles from
-    /// its predecessor, and a Conversation that is reopened is grilled.
+    /// its predecessor, and a Conversation steered into a second round is
+    /// grilled.
     NoGrillingProfile,
 
     /// And none is chosen for the implementation, which is what the stage's own
@@ -2083,31 +2084,6 @@ pub enum Adopted {
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.
-    WorktreeRefused,
-}
-
-/// What became of reopening a finished one with a new round.
-///
-/// Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
-/// press that gives a Conversation somewhere to work, and what stops one is
-/// something different for the human to go and do each time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ConversationReopened {
-    /// Reopened: it is drafting again, with a Brief of its own to write and a
-    /// worktree to work in.
-    Reopened,
-
-    NoSuchConversation,
-
-    /// It is not Done, so there is no finished round to open another after.
-    /// Closed is off the ladder, and every other state is somewhere the work
-    /// has got to.
-    NotDone,
-
-    /// The worktree's directory had gone and git would not check the branch out
-    /// again. The reason is in the server's log — this is the one refusal with
-    /// nothing for the human to correct.
     WorktreeRefused,
 }
 

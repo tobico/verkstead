@@ -386,7 +386,7 @@ async fn a_steer_into_grilling_without_one_writes_no_brief() {
 }
 
 /// The round before a steered-into grilling is over, so its wrap-up bookkeeping
-/// is forgotten — the same forgetting a reopened Conversation does.
+/// is forgotten.
 ///
 /// A round that inherited the one before it would reach Wrapping with everything
 /// wrap-up waits on already settled and would be over the moment it arrived. The

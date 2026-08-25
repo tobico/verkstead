@@ -29,12 +29,12 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
-    ConversationEntry, ConversationReopened, ConversationSteered, ConversationStopped,
-    ConversationView, Cursor, GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission,
-    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
+    GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -116,19 +116,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // The two that make and unmake what a Conversation works in. Named in
         // the path rather than in the verb, as closing a Set unanswered is: the
-        // viewer speaks one method.
+        // viewer speaks one method. Nothing here opens a second round on one
+        // Verkstead has finished with: a steer into Grilling is that, and it
+        // goes through the modal below like every other steer.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
         // And the press that adopts a roadmap's next stage, which is the
         // grilling start's sibling: what the human presses on an adopting
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/close", post(close))
-        // And the press that opens a second round on one Verkstead has finished
-        // with. Beside closing rather than in the menu with it: reopening throws
-        // nothing away, and what it is is the next thing to do about a finished
-        // piece of work — so it belongs at the end of the Timeline, where the
-        // grilling start is.
-        .route("/api/ui/conversations/{id}/reopen", post(reopen))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -729,8 +725,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     // The Brief decides whether the Conversation is ready to grill, so it is
     // read off the Timeline before the Timeline is spent building the view. The
-    // newest of them: a reopened Conversation has a frozen Brief and an open one,
-    // and what a grilling would start from is the round nobody has grilled yet.
+    // newest of them: a Conversation gets one Brief per round, and what a
+    // grilling would start from is the round nobody has grilled yet.
     let brief = timeline
         .iter()
         .rev()
@@ -771,8 +767,9 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // row. Only the roadmap's name is stored — see [`crate::stages::adopting`].
     //
     // A worktree is what says the adoption has happened, adoption being what
-    // makes one. What follows it is the stage's work and, if the human reopens it
-    // when that work is done, a Brief of their own — never the stage brief again.
+    // makes one. What follows it is the stage's work and, if the human steers it
+    // into a second round when that work is done, a Brief of their own — never
+    // the stage brief again.
     let adopting = match conversation.adopting.clone() {
         Some(roadmap) if worktree.is_none() => Some(
             crate::stages::adopting(
@@ -1571,26 +1568,6 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
             unavailable("the conversation could not be closed")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/reopen` — a second round on a finished one:
-/// a new Brief to write, on the branch the first round was built on.
-///
-/// Nothing in the body, as the grilling start takes nothing: which Conversation
-/// is in the path, and everything this is refused for the server decides itself
-/// when the button is pressed.
-async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(ConversationReopened::NoSuchConversation).into_response();
-    };
-
-    match crate::conversations::reopen(&state, id).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "reopening a Conversation failed");
-            unavailable("the conversation could not be reopened")
         }
     }
 }

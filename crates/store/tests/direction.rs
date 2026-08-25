@@ -682,8 +682,8 @@ async fn a_handoff_lands_on_the_timeline_as_the_document_it_is() {
 
     assert_eq!(handoffs(&pool, id).await, ["# What we settled\n"]);
 
-    // A reopened round grills again, and its handoff is a second Event rather
-    // than a rewrite of the first: nothing leaves a Timeline.
+    // A second round grills again, and its handoff is a second Event rather than
+    // a rewrite of the first: nothing leaves a Timeline.
     record_handoff(&pool, id, "# What we settled, again\n")
         .await
         .unwrap();

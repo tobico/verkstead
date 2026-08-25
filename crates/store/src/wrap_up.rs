@@ -478,10 +478,10 @@ pub async fn finish_wrap_up(pool: &SqlitePool, conversation_id: i64) -> Result<F
 /// Forget everything a Conversation's wrap-up has settled and everything its
 /// checks have been given, so a second round wraps up from nothing.
 ///
-/// What reopening does — see [`super::reopen_conversation`], whose transaction
-/// this runs in. A round that inherited the round before it would reach Wrapping
-/// with every one of the things wrap-up waits on already settled, and would be
-/// over the moment it arrived.
+/// What a steer into Grilling does — see [`super::steer_conversation`], whose
+/// transaction this runs in. A round that inherited the round before it would
+/// reach Wrapping with every one of the things wrap-up waits on already settled,
+/// and would be over the moment it arrived.
 ///
 /// The comments already addressed are deliberately left: a comment somebody
 /// wrote and a session answered stays answered, and forgetting it would

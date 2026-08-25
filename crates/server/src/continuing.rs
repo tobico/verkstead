@@ -368,8 +368,8 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
 ///
 /// The Pairings are the predecessor's, both of them. The implementation one is
 /// what the work runs under; the grilling one is carried across because a stage
-/// that is reopened later is grilled by whatever the roadmap's work has been
-/// grilled by all along.
+/// steered into a second round later is grilled by whatever the roadmap's work
+/// has been grilled by all along.
 ///
 /// Carried whole, model and all — and a predecessor whose Profile was chosen
 /// before pairings existed carries no model, which leaves this stage running on

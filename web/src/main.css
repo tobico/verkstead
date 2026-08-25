@@ -1465,14 +1465,14 @@ main:has(.workbench) {
 
 /* Work that has stopped, finished and closed alike — which of the two is the
    details pane's to say, and what the sidebar is saying is that there is nothing
-   here to do. Still a row to press: a Done Conversation can be reopened.
+   here to do. Still a row to press: a Done Conversation can be steered.
 
    Far enough down that the card reads as closed at a glance rather than merely
    quiet: a list of live work with a Done conversation in it should not have to be
    read to tell which is which. The line under the name is lifted to `--ink`
    below all the same — left soft it would be dimmed twice, and the card is what
    should recede and not the words in it. Still a card to press: a Done
-   Conversation can be reopened. */
+   Conversation can be steered. */
 .conversation-row.ended .open {
   opacity: 0.45;
 }
@@ -2287,20 +2287,15 @@ main:has(.workbench) {
   color: #b3382c;
 }
 
-/* The round boundary, which is the one move worth seeing from across the page:
-   everything above it was built from a different brief. */
-.timeline-event > .moved.draft {
-  font-weight: 600;
-  color: var(--ink-soft);
-  border-top: 1px solid var(--edge);
-  padding-top: 0.6rem;
-  margin-top: 0.4rem;
-}
-
 /* And the human saying where the work goes, which is the line the move under it
    came of. Drawn like the move for that reason — the two are one moment read
    twice — and in the ink the rest of the page is set in rather than the dim the
-   move takes: of the pair, this is the half somebody decided. */
+   move takes: of the pair, this is the half somebody decided.
+
+   It is also where a round boundary falls, a steer into grilling being what
+   opens a second round: everything above such a line was built from a different
+   brief, which is the one thing on a timeline worth seeing from across the
+   page. */
 .timeline-event > .steered,
 .steered-with > .steered {
   margin: 0;
@@ -3042,35 +3037,6 @@ main:has(.workbench) {
 }
 
 .start-grilling .error {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-/* And what happens next on one that is finished, in the same place and never at
-   the same time: a conversation is either drafting a round or it has finished
-   one. Drawn quieter than `Start grilling` — reopening is a deliberate second
-   thought about work that is over, rather than the obvious next press. */
-.reopen {
-  margin-top: 1rem;
-}
-
-.reopen .reopen-conversation {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--accent);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.reopen .reopen-conversation:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.reopen .error {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }

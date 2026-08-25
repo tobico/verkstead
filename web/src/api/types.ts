@@ -351,9 +351,9 @@ html: string,
  *
  * The server's rule rather than something the page works out from the
  * Conversation around it, as `ready_to_grill` is — and it is a fact about
- * one Brief rather than about the Conversation, because a reopened one has
- * a frozen Brief and an open one on the same Timeline. An adopting
- * Conversation's first Brief is frozen from the start: it is the stage
+ * one Brief rather than about the Conversation, because a Conversation gets
+ * one Brief per round and what is true of them differs: an adopting
+ * Conversation's first Brief is frozen from the start — it is the stage
  * brief, and nobody here writes it.
  */
 frozen: boolean, };
@@ -527,15 +527,6 @@ idle: boolean,
  * the whole of what a draft has to say.
  */
 waiting: boolean, };
-
-/**
- * What became of reopening a finished one with a new round.
- *
- * Every refusal is named, as [`GrillingStarted`]'s are: reopening is the other
- * press that gives a Conversation somewhere to work, and what stops one is
- * something different for the human to go and do each time.
- */
-export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone" | "WorktreeRefused";
 
 /**
  * What became of submitting one.

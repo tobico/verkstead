@@ -148,7 +148,7 @@ function onAPullRequest(conversation: ConversationView): boolean {
 /// Whether there is a brief for a steer into grilling to start a round on.
 ///
 /// The newest one on the timeline, which is the round's own — a conversation
-/// gets a brief per round, and a reopened one adds a second beside the first
+/// gets a brief per round, and a steered one adds a second beside the first
 /// rather than editing it. A grilling starts from a brief, so where this is
 /// false the modal's brief field is what the target *is*, and the server
 /// refuses a submit without one by name.

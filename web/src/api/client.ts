@@ -17,7 +17,6 @@ import type {
   CommitPane,
   ConversationClosed,
   ConversationEntry,
-  ConversationReopened,
   ConversationSteered,
   ConversationStopped,
   ConversationView,
@@ -331,16 +330,6 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
-}
-
-/// Open a second round on a Conversation Verkstead has finished with: a new
-/// brief to write, on the branch the first round was built on.
-///
-/// Nothing is sent, for the reason nothing is sent to start a grilling. The
-/// worktree is ordinarily still there and is kept; one whose directory has gone
-/// is checked out again on the same branch, which is the server's to do.
-export function reopenConversation(id: number): Promise<ConversationReopened> {
-  return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
 }
 
 /// Set a manual task going: this one instruction, under the pairing picked

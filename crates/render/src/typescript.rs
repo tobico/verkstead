@@ -19,13 +19,12 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
-    ConversationReopened, ConversationSteered, ConversationStopped, ConversationView,
-    GrillingStarted, ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation,
-    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed,
-    Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, ManualTaskStarted,
+    ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -84,13 +83,11 @@ fn the_viewers_types_are_written_from_these() {
     BaseBranchChoice::export_all(&config).unwrap();
     BaseRecorded::export_all(&config).unwrap();
 
-    // And the three actions that make, unmake and make again what a
-    // Conversation works in. None takes a request shape — which Conversation is
-    // in the path, and there is nothing else to say about any of them — so it is
-    // the outcomes alone.
+    // And the two actions that make and unmake what a Conversation works in.
+    // Neither takes a request shape — which Conversation is in the path, and
+    // there is nothing else to say about either — so it is the outcomes alone.
     GrillingStarted::export_all(&config).unwrap();
     ConversationClosed::export_all(&config).unwrap();
-    ConversationReopened::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
