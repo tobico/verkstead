@@ -840,7 +840,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         blocked_on,
         resets,
         // The same reading the Events above are drawn against, said as a fact
-
         // about the Conversation: the Timeline offers the Manual Task composer
         // exactly where nothing is running, and one Event of a session's is not
         // the question — a Conversation whose session has ended is not working,
@@ -958,7 +957,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     ),
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
-
                     // back — and the one nobody wrote for a human to press
                     // anything about. What a stop's Notice says is what stopped,
                     // why, and the evidence — see [`crate::stopping`], which writes

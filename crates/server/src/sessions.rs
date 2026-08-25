@@ -783,7 +783,6 @@ impl Sessions {
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
         // spent. The Profile is taken now because that is what the stop names,
-
         // and a Profile renamed while a session runs was not the account this
         // one is on — see [`crate::limits`].
         let limits =
@@ -942,7 +941,6 @@ impl Sessions {
     /// A Conversation with no session running is nothing to do, which is every
     /// Conversation that was never started and every one whose session has
     /// already ended.
-    ///
     pub(crate) async fn end(&self, conversation_id: i64) {
         let running = self
             .running
