@@ -25,6 +25,7 @@ import type {
   PauseEvent,
   PauseResumed,
 } from "../api/types";
+import { ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 
 /// What each way the wait ended is called.
@@ -141,17 +142,19 @@ function Waiting(props: {
       >
         Go on without waiting
       </button>
-      <p class="note">
+      <Note>
         The run starts again from where it stopped. Nothing changes about the
         account, and the worktree is left exactly as the session left it — the
         agent is waiting for the same reset, so it may simply wait again.
-      </p>
+      </Note>
 
       <Show when={refused()}>
-        {(outcome) => <p class="error">{RESUME_REFUSAL[outcome()]}</p>}
+        {(outcome) => <ErrorLine>{RESUME_REFUSAL[outcome()]}</ErrorLine>}
       </Show>
       <Show when={resume.isError}>
-        <p class="error">The run could not be started again: {resume.error?.message}</p>
+        <ErrorLine>
+          The run could not be started again: {resume.error?.message}
+        </ErrorLine>
       </Show>
     </div>
   );

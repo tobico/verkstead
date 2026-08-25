@@ -13,6 +13,8 @@
 
 import { Show, type JSX } from "solid-js";
 
+import { Empty } from "../notices";
+
 export function Document(props: {
   /// What the pane is titled, which is what the card is titled.
   heading: string;
@@ -38,10 +40,7 @@ export function Document(props: {
         </button>
       </div>
 
-      <Show
-        when={props.html !== ""}
-        fallback={<p class="empty">{props.empty}</p>}
-      >
+      <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
         <div class="document markdown" innerHTML={props.html} />
       </Show>
     </>

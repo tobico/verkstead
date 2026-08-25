@@ -45,6 +45,7 @@ import type {
   TokenEdit,
   Verified,
 } from "../api/types";
+import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 
 /// The credentials as they stand, and the form that writes them.
@@ -189,12 +190,12 @@ export function Credentials(): JSX.Element {
   return (
     <Switch>
       <Match when={settings.isPending}>
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
       <Match when={settings.isError}>
-        <p class="error">
+        <ErrorLine>
           Could not read the settings: {settings.error?.message}
-        </p>
+        </ErrorLine>
       </Match>
       <Match when={told()}>
         <section class="credentials">
@@ -229,9 +230,9 @@ export function Credentials(): JSX.Element {
           </Show>
           <Show when={refused()}>
             {(why) => (
-              <p class="error unverified">
+              <ErrorLine class="unverified">
                 It is saved, but GitHub would not say whose it is: {why()}
-              </p>
+              </ErrorLine>
             )}
           </Show>
 
@@ -367,9 +368,9 @@ export function Credentials(): JSX.Element {
                   that keeps the form up. Said loudly: a settings page that
                   quietly saved nothing is how credentials go missing. */}
               <Show when={save.isError}>
-                <p class="error">
+                <ErrorLine class="failure">
                   The settings could not be saved: {save.error?.message}
-                </p>
+                </ErrorLine>
               </Show>
             </form>
           </Modal>

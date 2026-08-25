@@ -14,6 +14,7 @@ import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Submitted } from "../src/api/types";
+import notices from "../src/notices.module.css";
 import { draftKey } from "../src/set/sheet";
 import {
   answering,
@@ -603,14 +604,14 @@ describe("a submit that did not land", () => {
     }
     press(page, "Submit");
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
-    await waitFor(() => expect(page.querySelector(".submit .error")).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.submit .${notices.error}`)).toBeTruthy());
     return page;
   }
 
   it("says the Set had already been answered", async () => {
     const page = await refused("AlreadyAnswered");
 
-    expect(page.querySelector(".submit .error")!.textContent).toContain(
+    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
       "The first Response stands",
     );
   });
@@ -618,7 +619,7 @@ describe("a submit that did not land", () => {
   it("says the Set was archived, which closed it for good", async () => {
     const page = await refused("Archived");
 
-    expect(page.querySelector(".submit .error")!.textContent).toContain(
+    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
       "archived unanswered",
     );
   });
@@ -626,7 +627,7 @@ describe("a submit that did not land", () => {
   it("says the Set is no longer here", async () => {
     const page = await refused("NoSuchSet");
 
-    expect(page.querySelector(".submit .error")!.textContent).toBe(
+    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toBe(
       "This Set is no longer here.",
     );
   });
@@ -634,7 +635,7 @@ describe("a submit that did not land", () => {
   it("carries back what the server said the Response failed to resolve", async () => {
     const page = await refused({ Rejected: ["Q2b is unaccounted for"] });
 
-    expect(page.querySelector(".submit .error")!.textContent).toContain(
+    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
       "Q2b is unaccounted for",
     );
   });
@@ -651,7 +652,7 @@ describe("a submit that did not land", () => {
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
-      expect(page.querySelector(".submit .error")!.textContent).toContain(
+      expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
         "the Response could not be taken",
       ),
     );

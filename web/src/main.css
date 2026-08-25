@@ -176,15 +176,6 @@
   font-weight: 500;
 }
 
-.empty,
-.error {
-  color: var(--ink-soft);
-}
-
-.error {
-  color: #b3382c;
-}
-
 /* The way back out of a page, in the same slot on every one of them. The way
    *on* to the settings was here too until it went into the ⋯ at the head of the
    conversations — see `.workbench-actions` — and nothing is left that puts two
@@ -254,7 +245,7 @@
   background: none;
 }
 
-.add-repo .error {
+.add-repo .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -345,7 +336,7 @@
   background: none;
 }
 
-.edit-profile .error {
+.edit-profile .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -505,7 +496,7 @@
 /* A token GitHub would not vouch for is still saved, and the line saying so
    sits in the flow above the field rather than under the button like the save's
    own failure — hence a margin of its own. */
-.credentials .error.unverified {
+.credentials .unverified {
   margin: 0 0 0.85rem;
   font-size: 0.9rem;
 }
@@ -568,7 +559,7 @@
   border-color: var(--edge);
 }
 
-.settings .error {
+.settings .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -1024,7 +1015,7 @@ main:has(.workbench) {
   color: var(--ink-soft);
 }
 
-.new-conversation .empty {
+.new-conversation .nothing {
   margin: 0;
   padding: 0.4rem 0.6rem;
   font-size: 0.9rem;
@@ -1784,16 +1775,11 @@ main:has(.workbench) {
   padding: 0.5rem 0.6rem;
 }
 
-/* What a control does not say for itself: the base dropdown's first entry is a
-   rule rather than a branch, and what it will resolve to is not known until
-   grilling starts. So it is said in words underneath. */
-.note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.note .default-branch {
+/* The branch named in the words under the dropdown, in the type a branch name
+   is written in. There are words there at all because the dropdown's first
+   entry is a rule rather than a branch: what it resolves to is not known until
+   grilling starts, so it is said underneath instead. */
+.base-branch .default-branch {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
@@ -1809,11 +1795,11 @@ main:has(.workbench) {
   padding: 0.5rem 0.6rem;
 }
 
-.branch-name .error,
-.base-branch .error,
-.new-conversation .error,
-.brief > .error,
-.conversation-profiles .error {
+.branch-name .failure,
+.base-branch .failure,
+.new-conversation .failure,
+.brief > .failure,
+.conversation-profiles .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2362,12 +2348,6 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-.resuming .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
 /* What the conversation has stopped on, said where the conversation is named. A
    button rather than a badge, because it goes to the event that stopped it — a
    timeline is long by the time a run gets far enough to stop. */
@@ -2544,7 +2524,7 @@ main:has(.workbench) {
   border-radius: 0.6rem;
 }
 
-.screen .holding .note {
+.screen .holding p {
   margin: 0;
   font-size: 0.85rem;
   color: var(--ink);
@@ -2740,7 +2720,7 @@ main:has(.workbench) {
   opacity: 0.65;
 }
 
-.start-grilling .error {
+.start-grilling .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2769,7 +2749,7 @@ main:has(.workbench) {
   opacity: 0.65;
 }
 
-.reopen .error {
+.reopen .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2795,8 +2775,7 @@ main:has(.workbench) {
   margin: 0 0 0.25rem;
 }
 
-.adoption .roadmap-title,
-.adoption .empty {
+.adoption .roadmap-title {
   color: var(--ink-soft);
 }
 
@@ -2821,7 +2800,7 @@ main:has(.workbench) {
   opacity: 0.65;
 }
 
-.adoption .error {
+.adoption .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2857,13 +2836,7 @@ main:has(.workbench) {
   opacity: 0.65;
 }
 
-.resume .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.resume .error {
+.resume .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2923,13 +2896,7 @@ main:has(.workbench) {
   opacity: 0.65;
 }
 
-.manual-task-composer .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.manual-task-composer .error {
+.manual-task-composer .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -2975,8 +2942,7 @@ main:has(.workbench) {
   border-color: #b3382c;
 }
 
-.conversation-actions .note,
-.conversation-actions .error {
+.conversation-actions .failure {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
 }
@@ -3178,7 +3144,7 @@ div.meta .standing {
 
 /* Its own full line under the provenance, so a refusal is not squeezed in
    beside the badge. */
-div.meta .error {
+div.meta .failure {
   flex-basis: 100%;
   margin: 0;
 }
@@ -4135,7 +4101,7 @@ div.meta .error {
 /* What the row means, under the name of it. Indented to the name rather than to
    the radio, so the three read as three names with notes and not as six
    lines. */
-.direction-pick .note {
+.direction-pick .means {
   margin: 0.2rem 0 0 2rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -4230,7 +4196,7 @@ div.meta .error {
   opacity: 0.65;
 }
 
-.submit .error {
+.submit .failure {
   margin-bottom: 0;
 }
 
@@ -4370,7 +4336,7 @@ div.meta .error {
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-.confirm .note {
+.confirm .caveat {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }

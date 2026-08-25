@@ -28,6 +28,7 @@ import type {
   UnreadableSetEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Sheet } from "../set/Sheet";
 import { Unreadable } from "../set/Unreadable";
 
@@ -67,11 +68,11 @@ export function Asked(props: {
     <Switch>
       <Match when={set.isPending}>
         {head}
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
       <Match when={set.isError}>
         {head}
-        <p class="error">Could not read this set: {set.error?.message}</p>
+        <ErrorLine>Could not read this set: {set.error?.message}</ErrorLine>
       </Match>
       {/* A stored body this build cannot read is the record drawn as itself,
           the same one the standalone page draws — the narrower match, so it

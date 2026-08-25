@@ -45,6 +45,7 @@ import type {
   ProfileEntry,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
@@ -133,17 +134,17 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
 
       <Switch>
         <Match when={profiles.isError}>
-          <p class="error">
+          <ErrorLine class="failure">
             Could not read the agent profiles: {profiles.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={profiles.data?.length === 0}>
           {/* Nothing to choose, so the only thing to offer is the page that
               fixes that. */}
-          <p class="empty">
+          <Empty>
             No agent profiles are saved yet —{" "}
             <A href="/settings">add one</A> to run a session under.
-          </p>
+          </Empty>
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
@@ -185,15 +186,15 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
       <Show
         when={!props.conversation.adopting}
         fallback={
-          <p class="note">
+          <Note>
             Both pairings are fixed before adopting: the implementation one is
             what the work runs under, and the grilling one is carried, because
             the stages after this one inherit both from it.
-          </p>
+          </Note>
         }
       >
         <Show when={props.conversation.ready_to_grill}>
-          <p class="note readiness ready">Ready to grill.</p>
+          <Note class="readiness ready">Ready to grill.</Note>
         </Show>
       </Show>
     </section>
@@ -264,23 +265,25 @@ function PairingPicker(props: {
           which the picker draws as none. Said in words rather than left as a
           bare placeholder, because the conversation does have a profile. */}
       <Show when={props.chosen && !props.chosen.model}>
-        <p class="note unpaired">
+        <Note class="unpaired">
           {props.chosen?.profile.name} was chosen before models were picked
           beside them. Pick one to pair.
-        </p>
+        </Note>
       </Show>
 
       {/* What is wrong with the one that is chosen, said where it is chosen. */}
       <Show when={props.chosen?.profile.broken}>
-        {(broken) => <p class="error broken">{BROKEN[broken()]}</p>}
+        {(broken) => <ErrorLine class="broken">{BROKEN[broken()]}</ErrorLine>}
       </Show>
       <Show when={refused()}>
-        {(outcome) => <p class="error">{CHOICE_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine class="failure">{CHOICE_REFUSAL[outcome()]}</ErrorLine>
+        )}
       </Show>
       <Show when={choose.isError}>
-        <p class="error">
+        <ErrorLine class="failure">
           The profile could not be chosen: {choose.error?.message}
-        </p>
+        </ErrorLine>
       </Show>
     </div>
   );
@@ -391,12 +394,14 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           not following the field, and one that vanished as it was read would
           leave the human nothing. */}
       <Show when={refused()}>
-        {(outcome) => <p class="error">{BRANCH_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine class="failure">{BRANCH_REFUSAL[outcome()]}</ErrorLine>
+        )}
       </Show>
       <Show when={rename.isError}>
-        <p class="error">
+        <ErrorLine class="failure">
           The branch could not be named: {rename.error?.message}
-        </p>
+        </ErrorLine>
       </Show>
     </form>
   );
@@ -494,7 +499,7 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
         pick={(picked) => record.mutate(picked)}
         disabled={record.isPending}
       />
-      <p class="note">
+      <Note>
         <Show
           when={props.conversation.base_commit}
           fallback={
@@ -515,21 +520,23 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
             </>
           )}
         </Show>
-      </p>
+      </Note>
       {/* The list is what there is to pick out of, so a read that failed is
           said rather than drawn as a repository with one branch. */}
       <Show when={branches.isError}>
-        <p class="error">
+        <ErrorLine class="failure">
           Could not read the repo's branches: {branches.error?.message}
-        </p>
+        </ErrorLine>
       </Show>
       <Show when={refused()}>
-        {(outcome) => <p class="error">{BASE_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine class="failure">{BASE_REFUSAL[outcome()]}</ErrorLine>
+        )}
       </Show>
       <Show when={record.isError}>
-        <p class="error">
+        <ErrorLine class="failure">
           The base branch could not be recorded: {record.error?.message}
-        </p>
+        </ErrorLine>
       </Show>
     </div>
   );

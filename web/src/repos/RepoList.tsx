@@ -29,6 +29,7 @@ import { Modal } from "../Modal";
 import { listRepos, registerRepo } from "../api/client";
 import type { Registered, RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 
 /// What each way of being refused says, once, wherever it is met.
 ///
@@ -124,15 +125,15 @@ export function RepoList() {
 
       <Switch>
         <Match when={repos.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         <Match when={repos.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read the registered Repos: {repos.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
-          <p class="empty">No repos are registered yet.</p>
+          <Empty>No repos are registered yet.</Empty>
         </Match>
         <Match when={repos.data}>
           {(registered) => (
@@ -185,14 +186,16 @@ export function RepoList() {
           </div>
 
           <Show when={refused()}>
-            {(outcome) => <p class="error">{REFUSAL[outcome()]}</p>}
+            {(outcome) => (
+              <ErrorLine class="failure">{REFUSAL[outcome()]}</ErrorLine>
+            )}
           </Show>
           {/* A server that could not answer at all, which is the one thing here
               that is an error rather than an outcome. */}
           <Show when={register.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The repo could not be registered: {register.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
         </form>
       </Modal>

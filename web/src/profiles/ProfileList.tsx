@@ -44,6 +44,7 @@ import type {
   ProfileSaved,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 
 /// What each way of being refused a save says, once, wherever it is met.
 ///
@@ -232,25 +233,27 @@ export function ProfileList(): JSX.Element {
       </div>
 
       <Show when={refusedRemoval()}>
-        {(outcome) => <p class="error">{PROFILE_REMOVAL_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine>{PROFILE_REMOVAL_REFUSAL[outcome()]}</ErrorLine>
+        )}
       </Show>
       <Show when={remove.isError}>
-        <p class="error">
+        <ErrorLine>
           The profile could not be removed: {remove.error?.message}
-        </p>
+        </ErrorLine>
       </Show>
 
       <Switch>
         <Match when={profiles.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         <Match when={profiles.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read the agent profiles: {profiles.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={profiles.data?.length === 0}>
-          <p class="empty">No agent profiles are saved yet.</p>
+          <Empty>No agent profiles are saved yet.</Empty>
         </Match>
         <Match when={profiles.data}>
           {(saved) => (
@@ -354,14 +357,18 @@ export function ProfileList(): JSX.Element {
           </div>
 
           <Show when={refused()}>
-            {(outcome) => <p class="error">{PROFILE_REFUSAL[outcome()]}</p>}
+            {(outcome) => (
+              <ErrorLine class="failure">
+                {PROFILE_REFUSAL[outcome()]}
+              </ErrorLine>
+            )}
           </Show>
           {/* A server that could not answer at all, which is the one thing here
               that is an error rather than an outcome. */}
           <Show when={save.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The profile could not be saved: {save.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
         </form>
       </Modal>
@@ -406,7 +413,7 @@ function ProfileRow(props: {
             start: the profile was checked when it was saved, and what has become
             of its pair since is the server's to report on every read. */}
         <Show when={props.profile.broken}>
-          {(broken) => <p class="error broken">{BROKEN[broken()]}</p>}
+          {(broken) => <ErrorLine class="broken">{BROKEN[broken()]}</ErrorLine>}
         </Show>
       </div>
       <div class="profile-actions">

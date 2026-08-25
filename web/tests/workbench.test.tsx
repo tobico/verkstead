@@ -42,6 +42,7 @@ import type {
   Turn,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
+import notices from "../src/notices.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
@@ -973,7 +974,7 @@ describe("the new conversation menu", () => {
 
     fireEvent.click((await repoRows(container))[0]!);
 
-    const said = await drawn(container, ".new-conversation > .menu-drop .error");
+    const said = await drawn(container, `.new-conversation > .menu-drop .${notices.error}`);
     expect(said.textContent).toContain("down");
   });
 });
@@ -1221,7 +1222,7 @@ describe("the adoption page", () => {
 
     const panel = await drawn(container, ".adoption");
     expect(panel.textContent).toContain(ADOPTION.roadmap);
-    expect(panel.querySelector(".empty")).toBeTruthy();
+    expect(panel.querySelector(`.${notices.empty}`)).toBeTruthy();
     expect(panel.querySelector(".stage")).toBeNull();
   });
 
@@ -1294,7 +1295,7 @@ describe("the adoption page", () => {
       fireEvent.click(await drawn(container, ".adoption .adopt"));
 
       await waitFor(() =>
-        expect(container.querySelector(".adoption .error")!.textContent).toBe(
+        expect(container.querySelector(`.adoption .${notices.error}`)!.textContent).toBe(
           ADOPT_REFUSAL[outcome],
         ),
       );
@@ -1879,7 +1880,7 @@ describe("a conversation's setup", () => {
     expect(
       (screen.getByLabelText("Base branch") as HTMLSelectElement).value,
     ).toBe("");
-    expect(container.querySelector(".base-branch .note")!.textContent).toContain(
+    expect(container.querySelector(`.base-branch .${notices.note}`)!.textContent).toContain(
       OPEN.repo.default_branch,
     );
   });
@@ -4464,7 +4465,7 @@ describe("stopping a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, ".conversation-actions .stop"));
 
-    const refused = await drawn(container, ".conversation-actions .error");
+    const refused = await drawn(container, `.conversation-actions .${notices.error}`);
 
     expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyHalted);
     expect(refused.textContent).toContain("Resume");
@@ -5320,7 +5321,7 @@ describe("a commit on the timeline", () => {
     // place while the diff is in flight.
     await waitFor(() =>
       expect(
-        container.querySelector(".details-pane .empty")!.textContent,
+        container.querySelector(`.details-pane .${notices.empty}`)!.textContent,
       ).toContain("changed no files"),
     );
 
@@ -5347,7 +5348,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const error = await drawn(container, ".details-pane .error");
+    const error = await drawn(container, `.details-pane .${notices.error}`);
 
     expect(error.textContent).toContain(
       "there is no such commit on that Conversation",
@@ -6114,7 +6115,7 @@ describe("a pause on the timeline", () => {
 
     // And nothing is said about a press that worked: the event reading back
     // resumed is what says it.
-    expect(waiting.querySelector(".error")).toBeNull();
+    expect(waiting.querySelector(`.${notices.error}`)).toBeNull();
   });
 
   /// The record is what a timeline is: a long run against a busy account
@@ -6164,7 +6165,7 @@ describe("a pause on the timeline", () => {
     fireEvent.click(waiting.querySelector(".resume")!);
 
     await waitFor(() =>
-      expect(waiting.querySelector(".error")!.textContent).toContain(
+      expect(waiting.querySelector(`.${notices.error}`)!.textContent).toContain(
         "The first ending stands",
       ),
     );
@@ -6367,7 +6368,7 @@ describe("the pinned pull request", () => {
     const opened = await drawn(container, ".pinned .pull-request");
     fireEvent.click(opened.querySelector(".open-pull-request")!);
 
-    const error = await drawn(container, ".details-pane .error");
+    const error = await drawn(container, `.details-pane .${notices.error}`);
 
     expect(error.textContent).toContain("is not logged in");
   });
@@ -6708,7 +6709,7 @@ describe("the resume button", () => {
     const resume = await drawn(container, ".resume");
     fireEvent.click(resume.querySelector(".resume-conversation")!);
 
-    const refused = await drawn(container, ".resume .error");
+    const refused = await drawn(container, `.resume .${notices.error}`);
 
     expect(refused.textContent).toBe(RESUME_REFUSAL.NothingToWork);
     expect(refused.textContent).toContain("no backlog left");
@@ -6726,7 +6727,7 @@ describe("the resume button", () => {
     const resume = await drawn(container, ".resume");
     fireEvent.click(resume.querySelector(".resume-conversation")!);
 
-    const refused = await drawn(container, ".resume .error");
+    const refused = await drawn(container, `.resume .${notices.error}`);
 
     expect(refused.textContent).toBe(RESUME_REFUSAL.AlreadyDriven);
   });
@@ -6895,7 +6896,7 @@ describe("the manual task composer", () => {
     });
     fireEvent.click(composer.querySelector(".start-manual-task")!);
 
-    const refused = await drawn(container, ".manual-task-composer .error");
+    const refused = await drawn(container, `.manual-task-composer .${notices.error}`);
 
     expect(refused.textContent).toBe(MANUAL_TASK_REFUSAL.AlreadyRunning);
     expect(refused.textContent).toContain("already running");

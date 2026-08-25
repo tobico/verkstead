@@ -4,6 +4,7 @@ import { Route, Router } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
+import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SetPage } from "./set/SetPage";
 import { SettingsPage } from "./settings/SettingsPage";
@@ -67,5 +68,5 @@ function Shell(props: { children?: JSX.Element }): JSX.Element {
 }
 
 function NoSuchPage(): JSX.Element {
-  return <p class="empty">No such page.</p>;
+  return <Empty>No such page.</Empty>;
 }

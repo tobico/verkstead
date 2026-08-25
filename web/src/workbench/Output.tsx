@@ -62,6 +62,7 @@ import {
 
 import { loadCapture, loadTranscript } from "../api/client";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Mark } from "./Mark";
 import { Screen } from "./Screen";
 import type {
@@ -297,12 +298,12 @@ export function Output(props: {
       >
         <Switch>
           <Match when={transcript.isPending}>
-            <p class="empty">Loading…</p>
+            <Empty>Loading…</Empty>
           </Match>
           <Match when={transcript.isError}>
-            <p class="error">
+            <ErrorLine>
               Could not read what this session said: {transcript.error?.message}
-            </p>
+            </ErrorLine>
           </Match>
           <Match when={spoke() && transcript.data}>
             {(said) => <Record said={said()} />}
@@ -310,24 +311,22 @@ export function Output(props: {
           {/* No Transcript, so the bytes — which is the whole Transcript-side
               story for a session whose backend kept no log of itself. */}
           <Match when={capture.isError}>
-            <p class="error">
+            <ErrorLine>
               Could not read this capture: {capture.error?.message}
-            </p>
+            </ErrorLine>
           </Match>
           <Match when={capture.data}>
             {(capture) => (
               <Show
                 when={capture().text !== ""}
-                fallback={
-                  <p class="empty">This session has printed nothing yet.</p>
-                }
+                fallback={<Empty>This session has printed nothing yet.</Empty>}
               >
                 <pre class="capture">{capture().text}</pre>
               </Show>
             )}
           </Match>
           <Match when={true}>
-            <p class="empty">Loading…</p>
+            <Empty>Loading…</Empty>
           </Match>
         </Switch>
       </Show>

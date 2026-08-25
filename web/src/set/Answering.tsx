@@ -32,6 +32,7 @@ import {
   DIRECTION_NOTE,
   DIRECTIONS,
 } from "../directions";
+import { ErrorLine, Note } from "../notices";
 import { AskText } from "./AskText";
 import { Postscript } from "./Postscript";
 import { anchor } from "./outline";
@@ -277,7 +278,9 @@ export function Answering(props: {
         <button type="button" onClick={start} disabled={submit.isPending}>
           {submit.isPending ? "Sending…" : "Submit"}
         </button>
-        <Show when={failed()}>{(said) => <p class="error">{said()}</p>}</Show>
+        <Show when={failed()}>
+          {(said) => <ErrorLine class="failure">{said()}</ErrorLine>}
+        </Show>
       </section>
       {/* The warning that stands between the human and a submit skipping
           offered choices: every multiple-choice question left open, by name, and
@@ -296,7 +299,7 @@ export function Answering(props: {
         <ul class="unanswered">
           <For each={confirming() ?? []}>{(name) => <li>{name}</li>}</For>
         </ul>
-        <p class="note">The agent will be told these are still open.</p>
+        <Note class="caveat">The agent will be told these are still open.</Note>
         <div class="confirm-actions">
           <button
             type="button"
@@ -397,7 +400,7 @@ function Choosing(props: {
                       </span>
                     </Show>
                   </label>
-                  <p class="note">{DIRECTION_NOTE[offered]}</p>
+                  <Note class="means">{DIRECTION_NOTE[offered]}</Note>
                 </li>
               );
             }}

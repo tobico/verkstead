@@ -88,6 +88,7 @@ import type {
 } from "../api/types";
 import { Menu } from "../Menu";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
@@ -605,18 +606,20 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
           {press.isPending ? "Resuming…" : "Resume"}
         </button>
 
-        <p class="note">
+        <Note>
           Verkstead works out what should be running from where the work now
           stands, and starts it.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{RESUME_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class="failure">{RESUME_REFUSAL[outcome()]}</ErrorLine>
+          )}
         </Show>
         <Show when={press.isError}>
-          <p class="error">
+          <ErrorLine class="failure">
             The conversation could not be resumed: {press.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -736,11 +739,11 @@ function ManualTaskComposer(props: {
           <Show
             when={profiles.data}
             fallback={
-              <p class="note">
+              <Note>
                 {profiles.isError
                   ? `Could not read the agent profiles: ${profiles.error?.message}`
                   : "Reading the agent profiles…"}
-              </p>
+              </Note>
             }
           >
             {(saved) => (
@@ -781,18 +784,22 @@ function ManualTaskComposer(props: {
           {submit.isPending ? "Starting…" : "Set it going"}
         </button>
 
-        <p class="note">
+        <Note>
           One session, outside the grilling and the implementation. Nothing about
           the conversation moves — what it leaves behind is what it commits.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{MANUAL_TASK_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class="failure">
+              {MANUAL_TASK_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
         </Show>
         <Show when={submit.isError}>
-          <p class="error">
+          <ErrorLine class="failure">
             The manual task could not be started: {submit.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -1296,9 +1303,7 @@ function AgentOutput(props: {
       <span class="latest">
         <Show
           when={props.output.latest !== ""}
-          fallback={
-            <span class="empty">Nothing printed yet.</span>
-          }
+          fallback={<Empty inline>Nothing printed yet.</Empty>}
         >
           {props.output.latest}
         </Show>
@@ -1552,24 +1557,26 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           when={ready()}
           fallback={
             <Show when={missing()}>
-              <p class="note wanting">
+              <Note class="wanting">
                 This needs a brief, and both pairings chosen and working.
-              </p>
+              </Note>
             </Show>
           }
         >
-          <p class="note">
+          <Note>
             This creates the branch and its worktree, and freezes the brief.
-          </p>
+          </Note>
         </Show>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{GRILL_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class="failure">{GRILL_REFUSAL[outcome()]}</ErrorLine>
+          )}
         </Show>
         <Show when={start.isError}>
-          <p class="error">
+          <ErrorLine class="failure">
             The grilling could not be started: {start.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -1617,18 +1624,20 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
         >
           {reopen.isPending ? "Reopening…" : "Reopen with a new brief"}
         </button>
-        <p class="note">
+        <Note>
           A second round on the same branch. The brief above stays where it is —
           this adds one to write, and the worktree comes back if it has gone.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{REOPEN_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class="failure">{REOPEN_REFUSAL[outcome()]}</ErrorLine>
+          )}
         </Show>
         <Show when={reopen.isError}>
-          <p class="error">
+          <ErrorLine class="failure">
             The conversation could not be reopened: {reopen.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -1733,12 +1742,12 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
               >
                 {stop.isPending ? "Stopping…" : "Stop"}
               </button>
-              <p class="note">Pause after the current task until you resume.</p>
+              <Note>Pause after the current task until you resume.</Note>
               <Show when={halting() === "Stopping"}>
-                <p class="note waiting">
+                <Note class="waiting">
                   The session running now finishes its task first. Nothing will
                   be started after it.
-                </p>
+                </Note>
               </Show>
             </div>
 
@@ -1753,14 +1762,14 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
                 >
                   {force.isPending ? "Stopping…" : "Force stop"}
                 </button>
-                <p class="note">Halt any running tasks and stop immediately.</p>
+                <Note>Halt any running tasks and stop immediately.</Note>
               </div>
             </Show>
           </Show>
 
           <Show
             when={props.conversation.state !== "Aborted"}
-            fallback={<p class="note">This conversation has been aborted.</p>}
+            fallback={<Note>This conversation has been aborted.</Note>}
           >
             <div class="action">
               <button
@@ -1772,30 +1781,32 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
               >
                 {abort.isPending ? "Aborting…" : "Abort conversation"}
               </button>
-              <p class="note">
+              <Note>
                 Permanently end the conversation and delete the worktree. The
                 branch stays where it is.
-              </p>
+              </Note>
             </div>
           </Show>
 
           <Show when={halting() && STOP_REFUSAL[halting()!]}>
-            <p class="error">{STOP_REFUSAL[halting()!]}</p>
+            <ErrorLine class="failure">{STOP_REFUSAL[halting()!]}</ErrorLine>
           </Show>
           <Show when={stop.isError || force.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The conversation could not be stopped:{" "}
               {stop.error?.message ?? force.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
 
           <Show when={refused()}>
-            {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+            {(outcome) => (
+              <ErrorLine class="failure">{ABORT_REFUSAL[outcome()]}</ErrorLine>
+            )}
           </Show>
           <Show when={abort.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The conversation could not be aborted: {abort.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
         </>
       )}
@@ -1933,7 +1944,7 @@ function Brief(props: {
           <Show
             when={props.brief.markdown !== ""}
             fallback={
-              <p class="empty">
+              <Empty>
                 <Show
                   when={props.conversation.adopting}
                   fallback={<>Nothing was written.</>}
@@ -1941,7 +1952,7 @@ function Brief(props: {
                   Nothing written yet — adopting the stage is what puts its
                   brief here.
                 </Show>
-              </p>
+              </Empty>
             }
           >
             <Show
@@ -1976,10 +1987,14 @@ function Brief(props: {
           the human was typing is still explained on the card it happened to
           once the card has gone back to being a rendering. */}
       <Show when={refused()}>
-        {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine class="failure">{BRIEF_REFUSAL[outcome()]}</ErrorLine>
+        )}
       </Show>
       <Show when={save.isError}>
-        <p class="error">The brief could not be saved: {save.error?.message}</p>
+        <ErrorLine class="failure">
+          The brief could not be saved: {save.error?.message}
+        </ErrorLine>
       </Show>
 
       {/* Under the brief, and only while the conversation is drafting: the

@@ -55,6 +55,7 @@ import type {
   Started,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { SPOKEN } from "./Mark";
 
 export function Conversations(props: {
@@ -212,15 +213,15 @@ export function Conversations(props: {
 
       <Switch>
         <Match when={conversations.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         <Match when={conversations.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read the conversations: {conversations.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={conversations.data?.length === 0}>
-          <p class="empty">Nothing is being worked on yet.</p>
+          <Empty>Nothing is being worked on yet.</Empty>
         </Match>
         <Match when={conversations.data}>
           <ul class="conversation-list" ref={list}>
@@ -245,7 +246,9 @@ export function Conversations(props: {
       {/* The order was not saved, which is worth saying because what is on the
           screen is the server's order rather than the one they just made. */}
       <Show when={place.isError}>
-        <p class="error">The order could not be saved: {place.error?.message}</p>
+        <ErrorLine>
+          The order could not be saved: {place.error?.message}
+        </ErrorLine>
       </Show>
     </>
   );
@@ -449,10 +452,10 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
             <Match when={repos.data?.length === 0}>
               {/* Nothing to attach a Conversation to, so the only thing to
                   offer is the page that fixes that. */}
-              <p class="empty">
+              <Empty class="nothing">
                 No repos are registered yet —{" "}
                 <A href="/settings">register one</A> to start a conversation.
-              </p>
+              </Empty>
             </Match>
             <Match when={repos.data}>
               {(registered) => (
@@ -516,14 +519,14 @@ function NewConversation(props: { open: (id: number) => void }): JSX.Element {
               the menu is still open to say it in: a press that failed left
               nothing else on the screen to carry the news. */}
           <Show when={start.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The conversation could not be started: {start.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
           <Show when={adopt.isError}>
-            <p class="error">
+            <ErrorLine class="failure">
               The conversation could not be started: {adopt.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
         </>
       )}

@@ -19,6 +19,7 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 import { loadPullRequest } from "../api/client";
 import type { ConversationView, PullRequestEvent } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { ABBREVIATED } from "./Timeline";
 
@@ -69,15 +70,15 @@ export function PullRequest(props: {
 
       <Switch>
         <Match when={carried.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         {/* The server's own wording, which is the thing to act on: no `gh` on
             the machine, an account not logged in, and a GitHub that would not
             answer are three different afternoons. */}
         <Match when={carried.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read this pull request: {carried.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={carried.data}>
           {(read) => (
@@ -86,7 +87,7 @@ export function PullRequest(props: {
                 <h2>Commits</h2>
                 <Show
                   when={read().commits.length > 0}
-                  fallback={<p class="empty">Nothing is on it yet.</p>}
+                  fallback={<Empty>Nothing is on it yet.</Empty>}
                 >
                   <ol class="commits">
                     <For each={read().commits}>
@@ -107,7 +108,7 @@ export function PullRequest(props: {
                 <h2>Comments</h2>
                 <Show
                   when={read().comments.length > 0}
-                  fallback={<p class="empty">Nobody has said anything.</p>}
+                  fallback={<Empty>Nobody has said anything.</Empty>}
                 >
                   <ol class="comments">
                     <For each={read().comments}>

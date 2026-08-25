@@ -47,6 +47,7 @@ import { loadCommitPane } from "../api/client";
 import type { CommitEvent, ConversationView } from "../api/types";
 import { setWrapping, wrapping } from "../device";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
@@ -218,20 +219,18 @@ export function Commit(props: {
 
       <Switch>
         <Match when={opened.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         <Match when={opened.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read this commit: {opened.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={opened.data}>
           {(read) => (
             <Show
               when={read().diff}
-              fallback={
-                <p class="empty">This commit changed no files.</p>
-              }
+              fallback={<Empty>This commit changed no files.</Empty>}
             >
               {(diff) => (
                 <section

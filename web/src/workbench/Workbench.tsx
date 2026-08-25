@@ -59,6 +59,7 @@ import type {
   UnreadableSetEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { Asked } from "./Asked";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
@@ -546,15 +547,15 @@ function Reading(props: {
           <Match when={props.id === ""}>
             {/* The resting state of the workbench, and what it says is the one
                 thing there is to do from here. */}
-            <p class="empty">Pick a conversation, or start one.</p>
+            <Empty>Pick a conversation, or start one.</Empty>
           </Match>
           <Match when={conversation.isPending}>
-            <p class="empty">Loading…</p>
+            <Empty>Loading…</Empty>
           </Match>
           <Match when={conversation.isError}>
-            <p class="error">
+            <ErrorLine>
               Could not read this conversation: {conversation.error?.message}
-            </p>
+            </ErrorLine>
           </Match>
           <Match when={conversation.data}>
             {(conversation) => (

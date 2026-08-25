@@ -10,6 +10,7 @@ import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Archived } from "../src/api/types";
+import notices from "../src/notices.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
 import { json, readable } from "./serving";
@@ -132,10 +133,10 @@ describe("the offer to close a Set unanswered", () => {
     expect((asking as HTMLDialogElement).open, "opened as a modal").toBe(true);
     // The one irreversible act in the UI has to be asked about as one — and it
     // has to say where the Set stays, because it is not being deleted.
-    expect(asking.querySelector(".note")!.textContent).toContain(
+    expect(asking.querySelector(`.${notices.note}`)!.textContent).toContain(
       "cannot be undone",
     );
-    expect(asking.querySelector(".note")!.textContent).toContain(
+    expect(asking.querySelector(`.${notices.note}`)!.textContent).toContain(
       "Conversation's timeline",
     );
     expect(posts(fetching), "nothing has been sent").toHaveLength(0);
@@ -210,7 +211,7 @@ describe("closing a Set unanswered", () => {
 
       await waitFor(() => expect(posts(fetching)).toHaveLength(1));
       await waitFor(() =>
-        expect(page.querySelector(".meta .error")!.textContent).toContain(
+        expect(page.querySelector(`.meta .${notices.error}`)!.textContent).toContain(
           said,
         ),
       );
@@ -230,7 +231,7 @@ describe("closing a Set unanswered", () => {
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
-      expect(page.querySelector(".meta .error")!.textContent).toContain(
+      expect(page.querySelector(`.meta .${notices.error}`)!.textContent).toContain(
         "the Question Set could not be archived",
       ),
     );

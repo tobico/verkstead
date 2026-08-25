@@ -16,6 +16,7 @@ import { Menu } from "../Menu";
 import { Modal } from "../Modal";
 import { archiveSet } from "../api/client";
 import type { Archived, Liveness } from "../api/types";
+import { ErrorLine, Note } from "../notices";
 import { clearDraft } from "./sheet";
 
 /// What the badge says. The word that colours it is the Liveness itself, which
@@ -127,7 +128,9 @@ export function Standing(props: {
           </button>
         )}
       </Menu>
-      <Show when={failed()}>{(said) => <span class="error">{said()}</span>}</Show>
+      <Show when={failed()}>
+        {(said) => <ErrorLine inline class="failure">{said()}</ErrorLine>}
+      </Show>
       {/* The one irreversible thing on the page, so it is asked about in as many
           words — including that it cannot be undone, which is what tells this
           dialog apart from the one before a submit. Every way out of it that is
@@ -140,7 +143,7 @@ export function Standing(props: {
         labelledBy="archive-title"
       >
         <p id="archive-title">Archive this Set unanswered?</p>
-        <p class="note">{ARCHIVE_WARNING}</p>
+        <Note class="caveat">{ARCHIVE_WARNING}</Note>
         <div class="confirm-actions">
           <button
             type="button"
