@@ -2,25 +2,17 @@
    so a long line never widens the page under it. And the syntax colouring
    inside it.
 
-   Both are HTML that `crates/render` writes and the page injects, so the class
-   names are the renderer's and syntect's rather than any component's, and there
-   is no class of ours to hash.
+   Both are HTML that `crates/render` writes and the page injects, so every name
+   in this file is the renderer's or syntect's and none of them can be hashed —
+   which is the whole of why the file exists. The section the two components draw
+   *around* this markup is theirs and is hashed like anything else: see
+   `set/Diff.module.css`, which reaches the names below through `:global`.
 
    The renderer's own names are camelCase, like every class we write. The
    `tok-*` family at the foot of this file is the documented exception: only the
    prefix is ours and the suffix is generated from a syntect scope, so renaming
    it would mean post-processing generated HTML. Mermaid's DOM and xterm's are
    the same exception for the same reason. */
-
-.diff {
-  margin-bottom: 1.5rem;
-}
-
-.diffFiles {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
 
 .diffFile {
   background: var(--card);
@@ -219,43 +211,6 @@
   font-style: italic;
 }
 
-/* Word wrap, remembered per device and switched on beside the heading. It undoes
-   the three rules that hold a hunk on one line: the `pre`'s own `white-space`,
-   the box measured to the longest line, and — because a wrapped line has to
-   break somewhere — the browser's refusal to break inside a long word, which
-   here is a minified line or a URL that would otherwise still overflow.
-
-   Nothing about the colouring changes: the wash is on the line, and a line that
-   is three rows tall is washed three rows deep. */
-
-.diff.wrapped .diffLines {
-  /* Nothing left to scroll to, so the box stops offering. */
-  overflow-x: visible;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.diff.wrapped .diffLines > code {
-  width: auto;
-}
-
-/* Hung off the code column: the padding holds every row of the line clear of the
-   two cells, and the negative indent pulls the first row — the one those cells
-   are actually in — back out to the edge again. The remainder of a wrapped line
-   then starts under the code above it rather than under the line numbers. */
-.diff.wrapped .diffLine {
-  padding-left: var(--diff-gutter);
-  text-indent: calc(-1 * var(--diff-gutter));
-}
-
-/* `text-indent` is inherited and an inline-block is a block container of its own,
-   so without this the two cells would each pull their own contents out to the
-   left along with the line. */
-.diff.wrapped .diffNumber,
-.diff.wrapped .diffLine .marker {
-  text-indent: 0;
-}
-
 /* Token colouring, on top of the +/- wash. The classes are syntect's scope
    atoms: an outer span carries the broad scope and inner ones refine it, so the
    more specific colour wins by being nested. Anything not named here keeps the
@@ -289,13 +244,12 @@
   color: var(--tok-support);
 }
 
-/* Where a jump from the Set page's table of contents lands: the section's own
-   heading, and each file's fold. Both keep clear of whatever the page has
-   pinned across its top edge — the nav's bar below one width, the floating
-   header above it — which is `--jump-clear` in `set/Contents.module.css`, that
-   being what does the pinning. Here rather than beside the component, because
-   these are the names this sheet owns and a module has no way to spell one. */
-.diff,
+/* Where a jump from the Set page's table of contents lands when it names a file:
+   that file's own fold, clear of whatever the page has pinned across its top
+   edge — the nav's bar below one width, the floating header above it — which is
+   `--jump-clear` in `set/Contents.module.css`, that being what does the pinning.
+   Here rather than beside the component because the fold is the renderer's; the
+   section around it keeps the same clearance in `set/Diff.module.css`. */
 .diffFile {
   scroll-margin-top: var(--jump-clear);
 }

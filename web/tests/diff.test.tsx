@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SetView } from "../src/api/types";
 // The wrap control, which is the one on/off switch this page draws twice.
 import app from "../src/App.module.css";
+// The Diff section itself, whose two classes are the whole of what wrapping is.
+import styles from "../src/set/Diff.module.css";
 import toggle from "../src/Switch.module.css";
 import { mount, reading, texts } from "./reading";
 import { json, readable, reads, serving, whenever } from "./serving";
@@ -38,7 +40,7 @@ afterEach(() => {
 
 /// The Diff section of a page, which every test here has to have found.
 function diffOf(page: ParentNode): HTMLElement {
-  const diff = page.querySelector<HTMLElement>("section.diff");
+  const diff = page.querySelector<HTMLElement>(`section.${styles.diff}`);
   expect(diff, "expected the Diff section").toBeTruthy();
   return diff as HTMLElement;
 }
@@ -134,7 +136,7 @@ describe("the attached Diff", () => {
   it("shows none of its chrome on a Set that has no Diff", async () => {
     const page = await reading(UNDIFFED);
 
-    expect(page.querySelector("section.diff")).toBeNull();
+    expect(page.querySelector(`section.${styles.diff}`)).toBeNull();
     expect(page.querySelector("#diff")).toBeNull();
     expect(page.querySelector("#diff-1")).toBeNull();
     expect(
@@ -153,7 +155,7 @@ describe("word wrap", () => {
   /// The switch beside the Diff's heading.
   function wrapSwitch(page: ParentNode): HTMLInputElement {
     const found = page.querySelector<HTMLInputElement>(
-      `section.diff .${toggle.switch} input`,
+      `section.${styles.diff} .${toggle.switch} input`,
     );
     expect(
       found,
@@ -168,7 +170,7 @@ describe("word wrap", () => {
 
     expect(flip.getAttribute("role")).toBe("switch");
     expect(flip.checked).toBe(false);
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
   });
 
   it("wraps the Diff, and remembers it for the next one", async () => {
@@ -179,7 +181,7 @@ describe("word wrap", () => {
     expect(
       diffOf(page).className,
       "wrapping is a class and nothing more: the Diff arrived rendered",
-    ).toBe("diff wrapped");
+    ).toBe(`${styles.diff} ${styles.wrapped}`);
     expect(
       localStorage.getItem(WRAP),
       "the setting governs every Diff, so it is the device that remembers it",
@@ -191,7 +193,7 @@ describe("word wrap", () => {
 
     const page = await reading(WAITING);
 
-    expect(diffOf(page).className).toBe("diff wrapped");
+    expect(diffOf(page).className).toBe(`${styles.diff} ${styles.wrapped}`);
     expect(wrapSwitch(page).checked).toBe(true);
   });
 
@@ -201,7 +203,7 @@ describe("word wrap", () => {
 
     wrapSwitch(page).click();
 
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
     expect(
       localStorage.getItem(WRAP),
       "the absence is already the default, so off is nothing kept",
@@ -219,10 +221,10 @@ describe("word wrap", () => {
     });
 
     const page = await reading(WAITING);
-    expect(diffOf(page).className).toBe("diff");
+    expect(diffOf(page).className).toBe(styles.diff);
 
     wrapSwitch(page).click();
-    expect(diffOf(page).className).toBe("diff wrapped");
+    expect(diffOf(page).className).toBe(`${styles.diff} ${styles.wrapped}`);
 
     vi.restoreAllMocks();
   });

@@ -57,6 +57,9 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
 // one session's record and the terminal it was printed on, and a pull request.
 import commitPane from "../src/workbench/Commit.module.css";
+// The Diff section the commit pane draws, which is the Set page's own component
+// and so the Set page's own module.
+import diffSection from "../src/set/Diff.module.css";
 // The sidebar, both ways: the hashed names its rows are queried by, and the
 // source of the rules that say what a card's state looks like.
 import sidebar from "../src/workbench/Conversations.module.css";
@@ -5172,7 +5175,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .diffFiles`);
+    await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.close}`));
 
@@ -5188,7 +5191,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const diff = await drawn(container, `.${shell.detailsPane} .diffFiles`);
+    const diff = await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
     // Put in the page as it arrived: the folds, the per-file anchors and the
     // highlighting are all the renderer's, and nothing here reads the diff.
@@ -5241,7 +5244,7 @@ describe("a commit on the timeline", () => {
 
     // Read in the order it is written in: what the commit says about itself,
     // then what it changed.
-    const diff = await drawn(container, `.${shell.detailsPane} .diff`);
+    const diff = await drawn(container, `.${shell.detailsPane} .${diffSection.diff}`);
 
     expect(
       summary.compareDocumentPosition(diff) &
@@ -5362,7 +5365,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .diffFiles`);
+    await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
     expect(container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`)).toBeNull();
   });

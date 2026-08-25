@@ -52,6 +52,10 @@ import { Empty, ErrorLine } from "../notices";
 import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
+// The Diff section, drawn as the Set page draws it: the box, the column of
+// files, and what the wrap switch does to the lines inside them. One definition
+// wherever a Diff is read — the renderer's own markup inside it is global.
+import diffStyles from "../set/Diff.module.css";
 import { files, spied } from "../set/outline";
 import styles from "./Commit.module.css";
 import { PaneHead } from "./PaneHead";
@@ -233,7 +237,11 @@ export function Commit(props: {
             >
               {(diff) => (
                 <section
-                  class={wrapped() ? "diff wrapped" : "diff"}
+                  class={
+                    wrapped()
+                      ? `${diffStyles.diff} ${diffStyles.wrapped}`
+                      : diffStyles.diff
+                  }
                   id={DIFF}
                 >
                   <div class={app.sectionHead}>
@@ -242,7 +250,7 @@ export function Commit(props: {
                   </div>
                   {/* The per-file folds and their anchors are stamped by the
                       renderer, since this arrives already rendered. */}
-                  <div class="diffFiles" innerHTML={diff().html} />
+                  <div class={diffStyles.diffFiles} innerHTML={diff().html} />
                 </section>
               )}
             </Show>

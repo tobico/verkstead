@@ -19,6 +19,8 @@ import type { SetView } from "../src/api/types";
 import toggle from "../src/Switch.module.css";
 // The nav's own names, which are the module's now rather than the page's.
 import contents from "../src/set/Contents.module.css";
+// And the Diff section the switch beside the heading belongs to.
+import diff from "../src/set/Diff.module.css";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -590,7 +592,7 @@ describe("the floating header", () => {
     spy().cross({ preface: true, diff: true });
 
     const beside = page.querySelector<HTMLInputElement>(
-      `section.diff .${toggle.switch} input`,
+      `section.${diff.diff} .${toggle.switch} input`,
     )!;
     const floating = page.querySelector<HTMLInputElement>(
       `.${contents.header} .${toggle.switch} input`,
@@ -598,7 +600,9 @@ describe("the floating header", () => {
 
     floating.click();
 
-    expect(page.querySelector("section.diff")!.className).toBe("diff wrapped");
+    expect(page.querySelector(`section.${diff.diff}`)!.className).toBe(
+      `${diff.diff} ${diff.wrapped}`,
+    );
     expect(
       beside.checked,
       "flipping either has to move the other: they are one setting",
