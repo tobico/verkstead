@@ -22,7 +22,6 @@ import type {
   ConversationView,
   GrillingStarted,
   ManualTaskStarted,
-  PauseResumed,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -339,25 +338,6 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
 /// is checked out again on the same branch, which is the server's to do.
 export function reopenConversation(id: number): Promise<ConversationReopened> {
   return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
-}
-
-/// Go on without waiting for the account's window to come back.
-///
-/// The human's half of the two ways a pause ends; the other is the reset time
-/// passing, which the server does on its own. Both close the same wait and start
-/// the work again from where it stopped, and neither touches the worktree — a
-/// pause never changed anything in it.
-///
-/// No body: there is one thing to do about a pause, and a choice of one is a
-/// press rather than a form.
-export function resumePause(
-  id: number,
-  event: number,
-): Promise<PauseResumed> {
-  return post<PauseResumed>(
-    `/api/ui/conversations/${id}/pause/${event}/resume`,
-    {},
-  );
 }
 
 /// Set a manual task going: this one instruction, under the pairing picked

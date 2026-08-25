@@ -295,6 +295,18 @@ fn said(what: &str, how: &str, git_status: &str, tail: &str) -> String {
     )
 }
 
+/// Why a run stopped when the account it was spending ran out: which account,
+/// and the line the session printed about it.
+///
+/// The `how` of that stop — see [`said`] — and here rather than where the stop
+/// is written, because it is read as well as written. A Pause a Verkstead of
+/// before put on a Timeline is the same two facts, and drawing it in the same
+/// sentence is what makes the record read as one kind of stopped thing rather
+/// than two: see the Timeline's own read, which is the other caller.
+pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
+    format!("the account **{profile}** was being spent is out of window: {said}")
+}
+
 /// The stop with its first letter up, because it opens the sentence the Notice
 /// is. Every caller names it the way the log does — "implementing the work" —
 /// and a Notice opening in lower case would read as half a line.

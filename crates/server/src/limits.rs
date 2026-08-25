@@ -54,10 +54,7 @@
 //! as the session left it — the same promise every other stop makes.
 
 use sqlx::SqlitePool;
-use verkstead_render::PauseResumed;
-use verkstead_schema::Nudge;
 
-use crate::AppState;
 use crate::nudge::Nudges;
 use crate::store;
 
@@ -427,7 +424,7 @@ async fn out_of_window(
             resets: resets.as_deref(),
         },
         crate::stalls::driving(lifecycle),
-        &format!("the account **{profile}** was being spent is out of window: {said}"),
+        &crate::stopping::out_of_window(profile, said),
         Some(session),
     )
     .await;
@@ -460,66 +457,6 @@ async fn out_of_window(
             false
         }
     }
-}
-
-/// End a Pause a Verkstead of before put on a Timeline, and get the
-/// Conversation driving where nothing is.
-///
-/// The card that offers this is one drawn over a stored Pause Event: nothing
-/// writes another, and what stops a run for a window now is the one stop. What
-/// is left for this to do is close the row — the record that the wait is over —
-/// and then press the one Resume, which is what clears the stop the Pause was
-/// read onto its Conversation as.
-///
-/// Nothing is reverted, reset or stashed. A stop never touched the Worktree, so
-/// there is nothing to put back: the run picks up from wherever the session left
-/// the repository.
-///
-/// Through the one standing way in — see [`crate::resume`] — rather than through
-/// anything of this module's own. What ought to be running after a stop is the
-/// same question Resume asks after any other, recomputed from the state the
-/// Conversation is in now, and a second answer to it here would be a second
-/// thing to keep true. Clearing the stop is that press's, which is why nothing
-/// here clears one.
-///
-/// [`crate::resume::Resuming::Pressed`], because there is nothing else left to
-/// be: a wait ends when the human ends it, so a wrapping Conversation's spent
-/// check-fix attempts are forgotten the way they are for any other press.
-pub(crate) async fn resume(
-    state: &AppState,
-    conversation_id: i64,
-    event_id: i64,
-) -> anyhow::Result<PauseResumed> {
-    let resuming = store::resume_pause(&state.pool, conversation_id, event_id).await?;
-
-    match resuming {
-        store::Resuming::NoSuchPause => return Ok(PauseResumed::NoSuchPause),
-        store::Resuming::AlreadyResumed => return Ok(PauseResumed::AlreadyResumed),
-        store::Resuming::Resumed => {}
-    }
-
-    tracing::info!(
-        conversation_id,
-        event_id,
-        "a run that was waiting on a usage limit is going on again"
-    );
-
-    state.nudges.announce(Nudge::Conversation {
-        conversation: conversation_id,
-    });
-
-    match crate::resume::resume(state, conversation_id, crate::resume::Resuming::Pressed).await {
-        Ok(resumed) => tracing::info!(
-            conversation_id,
-            resumed = ?resumed,
-            "the run that was stopped on a usage limit was asked to go on"
-        ),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "starting a run again after a usage limit failed");
-        }
-    }
-
-    Ok(PauseResumed::Resumed)
 }
 
 #[cfg(test)]

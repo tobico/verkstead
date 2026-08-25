@@ -1,5 +1,5 @@
 //! The Pauses a Verkstead of before put on a Timeline when an Agent Profile's
-//! account ran out of window, and when each of those waits ended.
+//! account ran out of window.
 //!
 //! Nothing writes one any more. An exhausted window stops a run the way
 //! everything else does — one stop on the Conversation, one Notice, one Resume
@@ -7,23 +7,25 @@
 //! that is the record of what happened, and ADR-0006's rule is that the record
 //! is kept and read rather than rewritten.
 //!
-//! So a stored Pause still says which account ran out, the line the session
-//! printed, when the window was read to come back, and whether the wait is over
-//! — and a Timeline holding one still draws it. What it no longer says is
-//! anything about *now*: whether a Conversation is stopped is the one stop's to
-//! answer, and an open Pause found in a database written before this stage was
-//! read onto its Conversation as one — see [`super::stops::apply_schema`].
+//! So a stored Pause still says which account ran out and the line the session
+//! printed, and a Timeline holding one still draws it — as the sentence every
+//! other stop is said in, there being one kind of stopped thing to read. What it
+//! no longer says is anything about *now*: whether a Conversation is stopped is
+//! the one stop's to answer, and an open Pause found in a database written
+//! before this stage was read onto its Conversation as one, reset words and all
+//! — see [`super::stops::apply_schema`].
 //!
-//! And no longer *what* ended the wait. A Verkstead of before had two answers —
-//! the human pressing, and the reset time passing — and there is one left: no
-//! stop resumes itself, so every wait that ends ends by a press. A row written
-//! before this stage keeps the word it was written with; nothing reads it.
+//! Which is what leaves three of the columns unread. When the window came back
+//! is on the stop now, and it is drawn there, beside the press; and whether the
+//! wait ended, and what ended it, was a card's to say — that card has gone, and
+//! a wait that is over is over. Not one of them is dropped: rewriting the record
+//! is the one thing this module does not do.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
-/// A Pause, whole: which account ran out, when it comes back, and whether the
-/// wait is over.
+/// A Pause as a Timeline draws one: which account ran out, and the line that
+/// said so.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pause {
     /// What the Agent Profile whose account ran out is called, as it was called
@@ -41,33 +43,6 @@ pub struct Pause {
     /// by a sentence this build recognised is answerable a year later by
     /// somebody reading the sentence itself.
     pub said: String,
-
-    /// When the window resets, RFC 3339 — or `None` where what the session
-    /// printed carried no time the Verkstead that wrote this could read as one.
-    ///
-    /// The half a Pause used to end itself on. What it says now is what it
-    /// always read as: when the account comes back, for somebody looking at
-    /// the record.
-    pub resets_at: Option<String>,
-
-    /// When the wait ended, RFC 3339 — or `None` while it is still on, which is
-    /// the state the run is stopped in.
-    pub resumed: Option<String>,
-}
-
-/// What became of ending one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Resuming {
-    /// Recorded: the run is free to go on.
-    Resumed,
-
-    /// This Conversation has no such Pause. An Event id belonging to another
-    /// Conversation names nothing here.
-    NoSuchPause,
-
-    /// It had ended already — the human pressed twice, from two devices. Not an
-    /// error and not something to act on twice: the first ending stands.
-    AlreadyResumed,
 }
 
 /// The pauses table. It hangs off a Timeline Event as a pull request does: a
@@ -77,8 +52,9 @@ pub enum Resuming {
 /// no Pause on any Timeline and the Timeline's own read joins this table all
 /// the same, so the shape has to be there for the join to find nothing in.
 ///
-/// `resumed_by` with it, though nothing reads it either. It is a column of rows
-/// written before this stage, and dropping it would be rewriting the record.
+/// `resets_at`, `resumed_by` and `resumed_at` with it, though nothing reads any
+/// of the three. They are columns of rows written before this stage, and
+/// dropping them would be rewriting the record.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pauses (
@@ -98,37 +74,6 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-/// The Pause one of a Conversation's Events is, or `None` where that Conversation
-/// has no such Event.
-///
-/// The Conversation is part of the question rather than trusted from the path: a
-/// Pause is reached through the Timeline it is on.
-pub async fn pause(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    event_id: i64,
-) -> Result<Option<Pause>> {
-    type Row = (String, String, Option<String>, Option<String>);
-
-    let row: Option<Row> = sqlx::query_as(
-        "SELECT profile, said, resets_at, resumed_at
-         FROM pauses
-         WHERE event_id = ? AND conversation_id = ?",
-    )
-    .bind(event_id)
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("reading the Pause of Event {event_id}"))?;
-
-    Ok(row.map(|(profile, said, resets_at, resumed)| Pause {
-        profile,
-        said,
-        resets_at,
-        resumed,
-    }))
-}
-
 /// Every Pause on a Conversation's Timeline, by the Event each one is.
 ///
 /// A read of its own rather than a join, for the arithmetic: the Timeline's
@@ -138,10 +83,10 @@ pub(crate) async fn on_timeline(
     pool: &SqlitePool,
     conversation_id: i64,
 ) -> Result<std::collections::HashMap<i64, Pause>> {
-    type Row = (i64, String, String, Option<String>, Option<String>);
+    type Row = (i64, String, String);
 
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT event_id, profile, said, resets_at, resumed_at
+        "SELECT event_id, profile, said
          FROM pauses
          WHERE conversation_id = ?",
     )
@@ -152,66 +97,8 @@ pub(crate) async fn on_timeline(
 
     Ok(rows
         .into_iter()
-        .map(|(event_id, profile, said, resets_at, resumed)| {
-            (
-                event_id,
-                Pause {
-                    profile,
-                    said,
-                    resets_at,
-                    resumed,
-                },
-            )
-        })
+        .map(|(event_id, profile, said)| (event_id, Pause { profile, said }))
         .collect())
-}
-
-/// End one: the wait is over, which now has one way of happening.
-///
-/// Recorded before anything acts on it, for the reason a stop is cleared before
-/// anything is launched over it: a Pause acted on without being closed is one the
-/// run could be started again from twice, and two launches is two agents in one
-/// Worktree.
-///
-/// [`Resuming::AlreadyResumed`] is an ordinary outcome. The human presses from
-/// whichever device is to hand, and a press that arrives second is the same
-/// press: a wait that is over is over.
-pub async fn resume_pause(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    event_id: i64,
-) -> Result<Resuming> {
-    let mut tx = pool.begin().await.context("ending a Pause")?;
-
-    let found: Option<(Option<String>,)> =
-        sqlx::query_as("SELECT resumed_at FROM pauses WHERE event_id = ? AND conversation_id = ?")
-            .bind(event_id)
-            .bind(conversation_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .with_context(|| format!("looking for the Pause of Event {event_id}"))?;
-
-    let Some((resumed,)) = found else {
-        return Ok(Resuming::NoSuchPause);
-    };
-
-    if resumed.is_some() {
-        return Ok(Resuming::AlreadyResumed);
-    }
-
-    sqlx::query(
-        "UPDATE pauses
-         SET resumed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-         WHERE event_id = ?",
-    )
-    .bind(event_id)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("ending the Pause of Event {event_id}"))?;
-
-    tx.commit().await.context("ending a Pause")?;
-
-    Ok(Resuming::Resumed)
 }
 
 /// The word the `kind` column holds for a Pause.

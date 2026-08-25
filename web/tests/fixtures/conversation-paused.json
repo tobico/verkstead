@@ -44,6 +44,7 @@
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
+  "resets": "3pm",
   "state": "Implementing",
   "timeline": [
     {
@@ -70,13 +71,10 @@
       }
     },
     {
-      "Pause": {
+      "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 25,
-        "profile": "opus",
-        "resets_at": "2026-08-03T05:00:00.000Z",
-        "resumed": null,
-        "said": "Usage limit reached · continuing automatically at 3pm · esc to cancel"
+        "html": "<p>the account <strong>opus</strong> was being spent is out of window: Usage limit reached · continuing automatically at 3pm · esc to cancel</p>\n",
+        "id": 25
       }
     },
     {

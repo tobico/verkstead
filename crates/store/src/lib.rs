@@ -60,7 +60,7 @@ pub use conversations::{
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};
-pub use pauses::{Pause, Resuming, pause, resume_pause};
+pub use pauses::Pause;
 pub use placements::place_conversations;
 pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,

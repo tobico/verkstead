@@ -2144,6 +2144,14 @@ main:has(.workbench) {
   margin-bottom: 0;
 }
 
+/* And the one of them a conversation is blocked on, which the badge in the
+   header marks: the rule at its left takes the colour that means stopped, so a
+   long record says where the stop is at a glance. The one thing that ever
+   selects a notice — there is no pane behind it to open. */
+.timeline-event > .notice.selected {
+  border-left-color: var(--stopped);
+}
+
 /* What a session has printed, summarised. A button, because the whole of it is
    in the details pane and this is how it is opened — so it is a card that says
    it can be pressed rather than one with a control in it. */
@@ -2500,71 +2508,6 @@ main:has(.workbench) {
   margin: 0 0 1.5rem;
   padding: 0 0 1.25rem;
   border-bottom: 1px solid var(--edge);
-}
-
-/* A run waiting an account's window out. A card and not a button, unlike the
-   events above it: this one has something to press *inside* it, so the press is
-   a control of its own rather than the whole card. Marked while it is open the
-   way a waiting question set is — in the colour that means stopped rather than
-   the one that means happening. What it does not have is a way into a details
-   pane, because it has no evidence to gather; three short facts are the whole of
-   it, and they are here. */
-.timeline-event > .pause.selected {
-  border-color: var(--accent);
-}
-
-.timeline-event > .pause.open {
-  border-color: var(--stopped);
-}
-
-.pause .event-head {
-  justify-content: flex-start;
-}
-
-/* Not `.live`, which is the accent and means something is happening here. This
-   means the opposite: nothing is happening, and it is waiting on you. */
-.pause .event-head .live {
-  color: var(--stopped);
-}
-
-/* Which account ran out and when it comes back, then the sentence the session
-   printed: the first reads as the heading of the thing that stopped, and the
-   second is the machine's own account of it. */
-.pause .what {
-  margin: 0;
-  font-weight: 600;
-}
-
-.pause .how {
-  margin: 0.15rem 0 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* That the wait was ended, once it has been. The press goes and this stays: a
-   long run against a busy account collects one of these a day. Marked, because
-   there is one way a wait ends and it is somebody deciding not to wait. */
-.pause .resumed {
-  margin: 0.75rem 0 0;
-  font-weight: 600;
-  color: var(--accent);
-}
-
-/* One press and no more, because there is one thing to do: Verkstead is not
-   driving anything here and has nothing to retry. */
-.resuming {
-  margin-top: 1rem;
-}
-
-.resuming .resume {
-  font: inherit;
-  cursor: pointer;
-}
-
-.resuming .note {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
 }
 
 /* What the conversation has stopped on, said where the conversation is named. A
@@ -3020,6 +2963,16 @@ main:has(.workbench) {
   margin: 0.5rem 0 0;
   font-size: 0.85rem;
   color: var(--ink-soft);
+}
+
+/* And when the account that ran out comes back, where the stop carries it.
+   Beside the button rather than in the note under it, and in the ink of the
+   note's siblings rather than the note's own: it is the one fact this stop has
+   that the others do not, and the human reads it to decide when to press. */
+.resume .resets {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .resume .error {

@@ -20,10 +20,10 @@ use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, ConversationAborted, ConversationEntry,
     ConversationReopened, ConversationStopped, ConversationView, GrillingStarted,
-    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, PauseResumed,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading,
-    SettingsEdit, SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
+    ManualTaskStarted, ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, Shown, Started, Submitted, Subscribed, Subscription,
     TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
@@ -135,13 +135,8 @@ fn the_viewers_types_are_written_from_these() {
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
 
-    // What the human does about a run waiting an account's window out. The Pause
-    // rides on the Timeline whole — it is the one Event with nothing behind a
-    // second fetch — and there is nothing to send with the press, so this is the
-    // outcome alone.
-    PauseResumed::export_all(&config).unwrap();
-
     // What the human sets going by hand at the end of a Timeline, and every way
+
     // of being refused it. The instruction's own Event rides on the
     // `ConversationView` above, rendered like the handoff.
     ManualTaskSubmission::export_all(&config).unwrap();

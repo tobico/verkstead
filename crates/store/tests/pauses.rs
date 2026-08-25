@@ -5,15 +5,13 @@
 //! everything else does. What is asked of the store here is ADR-0006's rule —
 //! *the record is kept and read rather than rewritten* — so the rows are written
 //! by hand, as a database from before holds them, and the tests are that a
-//! Timeline carrying one still reads and that ending one is recorded once.
+//! Timeline carrying one still reads whatever those rows say about a wait that
+//! is long over.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
-use verkstead_store::{
-    Event, Pause, Resuming, open_database, pause, register_repo, resume_pause, start_conversation,
-    timeline,
-};
+use verkstead_store::{Event, Pause, open_database, register_repo, start_conversation, timeline};
 
 /// The sentence claude prints when an account is out of window, as a Verkstead
 /// of before read it back off the terminal.
@@ -93,73 +91,30 @@ async fn on_the_timeline(pool: &SqlitePool, id: i64) -> Vec<Pause> {
         .collect()
 }
 
+/// What a stored Pause has to say is what the human reads on the Timeline: which
+/// account ran out, and the sentence the session printed about it.
 #[tokio::test]
-async fn a_stored_pause_still_names_the_account_and_the_reset() {
+async fn a_stored_pause_still_names_the_account_and_what_the_session_said() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
-    let event = stored(&pool, id, "fable", SAID, Some("2026-08-24T05:00:00Z")).await;
+    stored(&pool, id, "fable", SAID, Some("2026-08-24T05:00:00Z")).await;
 
     assert_eq!(
-        pause(&pool, id, event).await.unwrap(),
-        Some(Pause {
+        on_the_timeline(&pool, id).await,
+        vec![Pause {
             profile: "fable".to_owned(),
             said: SAID.to_owned(),
-            resets_at: Some("2026-08-24T05:00:00Z".to_owned()),
-            resumed: None,
-        }),
-        "the account that ran out and when it comes back, exactly as they were read",
-    );
-
-    assert_eq!(
-        on_the_timeline(&pool, id).await.len(),
-        1,
-        "and it is on the Timeline, which is where the human looks",
+        }],
+        "the account that ran out and its own sentence, exactly as they were read",
     );
 }
 
-/// The reset time is the half a display may not have carried. A Pause without
-/// one is a whole record rather than a broken one.
+/// A row a Verkstead of before ended still reads, and reads as the same thing:
+/// what a wait was is on the record, and what became of it was a card's to say.
+/// That card has gone, and the row keeps every word it was written with.
 #[tokio::test]
-async fn a_stored_pause_with_no_reset_time_reads_back_too() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
-
-    let event = stored(&pool, id, "fable", "Usage limit reached", None).await;
-
-    assert_eq!(
-        pause(&pool, id, event).await.unwrap().unwrap().resets_at,
-        None,
-    );
-    assert_eq!(on_the_timeline(&pool, id).await.len(), 1);
-}
-
-/// That a wait is over is on the record, and stamped. What ended it is not:
-/// there is one way left, and every wait that ends ends by a press.
-#[tokio::test]
-async fn a_wait_that_ended_is_on_the_record() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
-
-    let event = stored(&pool, id, "fable", SAID, None).await;
-
-    assert_eq!(
-        resume_pause(&pool, id, event).await.unwrap(),
-        Resuming::Resumed,
-    );
-
-    let Some(at) = pause(&pool, id, event).await.unwrap().unwrap().resumed else {
-        panic!("the Pause reads as still waiting");
-    };
-
-    assert!(!at.is_empty(), "and it is stamped");
-}
-
-/// A row a Verkstead of before ended reads as ended, whichever of its two
-/// answers it was written with. The word it kept is nothing this build asks
-/// about, and rewriting the row to drop it would be rewriting the record.
-#[tokio::test]
-async fn a_wait_a_verkstead_of_before_ended_still_reads_as_over() {
+async fn a_wait_a_verkstead_of_before_ended_reads_back_the_same() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
@@ -175,33 +130,31 @@ async fn a_wait_a_verkstead_of_before_ended_still_reads_as_over() {
     .unwrap();
 
     assert_eq!(
-        pause(&pool, id, event).await.unwrap().unwrap().resumed,
-        Some("2026-08-24T05:00:00.000Z".to_owned()),
+        on_the_timeline(&pool, id).await,
+        vec![Pause {
+            profile: "fable".to_owned(),
+            said: SAID.to_owned(),
+        }],
+    );
+
+    let ended: (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT resumed_by, resumed_at FROM pauses WHERE event_id = ?")
+            .bind(event)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(
+        ended,
+        (
+            Some("reset".to_owned()),
+            Some("2026-08-24T05:00:00.000Z".to_owned())
+        ),
+        "and the row itself is untouched: rewriting the record is what nothing does",
     );
 }
 
-/// The human presses from a phone twice over. The second one is not an error and
-/// not something to act on twice.
-#[tokio::test]
-async fn a_wait_that_is_over_stays_over() {
-    let (_dir, pool) = fresh_pool().await;
-    let id = conversation(&pool).await;
-
-    let event = stored(&pool, id, "fable", SAID, None).await;
-
-    assert_eq!(
-        resume_pause(&pool, id, event).await.unwrap(),
-        Resuming::Resumed,
-    );
-    assert_eq!(
-        resume_pause(&pool, id, event).await.unwrap(),
-        Resuming::AlreadyResumed,
-        "the first ending stands",
-    );
-}
-
-/// A Pause is reached through the Timeline it is on, so an Event belonging to
-/// another Conversation names nothing here.
+/// A Pause is one Conversation's, so another's Timeline does not carry it.
 #[tokio::test]
 async fn a_pause_belongs_to_the_conversation_it_is_on() {
     let (_dir, pool) = fresh_pool().await;
@@ -217,16 +170,8 @@ async fn a_pause_belongs_to_the_conversation_it_is_on() {
         .unwrap()
         .unwrap();
 
-    let event = stored(&pool, one, "fable", SAID, None).await;
+    stored(&pool, one, "fable", SAID, None).await;
 
-    assert_eq!(pause(&pool, other, event).await.unwrap(), None);
-    assert_eq!(
-        resume_pause(&pool, other, event).await.unwrap(),
-        Resuming::NoSuchPause,
-    );
-    assert_eq!(
-        pause(&pool, one, event).await.unwrap().unwrap().resumed,
-        None,
-        "and the Pause it does belong to is untouched",
-    );
+    assert_eq!(on_the_timeline(&pool, other).await, vec![]);
+    assert_eq!(on_the_timeline(&pool, one).await.len(), 1);
 }

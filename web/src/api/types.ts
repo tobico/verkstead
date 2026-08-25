@@ -666,6 +666,20 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
+ * What the stop shows about the account that ran out coming back, and
+ * `null` on every stop that is not a usage window's — which is nearly all
+ * of them, and every Conversation that has not stopped.
+ *
+ * Words to draw beside Resume rather than a moment anything acts on: no
+ * stop resumes itself, so what a stopped run waits for is a press whatever
+ * stopped it. The one thing that tells a run stopped by an exhausted window
+ * from a run stopped by anything else — same card, same badge, same button.
+ *
+ * As the session printed it, because the wording is the backend's: `3pm`
+ * stays `3pm`, which is what somebody looks at their own clock for.
+ */
+resets: string | null, 
+/**
  * Whether a session is registered for this Conversation as of this read.
  *
  * The same fact the sidebar draws its working indicator from, said here
@@ -938,52 +952,6 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
-
-/**
- * A run waiting an account's window out, as the Timeline shows it.
- *
- * Nothing here went wrong, which is what makes it a different Event from the
- * Notice a halt writes: the account is out of window, the agent is waiting for
- * the same reset, and the Conversation is *blocked on you* only in the sense
- * that the human may decide not to wait.
- */
-export type PauseEvent = { id: number, 
-/**
- * When the run stopped, RFC 3339.
- */
-at: string, 
-/**
- * What the Agent Profile whose account ran out is called, as it was called
- * then.
- */
-profile: string, 
-/**
- * The line the session printed, as it printed it. The record of why this
- * was raised, in the backend's own words rather than in Verkstead's.
- */
-said: string, 
-/**
- * When the window resets, RFC 3339 — or `null` where what the session
- * printed carried no time the Verkstead that wrote this could read as one.
- *
- * An instant, unlike the reset words a stop carries, because this is a row
- * a Verkstead of before wrote and nothing rewrites one.
- */
-resets_at: string | null, 
-/**
- * When the wait ended, RFC 3339 — or `null` while it is still on, which is
- * the state the run is stopped in, and what the resume press is drawn for.
- *
- * *What* ended it is not here. A wait used to end two ways, the reset time
- * passing being one of them; no stop resumes itself now, so a wait that is
- * over was ended by a press.
- */
-resumed: string | null, };
-
-/**
- * What became of pressing resume.
- */
-export type PauseResumed = "Resumed" | "NoSuchPause" | "AlreadyResumed";
 
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
@@ -1643,7 +1611,7 @@ tasks: Array<TaskEntry>, };
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Pause": PauseEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent };
 
 /**
  * What is to become of the configured token.

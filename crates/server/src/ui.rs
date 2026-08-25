@@ -31,10 +31,10 @@ use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
     GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
-    NewConversation, NewOrder, PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing,
+    Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -133,16 +133,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
         //
-        // And the press that says *do not wait for the window*. Per Event rather
-        // than per Conversation, because that is what is being answered: the
-        // Timeline is where the wait was said, and a route that took only the
-        // Conversation would answer whichever Pause happened to be open when it
-        // arrived. Nothing in the body: there is one thing to do about a Pause,
-        // and a choice of one is a press rather than a form.
-        .route(
-            "/api/ui/conversations/{id}/pause/{event}/resume",
-            post(resume_pause),
-        )
+        // And no route for a run waiting an account's window out. That was a
+        // press per Event, on the one card that carried its own; a run stopped
+        // for a window is stopped like everything else now, and what starts it
+        // again is the one Resume below.
+        //
         // And what the human sets going by hand, wherever nothing is running.
         // Per Conversation rather than per Event, unlike a Set: a Manual Task
         // answers nothing on the Timeline — it is a new thing to do, and the
@@ -784,7 +779,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // and why. One question about one thing — an account out of window stops a
     // run the same way a session falling over does.
     let stopped = match store::stopped(&state.pool, id).await {
-        Ok(stopped) => stopped.map(|stopped| stopped.notice),
+        Ok(stopped) => stopped,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation had stopped failed");
             None
@@ -807,7 +802,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // And the badge points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a badge with nowhere to go would be one
     // the human could not act on.
-    let blocked_on = stopped;
+    let blocked_on = stopped.as_ref().map(|stopped| stopped.notice);
+
+    // With the words about the account coming back beside it, where the stop
+    // carries any: the one thing that tells a run stopped by an exhausted window
+    // from a run stopped by anything else. Drawn beside Resume rather than acted
+    // on — no stop resumes itself, so every one of them waits for the same press.
+    let resets = stopped.and_then(|stopped| stopped.resets);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -837,7 +838,9 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
+        resets,
         // The same reading the Events above are drawn against, said as a fact
+
         // about the Conversation: the Timeline offers the Manual Task composer
         // exactly where nothing is running, and one Event of a session's is not
         // the question — a Conversation whose session has ended is not working,
@@ -937,16 +940,25 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             summary: commit.summary,
                         },
                     ),
-                    // Whole, unlike the three above it: there is a press on it,
-                    // and a page that had to fetch what the run was waiting for
-                    // could draw the button before it could say what for. Three
-                    // short strings, because nothing went wrong here and there
-                    // is no evidence to gather.
-                    store::Event::Pause(pause) => {
-                        verkstead_render::pause_event(event.id, event.at, waiting(pause))
-                    }
+                    // A wait a Verkstead of before put on a Timeline, said in
+                    // the sentence a stop for a window is said in now — see
+                    // [`crate::stopping::out_of_window`]. Nothing writes another
+                    // and nothing rewrote these: what changes is that the record
+                    // reads as the one kind of stopped thing, drawn as the line
+                    // it always carried with nothing to press on it.
+                    //
+                    // A Notice by the time it is on the wire, which is what a
+                    // migrated database needs it to be: an open Pause was read
+                    // onto its Conversation as the stop it is, and the Event the
+                    // *blocked on you* badge points at is this one.
+                    store::Event::Pause(pause) => verkstead_render::notice_event(
+                        event.id,
+                        event.at,
+                        &crate::stopping::out_of_window(&pause.profile, &pause.said),
+                    ),
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
+
                     // back — and the one nobody wrote for a human to press
                     // anything about. What a stop's Notice says is what stopped,
                     // why, and the evidence — see [`crate::stopping`], which writes
@@ -1376,38 +1388,6 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
     }
 }
 
-/// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
-/// waiting for the window.
-///
-/// The press on a Pause card, which is one drawn over a Pause Event a Verkstead
-/// of before wrote: nothing raises another. It closes that row and then presses
-/// the one Resume, which is what takes the stop away and starts the work again
-/// from where it stopped — see [`crate::limits`]. The Worktree is untouched:
-/// a stop never changed anything in it.
-///
-/// `AlreadyResumed` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the window may have come back while the page
-/// was open, and the press arriving second is something to say in words rather
-/// than something to retry.
-async fn resume_pause(
-    State(state): State<AppState>,
-    Path((id, event)): Path<(String, String)>,
-) -> HttpResponse {
-    // Two ids out of a URL a human may have typed, read as permissively as every
-    // other pair here.
-    let (Ok(id), Ok(event)) = (id.parse::<i64>(), event.parse::<i64>()) else {
-        return Json(PauseResumed::NoSuchPause).into_response();
-    };
-
-    match crate::limits::resume(&state, id, event).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, event_id = event, "starting a paused run again failed");
-            unavailable("the run could not be started again")
-        }
-    }
-}
-
 /// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
 ///
 /// The instruction goes on the Timeline and a one-off session starts on it under
@@ -1634,21 +1614,6 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
             tracing::error!(error = ?error, profile_id = id, "removing an Agent Profile failed");
             unavailable("the agent profile could not be removed")
         }
-    }
-}
-
-/// A Pause as the viewer receives it: which account ran out, when it comes back,
-/// and whether the wait is over.
-///
-/// The one Event whose whole self rides on the Timeline. Four strings across a
-/// seam that holds no enum any more: what ended a wait was the last of those,
-/// and there is one way left for one to end.
-fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
-    verkstead_render::Waiting {
-        profile: pause.profile,
-        said: pause.said,
-        resets_at: pause.resets_at,
-        resumed: pause.resumed,
     }
 }
 

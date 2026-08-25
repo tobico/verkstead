@@ -2085,7 +2085,10 @@ async fn the_viewers_own_tests_are_fed_from_here() {
              It said nothing at all.\n",
             profiles[1].name,
         ),
-        Some("2026-08-03T05:00:00.000Z"),
+        // The words the display drew, which is what a stop carries: `3pm` stays
+        // `3pm`, and the page draws it beside Resume rather than counting down
+        // to it.
+        Some("3pm"),
     )
     .await
     .unwrap()

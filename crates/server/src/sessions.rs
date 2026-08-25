@@ -773,7 +773,8 @@ impl Sessions {
 
         // And the same output watched for the one thing a session says that is
         // about the account rather than about the work: that its window is
-        // spent. The Profile is taken now because that is what the Pause names,
+        // spent. The Profile is taken now because that is what the stop names,
+
         // and a Profile renamed while a session runs was not the account this
         // one is on — see [`crate::limits`].
         let limits =

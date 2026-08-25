@@ -291,6 +291,19 @@ pub struct ConversationView {
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
 
+    /// What the stop shows about the account that ran out coming back, and
+    /// `null` on every stop that is not a usage window's — which is nearly all
+    /// of them, and every Conversation that has not stopped.
+    ///
+    /// Words to draw beside Resume rather than a moment anything acts on: no
+    /// stop resumes itself, so what a stopped run waits for is a press whatever
+    /// stopped it. The one thing that tells a run stopped by an exhausted window
+    /// from a run stopped by anything else — same card, same badge, same button.
+    ///
+    /// As the session printed it, because the wording is the backend's: `3pm`
+    /// stays `3pm`, which is what somebody looks at their own clock for.
+    pub resets: Option<String>,
+
     /// Whether a session is registered for this Conversation as of this read.
     ///
     /// The same fact the sidebar draws its working indicator from, said here
@@ -395,16 +408,6 @@ pub enum TimelineEvent {
     /// same reason.
     Commit(CommitEvent),
 
-    /// A run waiting an account's window out: which Profile ran out, when it
-    /// comes back, and the press that starts the work again.
-    ///
-    /// The one kind of Event that carries its whole self rather than a summary
-    /// with the rest behind a fetch: there is something to press on it, and a
-    /// page that had to fetch what it was waiting for could draw the button
-    /// before it could say what for. Three short strings, where a Capture and a
-    /// diff are megabytes.
-    Pause(PauseEvent),
-
     /// Something Verkstead did on its own account, rendered inline like the
     /// Brief — and for the same reason: it is a sentence to read, and there is
     /// nothing of it a details pane would show.
@@ -412,6 +415,10 @@ pub enum TimelineEvent {
     /// The one Event with nothing to do about it and nobody behind it: no agent
     /// wrote it and no human pressed anything for it. It is how an unattended run
     /// says what it decided while nobody was watching.
+    ///
+    /// What a Verkstead of before wrote as a Pause arrives here too — see
+    /// [`notice_event`]: a wait that happened is a sentence to read like any
+    /// other, and what a stopped run waits on is the one Resume.
     Notice(NoticeEvent),
 
     /// A Manual Task the human set going by hand, rendered inline like the
@@ -423,60 +430,6 @@ pub enum TimelineEvent {
     /// committed — so this is the instruction alone, which is the part of a
     /// Manual Task nothing else on the Timeline records.
     ManualTask(ManualTaskEvent),
-}
-
-/// A run waiting an account's window out, as the Timeline shows it.
-///
-/// Nothing here went wrong, which is what makes it a different Event from the
-/// Notice a halt writes: the account is out of window, the agent is waiting for
-/// the same reset, and the Conversation is *blocked on you* only in the sense
-/// that the human may decide not to wait.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct PauseEvent {
-    pub id: i64,
-
-    /// When the run stopped, RFC 3339.
-    pub at: String,
-
-    /// What the Agent Profile whose account ran out is called, as it was called
-    /// then.
-    pub profile: String,
-
-    /// The line the session printed, as it printed it. The record of why this
-    /// was raised, in the backend's own words rather than in Verkstead's.
-    pub said: String,
-
-    /// When the window resets, RFC 3339 — or `null` where what the session
-    /// printed carried no time the Verkstead that wrote this could read as one.
-    ///
-    /// An instant, unlike the reset words a stop carries, because this is a row
-    /// a Verkstead of before wrote and nothing rewrites one.
-    pub resets_at: Option<String>,
-
-    /// When the wait ended, RFC 3339 — or `null` while it is still on, which is
-    /// the state the run is stopped in, and what the resume press is drawn for.
-    ///
-    /// *What* ended it is not here. A wait used to end two ways, the reset time
-    /// passing being one of them; no stop resumes itself now, so a wait that is
-    /// over was ended by a press.
-    pub resumed: Option<String>,
-}
-
-/// What became of pressing resume.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum PauseResumed {
-    /// Recorded, and the run is going on again.
-    Resumed,
-
-    /// This Conversation has no such Pause — an Event id that belongs to another
-    /// Conversation names nothing.
-    NoSuchPause,
-
-    /// The wait was over before this arrived — the window came back, or a second
-    /// press. Not an error and not something to act on twice.
-    AlreadyResumed,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -1410,34 +1363,6 @@ pub struct Comment {
     pub author: String,
     pub at: String,
     pub markdown: String,
-}
-
-/// A run waiting an account's window out, as an Event. Nothing to render — a
-/// Profile's name and a line off a terminal are not markdown — and here beside
-/// the rest for the reason a move is: one place knows how a Timeline is made.
-pub fn pause_event(id: i64, at: String, waiting: Waiting) -> TimelineEvent {
-    TimelineEvent::Pause(PauseEvent {
-        id,
-        at,
-        profile: waiting.profile,
-        said: waiting.said,
-        resets_at: waiting.resets_at,
-        resumed: waiting.resumed,
-    })
-}
-
-/// What the caller of [`pause_event`] hands over: the Pause as the store holds
-/// it.
-///
-/// Its own type rather than the store's, because this crate does not depend on
-/// the store — and rather than four parameters, two of which are strings: a
-/// call with those in the wrong order would compile.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Waiting {
-    pub profile: String,
-    pub said: String,
-    pub resets_at: Option<String>,
-    pub resumed: Option<String>,
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

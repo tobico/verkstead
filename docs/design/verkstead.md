@@ -181,14 +181,18 @@ flowchart LR
   What replaced roadrunner's three remedies: retry is Resume, take over
   manually is the halt already standing, and abort is Abort.
 - **Usage limits.** When a claude account exhausts its window mid-run, the
-  conversation pauses and push-notifies; it resumes on the human's say-so or
-  when the window resets.
+  conversation stops the way every other stopped conversation does — one
+  notice, one badge, one Resume — and push-notifies. The reset time rides on
+  the stop as words to read beside that button rather than as a moment
+  anything acts on: no stop resumes itself, so this one waits for the same
+  press (*refined 2026-08-25, building one-stop*).
 - **No cap on concurrent sessions** across conversations.
 
 ## Execution and sandboxing
 
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
-  - **rw:** the conversation's worktree; the repo's common `.git` directory;
+  - **rw:**
+ the conversation's worktree; the repo's common `.git` directory;
     the profile's claude pair at `~/.claude` and `~/.claude.json`
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent

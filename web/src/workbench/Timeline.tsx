@@ -92,7 +92,6 @@ import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
-import { Pause } from "./Pause";
 import { Setup } from "./Setup";
 import { keeping } from "./settling";
 
@@ -217,20 +216,6 @@ export const REOPEN_REFUSAL: Record<ConversationReopened, string> = {
   WorktreeRefused:
     "The worktree is gone and git would not check the branch out again. The server log says why.",
 };
-
-/// Whether the event the *blocked on you* badge points at has a details pane
-/// behind it.
-///
-/// Every other thing that stops a run does — a halt opens the Notice saying what
-/// stopped — and a pause does not: what it has
-/// to say is three short facts and they are drawn whole in the list, with the
-/// press on them. So the badge selects it and stays put, rather than sending a
-/// narrow window away from the very thing there is to press.
-function opensAPane(conversation: ConversationView, event: number): boolean {
-  return !conversation.timeline.some(
-    (entry) => "Pause" in entry && entry.Pause.id === event,
-  );
-}
 
 /// The state a move came *from*: the state the move before it went to, and
 /// `Draft` where there is no move before it, since a Conversation starts
@@ -368,19 +353,20 @@ export function Timeline(props: {
               rather than only down in the list: a timeline is long by the time a
               run gets far enough to stop, and a badge the human had to go
               hunting behind would not be one. It points at the event that
-              stopped it, which is what makes it worth pressing. */}
+              stopped it, which is what makes it worth pressing.
+
+              Which is one kind of event now: whatever stopped a run — a session
+              that fell over, a press, an account out of window — the badge marks
+              the notice saying so, where it stands in the record. There is
+              nothing behind a pane for it, so a narrow window stays on the
+              record rather than being sent away from the very thing there is to
+              read. */}
           <Show when={props.conversation.blocked_on}>
             {(event) => (
               <button
                 type="button"
                 class="blocked"
-                onClick={() => {
-                  props.select(event());
-
-                  if (opensAPane(props.conversation, event())) {
-                    props.details();
-                  }
-                }}
+                onClick={() => props.select(event())}
               >
                 Blocked on you
               </button>
@@ -446,7 +432,12 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"Notice" in event && event.Notice}>
-                  {(notice) => <Notice notice={notice()} />}
+                  {(notice) => (
+                    <Notice
+                      notice={notice()}
+                      selected={props.selected === notice().id}
+                    />
+                  )}
                 </Match>
                 <Match when={"ManualTask" in event && event.ManualTask}>
                   {(manual) => (
@@ -493,19 +484,6 @@ export function Timeline(props: {
                         props.select(asked().id);
                         props.details();
                       }}
-                    />
-                  )}
-                </Match>
-                {/* Drawn like a card with something to press inside it, and
-                    with nothing behind a pane: what a pause has to say is a
-                    profile, a time and the line the session printed, so there
-                    is nothing to open. */}
-                <Match when={"Pause" in event && event.Pause}>
-                  {(waiting) => (
-                    <Pause
-                      conversation={props.conversation}
-                      waiting={waiting()}
-                      selected={props.selected === waiting().id}
                     />
                   )}
                 </Match>
@@ -573,6 +551,12 @@ export function Timeline(props: {
 /// and its branch at the moment of the press, which is the whole point of one
 /// button rather than one per way of stopping — steering the work is what the
 /// manual task below is for.
+///
+/// Beside it, where the run stopped because an account ran out of window, the
+/// words the session printed about when that account comes back. Words to read
+/// and not a countdown: no stop resumes itself, so this one waits for the same
+/// press as every other, and what the reset time is for is deciding when to
+/// make it. The one thing that tells the two apart.
 function Resume(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
@@ -604,6 +588,14 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
         >
           {press.isPending ? "Resuming…" : "Resume"}
         </button>
+
+        <Show when={props.conversation.resets}>
+          {(resets) => (
+            <p class="resets">
+              The account it was spending is out of window until {resets()}.
+            </p>
+          )}
+        </Show>
 
         <p class="note">
           Verkstead works out what should be running from where the work now
@@ -1193,16 +1185,31 @@ function Handoff(props: {
   );
 }
 
-/// Something Verkstead did on its own account: the stage it started and where
-/// the branch went, or a roadmap with nothing left to run.
+/// Something Verkstead did on its own account: the stage it started, where the
+/// branch went, a roadmap with nothing left to run — or a stop, which is what
+/// stopped the run, why, and what the evidence was.
 ///
 /// A line and not a card, unlike the handoff above it: it is a sentence rather
 /// than a document, and there is nothing to open and nothing to answer. It is
 /// rendered markdown all the same, because what it names — a branch, a stage, a
 /// file the repository records its process in — reads better set apart from the
 /// prose around it.
-function Notice(props: { notice: NoticeEvent }): JSX.Element {
-  return <div class="notice markdown" innerHTML={props.notice.html} />;
+///
+/// Marked while it is what the conversation is blocked on, which is the whole of
+/// what the badge above does: a timeline is long by the time a run stops, and
+/// the badge is how the notice that stopped it is found. Nothing else selects
+/// one — there is no pane behind it to open.
+function Notice(props: {
+  notice: NoticeEvent;
+  selected: boolean;
+}): JSX.Element {
+  return (
+    <div
+      class="notice markdown"
+      classList={{ selected: props.selected }}
+      innerHTML={props.notice.html}
+    />
+  );
 }
 
 /// What the human asked for by hand: the instruction a Manual Task was set
@@ -1733,7 +1740,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
               >
                 {stop.isPending ? "Stopping…" : "Stop"}
               </button>
-              <p class="note">Pause after the current task until you resume.</p>
+              <p class="note">Stop after the current task until you resume.</p>
               <Show when={halting() === "Stopping"}>
                 <p class="note waiting">
                   The session running now finishes its task first. Nothing will

@@ -73,6 +73,7 @@
     "name": "verkstead",
     "path": "/srv/repos/verkstead"
   },
+  "resets": null,
   "state": "Grilling",
   "timeline": [
     {

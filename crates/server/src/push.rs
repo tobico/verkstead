@@ -235,9 +235,9 @@ impl News {
 /// without making the thing that happened wait for it.
 ///
 /// Returns as soon as the work is handed to the runtime, exactly as a Set's push
-/// does: the caller's job is to put the stop, the pull request or the
-/// Pause on the record, and none of this may delay that or fail it. A push
-/// service that cannot be reached costs a notification and nothing else.
+/// does: the caller's job is to put the stop or the pull request on the record,
+/// and none of this may delay that or fail it. A push service that cannot be
+/// reached costs a notification and nothing else.
 pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
     let pool = pool.clone();
 
