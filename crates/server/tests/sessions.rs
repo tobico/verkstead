@@ -107,6 +107,15 @@ struct Grilling {
 }
 
 impl Grilling {
+    /// The registered repository this Conversation is against.
+    ///
+    /// [`bench_at_pace`] puts it at one place under the watched directory and
+    /// the fixture keeps that directory alive, so where it is is a fact about
+    /// the bench rather than something to thread through.
+    fn repo(&self) -> PathBuf {
+        self._watched.path().join("verkstead")
+    }
+
     /// The Conversation as the workbench reads it.
     async fn view(&self) -> ConversationView {
         get(&self.app, &format!("/api/ui/conversations/{}", self.id)).await
@@ -8286,6 +8295,132 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
     assert!(
         prompt.contains("not stacked on anything"),
         "and the session is told that rather than left to guess: {prompt:?}",
+    );
+}
+
+/// Give `repo` an origin it is behind: an upstream holding everything it holds
+/// plus one commit more, which this checkout has heard nothing about.
+///
+/// The upstream is a working clone rather than a bare one so that a commit can
+/// be made straight on its default branch, and the extra commit is made there
+/// rather than pushed from `repo` — a push would move this checkout's own copy
+/// of `origin/main`, and being out of date about origin is the whole state
+/// these are for.
+///
+/// The caller keeps the directory the upstream is in alive: the fetch this
+/// sets up is against a path rather than a server, and a tempdir that had gone
+/// would look exactly like being offline.
+fn behind_an_origin(repo: &Path, upstream: &Path) {
+    git(
+        upstream.parent().unwrap(),
+        &[
+            "clone",
+            &repo.to_string_lossy(),
+            &upstream.to_string_lossy(),
+        ],
+    );
+    git(
+        upstream,
+        &["config", "user.email", "test@verkstead.invalid"],
+    );
+    git(upstream, &["config", "user.name", "Verkstead Test"]);
+
+    git(
+        repo,
+        &["remote", "add", "origin", &upstream.to_string_lossy()],
+    );
+    git(repo, &["fetch", "--quiet", "origin"]);
+
+    std::fs::write(upstream.join("ahead.md"), "# origin moved on\n").unwrap();
+    git(upstream, &["add", "ahead.md"]);
+    git(upstream, &["commit", "-m", "docs: origin moves on"]);
+}
+
+/// An unstacked stage's branch comes off what origin is holding, not off
+/// wherever this checkout's copy of the default branch was last left.
+///
+/// The rule a grilling starts by, at the other end of the pipeline: a machine
+/// that has not pulled for a week would otherwise start every stage of a
+/// roadmap a week behind the work, with nobody at a button to notice.
+#[tokio::test]
+async fn an_unstacked_stage_comes_off_origins_tip_rather_than_the_local_branch() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // After the grilling started, so that this Conversation came off the local
+    // branch and the stage is the only thing origin's tip decides.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let repo = fixture.repo();
+    behind_an_origin(&repo, &elsewhere.path().join("upstream"));
+
+    let behind = git(&repo, &["rev-parse", "main"]).trim().to_owned();
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        worktree.join("ahead.md").exists(),
+        "the stage should have come off what origin is holding now",
+    );
+
+    // The fetch moved the remote-tracking ref and nothing else: the human's own
+    // branch is exactly where they left it.
+    assert_eq!(git(&repo, &["rev-parse", "main"]).trim(), behind);
+}
+
+/// Nobody is at a button when a stage starts, so a fetch git would not make
+/// halts it with a notice naming the fetch — and starts nothing at all.
+///
+/// Halted rather than carried on with off whatever was last fetched: a stage
+/// branched from the wrong place is a whole stage of work to unpick, where a
+/// notice is a thing the human can go and fix.
+#[tokio::test]
+async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let gone = tempfile::tempdir().unwrap();
+    let nowhere = gone.path().join("no-such-remote");
+    git(
+        &fixture.repo(),
+        &["remote", "add", "origin", &nowhere.to_string_lossy()],
+    );
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("would not fetch"),
+        "the fetch is what is named, that being what the human can go and fix: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and nothing was started",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
     );
 }
 

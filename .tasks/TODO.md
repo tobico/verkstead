@@ -16,4 +16,4 @@ environment — run `env -u VERKSTEAD_SERVER cargo test` if it bites.
 - [x] 01: An inline run ends on its pull request — [details](01-inline-run-ends-on-its-pull-request.md)
 - [x] 02: Resume finds an inline run's pull request — [details](02-resume-finds-an-inline-runs-pull-request.md)
 - [x] 03: A new Conversation branches from origin's fresh default tip — [details](03-new-conversation-branches-from-origins-fresh-default-tip.md)
-- [ ] 04: Stages and Adopt come off a fresh default too — [details](04-stages-and-adopt-come-off-a-fresh-default-too.md)
+- [x] 04: Stages and Adopt come off a fresh default too — [details](04-stages-and-adopt-come-off-a-fresh-default-too.md)

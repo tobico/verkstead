@@ -663,7 +663,8 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
 /// for: the roadmap named, and the stage adopting would start.
 ///
 /// Read at the base commit the Conversation branches from — the override where
-/// the human typed one, and the default branch's tip where they did not — and
+/// the human typed one, and origin's tip of the default branch where they did
+/// not, fetched for before it is read — and
 /// read again every time the page is. What the notice said is not carried over:
 /// a base pointing somewhere the roadmap reads differently, an unmerged
 /// predecessor's tip say, is answered by the stage that is next *there*.
@@ -684,7 +685,30 @@ pub(crate) async fn adopting(
     let named = roadmap.clone();
 
     let read = tokio::task::spawn_blocking(move || {
-        let commit = base.unwrap_or(repo.default_branch);
+        let commit = match base {
+            // The override resolves exactly as the human fixed it.
+            Some(base) => base,
+
+            // Without one it is the default branch as origin holds it, made
+            // current first: a page drawn off a week-old copy of `main` names
+            // the stage that was next a week ago. A fetch git refused is a line
+            // in the log and no more — what this draws is a reading, and the
+            // reading off what was last fetched says more than a blank page
+            // does. The press is where a failed fetch refuses, because the press
+            // is what would act on it.
+            None => {
+                if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo.path) {
+                    tracing::warn!(
+                        said,
+                        repo = %repo.path.display(),
+                        "fetching a Repo's remotes failed, so its adoption page is drawn off \
+                         what was last fetched",
+                    );
+                }
+
+                worktrees::default_ref(&repo.path, &repo.default_branch)
+            }
+        };
 
         let found = worktrees::resolve(&repo.path, &commit)
             .and_then(|commit| startable(&repo.path, &commit, &roadmap).stage());

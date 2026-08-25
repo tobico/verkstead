@@ -1868,6 +1868,12 @@ pub enum Adopted {
     /// to run the session under.
     ProfileBroken,
 
+    /// Git would not fetch from the Repo's remote, so the roadmap at the base
+    /// commit cannot be trusted to be the roadmap origin is holding. Refused
+    /// rather than adopted off refs that may be stale: being offline, or having
+    /// lost an authentication, is something the human can go and fix.
+    FetchFailed,
+
     /// Nothing in the repository answers to what the stage would branch from —
     /// an overridden commit that has gone, or a default branch that has.
     NoBaseCommit,

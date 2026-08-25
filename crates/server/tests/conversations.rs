@@ -2812,6 +2812,74 @@ async fn adopting_is_refused_when_the_base_branch_no_longer_resolves() {
     nothing_adopted(&app, id, &repo).await;
 }
 
+/// A roadmap is read at origin's tip of the default branch rather than at this
+/// checkout's copy of it — on the page and again at the press, both of them
+/// fetching first.
+///
+/// The case this is for is the ordinary one: a roadmap somebody else pushed, or
+/// a stage somebody else ticked, on a machine that has not pulled since.
+#[tokio::test]
+async fn adopting_reads_the_roadmap_at_origins_tip() {
+    let (watched, _dir, app, _repo, upstream, repo_id) = workbench_with_origin().await;
+
+    // The roadmap is committed on origin and nowhere else: this checkout has
+    // heard nothing about it, and neither has its copy of `origin/main`.
+    roadmap(
+        &upstream,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let tip = git(&upstream, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    assert_eq!(
+        stage_of(&opened(&app, id).await).label,
+        "03",
+        "the page fetches before it reads, so it names the stage origin is holding",
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.base_commit.as_deref(), Some(tip.as_str()));
+
+    let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
+    assert!(
+        worktree
+            .join("docs/roadmaps/mvp/03-implementation.md")
+            .exists(),
+        "and the stage is worked on what origin is holding",
+    );
+}
+
+/// There is a human at this button, so a fetch git would not make refuses the
+/// press by name rather than adopting a stage judged against refs nobody can
+/// vouch for. Being offline, or having lost an authentication, is theirs to fix.
+#[tokio::test]
+async fn adopting_is_refused_by_name_when_the_fetch_fails() {
+    let (watched, dir, app, repo, _upstream, repo_id) = workbench_with_origin().await;
+
+    // Committed here, so that what refuses the press is the fetch and not the
+    // roadmap being missing.
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    let nowhere = dir.path().join("no-such-remote");
+    git(
+        &repo,
+        &["remote", "set-url", "origin", &nowhere.to_string_lossy()],
+    );
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::FetchFailed);
+    nothing_adopted(&app, id, &repo).await;
+}
+
 /// The three ways a stage can stop being startable between the notice being
 /// drawn and the button being pressed, each its own thing to go and do about
 /// it: somebody ticked the last box, somebody moved the brief, somebody took

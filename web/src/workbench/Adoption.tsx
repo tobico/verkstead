@@ -41,6 +41,8 @@ export const ADOPT_REFUSAL: Record<Adopted, string> = {
     "Choose an implementation profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
+  FetchFailed:
+    "Git could not fetch from the repo's remote, so nothing was adopted. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",
   NoRoadmap: "There is no roadmap by that name at the base commit.",
   RoadmapComplete:

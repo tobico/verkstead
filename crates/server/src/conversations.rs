@@ -704,6 +704,12 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 /// Profiles are answered before anything that costs a git call. Nothing is
 /// created and nothing is checked out for any of them.
 ///
+/// **The fetch comes before the resolving**, as it does at a grill start: an
+/// unpicked base means the default branch as origin holds it rather than this
+/// checkout's copy of it, so what is adopted is judged against origin's tip. A
+/// fetch git would not make refuses the press by name; a repository with no
+/// remote has nothing to be stale against and is never refused for it.
+///
 /// **The stage is read again, here, at whatever the base resolves to.** What the
 /// page showed is a reading of a moment ago, and a roadmap is a document in a
 /// repository that anybody may have moved since — ticked the last box, taken the
@@ -766,21 +772,41 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
-    // rather than Verkstead's — and the default branch's tip where they did not.
-    let named = conversation
-        .base_commit
-        .clone()
-        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+    // rather than Verkstead's — and the default branch as origin holds it where
+    // they did not; which of the two it is, is settled inside the read below,
+    // because the fetch that makes origin's copy current happens there.
+    let picked = conversation.base_commit.clone();
+    let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
 
-    // The reading, off the runtime's threads: resolving a commit and reading a
-    // roadmap out of a git directory are both blocking calls.
+    // The reading, off the runtime's threads: fetching, resolving a commit and
+    // reading a roadmap out of a git directory are all blocking calls.
     let read = tokio::task::spawn_blocking({
         let repo = repo.clone();
-        let named = named.clone();
 
         move || {
+            // Before anything resolves. The human is at this button, so a fetch
+            // git would not make refuses the press by name rather than adopting
+            // a stage judged against refs that may be a week old — being offline
+            // or having lost an authentication is theirs to go and fix. A
+            // repository with no remote has nothing to fetch and is never
+            // refused for it.
+            if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+                tracing::error!(
+                    said,
+                    repo = %repo.display(),
+                    "fetching a Repo's remotes failed, so its roadmap is not being adopted",
+                );
+
+                return Err(Adopted::FetchFailed);
+            }
+
+            let named = match picked {
+                Some(picked) => picked,
+                None => worktrees::default_ref(&repo, &default),
+            };
+
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(Adopted::NoBaseCommit);
             };
@@ -791,7 +817,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
             match crate::stages::startable(&repo, &commit, &roadmap) {
-                Startable::Stage(abandoned) => Ok((commit, abandoned.stage)),
+                Startable::Stage(abandoned) => Ok((commit, named, abandoned.stage)),
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
@@ -802,7 +828,10 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     })
     .await?;
 
-    let (commit, stage) = match read {
+    // `named` comes back out rather than being worked out again up here: what an
+    // unpicked base resolved through is decided inside, after the fetch, and the
+    // Timeline is owed the name the branch actually came off.
+    let (commit, named, stage) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };
