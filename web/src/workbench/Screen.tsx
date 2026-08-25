@@ -104,6 +104,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
+import styles from "./Screen.module.css";
 
 /// The events that say the human is at this pane's keyboard.
 ///
@@ -428,8 +429,8 @@ export function Screen(props: {
             still running is redrawn at whatever size this pane is, so there is
             nothing to scroll to; the grid one left behind is fixed at the size
             it was printed for. */}
-        <div class="screen" classList={{ live: live() }}>
-          <div class="terminal-host" ref={host} />
+        <div class={styles.screen} classList={{ [styles.live!]: live() }}>
+          <div class={styles.terminalHost} ref={host} />
           {/* What the human may do with this Screen, said under it. A Hold
               outranks everything else there is to say: it is the one thing here
               that has stopped the work, and the way out of it is the press
@@ -440,7 +441,7 @@ export function Screen(props: {
               <Show
                 when={lost()}
                 fallback={
-                  <Note class="read-only">
+                  <Note class={styles.readOnly}>
                     {!shown()
                       ? "Waiting for this session's screen…"
                       : live()
@@ -455,7 +456,7 @@ export function Screen(props: {
               </Show>
             }
           >
-            <div class="holding">
+            <div class={styles.holding}>
               <Note>
                 {live()
                   ? "You have the keyboard. Verkstead is recording and nothing else."
@@ -463,7 +464,7 @@ export function Screen(props: {
               </Note>
               <button
                 type="button"
-                class="hand-back"
+                class={styles.handBack}
                 disabled={handingBack.isPending}
                 onClick={() => handingBack.mutate()}
               >

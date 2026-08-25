@@ -1,0 +1,275 @@
+/* One session, opened: the two ways of reading it, and the record itself. See
+   `Output.tsx`.
+
+   The terminal half of the switch is the Screen's own — `Screen.module.css` —
+   and so is the rule that makes this pane a column when one is showing. What is
+   here is the switch, the Capture that stands in for a session that kept no log,
+   and the Transcript. */
+
+/* The two ways of reading one session, switched between in the pane's header.
+   A pair rather than a row of tabs, because there are two of them and there is
+   no third coming: what says which is showing is the pressed one, not a rule
+   about position.
+
+   As wide as its two labels rather than as wide as the pane: it shares the
+   header row with the title, and a switch that stretched would leave the title
+   nothing. It does not shrink either — when the two will not fit beside each
+   other the header wraps and the switch takes the next line whole, which is
+   what the pane head's `flex-wrap` is there for — see
+   `workbench/PaneHead.module.css`. */
+.recordSwitch {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.25rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.2rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* What is under the pressed label: one element moved to it, rather than a
+   background drawn on it. A background belongs to the element it is on and
+   cannot travel between two; this can, which is what makes switching read as
+   one thing moving. Taken out of the flex row so its travel costs the labels
+   nothing, and first in the markup so they paint over it. Where it stands is
+   measured — see `Output.tsx`. */
+.recordSwitch .indicator {
+  position: absolute;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  background: var(--accent);
+  border-radius: 0.4rem;
+}
+
+/* The two labels themselves, named rather than taken as the switch's buttons:
+   the pane finds them by name to measure where the mark should stand — see
+   `Output.tsx` — and a sheet that called them `button` would be the one place
+   the two had no name at all. */
+.recordSwitch .transcriptTab,
+.recordSwitch .screenTab {
+  position: relative;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.recordSwitch .transcriptTab[aria-pressed="true"],
+.recordSwitch .screenTab[aria-pressed="true"] {
+  color: var(--paper);
+}
+
+/* The slide itself: a tenth of a second, eased at both ends, and across both
+   what it travels — the labels are words of different lengths, so the mark
+   changes width on its way as well as place.
+
+   Given only where motion is welcome, as the toggle switch's is. Under
+   `prefers-reduced-motion` there is no transition to run and the mark is simply
+   wherever the pressed label is, which is the instant switch this replaced. */
+@media (prefers-reduced-motion: no-preference) {
+  .recordSwitch .indicator {
+    transition:
+      transform 0.1s ease-in-out,
+      width 0.1s ease-in-out;
+  }
+}
+
+/* The metric above the record, which is the Timeline row's own said again: how
+   many turns, and the mark this session's liveness is drawn in. */
+.captureSummary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.turns {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* The mark at the right edge of the line rather than beside the count: what it
+   says is about the session rather than about the metric before it. Which ring
+   is drawn is `Mark`'s; where it stands is this line's, and travels to it as
+   the `class` Mark takes. */
+.liveMark {
+  margin-left: auto;
+}
+
+/* What the terminal was sent, as it was sent — the whole Transcript-side story
+   for a session whose backend kept no log of itself. Wrapped rather than
+   scrolled sideways: a pane on a phone is narrow, and a Capture nobody can read
+   the right-hand end of is one line of it. */
+.capture {
+  margin: 0;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* And the session read the other way: what it was saying rather than how it
+   looked. A list of turns down the pane, each one drawn as what it is — because
+   what makes a Transcript readable is telling a person's turn from a tool's
+   answer without having to read either. */
+.transcript {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One row of the record, whatever kind of turn it is. The kinds that draw
+   themselves differently say so below; `reasoning` and `unread` say nothing
+   beyond which they are, and are named in the rules they belong to rather than
+   left off this sheet — a class the component writes has to be one the module
+   exports. */
+.transcript .turn {
+  margin: 0 0 0.75rem;
+}
+
+/* The agent's own words, and the turns put to it: the two things a reader came
+   for, and the only two that are not folded away. The human's turn is set apart
+   by a rule down its left rather than by a colour, so that a pane of prose reads
+   as a conversation and not as a highlight reel.
+
+   The markdown inside them is the server's own class on HTML it rendered, so it
+   is read through `:global` — see `styles/markdown.css`. */
+.transcript .prose :global(.markdown),
+.transcript .put :global(.markdown) {
+  font-size: 0.95rem;
+}
+
+.transcript .put {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--accent);
+}
+
+/* Everything that folds. A summary is one line whatever is behind it, and the
+   marker is the only thing saying which way it is. Named a kind at a time
+   rather than as every `details` in the record, so that each kind of turn is a
+   name in this sheet as well as in the markup. */
+.reasoning > details > summary,
+.toolCall > details > summary,
+.toolResult > details > summary,
+.unread > details > summary,
+.bookkeeping > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+/* A call and the answer to it: one card rather than two rows, since one thing
+   happened. Shut it is the tool and the line about it, and open it is what the
+   tool was called with above what it said back. */
+.transcript .toolCall {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+/* Said after the fold rule above rather than out-specifying it: the two carry
+   the same weight now that both name the kind, so which wins is the order they
+   are read in. */
+.toolCall > details > summary {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The one word a pair ever says about itself, at the far end of the line it is
+   on. Success says nothing — a session calls a hundred tools and ninety-nine of
+   them work — so the word is there to be found rather than to be read past. */
+.transcript .toolCall .failed {
+  flex: none;
+  margin-left: auto;
+  color: var(--stopped);
+}
+
+.transcript .toolCall .tool {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+}
+
+.transcript .toolCall .about {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* And an answer with no call above it to draw it, which is the one shape left
+   that says how it went in a word of its own. */
+.toolResult.failed > details > summary {
+  color: var(--stopped);
+}
+
+/* What is behind a fold: a call's input, a tool's answer, and a line nobody
+   here knows. All three are text somebody else wrote rather than prose, so all
+   three are set the way the Capture is — wrapped rather than scrolled sideways,
+   because a pane on a phone is narrow. */
+.input,
+.output,
+.raw {
+  margin: 0.35rem 0 0;
+  padding: 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+/* Except inside a pair's card, where the two of them are wells of the paper
+   rather than boxes on it: the card is already the box around both, so a box of
+   their own would be a border drawn twice, and one rule is what separates the
+   call from the answer to it. */
+.toolCall .input,
+.toolCall .output {
+  margin: 0;
+  background: var(--paper);
+  border: 0;
+  border-top: 1px solid var(--edge);
+  border-radius: 0;
+}
+
+/* The backend's own bookkeeping, in one group under the conversation: a third
+   of every log, and none of what anybody opened this to read. */
+.bookkeeping {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--edge);
+}
+
+.bookkeeping ol {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bookkeeping li {
+  margin-bottom: 0.5rem;
+}
+
+.bookkeeping .kind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}

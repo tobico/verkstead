@@ -14,6 +14,7 @@
 import { Show, type JSX } from "solid-js";
 
 import { Empty } from "../notices";
+import styles from "./Document.module.css";
 import { PaneHead } from "./PaneHead";
 
 export function Document(props: {
@@ -38,7 +39,7 @@ export function Document(props: {
       />
 
       <Show when={props.html !== ""} fallback={<Empty>{props.empty}</Empty>}>
-        <div class="document markdown" innerHTML={props.html} />
+        <div class={`${styles.document} markdown`} innerHTML={props.html} />
       </Show>
     </>
   );

@@ -17,6 +17,9 @@ import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import stylesheet from "../src/main.css?raw";
+// The Screen owns the rule that gives the pane it stands in a height of its
+// own: it turns on a class of that module, and a module's names are hashed.
+import screenCss from "../src/workbench/Screen.module.css?raw";
 import {
   ALL_THREE,
   BESIDE,
@@ -388,8 +391,8 @@ describe("the rules the widths are read by", () => {
 
     // And the pane a terminal fills is still the pane that ends where the
     // window does: the cap is inline, and says nothing about a height.
-    expect(stylesheet).toContain(
-      ".workbench > .details-pane:has(.screen) {\n" +
+    expect(screenCss).toContain(
+      ":global(.workbench) > :global(.details-pane):has(.screen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n",
     );
@@ -422,15 +425,15 @@ describe("the rules the widths are read by", () => {
     // `dvh` that disagree by a pixel are a pixel of page. Said after the rule
     // it is overriding rather than up here with the rest of the layout, which
     // is the only place it could win.
-    expect(stylesheet).toContain(
+    expect(screenCss).toContain(
       `@media ${BESIDE} {\n` +
-        "  .workbench > .details-pane:has(.screen) {\n" +
+        "  :global(.workbench) > :global(.details-pane):has(.screen) {\n" +
         "    height: auto;\n  }\n}",
     );
 
     // And the terminal inside it, which is a scroller of its own.
-    expect(stylesheet).toMatch(
-      /\.screen \.terminal-host \{[^}]*overscroll-behavior: contain;/,
+    expect(screenCss).toMatch(
+      /\.screen \.terminalHost \{[^}]*overscroll-behavior: contain;/,
     );
   });
 });

@@ -22,6 +22,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "./PaneHead";
+import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
 
 export function PullRequest(props: {
@@ -55,10 +56,10 @@ export function PullRequest(props: {
         close={props.close}
       />
 
-      <div class="pull-request-summary">
-        <p class="title">{props.opened.title}</p>
-        <p class="where">
-          <span class="number">#{props.opened.number}</span>
+      <div class={styles.summary}>
+        <p class={styles.title}>{props.opened.title}</p>
+        <p class={styles.where}>
+          <span class={styles.number}>#{props.opened.number}</span>
           <a href={props.opened.url} target="_blank" rel="noreferrer">
             {props.opened.url}
           </a>
@@ -80,20 +81,20 @@ export function PullRequest(props: {
         <Match when={carried.data}>
           {(read) => (
             <>
-              <section class="pr-commits" aria-label="Commits">
+              <section class={styles.commits} aria-label="Commits">
                 <h2>Commits</h2>
                 <Show
                   when={read().commits.length > 0}
                   fallback={<Empty>Nothing is on it yet.</Empty>}
                 >
-                  <ol class="commits">
+                  <ol class={styles.carried}>
                     <For each={read().commits}>
                       {(commit) => (
                         <li>
-                          <span class="sha">
+                          <span class={styles.sha}>
                             {commit.sha.slice(0, ABBREVIATED)}
                           </span>
-                          <span class="subject">{commit.subject}</span>
+                          <span class={styles.subject}>{commit.subject}</span>
                         </li>
                       )}
                     </For>
@@ -101,18 +102,18 @@ export function PullRequest(props: {
                 </Show>
               </section>
 
-              <section class="pr-comments" aria-label="Comments">
+              <section class={styles.comments} aria-label="Comments">
                 <h2>Comments</h2>
                 <Show
                   when={read().comments.length > 0}
                   fallback={<Empty>Nobody has said anything.</Empty>}
                 >
-                  <ol class="comments">
+                  <ol class={styles.said}>
                     <For each={read().comments}>
                       {(comment) => (
                         <li>
-                          <p class="said-by">
-                            <span class="author">
+                          <p class={styles.saidBy}>
+                            <span class={styles.author}>
                               {comment.author === ""
                                 ? "somebody since gone"
                                 : comment.author}
@@ -120,7 +121,7 @@ export function PullRequest(props: {
                             {/* The stamp GitHub gave it, said as the stamp on a
                                 settled set is: one clock, in UTC, wherever the
                                 comment was written. */}
-                            <span class="when">{utcStamp(comment.at)}</span>
+                            <span>{utcStamp(comment.at)}</span>
                           </p>
                           <div class="markdown" innerHTML={comment.html} />
                         </li>

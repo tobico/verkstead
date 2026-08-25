@@ -53,17 +53,26 @@ import illegible from "../src/set/Unreadable.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
-// The pane chrome, both ways: the hashed names to query the page by, and the
-// source to read the rules that jsdom lays nothing out for.
+// The detail panes, each a module of its own: a commit, a document read whole,
+// one session's record and the terminal it was printed on, and a pull request.
+import commitPane from "../src/workbench/Commit.module.css";
+import documentPane from "../src/workbench/Document.module.css";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
 import marksCss from "../src/workbench/Mark.module.css?raw";
+import outputPane from "../src/workbench/Output.module.css";
+import outputCss from "../src/workbench/Output.module.css?raw";
 // The pane chrome, both ways: the hashed names to query the page by, and the
 // source to read the rules that jsdom lays nothing out for.
 import paneHead from "../src/workbench/PaneHead.module.css";
 import paneHeadCss from "../src/workbench/PaneHead.module.css?raw";
 // The pause card, which is one of the record's and draws itself.
 import pausing from "../src/workbench/Pause.module.css";
+import prPane from "../src/workbench/PullRequest.module.css";
+// The Screen, both ways: it is the one pane with a height of its own, and the
+// rules that give it one are what jsdom cannot lay out.
+import screenPane from "../src/workbench/Screen.module.css";
+import screenCss from "../src/workbench/Screen.module.css?raw";
 // And the timeline, both ways again: it is the biggest of these, and a good
 // deal of what it says about a card is a rule rather than an element.
 import timeline from "../src/workbench/Timeline.module.css";
@@ -2917,9 +2926,9 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const summary = await drawn(container, ".details-pane .capture-summary");
+    const summary = await drawn(container, `.details-pane .${outputPane.captureSummary}`);
 
-    expect(summary.querySelector(".turns")!.textContent).toBe(
+    expect(summary.querySelector(`.${outputPane.turns}`)!.textContent).toBe(
       `${OUTPUT.turns} turns`,
     );
   });
@@ -2932,7 +2941,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const summary = await drawn(container, ".details-pane .capture-summary");
+    const summary = await drawn(container, `.details-pane .${outputPane.captureSummary}`);
 
     expect(summary.querySelector(`.${marks.mark}.${marks.idle}`)).toBeTruthy();
     expect(summary.textContent).not.toContain("running");
@@ -2948,9 +2957,9 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
     // The record itself, which says the pane is drawn and it is this session's.
-    await drawn(container, ".details-pane .record-switch");
+    await drawn(container, `.details-pane .${outputPane.recordSwitch}`);
 
-    expect(container.querySelector(".details-pane .capture-summary")).toBeNull();
+    expect(container.querySelector(`.details-pane .${outputPane.captureSummary}`)).toBeNull();
   });
 
   /// The fallback, and the whole details-pane story for a session whose backend
@@ -2962,7 +2971,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const shown = await drawn(container, ".details-pane .capture");
+    const shown = await drawn(container, `.details-pane .${outputPane.capture}`);
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
@@ -2979,11 +2988,11 @@ describe("a session's output on the timeline", () => {
 
     const showing = await drawn(
       container,
-      '.details-pane .record-switch .transcript-tab[aria-pressed="true"]',
+      `.details-pane .${outputPane.recordSwitch} .${outputPane.transcriptTab}[aria-pressed="true"]`,
     );
 
     expect(showing.textContent).toBe("Transcript");
-    expect(container.querySelector(".details-pane .screen")).toBeNull();
+    expect(container.querySelector(`.details-pane .${screenPane.screen}`)).toBeNull();
     expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
   });
 
@@ -2998,9 +3007,9 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
-    const grid = await drawn(container, ".details-pane .screen .xterm-rows");
+    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -3024,14 +3033,14 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
-    const said = await drawn(container, ".details-pane .screen .read-only");
+    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Read-only");
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      ".details-pane .screen textarea",
+      `.details-pane .${screenPane.screen} textarea`,
     );
     expect(typing.readOnly).toBe(true);
   });
@@ -3055,7 +3064,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     (await attached()).says(PAINTED);
-    await drawn(container, ".details-pane .screen .xterm-rows");
+    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(0);
     // And the Capture with it, which is the read the Transcript's own answer
@@ -3070,15 +3079,15 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .turn.prose");
+    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
     const first = askedFor(fetching, TRANSCRIPT_OF_IT);
 
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
-    await drawn(container, ".details-pane .screen");
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
+    await drawn(container, `.details-pane .${screenPane.screen}`);
 
-    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
 
-    await waitFor(() => drawn(container, ".details-pane .turn.prose"));
+    await waitFor(() => drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`));
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThanOrEqual(first);
   });
 
@@ -3095,9 +3104,9 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
-    const said = await drawn(container, ".details-pane .screen .read-only");
+    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Waiting");
 
     (await attached()).says(PAINTED);
@@ -3114,13 +3123,13 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const prose = await drawn(container, ".details-pane .turn.prose");
+    const prose = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
 
     expect(prose.textContent).toContain("Looking at how the queue is drained");
     // Rendered by the server and put in the page as markup, which is what puts
     // no markdown parser on this side of the wire.
     expect(prose.querySelector("strong")!.textContent).toBe("drained");
-    expect(container.querySelector(".details-pane .capture")).toBeNull();
+    expect(container.querySelector(`.details-pane .${outputPane.capture}`)).toBeNull();
     expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBeGreaterThan(0);
   });
 
@@ -3133,8 +3142,8 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const put = await drawn(container, ".details-pane .turn.put");
-    const answered = await drawn(container, ".details-pane .turn.tool-call");
+    const put = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.put}`);
+    const answered = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolCall}`);
 
     expect(put.textContent).toContain("What should the queue do");
     expect(answered.textContent).toContain("crates/server/src/queue.rs");
@@ -3151,13 +3160,13 @@ describe("a session's output on the timeline", () => {
 
     const reasoning = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.reasoning details",
+      `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
     );
     const call = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.tool-call details",
+      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
     );
-    const prose = await drawn(container, ".details-pane .turn.prose");
+    const prose = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
 
     expect(reasoning.open).toBe(false);
     expect(call.open).toBe(false);
@@ -3180,7 +3189,7 @@ describe("a session's output on the timeline", () => {
 
     const pair = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.tool-call details",
+      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
     );
 
     expect(pair.querySelector("summary")!.textContent).toContain("Bash");
@@ -3190,17 +3199,20 @@ describe("a session's output on the timeline", () => {
 
     const behind = [...pair.querySelectorAll("pre")];
 
-    expect(behind.map((block) => block.className)).toEqual(["input", "output"]);
+    expect(behind.map((block) => block.className)).toEqual([
+      outputPane.input,
+      outputPane.output,
+    ]);
     expect(behind[0]!.textContent).toContain("rg -n 'retry'");
     expect(behind[1]!.textContent).toContain("crates/server/src/queue.rs");
 
     // And the answer is not also standing on its own under it, which is what
     // there being one card is.
     expect(
-      container.querySelectorAll(".details-pane .turn.tool-call"),
+      container.querySelectorAll(`.details-pane .${outputPane.turn}.${outputPane.toolCall}`),
     ).toHaveLength(1);
     expect(
-      container.querySelector(".details-pane .turn.tool-result"),
+      container.querySelector(`.details-pane .${outputPane.turn}.${outputPane.toolResult}`),
     ).toBeNull();
   });
 
@@ -3251,21 +3263,23 @@ describe("a session's output on the timeline", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .turn.tool-call");
+    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolCall}`);
 
     const [worked, failed] = [
-      ...container.querySelectorAll(".details-pane .turn.tool-call summary"),
+      ...container.querySelectorAll(`.details-pane .${outputPane.turn}.${outputPane.toolCall} summary`),
     ];
 
     expect(worked!.textContent).toContain("Count the tasks left");
-    expect(worked!.querySelector(".failed")).toBeNull();
+    expect(worked!.querySelector(`.${outputPane.failed}`)).toBeNull();
     expect(failed!.textContent).toContain("Run the tests");
-    expect(failed!.querySelector(".failed")!.textContent).toBe("failed");
+    expect(failed!.querySelector(`.${outputPane.failed}`)!.textContent).toBe(
+      "failed",
+    );
 
     // And the red it is said in is the one a stopped run is said in. The
     // stylesheet's, since jsdom resolves no variable and paints nothing.
-    expect(stylesheet).toContain(
-      ".transcript .tool-call .failed {\n  flex: none;\n  margin-left: auto;\n  color: var(--stopped);\n}",
+    expect(outputCss).toContain(
+      ".transcript .toolCall .failed {\n  flex: none;\n  margin-left: auto;\n  color: var(--stopped);\n}",
     );
   });
 
@@ -3293,7 +3307,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const orphan = await drawn(container, ".details-pane .turn.tool-result");
+    const orphan = await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.toolResult}`);
 
     expect(orphan.textContent).toContain("04-render.md");
   });
@@ -3347,23 +3361,23 @@ describe("a session's output on the timeline", () => {
 
     const waiting = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.tool-call details",
+      `.details-pane .${outputPane.turn}.${outputPane.toolCall} details`,
     );
     waiting.open = true;
 
     // Nothing has come back yet, so there is nothing under what it was called
     // with — and nothing said about how it went either.
-    expect(waiting.querySelector("pre.output")).toBeNull();
-    expect(waiting.querySelector("summary .failed")).toBeNull();
+    expect(waiting.querySelector(`pre.${outputPane.output}`)).toBeNull();
+    expect(waiting.querySelector(`summary .${outputPane.failed}`)).toBeNull();
 
     await client.invalidateQueries();
 
     await waitFor(() =>
-      expect(waiting.querySelector("pre.output")!.textContent).toContain(
-        "78 passed",
-      ),
+      expect(
+        waiting.querySelector(`pre.${outputPane.output}`)!.textContent,
+      ).toContain("78 passed"),
     );
-    expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(1);
+    expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(1);
     expect(waiting.open).toBe(true);
   });
 
@@ -3377,7 +3391,7 @@ describe("a session's output on the timeline", () => {
 
     const kept = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .bookkeeping",
+      `.details-pane .${outputPane.bookkeeping}`,
     );
 
     expect(kept.open).toBe(false);
@@ -3387,7 +3401,7 @@ describe("a session's output on the timeline", () => {
     expect(kept.textContent).toContain("attachment");
 
     // And not among the turns, which is what folding it away is for.
-    expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+    expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
       rows(TRANSCRIPT.turns),
     );
   });
@@ -3403,7 +3417,7 @@ describe("a session's output on the timeline", () => {
 
     const unread = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.unread details",
+      `.details-pane .${outputPane.turn}.${outputPane.unread} details`,
     );
 
     expect(unread.open).toBe(false);
@@ -3429,7 +3443,7 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     const reasoning = await drawn<HTMLDetailsElement>(
       container,
-      ".details-pane .turn.reasoning details",
+      `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
     );
     reasoning.open = true;
 
@@ -3438,14 +3452,14 @@ describe("a session's output on the timeline", () => {
     // What the session has said since has been drawn under the fold, added to
     // what was already there rather than replacing it…
     await waitFor(() =>
-      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+      expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
         rows(TRANSCRIPT.turns, MORE.turns),
       ),
     );
     // …and the fold is the same element it was, still open.
     expect(
       container.querySelector<HTMLDetailsElement>(
-        ".details-pane .turn.reasoning details",
+        `.details-pane .${outputPane.turn}.${outputPane.reasoning} details`,
       ),
     ).toBe(reasoning);
     expect(reasoning.open).toBe(true);
@@ -3463,17 +3477,17 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .bookkeeping");
+    await drawn(container, `.details-pane .${outputPane.bookkeeping}`);
 
     await client.invalidateQueries();
 
     await waitFor(() =>
       expect(
-        container.querySelectorAll(".details-pane .bookkeeping li"),
+        container.querySelectorAll(`.details-pane .${outputPane.bookkeeping} li`),
       ).toHaveLength(TRANSCRIPT.bookkeeping.length + MORE.bookkeeping.length),
     );
     expect(
-      container.querySelectorAll(".details-pane .bookkeeping"),
+      container.querySelectorAll(`.details-pane .${outputPane.bookkeeping}`),
     ).toHaveLength(1);
   });
 
@@ -3504,14 +3518,14 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .turn");
+    await drawn(container, `.details-pane .${outputPane.turn}`);
 
     await client.invalidateQueries();
 
     // What was read whole is the record, not something to add to it: the
     // session's beginning is drawn once.
     await waitFor(() =>
-      expect(container.querySelectorAll(".details-pane .turn")).toHaveLength(
+      expect(container.querySelectorAll(`.details-pane .${outputPane.turn}`)).toHaveLength(
         rows(WHOLE_AGAIN.turns),
       ),
     );
@@ -3525,7 +3539,7 @@ describe("a session's output on the timeline", () => {
     const { container, client } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .turn.prose");
+    await drawn(container, `.details-pane .${outputPane.turn}.${outputPane.prose}`);
 
     expect(OUTPUT.running).toBe(false);
     const before = askedFor(fetching, TRANSCRIPT_OF_IT);
@@ -3545,7 +3559,7 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    await drawn(container, `.details-pane .${paneHead.head} .record-switch`);
+    await drawn(container, `.details-pane .${paneHead.head} .${outputPane.recordSwitch}`);
     await drawn(container, `.details-pane .${paneHead.head} .${paneHead.back}`);
 
     expect(
@@ -3558,8 +3572,8 @@ describe("a session's output on the timeline", () => {
   /// room. Both are the stylesheet's, and jsdom lays nothing out.
   it("sizes the switch to its labels and wraps rather than overflowing", () => {
     expect(paneHeadCss).toContain(".head {\n  display: flex;\n  flex-wrap: wrap;");
-    expect(stylesheet).toContain(
-      ".record-switch {\n" +
+    expect(outputCss).toContain(
+      ".recordSwitch {\n" +
         "  position: relative;\n" +
         "  display: flex;\n" +
         "  flex: 0 0 auto;\n" +
@@ -3579,11 +3593,11 @@ describe("a session's output on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const transcript = await drawn(container, ".details-pane .transcript-tab");
-    const screen = await drawn(container, ".details-pane .screen-tab");
+    const transcript = await drawn(container, `.details-pane .${outputPane.transcriptTab}`);
+    const screen = await drawn(container, `.details-pane .${outputPane.screenTab}`);
     const mark = await drawn<HTMLElement>(
       container,
-      ".details-pane .record-switch .indicator",
+      `.details-pane .${outputPane.recordSwitch} .${outputPane.indicator}`,
     );
 
     // Presentation and nothing else: the two buttons already say which is
@@ -3611,9 +3625,9 @@ describe("a session's output on the timeline", () => {
   /// both what the mark travels — the labels are words of different lengths, so
   /// it changes width on the way as well as place.
   it("slides the mark over a tenth of a second, unless motion is unwelcome", () => {
-    expect(stylesheet).toContain(
+    expect(outputCss).toContain(
       "@media (prefers-reduced-motion: no-preference) {\n" +
-        "  .record-switch .indicator {\n" +
+        "  .recordSwitch .indicator {\n" +
         "    transition:\n" +
         "      transform 0.1s ease-in-out,\n" +
         "      width 0.1s ease-in-out;\n" +
@@ -3676,7 +3690,7 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
     return { container, socket: await attached() };
   }
@@ -3692,7 +3706,7 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const grid = await drawn(container, ".details-pane .screen .xterm-rows");
+    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -3709,7 +3723,7 @@ describe("watching a live session's screen", () => {
     // Watching, and saying what typing into it would cost: the first keystroke
     // takes the Hold, and a pane that let one be typed without saying so would
     // be one that stopped Verkstead by surprise.
-    const said = await drawn(container, ".details-pane .screen .read-only");
+    const said = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.readOnly}`);
     expect(said.textContent).toContain("Watching");
     expect(said.textContent).toContain("hand it back");
 
@@ -3770,8 +3784,8 @@ describe("watching a live session's screen", () => {
   /// header, rather than letting it run on down a page that scrolls. Read off
   /// the stylesheet, because jsdom lays nothing out.
   it("gives the Screen the pane's height rather than the page's", () => {
-    expect(stylesheet).toContain(
-      ".workbench > .details-pane:has(.screen) {\n" +
+    expect(screenCss).toContain(
+      ":global(.workbench) > :global(.details-pane):has(.screen) {\n" +
         "  flex-direction: column;\n" +
         "  height: 100dvh;\n" +
         "  padding-bottom: 1.25rem;\n" +
@@ -3780,12 +3794,12 @@ describe("watching a live session's screen", () => {
     );
 
     // What is above the terminal keeps its size; the Screen takes the rest.
-    expect(stylesheet).toContain(
-      ".workbench > .details-pane:has(.screen) > :not(.screen) {\n" +
+    expect(screenCss).toContain(
+      ":global(.workbench) > :global(.details-pane):has(.screen) > :not(.screen) {\n" +
         "  flex: none;\n" +
         "}",
     );
-    expect(stylesheet).toContain(
+    expect(screenCss).toContain(
       ".screen {\n" +
         "  display: flex;\n" +
         "  flex: 1;\n" +
@@ -3795,8 +3809,8 @@ describe("watching a live session's screen", () => {
 
     // And the grid a session left behind, which nothing can resize: at its own
     // size, scrolling in the card it sits on rather than scrolling the pane.
-    expect(stylesheet).toContain(
-      ".screen .terminal-host {\n" +
+    expect(screenCss).toContain(
+      ".screen .terminalHost {\n" +
         "  flex: 1;\n" +
         "  min-height: 0;\n" +
         "  padding: 0.5rem;\n" +
@@ -3815,27 +3829,29 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, ".details-pane .screen");
-    expect(screen.classList).toContain("live");
+    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    expect(screen.classList).toContain(screenPane.live!);
 
-    expect(stylesheet).toContain(
-      ".screen.live .terminal-host {\n  overflow: hidden;\n}",
+    expect(screenCss).toContain(
+      ".screen.live .terminalHost {\n  overflow: hidden;\n}",
     );
   });
 
   /// And it renders what the session wrote in the case the session wrote it in.
   /// The badge that says a row is live is styled by that word alone, and the
-  /// Screen marks itself with the same one — a bare `.live` rule matches the
-  /// Screen too, and `text-transform` inherits all the way down into the rows
-  /// xterm builds.
+  /// Screen marks itself with the same one. The two are hashed apart now that
+  /// each is in a module of its own, but neither sheet may ask for the word
+  /// bare inside itself — a rule that did would match every element of that
+  /// module carrying it, and `text-transform` inherits all the way down into
+  /// the rows xterm builds.
   it("leaves a live terminal's text in its own case", async () => {
     watching();
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, ".details-pane .screen");
-    expect(screen.classList).toContain("live");
+    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    expect(screen.classList).toContain(screenPane.live!);
 
     // The badge keeps its capitals, and asks for them where badges are.
     expect(timelineCss).toContain(
@@ -3847,8 +3863,8 @@ describe("watching a live session's screen", () => {
 
     // And nothing asks for them by the word alone, here or anywhere else: a
     // state class standing on its own matches every element that carries it.
-    expect(stylesheet).not.toMatch(/(^|\n)\.live[\s,{]/);
     expect(timelineCss).not.toMatch(/(^|\n)\.live[\s,{]/);
+    expect(screenCss).not.toMatch(/(^|\n)\.live[\s,{]/);
   });
 
   /// And the grid of a session that has ended does not carry it: nothing will
@@ -3861,10 +3877,10 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
-    const screen = await drawn(container, ".details-pane .screen");
-    expect(screen.classList).not.toContain("live");
+    const screen = await drawn(container, `.details-pane .${screenPane.screen}`);
+    expect(screen.classList).not.toContain(screenPane.live!);
   });
 
   /// The height belongs to the Screen and not to the pane: switching back to the
@@ -3875,12 +3891,12 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, ".details-pane .screen");
+    await drawn(container, `.details-pane .${screenPane.screen}`);
 
-    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
 
     await waitFor(() =>
-      expect(container.querySelector(".details-pane .screen")).toBeNull(),
+      expect(container.querySelector(`.details-pane .${screenPane.screen}`)).toBeNull(),
     );
   });
 
@@ -3892,9 +3908,9 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, ".details-pane .screen .xterm-rows");
+    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
-    fireEvent.click(await drawn(container, ".details-pane .transcript-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.transcriptTab}`));
 
     await waitFor(() => expect(socket.closed).toBe(true));
     expect(Attached.opened).toHaveLength(1);
@@ -3910,9 +3926,9 @@ describe("watching a live session's screen", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
-    await drawn(container, ".details-pane .screen .xterm-rows");
+    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
     expect(Attached.opened).toHaveLength(0);
     expect(askedFor(fetching, SCREEN_OF_IT)).toBeGreaterThan(0);
@@ -3926,7 +3942,7 @@ describe("taking a live session's keyboard", () => {
   async function typeInto(container: ParentNode, key: string, code: number) {
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      ".details-pane .screen .xterm-helper-textarea",
+      `.details-pane .${screenPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.keyDown(typing, { key, keyCode: code, which: code });
@@ -3956,12 +3972,12 @@ describe("taking a live session's keyboard", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
     const socket = await attached();
     socket.says(PAINTED);
 
-    await drawn(container, ".details-pane .screen .xterm-rows");
+    await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
 
     return { container, socket };
   }
@@ -3977,12 +3993,12 @@ describe("taking a live session's keyboard", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    fireEvent.click(await drawn(container, ".details-pane .screen-tab"));
+    fireEvent.click(await drawn(container, `.details-pane .${outputPane.screenTab}`));
 
     const socket = await attached();
     socket.says(PAINTED);
 
-    const grid = await drawn(container, ".details-pane .screen .xterm-rows");
+    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-rows`);
     const before = grid.textContent;
 
     await typeInto(container, "Enter", 13);
@@ -4000,7 +4016,7 @@ describe("taking a live session's keyboard", () => {
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      ".details-pane .screen .xterm-helper-textarea",
+      `.details-pane .${screenPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.paste(typing, {
@@ -4022,7 +4038,7 @@ describe("taking a live session's keyboard", () => {
   it("sends what the mouse did as the mouse, which takes nothing", async () => {
     const { container, socket } = await watching();
 
-    const grid = await drawn(container, ".details-pane .screen .xterm-screen");
+    const grid = await drawn(container, `.details-pane .${screenPane.screen} .xterm-screen`);
 
     fireEvent.wheel(grid, { deltaY: 120 });
 
@@ -4054,10 +4070,10 @@ describe("taking a live session's keyboard", () => {
     const socket = await attached();
     socket.says(PAINTED);
 
-    const holding = await drawn(container, ".details-pane .screen .holding");
+    const holding = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.holding}`);
     expect(holding.textContent).toContain("You have the keyboard");
 
-    fireEvent.click(await drawn(container, ".details-pane .hand-back"));
+    fireEvent.click(await drawn(container, `.details-pane .${screenPane.handBack}`));
 
     await waitFor(() =>
       expect(
@@ -4083,9 +4099,9 @@ describe("taking a live session's keyboard", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
-    const holding = await drawn(container, ".details-pane .screen .holding");
+    const holding = await drawn(container, `.details-pane .${screenPane.screen} .${screenPane.holding}`);
     expect(holding.textContent).toContain("the session has exited");
-    expect(await drawn(container, ".details-pane .hand-back")).toBeTruthy();
+    expect(await drawn(container, `.details-pane .${screenPane.handBack}`)).toBeTruthy();
 
     // Its Screen is the one it last stood on, fetched: there is nothing left to
     // attach to, held or not.
@@ -5188,7 +5204,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const header = await drawn(container, ".details-pane .commit-header");
+    const header = await drawn(container, `.details-pane .${commitPane.header}`);
 
     expect(header.textContent).toContain(COMMITS[0]!.subject);
     expect(header.textContent).toContain(COMMITS[0]!.sha.slice(0, 7));
@@ -5212,7 +5228,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, ".details-pane .commit-summary");
+    const summary = await drawn(container, `.details-pane .${commitPane.summary}`);
 
     expect(summary.innerHTML).toBe("<p>A bucket per account.</p>");
 
@@ -5237,7 +5253,7 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, ".details-pane .commit-summary");
+    const summary = await drawn(container, `.details-pane .${commitPane.summary}`);
 
     // The source block the renderer draws over — and what the reader is left
     // with if it never draws.
@@ -5280,7 +5296,7 @@ describe("a commit on the timeline", () => {
     /// this test is about, so waiting for the block alone would prove nothing.
     const showing = (words: string) =>
       waitFor(() => {
-        const block = container.querySelector(".details-pane .commit-summary");
+        const block = container.querySelector(`.details-pane .${commitPane.summary}`);
         if (!block?.textContent?.includes(words)) {
           throw new Error(`the pane is not showing ${words} yet`);
         }
@@ -5327,7 +5343,7 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, ".details-pane .commit-summary");
+    await drawn(container, `.details-pane .${commitPane.summary}`);
 
     expect(drawing).not.toHaveBeenCalled();
   });
@@ -5341,7 +5357,7 @@ describe("a commit on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
     await drawn(container, ".details-pane .diffFiles");
 
-    expect(container.querySelector(".details-pane .commit-summary")).toBeNull();
+    expect(container.querySelector(`.details-pane .${commitPane.summary}`)).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -6360,18 +6376,18 @@ describe("the pinned pull request", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
 
-    const commits = await drawn(container, ".details-pane .pr-commits");
+    const commits = await drawn(container, `.details-pane .${prPane.commits}`);
 
     expect(
-      [...commits.querySelectorAll(".commits li")].map((row) => [
-        row.querySelector(".sha")!.textContent,
-        row.querySelector(".subject")!.textContent,
+      [...commits.querySelectorAll(`.${prPane.carried} li`)].map((row) => [
+        row.querySelector(`.${prPane.sha}`)!.textContent,
+        row.querySelector(`.${prPane.subject}`)!.textContent,
       ]),
     ).toEqual(CARRIED.commits.map((it) => [it.sha.slice(0, 7), it.subject]));
 
-    const comments = await drawn(container, ".details-pane .pr-comments");
+    const comments = await drawn(container, `.details-pane .${prPane.comments}`);
 
-    expect(comments.querySelector(".author")!.textContent).toBe(
+    expect(comments.querySelector(`.${prPane.author}`)!.textContent).toBe(
       CARRIED.comments[0]!.author,
     );
     // Put in the page as it arrived: a comment is markdown from the public
@@ -6625,7 +6641,7 @@ describe("the pinned carousel", () => {
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened.querySelector(`.${timeline.openPullRequest}`)!);
 
-    await drawn(container, ".details-pane .pr-commits");
+    await drawn(container, `.details-pane .${prPane.commits}`);
     expect(askedFor(fetching, WHAT_IS_ON_IT)).toBeGreaterThan(0);
   });
 });
@@ -6972,7 +6988,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(brief);
 
-    const opened = await drawn(details(), ".document");
+    const opened = await drawn(details(), `.${documentPane.document}`);
 
     expect(details().querySelector("h1")!.textContent).toBe("Brief");
     // The whole of it, and not inside a clamp: the pane is where a document
@@ -6991,7 +7007,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(handoff);
 
-    const opened = await drawn(details(), ".document");
+    const opened = await drawn(details(), `.${documentPane.document}`);
 
     expect(details().querySelector("h1")!.textContent).toBe("Handoff");
     expect(opened.innerHTML).toBe(HANDOFF.html);
@@ -7008,7 +7024,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(asked);
 
-    const opened = await drawn(details(), ".document");
+    const opened = await drawn(details(), `.${documentPane.document}`);
 
     expect(details().querySelector("h1")!.textContent).toBe("Manual task");
     expect(opened.innerHTML).toBe(ASKED_BY_HAND.html);
@@ -7031,7 +7047,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.keyDown(handoff, { key: "Enter" });
 
-    await drawn(details(), ".document");
+    await drawn(details(), `.${documentPane.document}`);
 
     await waitFor(() =>
       expect(handoff.classList.contains(timeline.selected!)).toBe(true),
@@ -7054,7 +7070,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(asked);
 
-    await drawn(details(), ".document");
+    await drawn(details(), `.${documentPane.document}`);
   });
 
   /// The brief while it is still a draft is a field with the setup under it, and
@@ -7073,7 +7089,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(brief);
 
-    expect(details().querySelector(".document")).toBeNull();
+    expect(details().querySelector(`.${documentPane.document}`)).toBeNull();
   });
 
   /// A notice is a sentence rather than a document: one line already, with

@@ -37,6 +37,8 @@ import standing from "../src/set/Standing.module.css";
 // The mark on a session's row, and the pinned card the timeline holds
 // above the record.
 import marks from "../src/workbench/Mark.module.css";
+import outputPane from "../src/workbench/Output.module.css";
+import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
 import { drawn } from "./bench";
 import {
@@ -576,7 +578,7 @@ describe("what a Nudge is about", () => {
     await drawn(container, `.${timeline.agentOutput} .${marks.mark}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
-    await drawn(container, ".details-pane .turn");
+    await drawn(container, `.details-pane .${outputPane.turn}`);
     stream().opens();
     const before = { ...reads(fetching), [REST_OF_IT]: askedFor(fetching, REST_OF_IT) };
 
@@ -601,7 +603,7 @@ describe("what a Nudge is about", () => {
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
-    await drawn(container, ".details-pane .pr-commits");
+    await drawn(container, `.details-pane .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
 
@@ -622,7 +624,7 @@ describe("what a Nudge is about", () => {
     const { container } = render(() => <App />);
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(pinned.querySelector(`.${timeline.openPullRequest}`)!);
-    await drawn(container, ".details-pane .pr-commits");
+    await drawn(container, `.details-pane .${prPane.commits}`);
     stream().opens();
     const before = askedFor(fetching, WHAT_IS_ON_IT);
 

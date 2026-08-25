@@ -52,6 +52,7 @@ import { Contents, navigation } from "../set/Contents";
 import { drawDiagrams } from "../set/diagrams";
 import type { Section } from "../set/outline";
 import { files, spied } from "../set/outline";
+import styles from "./Commit.module.css";
 import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
@@ -106,7 +107,7 @@ function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
   return (
     <section
       id={SUMMARY}
-      class="commit-summary document markdown"
+      class={`${styles.summary} markdown`}
       ref={block}
       innerHTML={props.html}
     />
@@ -182,15 +183,15 @@ export function Commit(props: {
         close={props.close}
       />
 
-      <div class="commit-header">
-        <p class="subject">{props.commit.subject}</p>
-        <p class="changed">
-          <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
-          <span class="files">
+      <div class={styles.header}>
+        <p class={styles.subject}>{props.commit.subject}</p>
+        <p class={styles.changed}>
+          <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
+          <span>
             {props.commit.files} {props.commit.files === 1 ? "file" : "files"}
           </span>
-          <span class="added">+{props.commit.insertions}</span>
-          <span class="removed">−{props.commit.deletions}</span>
+          <span class={styles.added}>+{props.commit.insertions}</span>
+          <span class={styles.removed}>−{props.commit.deletions}</span>
         </p>
       </div>
 

@@ -82,10 +82,3 @@
   }
 }
 
-/* The mark at the right edge of a line rather than beside the metric before it:
-   what it says is about the row as a whole. The Timeline's row hands this in as
-   a class of its own; the Capture's summary has no module to hand one from yet,
-   so it is named here through `:global` until `Output.tsx` moves. */
-:global(.capture-summary) .mark {
-  margin-left: auto;
-}
