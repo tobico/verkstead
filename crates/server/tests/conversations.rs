@@ -141,6 +141,13 @@ async fn workbench_with_origin() -> (
         ],
     );
 
+    // A clone inherits no identity, and a machine that has no global one — which
+    // is every machine the checks run on — cannot commit in it. Set here rather
+    // than in whichever test commits first, because being able to commit is what
+    // a repository is for.
+    git(&repo, &["config", "user.email", "test@verkstead.invalid"]);
+    git(&repo, &["config", "user.name", "Verkstead Test"]);
+
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert_eq!(registered, Registered::Added);
