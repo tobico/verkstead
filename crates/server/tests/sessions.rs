@@ -9463,7 +9463,9 @@ async fn a_session_that_exits_held_is_judged_when_the_keyboard_goes_back() {
 ///
 /// An inline implementation, because that is the shortest run with an
 /// end-of-session judgement in it: what says it did anything is what it
-/// committed, and this one commits nothing.
+/// committed and what is on the branch, and this one leaves neither — hence the
+/// `gh` that finds no pull request, without which a session that committed
+/// nothing would still have carried the work to one.
 #[tokio::test]
 async fn a_held_session_that_landed_nothing_halts_on_the_hand_back() {
     let spill = tempfile::tempdir().unwrap();
@@ -9488,7 +9490,7 @@ esac
 "#,
             gate = quoted(&gate),
         ),
-        PULL_REQUEST,
+        NO_PULL_REQUEST,
     )
     .await;
 
@@ -11229,6 +11231,103 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
     assert_eq!(
         view.blocked_on, None,
         "with nothing waiting on the human while something is driving it",
+    );
+}
+
+/// And that second session ends the run by opening the pull request, whether or
+/// not it had anything left to commit.
+///
+/// The ending the skill sends it to: the work was already built and pushed by
+/// nobody, so what it has to do is check it over and carry it to a pull request
+/// — and a branch it finds nothing wrong with is a branch it commits nothing to.
+/// Landing no commit is what an empty session looks like too, so the two are
+/// told apart by asking GitHub rather than by counting commits: a pull request
+/// on the branch is the session having done the whole of what it was sent for.
+#[tokio::test]
+async fn a_second_inline_session_that_only_opens_the_pull_request_wraps_the_run_up() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-the-session");
+
+    // The second session's `gh pr create`, standing where the real one would:
+    // the file it writes is what the server's own `gh` finds a pull request by.
+    let stub = format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'reading the whole branch\n'
+    sleep 300
+    ;;
+*implementing/SKILL.md*)
+    if [ -f TRIED ]; then
+        printf 'the work was already here, so all it wanted was a pull request\n'
+        printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    else
+        printf 'once\n' > TRIED
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+        printf 'the limiter is in, and nothing pushed it\n'
+    fi
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(&opened),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The first session builds the work and goes without pushing, which is the
+    // ending this whole run is about.
+    let missing = fixture.halted().await;
+
+    assert!(
+        missing.html.contains("no pull request"),
+        "the run stopped on the pull request nothing opened: {:?}",
+        missing.html,
+    );
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the pull request the second session opened is the one the Conversation wraps up",
+    );
+    assert_eq!(
+        implementing_sessions(&fixture).await,
+        2,
+        "which took a second session, the first having left the branch unpushed",
+    );
+    assert_eq!(
+        commits(&fixture.view().await).len(),
+        1,
+        "and it built nothing again: there was nothing left to build",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        None,
+        "so nothing is waiting on the human any more",
     );
 }
 

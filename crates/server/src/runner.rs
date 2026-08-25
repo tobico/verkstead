@@ -730,6 +730,13 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// and moves the Conversation on. An inline implementation is work like any
 /// other work and goes for review like any other work.
 ///
+/// Which is why landing nothing is not the end of it either. A second session on
+/// the branch — the one [`inline_again`] launches where GitHub has no pull
+/// request yet — is sent to check work that is already built and carry it to
+/// one, and has nothing to commit when it finds nothing left to finish. So a
+/// clean session that committed nothing is asked about before it is called an
+/// empty one, and the pull request is what tells the two apart.
+///
 /// The registration it is handed is held until the session is over and whatever
 /// it left behind has been read, so an inline run is a driven Conversation for
 /// exactly as long as somebody is watching it.
@@ -801,7 +808,43 @@ async fn follow_inline(
         // Exited cleanly having committed nothing at all. An interactive agent
         // that decides there is nothing to do exits zero, so this is exactly the
         // case a status could not have caught.
-        (None, false) => "the session ended without committing anything".to_owned(),
+        //
+        // But it is also what the *second* session on a branch looks like when
+        // it does its job. The skill sends one that finds the work already built
+        // to check it over and carry it to the pull request — see
+        // [`inline_again`], which is what launches it — and a session that finds
+        // nothing left to finish has nothing left to commit either. So GitHub is
+        // asked before this is called nothing: a pull request on the branch is
+        // that session having done the whole of what it was sent for.
+        (None, false) => match crate::wrapping::asked(&state, conversation_id).await {
+            // Nothing committed, and GitHub saying there is nothing on the
+            // branch either, which is the session that really did do nothing.
+            // Said in its own words rather than `gh`'s: what is wrong here is
+            // the empty session, and the missing pull request is only how it
+            // shows.
+            //
+            // A branch that could not be asked about at all falls the same way,
+            // that being in the log already and no more of an answer than it
+            // was.
+            Some((_, Err(github::Trouble::NoPullRequest))) | None => {
+                "the session ended without committing anything".to_owned()
+            }
+            // Anything else is what the landed arm above makes of it, made in
+            // the one place that knows how: a pull request found is a wrap-up,
+            // and a `gh` that cannot answer at all is a halt naming what the
+            // human can go and fix.
+            Some(_) => {
+                tracing::info!(
+                    conversation_id,
+                    event_id,
+                    "an inline session committed nothing, so its pull request is what says \
+                     whether it did anything"
+                );
+
+                crate::wrapping::opened(&state, conversation_id, Some(event_id)).await;
+                return;
+            }
+        },
         // Ended badly, whether or not it got some of the way: the human is owed
         // the telling either way, and what it committed is on the Timeline above
         // the Notice for them to read.
