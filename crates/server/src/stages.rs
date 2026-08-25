@@ -491,11 +491,23 @@ pub(crate) async fn abandoned(repos: Vec<store::Repo>) -> Vec<AbandonedRepo> {
 
 /// One Repo's notice, or `None` where it has nothing to adopt.
 ///
-/// Read at the default branch's tip, which is the repository as everyone
-/// working on it sees it. A repository with no branch that resolves has nothing
-/// to read and nothing to say — the same shrug the pinned lists make.
+/// Read at the default branch's tip as origin holds it, which is the repository
+/// as everyone working on it sees it — the same ref [`adopting`] draws the page
+/// from and [`crate::conversations::adopt`] branches off, so what is offered
+/// here and what happens when it is pressed are one reading. A local default
+/// branch that has not been pulled for a week would offer a roadmap somebody
+/// finished and hide one somebody pushed. A repository with no branch that
+/// resolves has nothing to read and nothing to say — the same shrug the pinned
+/// lists make.
+///
+/// No fetch, unlike those two. This is drawn for every registered Repo every
+/// time the workbench reads the sidebar, and a network call per Repo per read is
+/// not what a notice is worth: origin's copy as it last stood is enough to agree
+/// with the page and the press, both of which freshen it themselves before they
+/// act on it.
 fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
-    let commit = worktrees::resolve(&repo.path, &repo.default_branch)?;
+    let named = worktrees::default_ref(&repo.path, &repo.default_branch);
+    let commit = worktrees::resolve(&repo.path, &named)?;
 
     let roadmaps: Vec<AbandonedRoadmap> = abandoned_at(&repo.path, &commit)
         .into_iter()
@@ -1623,6 +1635,70 @@ Turns this askance clone into Verkstead.
                 default_branch: "main".to_owned(),
             }),
             None,
+        );
+    }
+
+    /// The notice reads the default branch as origin holds it, so a roadmap
+    /// somebody pushed is offered on a checkout that has never pulled it.
+    ///
+    /// Which is what the page and the press read too — offering a roadmap here
+    /// and judging it against another ref there would be a button that refused
+    /// itself. No fetch of its own: this is drawn for every registered Repo on
+    /// every read of the sidebar, and origin's copy as the last fetch left it is
+    /// what the two of them freshen before they act.
+    #[test]
+    fn a_notice_reads_the_default_branch_as_origin_holds_it() {
+        let repo = Repo::with(&[]);
+
+        // The roadmap is committed on origin and nowhere else: this checkout's
+        // own `main` has never held it.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let upstream = elsewhere.path().join("upstream");
+
+        run(
+            elsewhere.path(),
+            &[
+                "clone",
+                &repo.path().to_string_lossy(),
+                &upstream.to_string_lossy(),
+            ],
+        );
+        run(
+            &upstream,
+            &["config", "user.email", "test@verkstead.invalid"],
+        );
+        run(&upstream, &["config", "user.name", "Verkstead Test"]);
+
+        write(&upstream, "mvp", MVP);
+        std::fs::write(
+            upstream.join(ROADMAPS).join("mvp/03-implementation.md"),
+            "# 03. Implementation\n",
+        )
+        .unwrap();
+        run(&upstream, &["add", "-A"]);
+        run(&upstream, &["commit", "-m", "docs: the roadmap"]);
+
+        run(
+            repo.path(),
+            &["remote", "add", "origin", &upstream.to_string_lossy()],
+        );
+        run(repo.path(), &["fetch", "--quiet", "origin"]);
+
+        let notice = notice(&store::Repo {
+            id: 1,
+            path: repo.path().to_owned(),
+            name: "verkstead".to_owned(),
+            default_branch: "main".to_owned(),
+        })
+        .expect("origin holds a roadmap with a stage left to start");
+
+        assert_eq!(
+            notice
+                .roadmaps
+                .iter()
+                .map(|roadmap| (roadmap.name.as_str(), roadmap.stage.as_str()))
+                .collect::<Vec<_>>(),
+            [("mvp", "03")],
         );
     }
 
