@@ -26,6 +26,16 @@ exhausted usage window still names the Profile and shows the reset time the
 session printed, but it waits for a press like every other — the reset time is
 information, not a timer. *Blocked on you* badges any stopped Conversation.
 
+And **a usage-window stop ends the session it stopped**, which is new. Verkstead
+has never touched that session: the agent holds it at the limit and carries on
+by itself when the window comes back, and what kept the two in step was
+Verkstead's own wait firing at the same reset and relaunching. Take the wait
+away and nothing does — the agent would wake and work on inside a Conversation
+that reads as stopped, and the press that came the next morning would launch
+over whatever it had done. So *no stop resumes itself* is made true of the agent
+too, at the cost of the window the session would otherwise have worked through
+unwatched.
+
 The Hold goes with it, replaced by a rule: **a keystroke into a Screen resets
 the session's quiet clock.** No register, no hand-back, no badge. The rule
 protects a running session from being ended mid-intervention, which was the

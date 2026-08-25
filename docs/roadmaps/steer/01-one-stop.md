@@ -23,6 +23,12 @@ stage:
   but it now writes an ordinary stop naming the Profile and carrying the
   reset time *as words to show*; the five-hour wait that resumed the run when
   the reset passed is deleted. Every stop ends by a press.
+- **A usage-window stop ends its session.** `limits::pause` has never touched
+  the session it stopped — the agent's own wait was not Verkstead's to end —
+  and what kept the two in step was the sweep relaunching at the same reset,
+  `Sessions::start` ending whatever was registered. With the sweep gone the
+  session has to be ended where the stop is written, or the agent wakes at the
+  reset and works on inside a Conversation that reads as stopped.
 - **Notification rules unchanged.** A stop Verkstead decided on is pushed;
   the human's own press and a stop nobody chose are not.
 - ***Blocked on you* badges any stopped Conversation.**
@@ -45,7 +51,8 @@ stage:
 2. **Server: writers and clearers.** `limits.rs` writes a stop and its wait
    task goes; `stops.rs`, `resume.rs` and the stalled sweep write and clear
    the one thing.
-   - An exhausted window leaves a stop with the Profile and reset words on it.
+   - An exhausted window leaves a stop with the Profile and reset words on it,
+     and leaves no session running behind it.
    - Resume clears any stop, whatever wrote it.
 3. **Workbench: one stopped presentation.** Fold `Pause.tsx` into the one
    stopped card; one badge; reset time drawn as text beside the ordinary
