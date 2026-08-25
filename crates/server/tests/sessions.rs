@@ -6987,10 +6987,18 @@ fn out_of_window(sentence: &str) -> String {
                     # printed on, so the banner is looked at more than once —
                     # with claude's own spinner turning in front of it, which is
                     # what makes each repaint a different line.
+                    # The glyphs themselves rather than `\xe2\x9c\xbb` and its
+                    # kind. `\xNN` is bash's extension to `printf` and not
+                    # POSIX: a `/bin/sh` that is dash — which is what Debian and
+                    # Ubuntu have, so it is what CI runs — prints the escape
+                    # rather than the character, and a banner opening with a
+                    # literal backslash is one [`verkstead_server`] is right to
+                    # refuse. ASCII punctuation is not decoration there,
+                    # deliberately, so it does not open a status line. This file
+                    # is UTF-8 and the shell passes the bytes through, which
+                    # needs no escape at either end.
                     for pass in 1 2; do
-                        for turning in \
-                            '\xe2\x9c\xbb' '\xe2\x9c\xbd' \
-                            '\xe2\x9c\xb3' '\xe2\x9c\xa2'
+                        for turning in '✻' '✽' '✳' '✢'
                         do
                             printf "$turning {sentence}\r\n"
                             sleep 0.125
@@ -7033,7 +7041,7 @@ async fn running_out(fixture: &Grilling) {
 #[tokio::test]
 async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     let fixture = grilling(&out_of_window(
-        "Usage limit reached \\xc2\\xb7 continuing automatically at 2026-08-24T05:00:00Z \\xc2\\xb7 esc to cancel",
+        "Usage limit reached · continuing automatically at 2026-08-24T05:00:00Z · esc to cancel",
     ))
     .await;
 
@@ -7235,7 +7243,7 @@ async fn the_humans_press_starts_a_stopped_run_again_where_it_stopped() {
 #[tokio::test]
 async fn a_reset_that_has_been_and_gone_starts_nothing() {
     let fixture = grilling(&out_of_window(
-        "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
+        "Usage limit reached · continuing automatically at 2020-01-01T00:00:00Z",
     ))
     .await;
 
