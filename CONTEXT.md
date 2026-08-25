@@ -416,13 +416,12 @@ stopped. A stop may be answered the next morning, and the Conversation moves on
 in the meantime; where the stop carries words about a usage window coming back,
 they stand beside the button as text, and nothing is waiting on them.
 
-It carries nothing. Steering the work is what a **Manual Task** is for, so
-there is no note to write and one button rather than one per way of stopping.
-It is never silent either: either something starts, which the Timeline says by
-itself, or the press is refused by name and the page says which — the backlog
-that has gone, the Pairing that has, the Worktree that is nowhere. A Worktree
-the record names and git does not is made again from the branch rather than
-refused on.
+It carries nothing. Steering the work is what **Steer** is for, so there is no
+note to write and one button rather than one per way of stopping. It is never
+silent either: either something starts, which the Timeline says by itself, or
+the press is refused by name and the page says which — the backlog that has
+gone, the Pairing that has, the Worktree that is nowhere. A Worktree the record
+names and git does not is made again from the branch rather than refused on.
 
 Offered on a Conversation that is merely undriven as much as on one that is
 **Stopped**, a run with nothing behind it being the same condition however it
@@ -434,6 +433,58 @@ Beside it in the Conversation's own menu, the two presses that stop: **Stop**,
 which lets whatever is running now reach its own end and stops before the next
 launch, and **Force stop**, which ends the session where it stands.
 _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
+
+**Steer**:
+The human saying where the work goes, from wherever it has got to: a row in the
+Conversation's own menu beside **Stop**, and a modal over one question — where
+does this go? Targets are **Grilling**, **Implementing**, **Wrapping** and
+**Done**, the four states the work is done in; Draft and Aborted are not among
+them, each having a way in of its own. Sources are every state there is — a
+Draft nothing has run in, a run in flight, work Verkstead has finished with —
+because a steer is the human stepping outside the pipeline's path rather than
+another move along it. So every refusal is about the target instead of the
+source: wrapping up is offered only where the work is on a pull request, there
+being no wrap-up to steer into otherwise.
+
+**The click stops the drive**, before the modal opens. The ordinary Stop, so
+nothing new launches while the human composes and whatever is running is seen
+out to its own end — unless **Interrupt current task** ends it where it stands,
+leaving the step however far it had got. **Cancel leaves the Conversation
+stopped**, with **Resume** on offer: the click froze the world, and unfreezing
+is a press of its own rather than something a dismissed modal does behind the
+human's back.
+
+**What is missing is made again**, and the further from a running state the
+source is the more of it there is to make. A Worktree whose directory has gone
+is checked out afresh from the branch, exactly as a pressed Resume makes one; a
+Draft has no branch either, so it is cut where a grill start would have cut it —
+off the base the human fixed, resolved at that moment.
+
+**What a target takes is what it has to be about.** Grilling takes a new Brief,
+optional, empty being the round starting on the one already there; and a choice
+about priming the session with the digest of everything already answered, off
+unless asked for, because a steer is usually a change of direction rather than a
+return to the argument just left. Implementing takes a hand-written
+instruction — required where the branch holds nothing to carry on, and optional
+where it does, empty there meaning carry it on. Wrapping takes nothing: its
+watchers recompute over whatever the branch now holds, the fix attempts
+forgotten. Done takes nothing at all, there being nothing to run in it.
+
+**The record is the move with the human's own line above it.** The Steer is an
+Event of its own — somebody decided this — carrying the brief or the instruction
+as its body, and the machine's plain Moved line stands under it. A steer into
+Grilling lands that round's Brief under the move as well, frozen where it lands
+and beside the earlier round's rather than over it. The Pairing the modal
+settled is recorded as the **Conversation's** rather than one session's, because
+steering re-settles what runs the work — which is also why the pick is part of
+the form: a steered Draft has none fixed yet.
+
+**And the submit resumes in the same press.** The stop the click left is
+cleared, and what that state ought to be running starts — a fresh grilling, the
+instruction session or the next step off the branch, the wrap-up's watchers.
+Into Done it is the move alone.
+_Avoid_: redirect, retarget, override, transition, take over, manual task (the
+errand beside the work, not a way of moving it)
 
 **Manual Task**:
 A free-text instruction the human types at the end of a Conversation's Timeline,
