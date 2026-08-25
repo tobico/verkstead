@@ -656,7 +656,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // reading the Profile list gets.
     let grilling_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.grilling_pairing,
+        conversation.grilling_pairing.clone(),
     )
     .await
     {
@@ -669,7 +669,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     let implementation_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.implementation_pairing,
+        conversation.implementation_pairing.clone(),
     )
     .await
     {
@@ -816,13 +816,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // wherever an instruction can be written, which is everywhere. Off the
     // Worktree as it stands, which is where the pinned Events above are read
     // from and for the same reason — the repository owns those files. See
-    // [`crate::steering::standing`], which is the rule the submit refuses by.
-    let ready_to_continue = crate::steering::standing(
-        conversation.direction,
-        conversation.worktree.clone(),
-        conversation.base_commit.clone(),
-    )
-    .await;
+    // [`crate::steering::standing`], which is the rule the submit refuses by,
+    // and which reads a Worktree that has gone as *cannot tell* rather than as
+    // nothing standing: the steer makes one out of the branch before anything
+    // runs in it.
+    let ready_to_continue = crate::steering::standing(&conversation).await.offerable();
 
     // And the badge points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a badge with nowhere to go would be one

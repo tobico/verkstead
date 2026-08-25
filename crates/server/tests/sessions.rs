@@ -11081,6 +11081,130 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
     );
 }
 
+/// A backlog, then a task session that dies the first time it is run and stays
+/// the second — the stall, and then the session the steer starts.
+///
+/// Which time it is is remembered outside the worktree, because this is the
+/// test that takes the worktree away between the two.
+fn a_backlog_then_once_then_staying(remembered: &Path) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+    printf '# 01. Count the requests\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan the rate limiter'
+    printf 'the backlog is written\n'
+    sleep 300
+    ;;
+*)
+    printf 'prompt was: %s\n' "$2"
+    if [ ! -f {remembered} ]; then
+        printf 'once\n' > {remembered}
+        printf 'this task is beyond me\n'
+        exit 1
+    fi
+    sleep 300
+    ;;
+esac
+"#,
+        remembered = quoted(remembered),
+    )
+}
+
+/// And the same steer where the Worktree has gone: the backlog is still on the
+/// branch, so it is still something to carry on and nothing has to be written.
+///
+/// The Conversation this button was written for, steered into the one target
+/// that reads a directory to decide what it offers. That reading is of the
+/// Worktree as it stands — a directory that has gone holds no `.tasks/` — so a
+/// rule taking *cannot tell* for *nothing there* would refuse a steer that was
+/// about to check the branch out again and find the whole backlog on it, and
+/// would say there was nothing on the branch to carry on while the branch was
+/// holding it.
+///
+/// So the modal offers carrying on, the submit is not refused, and what follows
+/// is the next task read off the directory the steer made.
+#[tokio::test]
+async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone() {
+    let spill = tempfile::tempdir().unwrap();
+    let remembered = spill.path().join("tried");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_backlog_then_once_then_staying(&remembered),
+        PULL_REQUEST,
+        SWEEPING,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    fixture.stopped().await;
+
+    let view = fixture.view().await;
+    let worktree = PathBuf::from(view.worktree.expect("the run has one").path);
+
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "the backlog is there before the directory goes",
+    );
+
+    // The registration in the repository outlives the directory, which is what
+    // leaves git refusing to check the branch out anywhere.
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.ready_to_continue,
+        "the branch still holds the backlog, so carrying on is still worth \
+         offering: a directory that has gone is nothing read rather than \
+         nothing standing",
+    );
+
+    let before = outputs(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+        "and nothing is asked for in writing: what is next is the backlog's own \
+         answer, as it always was",
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the run picks the backlog up again, which is the fork that reads it: \
+         {printed:?}",
+    );
+
+    assert!(
+        worktree.join(".tasks/01-count.md").is_file(),
+        "in a directory made again from the branch, with the backlog on it",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone"
+    );
+}
+
 /// Steering a halted wrap-up back into Wrapping does what that press does: the
 /// checks are watched again from no attempts spent, and the stop goes.
 ///

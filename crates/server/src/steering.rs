@@ -318,14 +318,14 @@ async fn refusal(
     // requires the instruction there rather than offering the submit —
     // [`standing`] is what it draws that by, and this is that same reading asked
     // again on arrival.
+    //
+    // A Worktree that is not there to be read is not a branch holding nothing:
+    // the steer checks one out of the branch a moment after this, and refusing
+    // here would refuse the Conversation this button was written for. See
+    // [`Standing::Unreadable`].
     if submission.target == SteerTarget::Implementing
         && instruction(submission).is_none()
-        && !standing(
-            conversation.direction,
-            conversation.worktree.clone(),
-            conversation.base_commit.clone(),
-        )
-        .await
+        && !standing(conversation).await.offerable()
     {
         return Ok(Some(ConversationSteered::NoInstruction));
     }
@@ -459,12 +459,54 @@ fn settling<'a>(
     })
 }
 
+/// What a steer into Implementing would find on the branch to carry on.
+///
+/// Three answers rather than two, because a Worktree that is not there is not
+/// the same thing as one that is there and empty — see [`Standing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// The Worktree is there, and it holds work left to do.
+    Stands,
+
+    /// It is there, and it holds none — or the Conversation's work is not the
+    /// kind anything on a branch could be carried on from.
+    ///
+    /// The one answer that refuses: a steer into Implementing here either does
+    /// what the human wrote or does nothing at all.
+    Nothing,
+
+    /// There was nothing to read: no Worktree on the record, or one git will not
+    /// answer about any more.
+    ///
+    /// **Not a refusal**, and that is the whole of why this is three answers.
+    /// The steer checks the branch out again before anything runs in it — see
+    /// [`somewhere`] — so a directory that has gone says nothing about what the
+    /// branch holds, and the Conversation stuck behind a deleted one is the very
+    /// thing this button is for. What decides it instead is
+    /// [`crate::runner::implementing_again`], which reads the Worktree the steer
+    /// has just made and starts nothing where there is nothing — exactly as it
+    /// does for a pressed Resume.
+    Unreadable,
+}
+
+impl Standing {
+    /// Whether *carrying on* is worth offering, which is everything but a
+    /// Worktree that was read and held nothing.
+    ///
+    /// What [`crate::ui`] draws the modal by and what [`refusal`] refuses by,
+    /// said once so that the page and the press cannot come to different answers
+    /// about it.
+    pub(crate) fn offerable(self) -> bool {
+        self != Self::Nothing
+    }
+}
+
 /// Whether there is work standing on the branch for a steer into Implementing
 /// to carry on.
 ///
 /// The one question that target turns on, said once here because the modal
 /// draws by it and the submit refuses by it — see
-/// [`ConversationSteered::NothingToContinue`]. Two things can stand, and the
+/// [`ConversationSteered::NoInstruction`]. Two things can stand, and the
 /// direction is what says which of them this run would be:
 ///
 /// - **a backlog with work left in it**, which is `.tasks/` asked exactly as
@@ -477,46 +519,83 @@ fn settling<'a>(
 /// distinction rather than an omission: its work is the one session, so there
 /// is nothing on the branch to pick up where it left off. What such a
 /// Conversation is steered into Implementing with is an instruction of the
-/// human's own, which is what this false answer asks the modal for.
+/// human's own, which is what [`Standing::Nothing`] asks the modal for — and it
+/// is answered before the directory is looked at, no reading of one being able
+/// to change it.
 ///
-/// Read of the Worktree as it stands rather than of the branch behind it,
-/// which is how everything else pinned to a Timeline is read: a Conversation
-/// whose directory has gone has nothing standing, whatever the branch may
-/// hold. Nothing is made here to find out — this is asked in front of a
-/// refusal, and a refusal that had rebuilt a Worktree first would be a press
-/// that half happened.
+/// Read of the Worktree as it stands, which is how everything else pinned to a
+/// Timeline is read. Nothing is made here to find out — this is asked in front
+/// of a refusal, and a refusal that had rebuilt a Worktree first would be a
+/// press that half happened — but a Worktree that is not there to be read is
+/// [`Standing::Unreadable`] rather than nothing standing, because the steer
+/// makes one out of the branch a moment later and the branch is what holds the
+/// backlog.
 ///
-/// Off the runtime's threads, both readings being filesystem and git calls.
-pub(crate) async fn standing(
-    direction: Option<Direction>,
-    worktree: Option<PathBuf>,
-    base_commit: Option<String>,
-) -> bool {
-    let (Some(direction), Some(worktree)) = (direction, worktree) else {
-        return false;
+/// [`crate::worktrees::healthy`] for whether there is one to read, which is the
+/// same reading [`somewhere`] makes about the same directory a moment later.
+///
+/// Off the runtime's threads, every one of these readings being a filesystem or
+/// git call.
+pub(crate) async fn standing(conversation: &Conversation) -> Standing {
+    // A Conversation that has never said how its work is built has nothing to
+    // carry on whatever is on its branch: what says what is next is the
+    // direction, and there is none.
+    let Some(direction) = conversation.direction else {
+        return Standing::Nothing;
     };
 
+    if direction == Direction::Inline {
+        return Standing::Nothing;
+    }
+
+    let Some(worktree) = conversation.worktree.clone() else {
+        return Standing::Unreadable;
+    };
+
+    let there = {
+        let repo = conversation.repo.path.clone();
+        let branch = conversation.branch.clone();
+        let worktree = worktree.clone();
+
+        tokio::task::spawn_blocking(move || crate::worktrees::healthy(&repo, &worktree, &branch))
+            .await
+            .unwrap_or(false)
+    };
+
+    if !there {
+        return Standing::Unreadable;
+    }
+
     match direction {
-        Direction::TaskList => crate::runner::anything_to_work(&worktree).await,
+        Direction::TaskList => match crate::runner::anything_to_work(&worktree).await {
+            true => Standing::Stands,
+            false => Standing::Nothing,
+        },
 
         // What a roadmap Conversation has written since it branched, committed
         // or not — see [`crate::stages::touched`], which is the same reading
         // [`crate::runner::implementing_again`] makes a moment later to decide
         // what to start. No base commit is a Conversation that has never
-        // branched, which has written nothing.
+        // branched, which has a Worktree it did not get from one.
         Direction::Roadmap => {
-            let Some(base) = base_commit else {
-                return false;
+            let Some(base) = conversation.base_commit.clone() else {
+                return Standing::Nothing;
             };
 
-            tokio::task::spawn_blocking(move || {
+            let touched = tokio::task::spawn_blocking(move || {
                 !crate::stages::touched(&worktree, &base).is_empty()
             })
             .await
-            .unwrap_or(false)
+            .unwrap_or(false);
+
+            match touched {
+                true => Standing::Stands,
+                false => Standing::Nothing,
+            }
         }
 
-        Direction::Inline => false,
+        // Answered above, before anything was read.
+        Direction::Inline => Standing::Nothing,
     }
 }
 

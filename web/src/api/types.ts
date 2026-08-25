@@ -649,8 +649,14 @@ ready_to_stop: boolean,
  * The server’s rule rather than something the page works out from the
  * fields around it: what stands is a reading of the Worktree as it is now,
  * which a page cannot make. Read the same way everything else pinned to
- * the Timeline is — a Conversation with no Worktree on disk has nothing
- * standing, whatever its branch may hold.
+ * the Timeline is.
+ *
+ * **A Worktree that has gone is not a branch holding nothing**, and this is
+ * true there. There is no directory to read, and the steer checks one out
+ * of the branch before anything runs in it — so a Conversation stuck behind
+ * a deleted directory is offered the carrying on its branch may well hold,
+ * and what decides it in the end is the relaunch that reads the directory
+ * the steer has just made.
  *
  * Checked again when the modal is submitted, as every refusal here is;
  * this says only that it was worth offering as of the moment it was read.
