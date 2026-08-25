@@ -62,10 +62,13 @@ stage:
    waiting on `until_handed_back`. Nothing takes its place, so the Screen's
    input path keeps writing what it is sent straight through — and telling a
    keystroke from a mouse report there was the Hold's business alone, so what
-   is left of that distinction goes with it.
+   is left of that distinction goes with it. Its push goes too:
+   `News::Waiting`, `push::when_it_has_stood`, `push::HELD_A_WHILE` and
+   `Pace::holding` have nothing left to announce, and `screen.rs` is the one
+   caller.
    - Typing into a driven session's Screen changes nothing about when it ends;
      pressing Stop first is what holds the run off.
-   - Nothing to hand back anywhere.
+   - Nothing to hand back anywhere, and no device is told about a Hold.
 5. **The vocabulary this stage retires.** CONTEXT.md: fold **Halt** and
    **Pause** into one entry for the one stop, delete **Hold**, and follow the
    cross-references out — **Stalled** is defined against both of the first
