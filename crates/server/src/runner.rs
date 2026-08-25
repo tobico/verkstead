@@ -674,10 +674,12 @@ async fn follow_inline(
 
     let ended = session.ended().await;
 
-    // Verkstead ended it, which for an inline run means the human aborted the
-    // Conversation: nothing was left to land because they stopped it. Answered
-    // before the branch is read, since an aborted run has committed nothing and
-    // would otherwise read as a session that did nothing.
+    // Verkstead ended it — the human aborted the Conversation or force-stopped
+    // it, or the account it was spending ran out of window. Whichever it was,
+    // the stop is already on the record and nothing was left to land, so there
+    // is nothing to ask about. Answered before the branch is read, since a run
+    // stopped from outside has committed nothing and would otherwise read as a
+    // session that did nothing. See [`crate::sessions::Ended::on_purpose`].
     if ended.on_purpose() {
         tracing::info!(
             conversation_id,
@@ -938,9 +940,10 @@ async fn proposing(
     let event_id = session.event_id;
     let ended = session.ended().await;
 
-    // Verkstead ended it, which here means the human aborted the Conversation out
-    // from under the wrap-up. There is nothing to ask them about: they have just
-    // answered.
+    // Verkstead ended it — the human aborted or force-stopped the Conversation
+    // out from under the wrap-up, or the account ran out of window. Either way
+    // the stop is already on the record, so there is nothing to ask about. See
+    // [`crate::sessions::Ended::on_purpose`].
     if ended.on_purpose() {
         tracing::info!(
             conversation_id,
@@ -1104,10 +1107,12 @@ async fn see_out(
         return Some(event_id);
     }
 
-    // Verkstead ended it, which here means the human aborted the Conversation
-    // out from under the run: the worktree has gone, so the step reads as not
-    // landed whatever it did. There is nothing to ask them about — they have
-    // just answered.
+    // Verkstead ended it — the human aborted the Conversation out from under
+    // the run, so the worktree has gone and the step reads as not landed
+    // whatever it did; or they force-stopped it; or the account it was spending
+    // ran out of window. Every one of the three has already written the stop
+    // this would otherwise write, so the backlog stops here without asking. See
+    // [`crate::sessions::Ended::on_purpose`].
     if ended.on_purpose() {
         tracing::info!(
             conversation_id,

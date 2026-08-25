@@ -289,8 +289,10 @@ pub(crate) enum Ended {
     /// Exited badly, said as what happened to it — "exited with status 1".
     Badly(String),
 
-    /// Verkstead ended it: its step had landed and it had gone quiet, or the
-    /// human aborted the Conversation out from under it.
+    /// Verkstead ended it, however it came to: its step had landed and it had
+    /// gone quiet, the human aborted the Conversation or pressed Force stop out
+    /// from under it, or the account it was spending ran out of window and the
+    /// stop written for that ended it — see [`crate::limits`].
     Stopped,
 
     /// It is over and nothing can say how — the relay itself failed, or could not
@@ -316,13 +318,20 @@ impl Ended {
 
     /// Whether Verkstead is what ended it.
     ///
-    /// The one way of ending that never stops the run, whatever the Worktree then
-    /// says.
-    /// Everything else a driver sees is a session that stopped without being
-    /// asked to, and the human is owed the telling about it; this is the human
-    /// having already stopped it themselves — they aborted the Conversation — or
-    /// the step having landed. Stopping over it would be telling them driving had
-    /// stopped, about the thing they just stopped.
+    /// The one way of ending that never stops the run, whatever the Worktree
+    /// then says. Everything else a driver sees is a session that stopped
+    /// without being asked to, and the human is owed the telling about it; this
+    /// is a session Verkstead meant to end, and stopping over one would either
+    /// tell them driving had stopped about the thing they just stopped, or
+    /// write a second stop behind one already on the record.
+    ///
+    /// Three ways in, and the driver treats them alike. The step landed and the
+    /// session went quiet, so there is nothing to tell. The human aborted the
+    /// Conversation or pressed Force stop, and the stop their press wrote is
+    /// already there. Or the account ran out of window, and the stop
+    /// [`crate::limits`] wrote before killing the sandbox is already there too —
+    /// which is what this has to be read as for, because a driver reading it as
+    /// the human's act alone would advance a run that has stopped.
     pub(crate) fn on_purpose(&self) -> bool {
         matches!(self, Self::Stopped)
     }
