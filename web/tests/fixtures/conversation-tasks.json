@@ -63,6 +63,7 @@
       }
     }
   ],
+  "ready_to_continue": true,
   "ready_to_grill": false,
   "ready_to_resume": true,
   "ready_to_stop": true,

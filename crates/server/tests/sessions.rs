@@ -50,7 +50,7 @@ use verkstead_render::{
     Registered, Resumed, Shown, Size, Started, SteerOpened, Submitted, TaskListEvent,
     TimelineEvent, TranscriptView, Turn, Watching,
 };
-use verkstead_schema::Nudge;
+use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::sandbox::{Executable, Home, Reachable, SandboxConfig};
 use verkstead_server::settings::Settings;
@@ -10940,6 +10940,124 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
     // a stop, so one dispatching at all is the stop gone; and two attempts is
     // every one the branch was allowed, so a third is the count forgotten.
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
+}
+
+/// Steering a stalled backlog run into Implementing carries it on: the next
+/// task is read off the branch and worked, and the stop the click wrote goes.
+///
+/// The same recompute rather than one of its own. What is next is the backlog's
+/// own answer, asked of `.tasks/` exactly as every other turn of the run asks
+/// it — so what the steer starts is what Resume starts, reused rather than
+/// forked. The task whose session died is still there, so that is the task the
+/// fresh session is started on: nothing here reverts anything.
+///
+/// And the target is offered because something stands. A branch with a backlog
+/// left in it is the whole of what a continue steer needs, which is what the
+/// modal draws the row by and what the submit is refused by where there is
+/// none.
+#[tokio::test]
+async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() {
+    let fixture = grilling_swept(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+            printf '# 01. Count the requests\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan the rate limiter'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            if [ ! -f TRIED ]; then
+                printf 'once\n' > TRIED
+                printf 'this task is beyond me\n'
+                exit 1
+            else
+                printf 'prompt was: %s\n' "$2"
+                sleep 300
+            fi
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains(".tasks/01-count.md"),
+        "the run stopped at the task whose session died: {:?}",
+        stopped.html,
+    );
+
+    let view = fixture.view().await;
+
+    assert!(
+        view.ready_to_continue,
+        "the branch holds a backlog with work left in it, so the modal offers \
+         the target",
+    );
+
+    let before = outputs(&view).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture.steer_into("Implementing", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let printed = fixture.printed_after(before).await;
+
+    assert!(
+        printed.contains("~/.claude/skills/next-task/SKILL.md"),
+        "the run picks the backlog up again, which is the fork that reads it: \
+         {printed:?}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert_eq!(
+        steered(&view),
+        [
+            ("moved", Lifecycle::Grilling),
+            ("moved", Lifecycle::Implementing),
+            ("steer", Lifecycle::Implementing),
+            ("moved", Lifecycle::Implementing),
+        ],
+        "the human's own line, and the plain move under it — into the state it \
+         was already in, because that is what they said",
+    );
+    assert_eq!(
+        view.blocked_on, None,
+        "and the stop the click wrote is gone: nothing advances past one, so a \
+         session starting at all is the stop taken away",
+    );
+    assert_eq!(
+        view.direction,
+        Some(Direction::TaskList),
+        "with the direction left exactly as the steer found it: what says how \
+         the work is being built is the Conversation's own pick",
+    );
+
+    let worktree = PathBuf::from(view.worktree.unwrap().path);
+
+    assert!(
+        worktree.join(".tasks/01-count.md").exists(),
+        "and it is the same task, because nothing reverted anything",
+    );
 }
 
 /// Steering a halted wrap-up back into Wrapping does what that press does: the

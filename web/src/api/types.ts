@@ -546,7 +546,7 @@ export type ConversationReopened = "Reopened" | "NoSuchConversation" | "NotDone"
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NothingToContinue" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused";
 
 /**
  * What became of pressing Stop or Force stop.
@@ -636,6 +636,22 @@ ready_to_resume: boolean,
  * [`working`]: ConversationView::working
  */
 ready_to_stop: boolean, 
+/**
+ * And whether a steer into Implementing has anything to carry on: the
+ * branch holds a backlog with work left in it, or a roadmap it has
+ * written.
+ *
+ * What decides whether the steer modal offers Implementing at all, and the
+ * server’s rule rather than something the page works out from the fields
+ * around it — what stands is a reading of the Worktree as it is now, which
+ * a page cannot make. Read the same way everything else pinned to the
+ * Timeline is: a Conversation with no Worktree on disk has nothing
+ * standing, whatever its branch may hold.
+ *
+ * Checked again when the modal is submitted, as every refusal here is;
+ * this says only that it was worth offering as of the moment it was read.
+ */
+ready_to_continue: boolean, 
 /**
  * What this Conversation is adopting, where it is adopting anything.
  *
@@ -1654,11 +1670,11 @@ digest: boolean, };
  * Where a steer can send a Conversation.
  *
  * Draft and Closed are not among them and never will be: each has a way in of
- * its own, and a steer is for the four states the work is *done in*. The one
- * that is not here yet arrives with the task that builds what it launches — a
- * target the modal offers is a target something runs for.
+ * its own, and a steer is for the four states the work is *done in*. A target
+ * the modal offers is a target something runs for, which is why Implementing is
+ * offered only where the branch holds something to carry on.
  */
-export type SteerTarget = "Grilling" | "Wrapping" | "Done";
+export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
 
 /**
  * What became of the human's Response.

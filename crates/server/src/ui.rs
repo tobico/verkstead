@@ -719,7 +719,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
-    let worktree = match crate::conversations::worktree(conversation.worktree).await {
+    let worktree = match crate::conversations::worktree(conversation.worktree.clone()).await {
         Ok(worktree) => worktree,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a worktree failed");
@@ -810,6 +810,18 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // [`crate::stops::ready`].
     let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
+    // And whether a steer into Implementing would have anything to carry on: a
+    // backlog with work left in it, or a roadmap the branch has written. Off the
+    // Worktree as it stands, which is where the pinned Events above are read
+    // from and for the same reason — the repository owns those files. See
+    // [`crate::steering::standing`], which is the rule the submit refuses by.
+    let ready_to_continue = crate::steering::standing(
+        conversation.direction,
+        conversation.worktree.clone(),
+        conversation.base_commit.clone(),
+    )
+    .await;
+
     // And the badge points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a badge with nowhere to go would be one
     // the human could not act on.
@@ -842,6 +854,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         ready_to_grill,
         ready_to_resume,
         ready_to_stop,
+        ready_to_continue,
         adopting,
         grilling_pairing,
         implementation_pairing,

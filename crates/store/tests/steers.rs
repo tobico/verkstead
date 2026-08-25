@@ -24,11 +24,12 @@
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
+use verkstead_schema::Direction;
 use verkstead_store::{
-    AgentType, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering, WaitingOn,
-    create_profile, fix_attempts, load_conversation, open_database, record_fix_attempt,
-    register_repo, save_brief, settle_wrap_up, start_conversation, start_grilling,
-    steer_conversation, timeline, wrap_up_settled,
+    AgentType, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering,
+    WaitingOn, create_profile, fix_attempts, load_conversation, open_database, pick_direction,
+    record_fix_attempt, register_repo, save_brief, settle_wrap_up, start_conversation,
+    start_grilling, steer_conversation, timeline, wrap_up_settled,
 };
 
 /// The plainest steer there is: the move and nothing beside it.
@@ -458,6 +459,40 @@ async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
         "the column held the branch the human picked while drafting, and now \
          holds what that resolved to",
     );
+}
+
+/// A steer into Implementing leaves the direction as it found it.
+///
+/// What says how the work is being built is the Conversation's own pick, and a
+/// steer that carries on what already stands changes nothing about that: the
+/// backlog it picks up is the backlog that pick led to. Nothing here writes the
+/// column, and this is what says so.
+#[tokio::test]
+async fn a_steer_into_implementing_leaves_the_direction_it_found() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        pick_direction(&pool, id, Direction::TaskList)
+            .await
+            .unwrap(),
+        Directing::Writing,
+    );
+
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Implementing))
+            .await
+            .unwrap(),
+        Steering::Steered,
+    );
+
+    let conversation = load_conversation(&pool, id)
+        .await
+        .unwrap()
+        .expect("the Conversation is there");
+
+    assert_eq!(conversation.state, Lifecycle::Implementing);
+    assert_eq!(conversation.direction, Some(Direction::TaskList));
 }
 
 #[tokio::test]

@@ -4441,6 +4441,33 @@ describe("steering a conversation", () => {
     expect(screen.getByText(/The branch looked at again/)).toBeTruthy();
   });
 
+  /// Implementing carries on what the branch already holds, so it is offered
+  /// only where something stands to be carried on: a backlog with work left in
+  /// it, or a roadmap the branch has written. The server says which — what
+  /// stands includes the finish step a list of ticked tasks still has to run,
+  /// which no reading of the entries here could see.
+  it("offers implementing only where there is something to carry on", async () => {
+    theGrillingStanding(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
+
+    expect(targets(await openSteer(container))).toEqual(["Grilling", "Done"]);
+    unmount();
+
+    theGrillingStanding(
+      { ready_to_stop: true, working: true, ready_to_continue: true },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const standing = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(standing.container);
+
+    expect(targets(modal)).toEqual(["Grilling", "Implementing", "Done"]);
+    expect(screen.getByText(/the next task of the backlog/)).toBeTruthy();
+  });
+
   /// The pairing is the conversation's rather than one session's, so it is
   /// prefilled from what the work already runs under and what is picked is sent
   /// to be recorded as the conversation's own.

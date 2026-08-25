@@ -41,9 +41,13 @@
 //! fresh grilling on the round's own Brief, primed with the digest of what has
 //! already been answered where the human asked for it — which is
 //! [`crate::grillings::again`], the relaunch a pressed Resume makes, reused
-//! rather than forked. Into Wrapping it is the wrap-up's own watchers over
-//! whatever the branch now holds, with the fix attempts forgotten, which is what
-//! that press does there. Into Done there is nothing to start at all.
+//! rather than forked. Into Implementing it is the next step read off the
+//! branch — the backlog's own answer to what is next, or the roadmap it has
+//! written — which is [`crate::runner::implementing_again`], the same relaunch,
+//! and it is offered only where something actually stands to be carried on; see
+//! [`standing`]. Into Wrapping it is the wrap-up's own watchers over whatever
+//! the branch now holds, with the fix attempts forgotten, which is what that
+//! press does there. Into Done there is nothing to start at all.
 //!
 //! Nothing is reverted, reset or stashed, here or anywhere a stop is written:
 //! the Worktree is left exactly as whatever was running left it.
@@ -51,7 +55,7 @@
 use std::path::PathBuf;
 
 use verkstead_render::{ConversationSteered, SteerOpened, SteerSubmission, SteerTarget};
-use verkstead_schema::Nudge;
+use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::grillings::Digest;
@@ -199,6 +203,25 @@ pub(crate) async fn submit(
             ));
         }
 
+        // The next step read off the branch, which is the direction's to say:
+        // the backlog's own answer to what is next, or the roadmap the branch
+        // has written. Exactly what a pressed Resume does for an implementing
+        // Conversation, reused rather than forked — see
+        // [`crate::runner::implementing_again`], which reads the branch again
+        // for itself a moment after this and holds the registration until its
+        // session has one.
+        //
+        // Nothing here can come to nothing: [`standing`] has already refused a
+        // steer with nothing to carry on, which is the reading this one is the
+        // second of.
+        SteerTarget::Implementing => {
+            tokio::spawn(crate::runner::implementing_again(
+                state.clone(),
+                conversation_id,
+                driving,
+            ));
+        }
+
         // The wrap-up's four watchers over the top of whatever the branch now
         // holds, with the fix attempts forgotten: exactly what a pressed Resume
         // does for a wrapping Conversation, reused rather than forked. Each of
@@ -239,11 +262,11 @@ pub(crate) async fn submit(
 
 /// Why this steer cannot be made at all, or `None` where it can.
 ///
-/// Everything asked of the record and of nothing else, so that all of it can be
-/// asked before a session is ended or a stop taken away. The state the
-/// Conversation is *in* is not among them and never will be — every state is a
-/// source — so each of these is about the state it is going *to*: work that
-/// cannot be set going from what the record holds.
+/// Everything asked of the record and of the branch as it already stands, so
+/// that all of it can be asked before a session is ended, a Worktree is rebuilt
+/// or a stop is taken away. The state the Conversation is *in* is not among them
+/// and never will be — every state is a source — so each of these is about the
+/// state it is going *to*: work that cannot be set going from what there is.
 async fn refusal(
     state: &AppState,
     conversation: &Conversation,
@@ -259,6 +282,21 @@ async fn refusal(
             .is_none()
     {
         return Ok(Some(ConversationSteered::NoPullRequest));
+    }
+
+    // And a steer into Implementing carries on what the branch already holds, so
+    // a branch holding nothing to carry on is a target with nothing to start.
+    // The modal does not offer it there either — [`standing`] is what draws it,
+    // and this is that same reading asked again on arrival.
+    if submission.target == SteerTarget::Implementing
+        && !standing(
+            conversation.direction,
+            conversation.worktree.clone(),
+            conversation.base_commit.clone(),
+        )
+        .await
+    {
+        return Ok(Some(ConversationSteered::NothingToContinue));
     }
 
     let Some(role) = role(submission.target) else {
@@ -336,18 +374,80 @@ fn settling<'a>(
     })
 }
 
+/// Whether there is work standing on the branch for a steer into Implementing
+/// to carry on.
+///
+/// The one question that target turns on, said once here because the modal
+/// draws by it and the submit refuses by it — see
+/// [`ConversationSteered::NothingToContinue`]. Two things can stand, and the
+/// direction is what says which of them this run would be:
+///
+/// - **a backlog with work left in it**, which is `.tasks/` asked exactly as
+///   every turn of a task-list run asks it — the finish step included, a list
+///   whose tasks are all worked still having the finish to run; and
+/// - **a roadmap the branch has written**, which is the reading a stalled
+///   roadmap run makes of itself before it decides whether to write one.
+///
+/// An inline run stands for nothing here, and that is the point of the
+/// distinction rather than an omission: its work is the one session, so there
+/// is nothing on the branch to pick up where it left off. What such a
+/// Conversation is steered into Implementing with is an instruction of the
+/// human's own, and until that lands the target is refused on one by name.
+///
+/// Read of the Worktree as it stands rather than of the branch behind it,
+/// which is how everything else pinned to a Timeline is read: a Conversation
+/// whose directory has gone has nothing standing, whatever the branch may
+/// hold. Nothing is made here to find out — this is asked in front of a
+/// refusal, and a refusal that had rebuilt a Worktree first would be a press
+/// that half happened.
+///
+/// Off the runtime's threads, both readings being filesystem and git calls.
+pub(crate) async fn standing(
+    direction: Option<Direction>,
+    worktree: Option<PathBuf>,
+    base_commit: Option<String>,
+) -> bool {
+    let (Some(direction), Some(worktree)) = (direction, worktree) else {
+        return false;
+    };
+
+    match direction {
+        Direction::TaskList => crate::runner::anything_to_work(&worktree).await,
+
+        // What a roadmap Conversation has written since it branched, committed
+        // or not — see [`crate::stages::touched`], which is the same reading
+        // [`crate::runner::implementing_again`] makes a moment later to decide
+        // what to start. No base commit is a Conversation that has never
+        // branched, which has written nothing.
+        Direction::Roadmap => {
+            let Some(base) = base_commit else {
+                return false;
+            };
+
+            tokio::task::spawn_blocking(move || {
+                !crate::stages::touched(&worktree, &base).is_empty()
+            })
+            .await
+            .unwrap_or(false)
+        }
+
+        Direction::Inline => false,
+    }
+}
+
 /// Which role's Pairing a target's sessions run under, or `None` where nothing
 /// runs there.
 ///
-/// The wrap-up's watchers dispatch fix sessions, review sessions and comment
-/// sessions, and every one of them is the work itself: they run under the
-/// implementation Pairing, the same one the backlog was worked under. A grilling
-/// is the other one, which is what an interview runs under whatever else has
-/// happened since.
+/// Implementing and Wrapping are one answer between them, because they are one
+/// run seen at two moments: the task sessions build the work, and the wrap-up's
+/// watchers dispatch the fix, review and comment sessions that see it through.
+/// Every one of those is the work itself, so all of them run under the
+/// implementation Pairing. A grilling is the other one, which is what an
+/// interview runs under whatever else has happened since.
 fn role(target: SteerTarget) -> Option<Role> {
     match target {
         SteerTarget::Grilling => Some(Role::Grilling),
-        SteerTarget::Wrapping => Some(Role::Implementation),
+        SteerTarget::Implementing | SteerTarget::Wrapping => Some(Role::Implementation),
         SteerTarget::Done => None,
     }
 }
@@ -495,6 +595,7 @@ struct Made {
 fn target(target: SteerTarget) -> Lifecycle {
     match target {
         SteerTarget::Grilling => Lifecycle::Grilling,
+        SteerTarget::Implementing => Lifecycle::Implementing,
         SteerTarget::Wrapping => Lifecycle::Wrapping,
         SteerTarget::Done => Lifecycle::Done,
     }

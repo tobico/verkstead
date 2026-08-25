@@ -1509,6 +1509,55 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
     );
 }
 
+/// A steer into Implementing carries on what the branch already holds, so a
+/// branch holding nothing to carry on is refused by name.
+///
+/// What stands is a backlog with work left in it or a roadmap the branch has
+/// written, and a Conversation still being grilled has neither: the session
+/// that would write one is the session the click just stopped. So the modal
+/// does not offer the target at all — [`ConversationView::ready_to_continue`]
+/// is what draws it — and the submit says the same thing again, this being the
+/// press that could have been made against a page read a moment earlier.
+///
+/// Nothing moves on a refusal. The refusals are asked before anything is ended,
+/// rebuilt or cleared, so a Conversation refused here is exactly the one the
+/// click left: stopped, where it stood.
+#[tokio::test]
+async fn steering_into_implementing_with_nothing_to_continue_is_refused_by_name() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert!(
+        !opened(&app, id).await.ready_to_continue,
+        "there is no backlog and no roadmap on the branch, so the modal draws \
+         the target out",
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Implementing", false).await,
+        ConversationSteered::NothingToContinue,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Grilling, "so nothing moved");
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and nothing on the record says it was steered",
+    );
+    assert!(
+        view.blocked_on.is_some() && view.ready_to_resume,
+        "the Conversation is where the click left it: stopped, with Resume on \
+         offer",
+    );
+}
+
 /// A closed Conversation is a source like any other: its Worktree was deleted
 /// and its branch kept, so a steer checks the branch out again into one.
 ///

@@ -11,10 +11,12 @@
 //! is nothing to drive in done, so no pairing is picked and no payload is
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
-//! but it does need a pairing, because sessions run there. **Grilling** is the
-//! one that carries a payload: a new brief, which is optional, and a choice
-//! about how much of the last interview the session is primed with. The one
-//! target left arrives with the task that builds what it starts.
+//! but it does need a pairing, because sessions run there. **Implementing**
+//! needs none either, for the same kind of reason: what is next is the branch's
+//! own answer, and it is offered only where the branch has something to carry
+//! on. **Grilling** is the one that carries a payload: a new brief, which is
+//! optional, and a choice about how much of the last interview the session is
+//! primed with.
 //!
 //! **The pairing is the conversation's, not the session's.** It is prefilled
 //! from what the conversation already runs the work under and what is picked is
@@ -54,6 +56,8 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
   NoSuchConversation: "This conversation is gone.",
   NoPullRequest:
     "This work is on no pull request, so there is no wrap-up to steer it into.",
+  NothingToContinue:
+    "There is nothing on this branch to carry on: no backlog with work left in it, and no roadmap it has written.",
   NoPairing: "Pick the account and model the work runs under from here.",
   NoSuchProfile: "That profile has been removed.",
   NoSuchModel: "That profile no longer lists that model.",
@@ -66,8 +70,8 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
 /// Where a steer can send a conversation, and what each target means.
 ///
 /// Draft and closed are not here and never will be: each has a way in of its
-/// own. The one target left arrives with the task that builds what it launches —
-/// a target the modal offers is a target something runs for.
+/// own. A target the modal offers is a target something runs for, which is what
+/// `offered` below draws two of them out by.
 ///
 /// `runs` is whether work goes on in that state, which is the one question the
 /// rest of the form follows from: a target something runs in needs a pairing
@@ -90,6 +94,13 @@ const TARGETS: {
     note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been closed.",
     runs: true,
     role: "grilling",
+  },
+  {
+    target: "Implementing",
+    label: "Implementing",
+    note: "The work built on from where the branch stands: the next task of the backlog, or the roadmap it has written. Nothing to write — what is next is the branch’s own answer.",
+    runs: true,
+    role: "implementation",
   },
   {
     target: "Wrapping",
@@ -130,13 +141,24 @@ export function Steer(props: {
   const queries = useQueryClient();
 
   /// The targets this conversation can actually be sent to. Wrapping up is
-  /// drawn out where the work is on no pull request: a target that would be
-  /// refused by name is worse than one that was never offered.
+  /// drawn out where the work is on no pull request, and implementing where
+  /// there is nothing on the branch to carry on: a target that would be refused
+  /// by name is worse than one that was never offered.
   const offered = createMemo(() =>
-    TARGETS.filter(
-      (offered) =>
-        offered.target !== "Wrapping" || onAPullRequest(props.conversation),
-    ),
+    TARGETS.filter((offered) => {
+      switch (offered.target) {
+        case "Wrapping":
+          return onAPullRequest(props.conversation);
+        // The server’s own reading of the branch rather than anything worked
+        // out from the pinned backlog here: what stands includes the finish step
+        // a list of ticked tasks still has to run, which no reading of the
+        // entries could see.
+        case "Implementing":
+          return props.conversation.ready_to_continue;
+        default:
+          return true;
+      }
+    }),
   );
 
   // Where it goes. Prefilled with the first target offered rather than left

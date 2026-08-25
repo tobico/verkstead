@@ -255,6 +255,21 @@ pub struct ConversationView {
     /// [`working`]: ConversationView::working
     pub ready_to_stop: bool,
 
+    /// And whether a steer into Implementing has anything to carry on: the
+    /// branch holds a backlog with work left in it, or a roadmap it has
+    /// written.
+    ///
+    /// What decides whether the steer modal offers Implementing at all, and the
+    /// server’s rule rather than something the page works out from the fields
+    /// around it — what stands is a reading of the Worktree as it is now, which
+    /// a page cannot make. Read the same way everything else pinned to the
+    /// Timeline is: a Conversation with no Worktree on disk has nothing
+    /// standing, whatever its branch may hold.
+    ///
+    /// Checked again when the modal is submitted, as every refusal here is;
+    /// this says only that it was worth offering as of the moment it was read.
+    pub ready_to_continue: bool,
+
     /// What this Conversation is adopting, where it is adopting anything.
     ///
     /// `null` is the ordinary Conversation, which begins with a Brief and a
@@ -1738,9 +1753,9 @@ pub enum SteerOpened {
 /// Where a steer can send a Conversation.
 ///
 /// Draft and Closed are not among them and never will be: each has a way in of
-/// its own, and a steer is for the four states the work is *done in*. The one
-/// that is not here yet arrives with the task that builds what it launches — a
-/// target the modal offers is a target something runs for.
+/// its own, and a steer is for the four states the work is *done in*. A target
+/// the modal offers is a target something runs for, which is why Implementing is
+/// offered only where the branch holds something to carry on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
@@ -1753,6 +1768,22 @@ pub enum SteerTarget {
     /// closed Conversation kept its branch and lost its Worktree, and gets the
     /// branch checked out again into one.
     Grilling,
+
+    /// The work built again, carrying on from what the branch already holds:
+    /// the next task of the backlog, or the roadmap the branch has written.
+    ///
+    /// Offered only where something actually stands to be carried on. Where
+    /// nothing does there is nothing for the recompute to pick up, and the
+    /// target is refused by name — see
+    /// [`ConversationSteered::NothingToContinue`] and
+    /// [`ConversationView::ready_to_continue`], which is the same rule the
+    /// modal draws by.
+    ///
+    /// No payload: what is next is the branch’s own answer, asked exactly
+    /// as every other turn of the run asks it. And no direction settled either
+    /// — a steer that carries on what stands leaves what says how the work is
+    /// being built as it found it.
+    Implementing,
 
     /// The branch looked at again: the checks watched, the review run, the
     /// comments answered. No payload — the wrap-up's watchers work out for
@@ -1780,7 +1811,7 @@ impl SteerTarget {
     /// the same question could come to different answers.
     pub fn runs(self) -> bool {
         match self {
-            Self::Grilling | Self::Wrapping => true,
+            Self::Grilling | Self::Implementing | Self::Wrapping => true,
             Self::Done => false,
         }
     }
@@ -1867,6 +1898,17 @@ pub enum ConversationSteered {
     /// Conversation at all; this is the same rule asked again on arrival, the
     /// way every named refusal here is.
     NoPullRequest,
+
+    /// Implementing was named for a Conversation with nothing on its branch to
+    /// carry on: no backlog with work left in it, and no roadmap it has
+    /// written.
+    ///
+    /// What a steer into Implementing does is pick up what stands, so a branch
+    /// where nothing does is one it has nothing to start. The modal does not
+    /// offer the target on such a Conversation at all — see
+    /// [`ConversationView::ready_to_continue`] — and this is the same rule
+    /// asked again on arrival.
+    NothingToContinue,
 
     /// Nothing says which account and model the work runs under from here:
     /// neither a Pairing picked in the modal nor one the Conversation already

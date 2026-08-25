@@ -35,6 +35,7 @@
     }
   },
   "pinned": [],
+  "ready_to_continue": false,
   "ready_to_grill": true,
   "ready_to_resume": false,
   "ready_to_stop": false,
