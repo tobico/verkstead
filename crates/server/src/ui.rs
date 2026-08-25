@@ -656,7 +656,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // reading the Profile list gets.
     let grilling_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.grilling_pairing.clone(),
+        conversation.grilling_pairing,
     )
     .await
     {
@@ -669,7 +669,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
 
     let implementation_pairing = match crate::profiles::pairing(
         &state.watched,
-        conversation.implementation_pairing.clone(),
+        conversation.implementation_pairing,
     )
     .await
     {
@@ -820,7 +820,13 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // and which reads a Worktree that has gone as *cannot tell* rather than as
     // nothing standing: the steer makes one out of the branch before anything
     // runs in it.
-    let ready_to_continue = crate::steering::standing(&conversation).await.offerable();
+    let ready_to_continue = crate::steering::standing(
+        conversation.direction,
+        conversation.worktree.clone(),
+        conversation.base_commit.clone(),
+    )
+    .await
+    .offerable();
 
     // And the badge points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a badge with nowhere to go would be one

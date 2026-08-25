@@ -339,7 +339,13 @@ async fn refusal(
     // [`Standing::Unreadable`].
     if submission.target == SteerTarget::Implementing
         && instruction(submission).is_none()
-        && !standing(conversation).await.offerable()
+        && !standing(
+            conversation.direction,
+            conversation.worktree.clone(),
+            conversation.base_commit.clone(),
+        )
+        .await
+        .offerable()
     {
         return Ok(Some(ConversationSteered::NoInstruction));
     }
@@ -564,16 +570,27 @@ impl Standing {
 /// makes one out of the branch a moment later and the branch is what holds the
 /// backlog.
 ///
-/// [`crate::worktrees::healthy`] for whether there is one to read, which is the
-/// same reading [`somewhere`] makes about the same directory a moment later.
+/// **One `stat` for whether there is a directory to read**, rather than asking
+/// git whether it would still call the place a worktree. Two reasons, and the
+/// second is the one that decides it: what is read below is `.tasks/` and what
+/// the branch has written, and a directory that answers those answers them
+/// however git feels about its registration — and this runs on every draw of
+/// every Conversation, which a workbench re-reads on every Nudge, so three git
+/// processes here would be three git processes a second on a page nobody is
+/// touching. [`somewhere`] asks git the harder question a moment later, where it
+/// is asked once and a rebuild turns on it.
 ///
 /// Off the runtime's threads, every one of these readings being a filesystem or
 /// git call.
-pub(crate) async fn standing(conversation: &Conversation) -> Standing {
+pub(crate) async fn standing(
+    direction: Option<Direction>,
+    worktree: Option<PathBuf>,
+    base_commit: Option<String>,
+) -> Standing {
     // A Conversation that has never said how its work is built has nothing to
     // carry on whatever is on its branch: what says what is next is the
     // direction, and there is none.
-    let Some(direction) = conversation.direction else {
+    let Some(direction) = direction else {
         return Standing::Nothing;
     };
 
@@ -581,16 +598,14 @@ pub(crate) async fn standing(conversation: &Conversation) -> Standing {
         return Standing::Nothing;
     }
 
-    let Some(worktree) = conversation.worktree.clone() else {
+    let Some(worktree) = worktree else {
         return Standing::Unreadable;
     };
 
     let there = {
-        let repo = conversation.repo.path.clone();
-        let branch = conversation.branch.clone();
         let worktree = worktree.clone();
 
-        tokio::task::spawn_blocking(move || crate::worktrees::healthy(&repo, &worktree, &branch))
+        tokio::task::spawn_blocking(move || worktree.is_dir())
             .await
             .unwrap_or(false)
     };
@@ -611,7 +626,7 @@ pub(crate) async fn standing(conversation: &Conversation) -> Standing {
         // what to start. No base commit is a Conversation that has never
         // branched, which has a Worktree it did not get from one.
         Direction::Roadmap => {
-            let Some(base) = conversation.base_commit.clone() else {
+            let Some(base) = base_commit else {
                 return Standing::Nothing;
             };
 
