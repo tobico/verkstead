@@ -447,12 +447,19 @@ source: wrapping up is offered only where the work is on a pull request, there
 being no wrap-up to steer into otherwise.
 
 **The click stops the drive**, before the modal opens. The ordinary Stop, so
-nothing new launches while the human composes and whatever is running is seen
-out to its own end — unless **Interrupt current task** ends it where it stands,
-leaving the step however far it had got. **Cancel leaves the Conversation
-stopped**, with **Resume** on offer: the click froze the world, and unfreezing
-is a press of its own rather than something a dismissed modal does behind the
-human's back.
+nothing new launches while the human composes and whatever is running is left
+exactly where it is. **Cancel leaves the Conversation stopped**, with **Resume**
+on offer: the click froze the world, and unfreezing is a press of its own rather
+than something a dismissed modal does behind the human's back.
+
+**What ends the session running is the submit rather than the click.** One
+Worktree holds one agent, so the session a steer starts takes the Worktree from
+whatever is still in it — at once, or once a session that cannot be displaced
+has finished, which is a review waiting on an Ask or a **Manual Task**. Into
+**Done** nothing is started, so nothing takes it and the session runs to its own
+end. **Interrupt current task** ends it where it stands instead, leaving the
+step however far it had got: the wait saved in the first case, and the only
+ending there is in the second.
 
 **What is missing is made again**, and the further from a running state the
 source is the more of it there is to make. A Worktree whose directory has gone

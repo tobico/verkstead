@@ -1774,10 +1774,15 @@ pub enum SteerOpened {
     Opened {
         /// Whether a session is still running as the modal opens.
         ///
-        /// What **Interrupt current task** is offered for: a session left alone
-        /// is seen out to its own end, and the checkbox is the only way to end
-        /// it where it stands. Where nothing is running there is nothing to
-        /// interrupt, so the checkbox is not drawn at all.
+        /// What **Interrupt current task** is offered for: the click leaves what
+        /// is running exactly where it is, and the checkbox is the only way to
+        /// end it where it stands. What ends it otherwise is the submit's own
+        /// launch — one Worktree holds one agent, so the session a steer starts
+        /// takes the Worktree from whatever is still in it — and into Done,
+        /// where nothing is launched, nothing ends it at all.
+        ///
+        /// Where nothing is running there is nothing to interrupt, so the
+        /// checkbox is not drawn at all.
         working: bool,
     },
 
@@ -1866,9 +1871,12 @@ pub struct SteerSubmission {
 
     /// Whether to end the session that is running where it stands.
     ///
-    /// `false` is the default and the ordinary case: the click already stopped
-    /// the drive, so what is running finishes what it was doing and nothing is
-    /// started after it. `true` is the human saying they will not wait.
+    /// `false` is the default and the ordinary case: the click stopped the
+    /// drive, so nothing was started after what is running, and what ends it is
+    /// this steer's own launch taking the Worktree from it. `true` is the human
+    /// saying they will not wait for it — which is what saves the wait where the
+    /// launch would have had to queue behind it, and what ends it at all into
+    /// Done, where nothing is launched.
     pub interrupt: bool,
 
     /// The Pairing the work runs under from here, for a target something runs

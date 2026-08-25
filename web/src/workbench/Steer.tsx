@@ -31,10 +31,18 @@
 //! runs under the other.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
-//! rather than about the move. A session left alone is seen out to its own end,
-//! which is what the click promised; ticking the box ends it where it stands,
-//! and the step is left however far it had got. It is drawn only where the click
-//! found a session running — there is otherwise nothing to interrupt.
+//! rather than about the move. The click left whatever was running exactly where
+//! it was; ticking the box ends it where it stands, and the step is left however
+//! far it had got.
+//!
+//! Left alone it is seen out, and what *out* means follows the target. One
+//! worktree holds one agent, so a target something runs in ends it by starting:
+//! the session this steer launches takes the worktree over, at once where it can
+//! and once the session in front of it has finished where it cannot — a review
+//! waiting on an ask, or a manual task. **Done** launches nothing, so there it
+//! runs to its own end and the box is the only thing that would stop it. The box
+//! is drawn only where the click found a session running — there is otherwise
+//! nothing to interrupt.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
@@ -477,8 +485,10 @@ export function Steer(props: {
               Interrupt current task
             </label>
             <p class="note">
-              End the session running now where it stands. Left alone it finishes
-              what it was doing, and nothing is started after it.
+              End the session running now where it stands, leaving the step
+              however far it had got. Left alone it keeps the worktree — to its
+              own end into done, where nothing is started, and otherwise until
+              the session this steer starts is ready to take it over.
             </p>
           </div>
         </Show>

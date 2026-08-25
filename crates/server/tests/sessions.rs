@@ -7959,11 +7959,14 @@ async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
 /// The same steer with the checkbox left alone: the session finishes what it was
 /// doing, and nothing is launched behind it.
 ///
-/// Which is the click's own promise carried through the submit. What holds the
-/// next launch off is not a stop any more — the steer took that away — but where
-/// the work now stands: nothing drives a Conversation Verkstead has finished
-/// with, so the driver seeing this session out finds a state with no next step
-/// in it. See `stopping::stopped`, which is the one question every launch asks.
+/// Done is the target this is true of, and it is true because nothing runs
+/// there: what ends a session under every other target is the session the steer
+/// starts taking the Worktree from it, and here there is none to start. What
+/// holds the next launch off is not a stop any more — the steer took that away —
+/// but where the work now stands: nothing drives a Conversation Verkstead has
+/// finished with, so the driver seeing this session out finds a state with no
+/// next step in it. See `stopping::stopped`, which is the one question every
+/// launch asks.
 #[tokio::test]
 async fn steering_into_done_without_interrupt_sees_the_session_out() {
     let spill = tempfile::tempdir().unwrap();
@@ -11599,9 +11602,11 @@ async fn an_instruction_session_that_ends_badly_stops_the_conversation() {
 /// the first one wrote — the round's own, whichever round that is — with what
 /// the human settled under it.
 ///
-/// The session running is left alone both times: **Interrupt current task** is
-/// unticked, so the steer waits its turn and the grilling that follows is the
-/// one that goes next.
+/// **Interrupt current task** is unticked both times, and the session running is
+/// ended all the same: one Worktree holds one agent, so the grilling a steer
+/// starts takes the Worktree from whatever was in it. The checkbox is for the
+/// session a launch cannot displace and for the target that launches nothing —
+/// see [`steering_into_done_without_interrupt_sees_the_session_out`].
 #[tokio::test]
 async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() {
     let fixture = grilling(

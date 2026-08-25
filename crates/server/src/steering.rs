@@ -6,11 +6,20 @@
 //! human composes. What they submit lands as the move.
 //!
 //! **The click stops it, and that is deliberate.** It is the ordinary Stop —
-//! nothing new starts, and a session already running is seen out — so the world
-//! the modal is drawn against is the world the submit arrives in. **Cancel
-//! leaves the Conversation stopped**, with Resume on offer: the click is what
-//! froze it, and unfreezing is a press of its own rather than something a
-//! dismissed modal does behind the human's back.
+//! nothing new starts, and a session already running is left exactly where it
+//! is — so the world the modal is drawn against is the world the submit arrives
+//! in. **Cancel leaves the Conversation stopped**, with Resume on offer: the
+//! click is what froze it, and unfreezing is a press of its own rather than
+//! something a dismissed modal does behind the human's back.
+//!
+//! **What ends that session is the submit rather than the click.** One Worktree
+//! holds one agent, so the session a steer starts takes the Worktree from
+//! whatever is still in it — see [`crate::runner::launch_in_turn`], which waits
+//! for a session that cannot be displaced and ends one that can. So a steer into
+//! a target something runs in ends what was running, at once or once a review
+//! waiting on an ask has finished; a steer into Done launches nothing and ends
+//! nothing. **Interrupt current task** is what ends it where it stands instead:
+//! the wait saved in the first case, and the only ending there is in the second.
 //!
 //! **Every state is a source.** Unlike every other move here, a steer answers to
 //! no rung of the ladder: a draft nothing has run in, a run in flight and a
@@ -160,6 +169,11 @@ pub(crate) async fn submit(
         // [`crate::sessions::Ended::on_purpose`] — so what was following it
         // reads its ending as the ending it is, and what it leaves in the
         // Worktree is left there.
+        //
+        // Here rather than left to the launch, which is what ends it otherwise
+        // and which cannot end every session: a review waiting on an ask holds
+        // the Worktree against being displaced, and into Done nothing launches
+        // at all. This is the one ending that answers to neither.
         state.sessions.end(conversation_id).await;
 
         tracing::info!(
