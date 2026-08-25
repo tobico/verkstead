@@ -161,14 +161,41 @@ impl Grilling {
                 return reached;
             }
 
-            assert!(
-                Instant::now() < deadline,
-                "the session never got there. The Timeline says: {}",
-                standing(&view),
-            );
+            if Instant::now() >= deadline {
+                panic!(
+                    "the session never got there. The Timeline says: {}{}",
+                    standing(&view),
+                    self.said_by_each(&view).await,
+                );
+            }
 
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+    }
+
+    /// What every session on this Timeline actually put on its terminal, for the
+    /// assertion above.
+    ///
+    /// Escaped rather than printed as it stands, because half of what a failure
+    /// here turns on is what the bytes *were*: a display's own glyphs, a
+    /// carriage return, an escape sequence — or a shell that printed the source
+    /// of one because its `printf` does not know the escape. A Capture pasted
+    /// raw into a panic message hides exactly that.
+    ///
+    /// Read only once the wait has given up, so a passing test pays nothing for
+    /// it.
+    async fn said_by_each(&self, view: &ConversationView) -> String {
+        let mut said = String::new();
+
+        for output in outputs(view) {
+            said.push_str(&format!(
+                "\n  #{} printed: {:?}",
+                output.id,
+                self.capture(output.id).await,
+            ));
+        }
+
+        said
     }
 
     /// What the session has printed, whole, as the details pane fetches it.
