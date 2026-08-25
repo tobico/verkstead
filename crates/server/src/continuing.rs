@@ -204,9 +204,41 @@ async fn start(
     // stacking. The predecessor's branch is the one this stage's work builds on,
     // and its tip is where the branch starts.
     let stacked_on = stacks.then(|| conversation.branch.clone());
-    let from = stacked_on
-        .clone()
-        .unwrap_or_else(|| conversation.repo.default_branch.clone());
+
+    let from = match stacked_on.clone() {
+        // A stacked stage stands on the predecessor's branch, which is work on
+        // this machine and nowhere else: there is no remote copy of it to be
+        // behind, so there is nothing a fetch could freshen.
+        Some(predecessor) => predecessor,
+
+        // An unstacked one comes off the default branch, and what that means is
+        // what origin is holding rather than wherever this checkout's copy of it
+        // was last left — so the remote-tracking refs are made current before
+        // anything reads them.
+        None => match fresh(&repo, &conversation.repo.default_branch).await {
+            Some(from) => from,
+
+            // Nobody is at a button to refuse with: this runs at the end of an
+            // unattended run, so a fetch git would not make halts the stage with
+            // a notice naming it. Halted rather than carried on with, because a
+            // stage branched off refs nobody can vouch for is a whole stage of
+            // work starting from the wrong place.
+            None => {
+                return say(
+                    state,
+                    settled,
+                    &format!(
+                        "Stage {} of the `{}` roadmap is next, and git would not fetch from \
+                         this repository's remote — so what its branch would come off cannot \
+                         be trusted to be what origin is holding. Nothing was started, and \
+                         the server log says why the fetch failed.",
+                        stage.label, stage.roadmap,
+                    ),
+                )
+                .await;
+            }
+        },
+    };
 
     let started = store::start_conversation(&state.pool, conversation.repo.id, &branch).await;
 
@@ -440,6 +472,47 @@ async fn taken(repo: &Path, branch: &str) -> bool {
             // letting an agent loose on it.
             true
         })
+}
+
+/// The name an unstacked stage's branch comes off, with `repo`'s
+/// remote-tracking refs made current first — or `None` where git would not
+/// fetch.
+///
+/// The rule a grilling starts by, applied where nobody pressed anything: the
+/// default branch means what origin is holding, and a remote-tracking ref is
+/// only ever as fresh as the last fetch. Without this a stage comes off
+/// wherever the human's own copy of the default branch was last left, which on
+/// a machine that has not pulled for a week is a week of other people's work
+/// missing from every stage after it.
+///
+/// A repository with no remote has nothing to fetch and nothing to be stale
+/// against, so it comes off its own default branch and is never refused for it.
+/// A join that failed says nothing either way, and nothing either way is not
+/// permission to branch: it reads as a fetch that failed, which is the same way
+/// round [`taken`] falls.
+async fn fresh(repo: &Path, default: &str) -> Option<String> {
+    let repo = repo.to_owned();
+    let default = default.to_owned();
+
+    let read = tokio::task::spawn_blocking(move || {
+        if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
+            tracing::error!(
+                said,
+                repo = %repo.display(),
+                "fetching a Repo's remotes failed, so the next stage is not being started",
+            );
+
+            return None;
+        }
+
+        Some(worktrees::default_ref(&repo, &default))
+    })
+    .await;
+
+    read.unwrap_or_else(|error| {
+        tracing::error!(error = ?error, "fetching before a stage started failed");
+        None
+    })
 }
 
 /// Put a notice on a Timeline.
