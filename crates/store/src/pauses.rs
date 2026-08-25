@@ -1,25 +1,18 @@
-//! The Pauses a run waits out: an Agent Profile's account exhausting its window,
-//! and how the wait ended.
+//! The Pauses a Verkstead of before put on a Timeline when an Agent Profile's
+//! account ran out of window, and how each of those waits ended.
 //!
-//! A Pause is a run that has stopped without anything having gone wrong. The
-//! account it was spending is out of window, so nothing it launched would get
-//! anywhere — and the agent itself is waiting for the same reset. What Verkstead
-//! adds is that the wait is *said*: which Profile ran out, when the window comes
-//! back where that could be read, and a press to start again.
+//! Nothing writes one any more. An exhausted window stops a run the way
+//! everything else does — one stop on the Conversation, one Notice, one Resume
+//! — and what is left here is the reading half: a Pause Event written before
+//! that is the record of what happened, and ADR-0006's rule is that the record
+//! is kept and read rather than rewritten.
 //!
-//! Shaped like a halt and deliberately, because it stops a run the same way: the
-//! run does not advance past one, and the Conversation carries *blocked on you*
-//! until it is closed. At most one open per Conversation, by the partial unique
-//! index — two Pauses would be two things to answer about one wait.
-//!
-//! Where it differs is how it closes. A halt waits on the human alone; a Pause is
-//! closed either by their press or by the reset time passing, and the row says
-//! which — see [`Resumed`]. Neither reverts anything: the repository is left
-//! exactly as the session left it, as it is after a halt.
-//!
-//! Nothing here recognises a limit, and nothing here acts on one. What the
-//! wording is, and what starting the work again means, is the server's — see its
-//! `limits` module.
+//! So a stored Pause still says which account ran out, the line the session
+//! printed, when the window was read to come back, and what ended the wait —
+//! and a Timeline holding one still draws it. What it no longer says is
+//! anything about *now*: whether a Conversation is stopped is the one stop's to
+//! answer, and an open Pause found in a database written before this stage was
+//! read onto its Conversation as one — see [`super::stops::apply_schema`].
 
 use anyhow::{Context, Result, bail};
 use sqlx::SqlitePool;
@@ -31,7 +24,7 @@ pub struct Pause {
     /// What the Agent Profile whose account ran out is called, as it was called
     /// then.
     ///
-    /// The name and not the id, for the reason a halt's evidence is gathered
+    /// The name and not the id, for the reason a stop's evidence is gathered
     /// rather than fetched: a Profile can be renamed or deleted, and a
     /// Pause that could no longer say which account it was would be a wait
     /// nobody could account for.
@@ -47,9 +40,9 @@ pub struct Pause {
     /// When the window resets, RFC 3339 — or `None` where what the session
     /// printed carried no time this build could read as one.
     ///
-    /// The half that makes a Pause end itself. Without it the wait is the
-    /// human's to end, which is a whole answer rather than a lesser one: the
-    /// Timeline says an account ran out, and one press starts the work again.
+    /// The half a Pause used to end itself on. What it says now is what it
+    /// always read as: when the account comes back, for somebody looking at
+    /// the record.
     pub resets_at: Option<String>,
 
     /// How the wait ended, or `None` while it is still on — which is the state
@@ -119,23 +112,12 @@ pub enum Resuming {
     AlreadyResumed,
 }
 
-/// One Conversation's open Pause, for whatever is waiting the reset out.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Waiting {
-    pub conversation_id: i64,
-    pub event_id: i64,
-
-    /// When the window resets, RFC 3339, or `None` where none could be read —
-    /// which is a wait only the human ends.
-    pub resets_at: Option<String>,
-}
-
 /// The pauses table. It hangs off a Timeline Event as a pull request does: a
 /// Pause is one Event's full self, and the Event is what a Timeline holds.
 ///
-/// The Conversation is on the row as well as on the Event above it, because the
-/// partial unique index needs it and SQLite cannot index a column that lives in
-/// another table.
+/// Declared still, though nothing writes one: a database made this morning has
+/// no Pause on any Timeline and the Timeline's own read joins this table all
+/// the same, so the shape has to be there for the join to find nothing in.
 pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS pauses (
@@ -152,137 +134,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the pauses table")?;
 
-    // Partial, so that it constrains only the open ones: a long run against a
-    // busy account collects a Pause a day, and exactly one of them is stopping
-    // it.
-    sqlx::query(
-        "CREATE UNIQUE INDEX IF NOT EXISTS pauses_open
-             ON pauses (conversation_id) WHERE resumed_at IS NULL",
-    )
-    .execute(pool)
-    .await
-    .context("indexing the open Pauses by their Conversation")?;
-
     Ok(())
-}
-
-/// Put a Pause on a Conversation's Timeline, and say which Event it became.
-///
-/// `None` is a Conversation that is paused already, or one that is not there:
-/// neither is a failure. A session redraws the line that says its account ran out
-/// for as long as it waits, so the second reading of it is the ordinary case
-/// rather than the strange one — and the first Pause is the one the human is
-/// being told about.
-///
-/// One transaction, because an Event without its row is a Timeline holding a
-/// Pause that cannot say what it is waiting for.
-pub async fn record_pause(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    profile: &str,
-    said: &str,
-    resets_at: Option<&str>,
-) -> Result<Option<i64>> {
-    let mut tx = pool.begin().await.context("pausing a run")?;
-
-    // Asked inside the transaction, so the answer still holds when the insert
-    // below acts on it. The partial unique index is what settles it either way.
-    let open: Option<(i64,)> = sqlx::query_as(
-        "SELECT event_id FROM pauses WHERE conversation_id = ? AND resumed_at IS NULL",
-    )
-    .bind(conversation_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .with_context(|| format!("looking for an open Pause on Conversation {conversation_id}"))?;
-
-    if open.is_some() {
-        return Ok(None);
-    }
-
-    // Selected from `conversations` rather than trusting the id, as every other
-    // Event is written: a Pause attributed to a Conversation that is not there
-    // would be one nobody could ever end.
-    let event: Option<(i64,)> = sqlx::query_as(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ''
-         FROM conversations WHERE id = ?
-         RETURNING id",
-    )
-    .bind(PAUSE)
-    .bind(conversation_id)
-    .fetch_optional(&mut *tx)
-    .await
-    .with_context(|| {
-        format!("putting a Pause on the Timeline of Conversation {conversation_id}")
-    })?;
-
-    let Some((event_id,)) = event else {
-        return Ok(None);
-    };
-
-    sqlx::query(
-        "INSERT INTO pauses (event_id, conversation_id, profile, said, resets_at)
-         VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(event_id)
-    .bind(conversation_id)
-    .bind(profile)
-    .bind(said)
-    .bind(resets_at)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("recording the Pause of Event {event_id}"))?;
-
-    tx.commit().await.context("pausing a run")?;
-
-    Ok(Some(event_id))
-}
-
-/// Which Event a Conversation's open Pause is, or `None` where nothing is waiting.
-///
-/// What the runner asks before it launches anything, beside the same question
-/// about a halt: a run does not advance while an account is out of window, and
-/// the one place that is decided is here.
-pub async fn open_pause(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT event_id FROM pauses WHERE conversation_id = ? AND resumed_at IS NULL",
-    )
-    .bind(conversation_id)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("reading the open Pause of Conversation {conversation_id}"))?;
-
-    Ok(row.map(|(event_id,)| event_id))
-}
-
-/// Every Pause that is still waiting, across every Conversation.
-///
-/// What the sweep that ends a wait on its reset time reads. Everything at once
-/// rather than a question per Conversation, and for the reason the stall sweep
-/// reads the sessions register once: this is a look over the whole server, and
-/// nearly always comes back with nothing.
-///
-/// Which is also what makes the reset survive a restart. Nothing holds a timer
-/// across the process, and a Pause whose window came back while the server was
-/// down is one the next sweep finds already due.
-pub async fn waiting_pauses(pool: &SqlitePool) -> Result<Vec<Waiting>> {
-    let rows: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
-        "SELECT conversation_id, event_id, resets_at
-         FROM pauses WHERE resumed_at IS NULL
-         ORDER BY event_id",
-    )
-    .fetch_all(pool)
-    .await
-    .context("reading the Pauses that are still waiting")?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(conversation_id, event_id, resets_at)| Waiting {
-            conversation_id,
-            event_id,
-            resets_at,
-        })
-        .collect())
 }
 
 /// The Pause one of a Conversation's Events is, or `None` where that Conversation
@@ -365,7 +217,7 @@ pub(crate) async fn on_timeline(
 
 /// End one: the wait is over, and this is what ended it.
 ///
-/// Recorded before anything acts on it, for the reason a halt is cleared before
+/// Recorded before anything acts on it, for the reason a stop is cleared before
 /// anything is launched over it: a Pause acted on without being closed is one the
 /// run could be started again from twice, and two launches is two agents in one
 /// Worktree.

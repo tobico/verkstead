@@ -316,7 +316,7 @@ pub(crate) fn pull_request(
 ///
 /// The name is what a human calls it by and what Verkstead counts fix attempts
 /// against — see [`store::fix_attempts`]. The link is where the run itself is,
-/// which is the one thing a halt over a red check cannot be read without.
+/// which is the one thing a stop over a red check cannot be read without.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Check {
     pub(crate) name: String,

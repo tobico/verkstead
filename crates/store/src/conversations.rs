@@ -309,8 +309,9 @@ pub enum Event {
     /// looking at the work will ever find.
     ///
     /// Never something to do about, whatever it says: a Notice is written
-    /// after the fact, and what a run that stopped is waiting on is the halt
-    /// beside it rather than anything on the Timeline — see [`super::halts`].
+    /// after the fact, and what a run that stopped is waiting on is the stop
+    /// on the Conversation rather than anything on the Timeline — see
+    /// [`super::stops`].
     Notice(String),
 
     /// A Manual Task: the instruction the human typed at the end of the
@@ -965,22 +966,17 @@ async fn started(
 /// `waiting` is an `OR` over the sources, computed here rather than by the
 /// caller, because every one of them is a read of this database and the sidebar
 /// is one list: a caller folding them itself would be issuing a query per row
-/// for facts a subselect already has. A new source is one more clause — which is
-/// how the Hold will arrive, once there is one to ask about.
+/// for facts a subselect already has.
 ///
 /// The sources, in the order they appear below:
 ///
 /// - A **Question Set with no Response and no archiving** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
-/// - A **halt**, which is a Conversation nothing is driving any more and which
-///   goes again only when the human says so. Read off the table rather than off
-///   the Timeline, so the whole list costs one query.
-/// - An **open Pause**, which is a run stopped because the account it was
-///   spending is out of window. Read the same way and for the same reason. The
-///   human may not have to do anything about one — the window comes back by
-///   itself — but a run that has stopped is one the sidebar has to say has
-///   stopped.
+/// - A **stop**, which is a Conversation nothing is driving any more and which
+///   goes again only when the human says so — however it stopped, an account
+///   out of window included. A column on the row rather than a subselect, so
+///   the whole list costs one query.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1004,13 +1000,7 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
                               SELECT 1 FROM archivings a WHERE a.set_id = s.set_id
                           )
                     )
-                    OR EXISTS (
-                        SELECT 1 FROM halts h WHERE h.conversation_id = c.id
-                    )
-                    OR EXISTS (
-                        SELECT 1 FROM pauses u
-                        WHERE u.conversation_id = c.id AND u.resumed_at IS NULL
-                    )
+                    OR c.stopped_at IS NOT NULL
                 ) AS waiting
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
@@ -1610,7 +1600,7 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 ///
 /// The newest rather than the batch's own, because nothing on the record says
 /// which session asked one and nothing has to. One Worktree holds one agent and
-/// nothing advances past a halt, so the proposal a batch session made is the
+/// nothing advances past a stop, so the proposal a batch session made is the
 /// last one there is for as long as anything is asking about it.
 pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     Ok(proposals(pool, conversation_id).await?.last().copied())

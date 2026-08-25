@@ -32,7 +32,6 @@ mod captures;
 mod commits;
 mod conversations;
 mod deferrals;
-mod halts;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -42,6 +41,7 @@ mod pull_requests;
 mod push;
 mod repos;
 mod session_names;
+mod stops;
 mod transcripts;
 mod waits;
 mod wrap_up;
@@ -59,12 +59,8 @@ pub use conversations::{
     unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
-pub use halts::{Halt, Halted, ask_to_stop, asked_to_stop, clear_halt, forget_stop, halt, halted};
 pub use pairings::{RepoPairings, remembered_pairings};
-pub use pauses::{
-    By, Pause, Resumed, Resuming, Waiting, open_pause, pause, record_pause, resume_pause,
-    waiting_pauses,
-};
+pub use pauses::{By, Pause, Resumed, Resuming, pause, resume_pause};
 pub use placements::place_conversations;
 pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -77,6 +73,10 @@ pub use push::{
 };
 pub use repos::{Repo, load_repo, register_repo, registered_repos};
 pub use session_names::session_id;
+pub use stops::{
+    Decision, Resetting, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop,
+    resetting_stops, stop, stopped,
+};
 pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};
 pub use wrap_up::{
@@ -588,15 +588,18 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // per Conversation a rule the database keeps.
     commits::apply_schema(pool).await?;
 
-    // And that driving has stopped, which hangs off the Conversations alone: a
-    // halt is how things are rather than something that happened, and what did
-    // happen is the Notice it points at.
-    halts::apply_schema(pool).await?;
-
-    // And where a run is waiting an account's window out, which hangs off both
-    // for the Interruptions' reasons said again — *one open Pause per
-    // Conversation* is a rule the database keeps, the same way.
+    // The Pauses a Verkstead of before put on a Timeline when an account ran
+    // out of window. Nothing writes one any more — an exhausted window stops a
+    // run the way everything else does — and the table stays because those
+    // Events are the record of what happened and still have to read back.
     pauses::apply_schema(pool).await?;
+
+    // And that driving has stopped, which is columns on the Conversation
+    // itself: a stop is how things are rather than something that happened,
+    // and what did happen is the Notice it points at. After the Pauses,
+    // because a database written before this carries its open ones onto the
+    // Conversations as the columns arrive — see [`stops::apply_schema`].
+    stops::apply_schema(pool).await?;
 
     // And what the work ended up on, which hangs off the Timelines the same way
     // — and off the Conversations, which is what makes *one pull request per

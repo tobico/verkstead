@@ -276,7 +276,7 @@ pub(crate) struct Session {
 
 /// How a session ended, as whoever was driving it hears.
 ///
-/// The distinction the halts turn on: [`Ended::Stopped`] is a session Verkstead
+/// The distinction a stop turns on: [`Ended::Stopped`] is a session Verkstead
 /// put an end to because its step had landed, and every other variant is a
 /// session that stopped without being asked to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,7 +300,7 @@ pub(crate) enum Ended {
 }
 
 impl Ended {
-    /// The sentence a halt's Notice records, or `None` where the session ended
+    /// The sentence a stop's Notice records, or `None` where the session ended
     /// the way it was meant to.
     ///
     /// One place decides what each way of ending is *called*, so the words the
@@ -316,11 +316,12 @@ impl Ended {
 
     /// Whether Verkstead is what ended it.
     ///
-    /// The one way of ending that never halts, whatever the Worktree then says.
+    /// The one way of ending that never stops the run, whatever the Worktree then
+    /// says.
     /// Everything else a driver sees is a session that stopped without being
     /// asked to, and the human is owed the telling about it; this is the human
     /// having already stopped it themselves — they aborted the Conversation — or
-    /// the step having landed. Halting over it would be telling them driving had
+    /// the step having landed. Stopping over it would be telling them driving had
     /// stopped, about the thing they just stopped.
     pub(crate) fn on_purpose(&self) -> bool {
         matches!(self, Self::Stopped)
@@ -880,7 +881,7 @@ impl Sessions {
                     });
 
                     // Last of all, for the reason the drop it replaced was last:
-                    // whoever is driving acts on this — it halts the run or
+                    // whoever is driving acts on this — it stops the run or
                     // launches the next step — and everything above has to
                     // have happened by then. Chief among them the final sweep of
                     // the branch, because a session's last act is usually a
@@ -1073,7 +1074,7 @@ struct Printing {
 /// Conversation being watched and not the list of them.
 ///
 /// What comes back is how it ended, which is what whoever is driving decides
-/// between carrying on and halting by.
+/// between carrying on and stopping by.
 ///
 /// One parameter per thing the loop reads or writes, which is what makes the
 /// list long: gathering them would be a struct built at one call site and taken
@@ -1212,7 +1213,7 @@ async fn relay(
     // that has gone. A limit the agent waits out never ends its session — that
     // is the whole of why a Pause is a wait rather than a failure — so a limit
     // in a session's last words is a session that did not come back from one,
-    // which is the halt whoever is driving is about to write. Pausing as well
+    // which is the stop whoever is driving is about to write. Pausing as well
     // would leave the run stopped on two things at once, and Resume would
     // launch nothing.
 

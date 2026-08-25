@@ -62,7 +62,7 @@
 //! there would reach Done with approved fixes lost. So the record is asked
 //! afterwards rather than the session trusted: the findings they accepted are on
 //! the Set, their words are on the Response, and a branch with no commit since
-//! the answers is the doing never having happened. That halts the run with a
+//! the answers is the doing never having happened. That stops the run with a
 //! Notice saying what is owed, and Resume is the doing over again — one fix
 //! session handed every accepted finding at once, because the decisions were
 //! made and only the carrying out failed. Nothing is asked again. A split pick
@@ -71,7 +71,7 @@
 //! whether anything was committed.
 //!
 //! A review session that ends badly having been owed nothing is not a review that
-//! had nothing to do: it is a review that did not finish. That halts the run like
+//! had nothing to do: it is a review that did not finish. That stops the run like
 //! every other stop, and going again is the review over from the start, in a
 //! session as fresh as the first.
 //!
@@ -88,10 +88,10 @@
 //! rather than only where nobody has read the branch. A review that asked and has
 //! no session is picked up by what the record says about its Set. **Answered**,
 //! and the deciding is done: what is left is the doing, dispatched exactly as an
-//! owed-fixes halt has it dispatched on Resume, with nobody asked for anything.
+//! owed-fixes stop has it dispatched on Resume, with nobody asked for anything.
 //! **Unanswered**, and there is nothing to carry out and nobody to carry it out —
 //! so the Set is closed unanswered, saying on the Timeline that the question is
-//! off, and the run halts with Resume meaning the branch read again. Closing it
+//! off, and the run stops with Resume meaning the branch read again. Closing it
 //! is also what makes that work: a Set left standing would still be this wrap's
 //! review, and the fresh reading would be a second review nothing recognised.
 //!
@@ -123,7 +123,7 @@ use crate::store;
 ///
 /// Both, because this is spawned by everything that might have left a wrap-up
 /// with no review running — the finish step, a server coming back up, a Resume
-/// pressed on a halted wrap-up — and *no review running* is two different
+/// pressed on a stopped wrap-up — and *no review running* is two different
 /// situations. One is a branch nobody has read. The other is a review that asked
 /// and whose session is no longer there to act on the answers, which no amount
 /// of waiting resolves by itself.
@@ -564,7 +564,7 @@ async fn owing_now(state: &AppState, conversation_id: i64) -> Owing {
 /// A Conversation with no Worktree left has nowhere for one to be, and a store
 /// that will not answer has said nothing about whether it is there. Both read as
 /// *not written*, which is the right way round for what is on the other side of
-/// this: a halt the human can clear with a glance at the branch,
+/// this: a stop the human can clear with a glance at the branch,
 /// against a wrap-up that carried on as though work nobody had written was done.
 async fn backlog(state: &AppState, conversation_id: i64) -> bool {
     let worktree = match store::load_conversation(&state.pool, conversation_id).await {
@@ -594,7 +594,7 @@ enum Wanted {
     /// Nothing at all, which is the ordinary answer and never a failure: the
     /// Conversation has stopped wrapping up, the review has already settled, or
     /// driving has stopped — the same rule the runner and the checks watcher
-    /// keep, that nothing is launched behind a halt.
+    /// keep, that nothing is launched behind a stop.
     Nothing,
 
     /// Nobody has read the branch, so a review session reads it.
@@ -610,7 +610,7 @@ enum Wanted {
 ///
 /// The order matters and is the order the questions rule each other out in: a
 /// Conversation that is not wrapping up has no wrap-up to see to, a review that
-/// has settled is over whatever Sets are on the Timeline, and a halt stops
+/// has settled is over whatever Sets are on the Timeline, and a stop holds off
 /// everything below it. Only then is the Set worth looking
 /// for, because only then does its being there mean anything.
 ///
@@ -637,7 +637,7 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
         }
     }
 
-    if crate::halts::stopped(state, conversation_id).await {
+    if crate::stopping::stopped(state, conversation_id).await {
         return Wanted::Nothing;
     }
 
@@ -701,7 +701,7 @@ pub(crate) async fn unanswered(state: &AppState, set_id: i64) -> bool {
 /// was already gone before anybody looked, which is what a restarted server
 /// finds.
 ///
-/// [`store::Halt::Deliberate`]: what to do about it is Resume, which reads the
+/// [`store::Decision::Deliberate`]: what to do about it is Resume, which reads the
 /// branch again in a session as fresh as the first, or taking the branch over,
 /// or aborting the run with it exactly as it stands.
 async fn abandoned(
@@ -721,10 +721,11 @@ async fn abandoned(
         None => (left.to_owned(), None),
     };
 
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "acting on the answers to what the review found",
         &how,
         writing,
@@ -734,7 +735,7 @@ async fn abandoned(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review's findings were left with nobody to act on them and the halt \
+            "a review's findings were left with nobody to act on them and the stop \
              saying so could not be recorded"
         );
     }
@@ -786,15 +787,16 @@ async fn settle(state: &AppState, conversation_id: i64) {
 /// that fell over says why — and what to do about it is Resume, read the branch
 /// themselves, or abort.
 ///
-/// [`store::Halt::Deliberate`], because a wrap-up that goes on without its
+/// [`store::Decision::Deliberate`], because a wrap-up that goes on without its
 /// review is a branch nobody read: Verkstead stops rather than pass a session
 /// that crashed off as a clean bill of health, and going again is the human's
 /// press.
 async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64) {
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "reviewing the branch the pull request is on",
         how,
         Some(writing),
@@ -804,7 +806,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review did not finish and the halt saying so could not be recorded"
+            "a review did not finish and the stop saying so could not be recorded"
         );
     }
 }
@@ -816,7 +818,7 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 /// that failed — and it says what is owed in the review's own words, so what to
 /// do about it is answerable without opening the Set again.
 ///
-/// [`store::Halt::Deliberate`]: what to do is Resume, which is the doing over
+/// [`store::Decision::Deliberate`]: what to do is Resume, which is the doing over
 /// again in one session, or the human doing it themselves, or aborting the run
 /// with the branch exactly as the session left it.
 ///
@@ -830,10 +832,11 @@ async fn dropped(
     how: Option<&str>,
     writing: Option<i64>,
 ) {
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         what_failed(owed),
         &owing(owed, how),
         writing,
@@ -843,7 +846,7 @@ async fn dropped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a review's decided findings were never acted on and the halt saying so \
+            "a review's decided findings were never acted on and the stop saying so \
              could not be recorded"
         );
     }
@@ -928,7 +931,7 @@ fn in_lines(findings: &[store::Fixing]) -> String {
 /// One finding on one line: whitespace collapsed, and clamped to what a line
 /// holds.
 ///
-/// Shared with the batch sessions' own halt, which says what it is owed the same
+/// Shared with the batch sessions' own stop, which says what it is owed the same
 /// way and in the same line — see [`crate::responding`].
 pub(crate) fn in_a_line(what: &str) -> String {
     let said = what.split_whitespace().collect::<Vec<&str>>().join(" ");

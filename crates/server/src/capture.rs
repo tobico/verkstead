@@ -9,7 +9,7 @@
 //! The tidying is the fallback rather than the first answer. A session whose
 //! backend keeps a log has its own prose on the Transcript beside this, and the
 //! two places that quote a session in miniature — the Timeline row and the
-//! evidence a halt's Notice carries — read that instead. What is left here is every
+//! evidence a stop's Notice carries — read that instead. What is left here is every
 //! session that has no such log, for which the terminal is the whole record.
 //!
 //! What the sandbox's own plumbing said goes through this too, and by the same
@@ -251,7 +251,7 @@ pub(crate) fn plain(line: &str) -> String {
 /// The last `lines` of a Capture that said anything, tidied of the terminal's
 /// own control sequences.
 ///
-/// What a halt's Notice keeps as evidence. The tail and not the whole, because
+/// What a stop's Notice keeps as evidence. The tail and not the whole, because
 /// the whole is on the Timeline already as the session's own Event and this is
 /// meant to be readable on a phone — and tidied for the same reason the one-line
 /// summary is, a wall of cursor moves being a record of a display rather than of

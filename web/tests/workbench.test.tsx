@@ -6040,21 +6040,23 @@ describe("a pause on the timeline", () => {
     );
   });
 
-  /// A paused run is a run that has stopped, so it carries the same badge an
-  /// interruption does — and the badge stays put, because what there is to press
-  /// is drawn whole in the list and there is no pane behind it.
-  it("carries blocked on you, and the badge opens no pane", async () => {
+  /// A run stopped because an account ran out of window carries the same badge
+  /// every other stopped run carries, and it points at the same thing: the
+  /// Notice of the stop. The Pause above it is the record of a wait that
+  /// happened, and nothing is blocked on a record.
+  it("carries blocked on you, pointing at the notice of the stop", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
     const badge = await drawn<HTMLButtonElement>(container, ".blocked");
     expect(badge.textContent).toBe("Blocked on you");
 
-    fireEvent.click(badge);
+    const stopped = WAITING.timeline.find(
+      (entry) => "Notice" in entry && entry.Notice.id === WAITING.blocked_on,
+    );
 
-    const waiting = await drawn(container, ".timeline .pause.selected");
-    expect(waiting).toBeTruthy();
-    expect(frame(container).dataset.pane).toBe("timeline");
+    expect(stopped).toBeTruthy();
+    await drawn(container, ".timeline .notice");
   });
 });
 

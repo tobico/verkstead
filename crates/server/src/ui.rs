@@ -779,22 +779,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         _ => None,
     };
 
-    // What the work is waiting an account's window out on, read off the Timeline
-    // for the reason the Brief is: it is already here. The store's index makes at
-    // most one open, so the last one that is unresumed is the one — and it is the
-    // *only* one, which is what makes *the run stops here* a fact rather than a
-    // promise. It carries *blocked on you* like a halt: a run that has stopped is
-    // stopped, and a badge with nowhere to go would be one the human could not
-    // act on.
-    let waiting_at = timeline.iter().rev().find_map(|event| match &event.event {
-        store::Event::Pause(pause) if pause.resumed.is_none() => Some(event.id),
-        _ => None,
-    });
-
-    // Whether driving has stopped: a halt says the Conversation is stopped
-    // now, and the Notice it points at says what stopped and why.
-    let halted = match store::halted(&state.pool, id).await {
-        Ok(halted) => halted.map(|halted| halted.event_id),
+    // Whether driving has stopped, however it stopped: the stop says the
+    // Conversation is stopped now, and the Notice it points at says what stopped
+    // and why. One question about one thing — an account out of window stops a
+    // run the same way a session falling over does.
+    let stopped = match store::stopped(&state.pool, id).await {
+        Ok(stopped) => stopped.map(|stopped| stopped.notice),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation had stopped failed");
             None
@@ -805,20 +795,19 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // fact about the other end of the ladder: the Conversation says it is being
     // worked on and nothing is working on it. Asked of the running server as
     // much as of the record — see [`crate::resume::ready`].
-    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, halted.is_some());
+    let ready_to_resume = crate::resume::ready(&state, id, conversation.state, stopped.is_some());
 
     // And whether there is driving to stop, which is the same fact read the
     // other way: a Conversation that says it is being worked on and has not
-    // halted is one the human may pull the brake on. Nothing about the register
+    // stopped is one the human may pull the brake on. Nothing about the register
     // here — a run between two steps is as much a run to stop as a busy one. See
     // [`crate::stops::ready`].
-    let ready_to_stop = crate::stops::ready(conversation.state, halted.is_some());
+    let ready_to_stop = crate::stops::ready(conversation.state, stopped.is_some());
 
-    // The badge points at whichever of the two is in force. Neither can really
-    // be in force with the other — a run waiting a window out is one nothing is
-    // driving to halt — and where both somehow are, the halt is the thing the
-    // human has to press Resume on.
-    let blocked_on = halted.or(waiting_at);
+    // And the badge points at the stop's own Notice, whatever wrote it: a run
+    // that has stopped is stopped, and a badge with nowhere to go would be one
+    // the human could not act on.
+    let blocked_on = stopped;
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -959,8 +948,8 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     // Rendered like the handoff and inline like it, being the
                     // other kind of sentence somebody has to be able to read
                     // back — and the one nobody wrote for a human to press
-                    // anything about. What a halt's Notice says is what stopped,
-                    // why, and the evidence — see [`crate::halts`], which writes
+                    // anything about. What a stop's Notice says is what stopped,
+                    // why, and the evidence — see [`crate::stopping`], which writes
                     // the markdown.
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
@@ -1390,10 +1379,11 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
 /// `POST /api/ui/conversations/{id}/pause/{event}/resume` — go on without
 /// waiting for the window.
 ///
-/// The human's half of the two ways a Pause ends; the other is the reset time
-/// passing, which the sweep does — see [`crate::limits`]. Both close the same
-/// row and start the work again from where it stopped, and the Worktree is
-/// untouched by either: a Pause never changed anything in it.
+/// The press on a Pause card, which is one drawn over a Pause Event a Verkstead
+/// of before wrote: nothing raises another. It closes that row and then presses
+/// the one Resume, which is what takes the stop away and starts the work again
+/// from where it stopped — see [`crate::limits`]. The Worktree is untouched:
+/// a stop never changed anything in it.
 ///
 /// `AlreadyResumed` is an outcome rather than an error, for the reason every
 /// other named outcome here is one: the window may have come back while the page
@@ -1451,7 +1441,7 @@ async fn start_manual_task(
 ///
 /// What should be running is recomputed from the state the Conversation is in
 /// and what its branch has written, rather than being read off whatever stopped:
-/// a halt is answered whenever the human gets to it, and the work moves on in
+/// a stop is answered whenever the human gets to it, and the work moves on in
 /// the meantime.
 ///
 /// Answered as soon as the decision is made rather than once the session is up.
@@ -1491,7 +1481,7 @@ async fn stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResp
     }
 }
 
-/// `POST /api/ui/conversations/{id}/force-stop` — halt now, and end what is
+/// `POST /api/ui/conversations/{id}/force-stop` — stop now, and end what is
 /// running.
 async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {

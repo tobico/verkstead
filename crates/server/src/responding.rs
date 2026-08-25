@@ -26,14 +26,14 @@
 //! being a session launch. A batch session that asked, was answered and then went
 //! — cleanly or otherwise — with nothing committed since is a wrap-up owing work
 //! nobody is left to do. So the record is asked afterwards rather than the
-//! session trusted, and what is owed halts the run. Resuming is the doing over
+//! session trusted, and what is owed stops the run. Resuming is the doing over
 //! again: one fix session handed every accepted proposal at once, because the
 //! decisions were made and only the carrying out failed. Nothing is asked again.
 //!
 //! A batch session that ended badly having been owed nothing never got as far as
-//! asking. That halts the run too — and because the batch was written down as
+//! asking. That stops the run too — and because the batch was written down as
 //! addressed the moment it was dispatched, the comments are forgotten again as
-//! the halt is recorded, so a Resume is the batch over again in a session as
+//! the stop is recorded, so a Resume is the batch over again in a session as
 //! fresh as the first.
 //!
 //! **And nothing the human was asked goes quietly either**, which is the review's
@@ -49,9 +49,9 @@
 //! review owes its own: **answered**, and the fixes are landed by a fresh session
 //! with nobody asked for anything; **unanswered**, and there is nothing to carry
 //! out and nobody to carry it out, so the Set is closed unanswered and the run
-//! halts.
+//! stops.
 //!
-//! What was said goes back to being unread as that halt is recorded. The record cannot
+//! What was said goes back to being unread as that stop is recorded. The record cannot
 //! say which comments the dead session was dealing with and which the review
 //! folded in before it, so every one of them is read again — a comment read twice
 //! costs a session's work, and one dropped costs the human theirs. Which is safe
@@ -226,7 +226,7 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// Stop the run: a batch session's proposal is up and nobody is left to act on
 /// it.
 ///
-/// The Set is closed as this halts, for the reason the review closes its own — a
+/// The Set is closed as this stops, for the reason the review closes its own — a
 /// question whose answer nothing would read is one to take off the Timeline
 /// rather than leave standing. And what was said goes back to being unread with
 /// it, so that the human's feedback outlives the session that lost it and a
@@ -241,14 +241,14 @@ async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// reads the code as it now stands: a question the commits since have answered is
 /// one it says so about and asks nothing more of.
 ///
-/// Forgotten before the halt is recorded, exactly as [`stopped`] forgets them,
+/// Forgotten before the stop is recorded, exactly as [`stopped`] forgets them,
 /// so that a forgetting that fails leaves the run stopped rather than quietly
 /// going round again.
 ///
 /// `ended_badly` is how the session went where this is being raised as one ends
 /// and it did not end well, with the Timeline Event it was printing into.
 ///
-/// [`store::Halt::Deliberate`]: what to do about it is Resume, which answers
+/// [`store::Decision::Deliberate`]: what to do about it is Resume, which answers
 /// what was said again, or reading the comments yourself, or ending the run.
 async fn abandoned(
     state: &AppState,
@@ -271,10 +271,11 @@ async fn abandoned(
         None => (left.to_owned(), None),
     };
 
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "acting on the answers to what was proposed about the pull request's comments",
         &how,
         writing,
@@ -284,7 +285,7 @@ async fn abandoned(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session's proposal was left with nobody to act on it and the halt \
+            "a batch session's proposal was left with nobody to act on it and the stop \
              saying so could not be recorded"
         );
     }
@@ -436,13 +437,13 @@ async fn unlanded(state: &AppState, conversation_id: i64) -> Vec<store::Fixing> 
 /// and they were written down as addressed the moment it was dispatched.
 /// Forgotten rather than left, so that the session Resume's watcher starts is one
 /// about the same words rather than one about nothing — and forgotten before the
-/// halt is recorded, so that a forgetting that fails leaves the run stopped
+/// stop is recorded, so that a forgetting that fails leaves the run stopped
 /// rather than quietly going round again.
 ///
 /// The evidence is the tail of what the session said, which is where one that
 /// fell over says why.
 ///
-/// [`store::Halt::Deliberate`]: what to do about it is Resume, which answers what
+/// [`store::Decision::Deliberate`]: what to do about it is Resume, which answers what
 /// was said again, or reading the comments yourself, or ending the run.
 async fn stopped(
     state: &AppState,
@@ -456,10 +457,11 @@ async fn stopped(
         tracing::error!(error = ?error, conversation_id, "forgetting a batch nobody answered failed");
     }
 
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "answering what was said on the pull request",
         how,
         Some(writing),
@@ -469,7 +471,7 @@ async fn stopped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session did not finish and the halt saying so could not be recorded"
+            "a batch session did not finish and the stop saying so could not be recorded"
         );
     }
 }
@@ -481,7 +483,7 @@ async fn stopped(
 /// that failed — and it says what is owed in the session's own words, so what to
 /// do about it is answerable without opening the Set again.
 ///
-/// [`store::Halt::Deliberate`]: what to do is Resume, which is the fixes in one
+/// [`store::Decision::Deliberate`]: what to do is Resume, which is the fixes in one
 /// session, or the human making them, or aborting the run with the branch
 /// exactly as the session left it.
 ///
@@ -498,10 +500,11 @@ async fn dropped(
     how: Option<&str>,
     writing: Option<i64>,
 ) {
-    if let Err(error) = crate::halts::halt(
-        state,
+    if let Err(error) = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
-        crate::halts::Decided::Verkstead,
+        crate::stopping::Decided::Verkstead,
         "landing the fixes what was said on the pull request was answered with",
         &owing(owed, how),
         writing,
@@ -511,7 +514,7 @@ async fn dropped(
         tracing::error!(
             error = ?error,
             conversation_id,
-            "a batch session's accepted fixes were never landed and the halt saying so \
+            "a batch session's accepted fixes were never landed and the stop saying so \
              could not be recorded"
         );
     }

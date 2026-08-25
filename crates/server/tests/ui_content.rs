@@ -1970,18 +1970,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And the same Conversation with its driving halted, which is the one shape a
-    // viewer test cannot reach any other way: a halt is written by a session
-    // dying, and there are no sessions here. Recorded after the fixture above is
-    // written, so the two are the same backlog before and after it went wrong.
+    // And the same Conversation stopped, which is the one shape a viewer test
+    // cannot reach any other way: a stop is written by a session dying, and there
+    // are no sessions here. Recorded after the fixture above is written, so the
+    // two are the same backlog before and after it went wrong.
     //
-    // The Notice is written here rather than by the server's own `halts`, which
-    // is what composes one from the evidence it gathers — this is an integration
-    // test, and what it needs is a Timeline of the right shape.
-    store::halt(
+    // The Notice is written here rather than by the server's own `stopping`,
+    // which is what composes one from the evidence it gathers — this is an
+    // integration test, and what it needs is a Timeline of the right shape.
+    store::stop(
         &pool,
         tasked,
-        store::Halt::Deliberate,
+        store::Decision::Deliberate,
         "**The task in .tasks/03-commit-events.md** stopped.\n\n\
          the session exited with status 1\n\n\
          ### The worktree\n\n\
@@ -1989,6 +1989,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
          ### What the last session said\n\n\
          \x20   error[E0432]: unresolved import `crate::sweep`\n    \x20 --> crates/store/src/commits.rs:9:5\n\
          \x20   error: could not compile `verkstead-store` (lib) due to 1 previous error\n",
+        None,
     )
     .await
     .unwrap()
@@ -2004,12 +2005,14 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And the same backlog waiting an account's window out, which is the other
-    // shape a viewer test cannot reach any other way: a Pause is raised by a
-    // session printing that its account is spent, and there are no sessions
-    // here. Recorded on a Conversation of its own rather than on the one above,
-    // because that one already has a run stopped on it — and *one thing
-    // stopping a run* is what both these Events are for.
+    // And the same backlog stopped because an account ran out of window, which is
+    // the other shape a viewer test cannot reach any other way. Recorded on a
+    // Conversation of its own rather than on the one above, because that one is
+    // stopped already and there is one stop per Conversation.
+    //
+    // It carries a Pause Event as well, written by hand the way a Verkstead of
+    // before wrote one: those are the record of what happened, nothing rewrites
+    // them, and a Timeline holding one still has to draw.
     let waiting = store::start_conversation(&pool, repos[0].id, "deferred-asks")
         .await
         .unwrap()
@@ -2045,11 +2048,43 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .unwrap();
     store::start_implementing(&pool, waiting).await.unwrap();
 
-    store::record_pause(
+    let printed = "Usage limit reached · continuing automatically at 3pm · esc to cancel";
+
+    let (paused,): (i64,) = sqlx::query_as(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, '2026-08-03T02:41:07.000Z', 'pause', '')
+         RETURNING id",
+    )
+    .bind(waiting)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO pauses (event_id, conversation_id, profile, said, resets_at)
+         VALUES (?, ?, ?, ?, '2026-08-03T05:00:00.000Z')",
+    )
+    .bind(paused)
+    .bind(waiting)
+    .bind(&profiles[1].name)
+    .bind(printed)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    store::stop(
         &pool,
         waiting,
-        &profiles[1].name,
-        "Usage limit reached · continuing automatically at 3pm · esc to cancel",
+        store::Decision::Deliberate,
+        &format!(
+            "**Implementing the work** stopped.\n\n\
+             the account **{}** was being spent is out of window: {printed}\n\n\
+             ### The worktree\n\n\
+             Git had nothing pending, or the repository would not answer.\n\n\
+             ### What the last session said\n\n\
+             It said nothing at all.\n",
+            profiles[1].name,
+        ),
         Some("2026-08-03T05:00:00.000Z"),
     )
     .await

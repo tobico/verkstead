@@ -6,14 +6,14 @@
 //! difference between the two presses is only what they are willing to wait for:
 //!
 //! - **Stop** pauses after the current task. Nothing new is started, whatever is
-//!   running now runs to its own end, and the Conversation halts before the next
+//!   running now runs to its own end, and the Conversation stops before the next
 //!   launch. Pressed with nothing running, there is nothing to see out and it
-//!   halts where it stands.
-//! - **Force stop** ends what is running now and halts at once. The step is left
+//!   stops where it stands.
+//! - **Force stop** ends what is running now and stops at once. The step is left
 //!   wherever the session had got to, uncommitted work and all, because that is
 //!   what stopping immediately means.
 //!
-//! Both write a **deliberate** halt — see [`crate::halts::Decided`] — so neither
+//! Both are **deliberate** — see [`crate::stopping::Decided`] — so neither
 //! is one a restart picks up unasked, and neither reaches a phone: the human is
 //! the one person a notification about their own press would be telling nothing.
 //! Both are undone by the one Resume, which recomputes what ought to be running
@@ -27,15 +27,15 @@ use anyhow::Result;
 use verkstead_render::ConversationStopped;
 
 use crate::AppState;
-use crate::halts::Decided;
+use crate::stopping::Decided;
 use crate::store::{self, Lifecycle};
 
 /// Why the Notice says the run stopped, for each way of pressing.
 ///
 /// The human's own words back to them, because that is the whole of the reason:
 /// nothing failed, nothing was decided about the work, somebody pressed a
-/// button. Written as the *how* half of a halt's Notice — see
-/// [`crate::halts::halt`].
+/// button. Written as the *how* half of a stop's Notice — see
+/// [`crate::stopping::stop`].
 const AFTER_THE_STEP: &str = "you pressed Stop, so the session that was running \
      was carried to its end and nothing was started after it";
 const NOTHING_RUNNING: &str =
@@ -46,8 +46,8 @@ const AT_ONCE: &str = "you pressed Force stop, so what was running was ended whe
 ///
 /// Where a session is running, that session is left alone and the stop is
 /// recorded for the run to find at its next launch — see [`asked`], which is
-/// where it becomes a halt. Where none is, there is nothing to see out and the
-/// halt is written now.
+/// where it lands. Where none is, there is nothing to see out and the stop is
+/// written now.
 ///
 /// The session is what is asked about rather than the register of drivers, and
 /// deliberately: a run between steps has a driver and no session, and what Stop
@@ -80,13 +80,13 @@ pub(crate) async fn stop(state: &AppState, conversation_id: i64) -> Result<Conve
     Ok(ConversationStopped::Stopping)
 }
 
-/// Press Force stop: halt now, and end whatever is running.
+/// Press Force stop: stop now, and end whatever is running.
 ///
-/// The halt goes first and the ending second, which is the one thing here that
+/// The stop goes first and the ending second, which is the one thing here that
 /// has to be that way round. A session ended by Verkstead advances nothing —
 /// see [`crate::sessions::Ended::on_purpose`] — so the driver that was seeing it
 /// out goes straight to its next launch, and what must be there when it looks is
-/// the halt. Ending first would be a race with the very run being stopped.
+/// the stop. Ending first would be a race with the very run being stopped.
 ///
 /// One session, because a Conversation has one: [`crate::sessions::Sessions`]
 /// keeps a session per Conversation and starting a second ends the first, so
@@ -115,15 +115,15 @@ pub(crate) async fn force(state: &AppState, conversation_id: i64) -> Result<Conv
     Ok(ConversationStopped::Stopped)
 }
 
-/// Whether a Stop the human pressed earlier is waiting to land, and the halt
+/// Whether a Stop the human pressed earlier is waiting to land, and the stop
 /// that answers it where one is.
 ///
-/// Asked in front of every launch, through [`crate::halts::stopped`]: this *is*
-/// the next launch the press asked to come before, so the stop becomes a halt
+/// Asked in front of every launch, through [`crate::stopping::stopped`]: this
+/// *is* the next launch the press asked to come before, so the stop is written
 /// here and the launch does not happen.
 ///
 /// `true` is *do not launch*, which is also what a store that will not answer
-/// gets, for the reason [`crate::halts::stopped`] reads its own failures that
+/// gets, for the reason [`crate::stopping::stopped`] reads its own failures that
 /// way: what is on the other side of this is spending an account, and something
 /// that cannot tell whether the human asked it to stop should wait. Nothing is
 /// written down in that case — the sweep finds the Conversation standing still a
@@ -154,7 +154,7 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
     );
 
     if let Err(error) = by_hand(state, conversation_id, lifecycle, AFTER_THE_STEP).await {
-        tracing::error!(error = ?error, conversation_id, "a run the human stopped could not be recorded as halted");
+        tracing::error!(error = ?error, conversation_id, "a run the human stopped could not be recorded as stopped");
     }
 
     true
@@ -170,11 +170,11 @@ pub(crate) async fn asked(state: &AppState, conversation_id: i64) -> bool {
 /// Nothing about what is running. A Conversation between one step and the next
 /// is one to stop as much as a busy one: what Stop is for is the run, and the
 /// run is what will launch the next session the moment it can.
-pub(crate) fn ready(lifecycle: Lifecycle, halted: bool) -> bool {
+pub(crate) fn ready(lifecycle: Lifecycle, stopped: bool) -> bool {
     matches!(
         lifecycle,
         Lifecycle::Grilling | Lifecycle::Implementing | Lifecycle::Wrapping
-    ) && !halted
+    ) && !stopped
 }
 
 /// What a press finds when it arrives: a Conversation to stop, or the refusal to
@@ -194,10 +194,12 @@ async fn standing(state: &AppState, conversation_id: i64) -> Result<Option<Stand
         return Ok(None);
     };
 
-    let halted = store::halted(&state.pool, conversation_id).await?.is_some();
+    let stopped = store::stopped(&state.pool, conversation_id)
+        .await?
+        .is_some();
 
-    Ok(Some(if !ready(conversation.state, halted) {
-        Standing::Refused(if halted {
+    Ok(Some(if !ready(conversation.state, stopped) {
+        Standing::Refused(if stopped {
             ConversationStopped::AlreadyHalted
         } else {
             ConversationStopped::NotDriven
@@ -207,26 +209,27 @@ async fn standing(state: &AppState, conversation_id: i64) -> Result<Option<Stand
     }))
 }
 
-/// Write the halt the human's press is, and forget the asking.
+/// Write the stop the human's press is, and forget the asking.
 ///
-/// The ordinary halt with the ordinary evidence — what ought to have been
+/// The ordinary stop with the ordinary evidence — what ought to have been
 /// happening, why it is not, what git makes of the Worktree and the tail of what
 /// the last session said. Nothing about a press deserves a Notice of its own
 /// shape: the human reading this tomorrow wants what every other stop tells
 /// them, and the reason line is what says this one was theirs.
 ///
 /// The asking is forgotten whether or not a Notice was written. A Conversation
-/// that had already halted keeps the halt it has — [`crate::halts::halt`] writes
-/// one per Conversation — and leaving the request behind either way would be a
-/// stop that landed again on the far side of the next Resume.
+/// that had already stopped keeps the stop it has — there is one per
+/// Conversation — and leaving the request behind either way would be a stop that
+/// landed again on the far side of the next Resume.
 async fn by_hand(
     state: &AppState,
     conversation_id: i64,
     lifecycle: Lifecycle,
     how: &str,
 ) -> Result<()> {
-    let halted = crate::halts::halt(
-        state,
+    let stopped = crate::stopping::stop(
+        &state.pool,
+        &state.nudges,
         conversation_id,
         Decided::Human,
         crate::stalls::driving(lifecycle),
@@ -237,7 +240,7 @@ async fn by_hand(
 
     store::forget_stop(&state.pool, conversation_id).await?;
 
-    halted?;
+    stopped?;
 
     Ok(())
 }

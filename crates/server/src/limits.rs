@@ -1,10 +1,15 @@
-//! An Agent Profile's account running out of window, and the Pause that makes
+//! An Agent Profile's account running out of window, and the stop that makes
 //! the wait answerable from a phone.
+//!
+//! **One stop, the same as every other.** A run whose account is out of window
+//! is a run that has stopped — one Notice, one *blocked on you*, one Resume —
+//! and the only thing that tells it apart is the words it carries about when
+//! the account comes back. See [`crate::stopping`], which writes it.
 //!
 //! **The agent waits too, and Verkstead neither turns that off nor depends on
 //! it.** The claude in use holds its session when the limit lands and carries on
 //! by itself when the window comes back, under a setting of its own. Nothing here
-//! reaches into that configuration. What the Pause adds is that the wait is
+//! reaches into that configuration. What the stop adds is that the wait is
 //! *said*: the Timeline names the account that ran out and when it comes back,
 //! the devices are told, and there is a press to start again — instead of a
 //! session that has gone quiet for no stated reason.
@@ -30,9 +35,9 @@
 //! reason to spend a different one: no Conversation moves to another Profile
 //! because the one it is on ran out, and there is no code here that could.
 //!
-//! **Nothing here touches the Worktree.** A Pause stops Verkstead advancing and
-//! does nothing else, so a run picked up again finds the repository exactly as
-//! the session left it — the same promise a halt makes.
+//! **Nothing here touches the Worktree.** The stop holds Verkstead off advancing
+//! and does nothing else, so a run picked up again finds the repository exactly
+//! as the session left it — the same promise every other stop makes.
 
 use std::time::Duration;
 
@@ -63,16 +68,16 @@ const HELD: usize = 8 * 1024;
 /// How often the runs waiting a window out are looked over, as [`crate::Pace`]
 /// has it by default.
 ///
-/// A minute. A window resets on the hour and a Pause is a wait rather than a
-/// race, so noticing one a minute late costs nothing — and the sweep is one
-/// indexed read that nearly always comes back with nothing, which is not a thing
-/// to do in a tight loop for the years a server is up.
+/// A minute. A window resets on the hour and this is a wait rather than a race,
+/// so noticing one a minute late costs nothing — and the sweep is one read that
+/// nearly always comes back with nothing, which is not a thing to do in a tight
+/// loop for the years a server is up.
 pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
 
 /// How long to give the machine to say what offset it keeps local time at.
 ///
-/// Asked of `date`, once per Pause raised. A machine that will not answer within
-/// this leaves the reset time unread, which is a Pause the human ends.
+/// Asked of `date`, once per stop written. A machine that will not answer within
+/// this leaves the reset time unread, which is a stop carrying no reset words.
 const ASKED_WITHIN: Duration = Duration::from_secs(5);
 
 /// What a session said about its account being out of window.
@@ -82,7 +87,7 @@ pub(crate) struct Exhausted {
     /// sequences.
     ///
     /// Kept rather than reduced to the phrase that matched it, because it is the
-    /// record: somebody reading the Pause a week later is reading the backend's
+    /// record: somebody reading the stop a week later is reading the backend's
     /// own sentence rather than this build's opinion of it.
     pub(crate) said: String,
 }
@@ -90,7 +95,7 @@ pub(crate) struct Exhausted {
 /// The sentence in `text` that says an account is out of window, or `None`.
 ///
 /// Pure and cheap on purpose: this runs on every flush of every session, twice a
-/// second while an agent talks, so everything a Pause needs beyond *whether* —
+/// second while an agent talks, so everything the stop needs beyond *whether* —
 /// the reset time, the machine's offset — is worked out afterwards and only on a
 /// hit.
 pub(crate) fn exhausted(text: &str) -> Option<Exhausted> {
@@ -251,12 +256,13 @@ async fn resets_when(said: &str) -> Option<OffsetDateTime> {
 /// A clock time is written for somebody sitting at that machine, so the zone it
 /// is missing is that machine's. Asked of `date`, which every system has, rather
 /// than carried as a timezone database this build has no other use for — and
-/// asked per Pause rather than held, so a server that has been up across a
+/// asked per stop rather than held, so a server that has been up across a
 /// daylight-saving change still reads the sentence in the offset the sentence was
 /// written in.
 ///
 /// `None` is a machine that would not answer, or an answer that is not an offset.
-/// The Pause then carries no reset time, which is a wait the human ends.
+/// The stop then carries no reset words, which changes nothing about how it ends:
+/// every stop waits for a press.
 async fn local_offset() -> Option<UtcOffset> {
     let asking = tokio::process::Command::new("date").arg("+%z").output();
 
@@ -320,7 +326,7 @@ pub(crate) struct Watch {
     event_id: i64,
 
     /// What the Agent Profile this session runs under is called, kept because
-    /// that is what the Pause names — see [`store::Pause::profile`].
+    /// that is what the stop names — see [`crate::stopping::Decided`].
     profile: String,
 
     /// What the session has printed since the last look, less whatever has
@@ -332,13 +338,13 @@ pub(crate) struct Watch {
     /// strange one.
     printed: String,
 
-    /// Whether the banner on screen now has already been paused on.
+    /// Whether the banner on screen now has already been stopped on.
     ///
     /// A latch, because the display redraws its banner for as long as the wait
     /// lasts and this is looked at twice a second: without one, five hours of
     /// waiting would be five hours of reading the reset time — a parse, a
     /// question to the machine about its offset, a transaction and a log line,
-    /// all to be told the run is already paused.
+    /// all to be told the run has already stopped.
     ///
     /// Latched on *whether* rather than on the sentence, because the sentence is
     /// not stable: what is kept is the line as the terminal drew it, decoration
@@ -347,12 +353,12 @@ pub(crate) struct Watch {
     ///
     /// Let go when the session prints something that is *not* the banner, which
     /// is it having moved on: an account that runs out again after that is a new
-    /// wait and gets a Pause of its own. Not when a look finds nothing, which is
+    /// wait and gets a stop of its own. Not when a look finds nothing, which is
     /// a look landing between two repaints.
     ///
     /// And never on the wait ending, which is the case that decides the shape of
     /// this. The human saying *go on without waiting* leaves the agent seeing
-    /// its own limit out with the banner still up — that is what a Pause never
+    /// its own limit out with the banner still up — that is what a stop never
     /// ends — so a latch let go there would read the next repaint as a fresh
     /// limit and stop the run again a half-second after they started it.
     raised: bool,
@@ -378,7 +384,7 @@ impl Watch {
         self.printed.push_str(text);
     }
 
-    /// Look at what has arrived, and pause the run if it says the account is out
+    /// Look at what has arrived, and stop the run if it says the account is out
     /// of window.
     ///
     /// `said` is the last thing the agent wrote in its own log, which is the other
@@ -437,7 +443,7 @@ impl Watch {
 
         self.raised = true;
 
-        pause(
+        out_of_window(
             pool,
             nudges,
             self.conversation_id,
@@ -449,13 +455,23 @@ impl Watch {
     }
 }
 
-/// Stop the run: put the wait on the Timeline and tell the human's devices.
+/// Stop the run: write the stop, its Notice and the reset words, and tell the
+/// human's devices.
 ///
-/// Nothing is refused for. A Pause that could not be written is a run that waits
+/// The one stop and nothing of its own — see [`crate::stopping::stop`]. What is
+/// particular to a window is only what the stop is told: the account that ran
+/// out, the line the session printed, and when the window comes back. So a
+/// Conversation stopped here reads as one stopped by anything else — one Notice,
+/// one badge, one Resume — with the reset words the only thing telling it apart.
+///
+/// The pool and the Nudges, because that is all this half of the server has:
+/// the watcher runs inside the relay task of the session that printed the line.
+///
+/// Nothing is refused for. A stop that could not be written is a run that waits
 /// with nothing saying so, which is a thing to see in the log and the same thing
 /// either way: the session goes on waiting, because the agent's own wait is not
 /// Verkstead's to end.
-async fn pause(
+async fn out_of_window(
     pool: &SqlitePool,
     nudges: &Nudges,
     conversation_id: i64,
@@ -463,76 +479,74 @@ async fn pause(
     profile: &str,
     said: &str,
 ) {
-    // Only now, and only once per Pause: reading the reset time is a word or two
+    // Only now, and only once per stop: reading the reset time is a word or two
     // of parsing and, for a clock time, a question to the machine — and the
     // flush this was reached from runs twice a second.
-    let resets_at = resets_when(said)
+    let resets = resets_when(said)
         .await
         .and_then(|at| at.format(&Rfc3339).ok());
 
-    let recorded =
-        store::record_pause(pool, conversation_id, profile, said, resets_at.as_deref()).await;
-
-    let event_id = match recorded {
-        Ok(Some(event_id)) => event_id,
-        // A run that is already waiting, which is what the banner redrawing in
-        // different words comes to. The first Pause is the one the human was
-        // told about.
-        Ok(None) => {
-            tracing::info!(
-                conversation_id,
-                session,
-                "an account ran out of window on a run that was already waiting"
-            );
-            return;
-        }
+    // What ought to have been happening, in the words every other stop names it
+    // in: the Notice opens with it, and a stop for a window is not a different
+    // kind of sentence.
+    let lifecycle = match store::load_conversation(pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation.state,
+        Ok(None) => return,
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "a run could not be paused on a usage limit");
+            tracing::error!(error = ?error, conversation_id, "reading the Conversation whose account ran out failed");
             return;
         }
     };
 
-    tracing::warn!(
-        conversation_id,
-        event_id,
-        session,
-        profile,
-        resets_at = resets_at.as_deref().unwrap_or("unread"),
-        "an account ran out of window, so the run is waiting"
-    );
-
-    // The Timeline has something on it that is waiting on the human, and an open
-    // page should say so without being reloaded.
-    nudges.announce(Nudge::Conversation {
-        conversation: conversation_id,
-    });
-
-    crate::push::told(
+    let stopped = crate::stopping::stop(
         pool,
+        nudges,
         conversation_id,
-        crate::push::News::OutOfWindow {
-            profile: profile.to_owned(),
-            resets_at,
+        crate::stopping::Decided::OutOfWindow {
+            profile,
+            resets: resets.as_deref(),
         },
-    );
+        crate::stalls::driving(lifecycle),
+        &format!("the account **{profile}** was being spent is out of window: {said}"),
+        Some(session),
+    )
+    .await;
+
+    match stopped {
+        // A run that is already stopped, which is what the banner redrawing in
+        // different words comes to. The first Notice is the one the human was
+        // told about.
+        Ok(None) => tracing::info!(
+            conversation_id,
+            session,
+            "an account ran out of window on a run that had already stopped"
+        ),
+        Ok(Some(notice)) => tracing::warn!(
+            conversation_id,
+            notice,
+            session,
+            profile,
+            resets = resets.as_deref().unwrap_or("unread"),
+            "an account ran out of window, so the run has stopped"
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "a run could not be stopped on a usage limit");
+        }
+    }
 }
 
-/// Start the work again: close the wait, and get the Conversation driving where
-/// nothing is.
+/// End a Pause a Verkstead of before put on a Timeline, and get the
+/// Conversation driving where nothing is.
 ///
-/// The two ways in meet here, which is the point of them meeting: the human's
-/// press and the reset time passing do the same thing, and the record keeps which
-/// it was — see [`store::By`].
+/// The card that offers this is one drawn over a stored Pause Event: nothing
+/// writes another, and what stops a run for a window now is the one stop. What
+/// is left for this to do is close the row — the record of how that wait ended —
+/// and then press the one Resume, which is what clears the stop the Pause was
+/// read onto its Conversation as.
 ///
-/// Nothing is reverted, reset or stashed. A Pause never touched the Worktree, so
+/// Nothing is reverted, reset or stashed. A stop never touched the Worktree, so
 /// there is nothing to put back: the run picks up from wherever the session left
 /// the repository.
-///
-/// What it does beyond closing depends on what is there. A session still waiting
-/// its own limit out is left alone — the agent comes back by itself, and the
-/// Pause was only ever what stopped Verkstead launching the *next* thing. A
-/// Conversation with nothing driving it is started driving again the way a
-/// stalled one is, which is the same question answered from the state it is in.
 pub(crate) async fn resume(
     state: &AppState,
     conversation_id: i64,
@@ -558,7 +572,12 @@ pub(crate) async fn resume(
         conversation: conversation_id,
     });
 
-    driving_again(state, conversation_id, by).await;
+    let resuming = match by {
+        store::By::Human => crate::resume::Resuming::Pressed,
+        store::By::Reset => crate::resume::Resuming::Restarted,
+    };
+
+    driving_again(state, conversation_id, resuming).await;
 
     Ok(PauseResumed::Resumed)
 }
@@ -566,31 +585,22 @@ pub(crate) async fn resume(
 /// Start driving the Conversation again, where nothing is driving it.
 ///
 /// Through the one standing way in — see [`crate::resume`] — rather than through
-/// anything of this module's own. What ought to be running after a wait is the
-/// same question Resume asks after a halt, recomputed from the state the
-/// Conversation is in now, and a second answer to it here would be a second thing
-/// to keep true.
+/// anything of this module's own. What ought to be running after a stop is the
+/// same question Resume asks after any other, recomputed from the state the
+/// Conversation is in now, and a second answer to it here would be a second
+/// thing to keep true. Clearing the stop is that press's, which is why nothing
+/// here clears one.
 ///
-/// Which of [`crate::resume::Resuming`]'s two it is follows the record of how the
-/// wait ended, and the one thing that turns on it is whether a wrapping
-/// Conversation's spent check-fix attempts are forgotten. The human pressing *go
-/// on without waiting* has read the Pause and is asking for another go; the
-/// window coming back has been read by nobody, exactly as a restart has.
-///
-/// [`Resumed::AlreadyDriven`] is the ordinary answer and not a failure: a session
-/// waiting its own limit out is a run somebody is still seeing out, and the wait
-/// ending is the whole of what there was to do.
-async fn driving_again(state: &AppState, conversation_id: i64, by: store::By) {
-    let resuming = match by {
-        store::By::Human => crate::resume::Resuming::Pressed,
-        store::By::Reset => crate::resume::Resuming::Restarted,
-    };
-
+/// The one thing [`crate::resume::Resuming`] turns on is whether a wrapping
+/// Conversation's spent check-fix attempts are forgotten. A human who has read
+/// the stop and pressed is asking for another go; a window coming back has been
+/// read by nobody, exactly as a restart has.
+async fn driving_again(state: &AppState, conversation_id: i64, resuming: crate::resume::Resuming) {
     match crate::resume::resume(state, conversation_id, resuming).await {
         Ok(resumed) => tracing::info!(
             conversation_id,
             resumed = ?resumed,
-            "the run that was waiting on a usage limit was asked to go on"
+            "the run that was stopped on a usage limit was asked to go on"
         ),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "starting a run again after its window came back failed");
@@ -598,9 +608,9 @@ async fn driving_again(state: &AppState, conversation_id: i64, by: store::By) {
     }
 }
 
-/// End every Pause whose window has come back, from now until the process stops.
+/// End every stop whose window has come back, from now until the process stops.
 ///
-/// A sweep rather than a timer per Pause, and that is what makes the reset
+/// A sweep rather than a timer per stop, and that is what makes the reset
 /// survive a restart: nothing holds a clock across the process, so a window that
 /// came back while the server was down is one the first sweep finds already due.
 ///
@@ -619,57 +629,41 @@ pub(crate) fn sweeping(state: &AppState) {
     });
 }
 
-/// One look over every Pause that is still waiting.
+/// One look over every stop that names a time its window comes back.
 ///
 /// Nothing is refused for and nothing is returned: this runs unattended with
 /// nobody watching, and what it has to say it says on the Timeline or in the log.
 pub(crate) async fn sweep(state: &AppState) {
-    let waiting = match store::waiting_pauses(&state.pool).await {
-        Ok(waiting) => waiting,
+    let resetting = match store::resetting_stops(&state.pool).await {
+        Ok(resetting) => resetting,
         Err(error) => {
-            tracing::error!(error = ?error, "listing the runs waiting on a usage limit failed");
+            tracing::error!(error = ?error, "listing the runs stopped on a usage limit failed");
             return;
         }
     };
 
     let now = OffsetDateTime::now_utc();
 
-    for pause in waiting {
-        // A Pause whose sentence carried no time this build could read is a wait
-        // the human ends, and there is nothing here for it.
-        let Some(resets_at) = pause.resets_at.as_deref() else {
-            continue;
-        };
-
-        let Ok(resets_at) = OffsetDateTime::parse(resets_at, &Rfc3339) else {
+    for stop in resetting {
+        let Ok(resets) = OffsetDateTime::parse(&stop.resets, &Rfc3339) else {
             tracing::error!(
-                conversation_id = pause.conversation_id,
-                event_id = pause.event_id,
-                resets_at,
-                "a Pause names a reset time nothing can read"
+                conversation_id = stop.conversation_id,
+                resets = stop.resets,
+                "a stop names a reset time nothing can read"
             );
             continue;
         };
 
-        if resets_at > now {
+        if resets > now {
             continue;
         }
 
-        if let Err(error) = resume(
+        driving_again(
             state,
-            pause.conversation_id,
-            pause.event_id,
-            store::By::Reset,
+            stop.conversation_id,
+            crate::resume::Resuming::Restarted,
         )
-        .await
-        {
-            tracing::error!(
-                error = ?error,
-                conversation_id = pause.conversation_id,
-                event_id = pause.event_id,
-                "a window came back and the run could not be started again",
-            );
-        }
+        .await;
     }
 }
 
@@ -707,7 +701,7 @@ mod tests {
     }
 
     /// A line that mentions limits is not a line that says one has been reached.
-    /// Verkstead's own sessions read this file, and a run that paused itself on
+    /// Verkstead's own sessions read this file, and a run that stopped itself on
     /// its own source would be the worst kind of false alarm.
     #[test]
     fn a_line_about_limits_is_not_a_line_saying_one_was_reached() {
@@ -717,7 +711,7 @@ mod tests {
             "reading whether the usage limit reached the account",
             "No limit was reached.",
         ] {
-            assert_eq!(exhausted(line), None, "{line:?} paused a run");
+            assert_eq!(exhausted(line), None, "{line:?} stopped a run");
         }
     }
 
@@ -743,7 +737,7 @@ mod tests {
             "# Usage limit reached",
             "> Usage limit reached, said the display",
         ] {
-            assert_eq!(exhausted(line), None, "{line:?} paused the run reading it");
+            assert_eq!(exhausted(line), None, "{line:?} stopped the run reading it");
         }
     }
 
@@ -826,10 +820,10 @@ mod tests {
         );
     }
 
-    /// A sentence with no time in it leaves the Pause with none, which is a wait
-    /// the human ends. A bare number is never read as an hour: the display writes
-    /// "3pm" or "15:00", and reading "40" as four in the afternoon would end a
-    /// wait on arithmetic.
+    /// A sentence with no time in it leaves the stop with no reset words, which
+    /// is a stop that says only that the account ran out. A bare number is never
+    /// read as an hour: the display writes "3pm" or "15:00", and reading "40" as
+    /// four in the afternoon would show a reset nobody said anything about.
     #[test]
     fn a_sentence_with_no_time_in_it_carries_none() {
         let now = OffsetDateTime::parse("2026-08-24T01:00:00Z", &Rfc3339).unwrap();

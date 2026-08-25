@@ -4,7 +4,7 @@
 //!
 //! Three small tables and one Timeline Event, which is the whole shape of this
 //! module. Everything else a human reads about wrap-up is already an Event — the
-//! pull request, the commits a fix session lands, the Notice of the halt where
+//! pull request, the commits a fix session lands, the Notice of the stop where
 //! it stops asking the machine. What is kept here is the bookkeeping underneath:
 //! facts that decide what Verkstead does next and that nobody would want a row
 //! on a Timeline for.
@@ -379,7 +379,7 @@ pub async fn record_addressed_comments(
 /// over again, in a session as fresh as the first.
 ///
 /// Only ever called for a batch nothing is left running about — the session is
-/// gone and the run has halted with a Notice saying so — so there is nothing
+/// gone and the run has stopped with a Notice saying so — so there is nothing
 /// racing this to dispatch about them in the meantime.
 pub async fn forget_addressed_comments(
     pool: &SqlitePool,
@@ -513,7 +513,7 @@ pub(crate) async fn forget_the_round(
 /// again from nothing.
 ///
 /// What Resume does. The human has read the Notice of what stopped and asked
-/// for another go, and a count left standing would be a watcher that halted all
+/// for another go, and a count left standing would be a watcher that stopped all
 /// over again on its next poll without dispatching anything.
 pub async fn forget_fix_attempts(pool: &SqlitePool, conversation_id: i64) -> Result<()> {
     sqlx::query("DELETE FROM check_fix_attempts WHERE conversation_id = ?")

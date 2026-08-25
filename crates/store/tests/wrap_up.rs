@@ -177,7 +177,7 @@ async fn what_a_check_has_already_been_given_survives_a_restart() {
 }
 
 /// What Resume does. The human has read the Notice of what stopped and asked
-/// for another go, and a count left standing would be a watcher that halted all
+/// for another go, and a count left standing would be a watcher that stopped all
 /// over again on its next poll without dispatching anything.
 #[tokio::test]
 async fn resuming_gives_every_check_its_attempts_back() {

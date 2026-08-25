@@ -180,8 +180,8 @@ async fn usable(
 ///
 /// Nothing here is refused for: by the time this runs the Response is stored and
 /// the store has recorded the pick. What a session that could not be picked up
-/// leaves behind is something to see in the log, and no more than that. A halt
-/// is written about a run that stopped — see [`crate::halts`] — and this is not
+/// leaves behind is something to see in the log, and no more than that. A stop
+/// is written about a run that stopped — see [`crate::stopping`] — and this is not
 /// one.
 pub(crate) async fn settle_a_proposal(
     state: &AppState,
@@ -252,7 +252,7 @@ pub(crate) async fn settle_a_proposal(
     if !write_the_artifact(state, conversation_id, picked).await {
         // A Conversation grilling with nothing grilling it, which is a thing to
         // see in the log: the pick is recorded, so the human's answer stands, and
-        // there is nothing here to halt over — no session ran and went wrong.
+        // there is nothing here to stop over — no session ran and went wrong.
         tracing::error!(
             conversation_id,
             ?picked,
@@ -499,8 +499,8 @@ pub(crate) async fn set_base_branch(
 /// would be an agent nobody could see or stop. It is also the one part of this
 /// that failing does not refuse — the branch is made, the Brief is frozen, and a
 /// session that would not start is logged, leaving a Conversation that is
-/// grilling with a Timeline that says so and no session on it. Not a halt
-/// either: the human is at the button they have just pressed, and what a halt is
+/// grilling with a Timeline that says so and no session on it. Not a stop
+/// either: the human is at the button they have just pressed, and what a stop is
 /// for is telling them about a run that stopped while nobody was watching. The
 /// sweep is what finds this one, a minute later — see [`crate::stalls`].
 ///
@@ -609,7 +609,8 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // will say so is a session that does not exist yet. So a registration stands
     // in for it across the launch, which is the slowest part of this: a sweep
     // that looked in between would find a Conversation grilling with nothing
-    // grilling it, and halt a press the human is still standing at. Held to the
+    // grilling it, and stop the run under a press the human is still standing
+    // at. Held to the
     // end of this rather than handed on — what drives a grilling from there is
     // its session — and what it leaves behind where the launch fails is a stall
     // for the next sweep to find. See [`crate::drivers`] and [`crate::stalls`].

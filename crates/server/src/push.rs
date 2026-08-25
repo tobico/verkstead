@@ -1,7 +1,7 @@
 //! Telling the devices what happened while nobody was watching.
 //!
 //! Two kinds of thing are worth a phone lighting up. **Needs-you**: a Question
-//! Set has arrived, driving has halted on something Verkstead decided to stop
+//! Set has arrived, driving has stopped on something Verkstead decided to stop
 //! for, or the account the run was spending ran out of window. And
 //! **milestones**: the work is on a pull request, a roadmap has moved on to its
 //! next stage or run out of stages, or a Conversation has reached Done. One push
@@ -21,14 +21,14 @@
 //! the one place Verkstead reaches the public internet, and none of it is
 //! reliable enough to make the record depend on: a service that cannot be
 //! reached costs a notification, and never the Set, the pull request or the
-//! halt it was about.
+//! stop it was about.
 //!
 //! No push writes anything down. Each is sent from the one place that already
 //! knows the thing happened, and the record of it is whatever that place wrote.
 //!
-//! A halt's push is what a stop is worth: the run has stopped and will not start again
+//! A stop's push is what a stop is worth: the run has stopped and will not start again
 //! until the human presses Resume, so a silent stop is one they find days late.
-//! Only the halts Verkstead decided on are worth a phone, though — a stop
+//! Only the stops Verkstead decided on are worth a phone, though — a stop
 //! nobody chose is one a restart picks up unasked, and telling somebody about a
 //! run that is about to carry on by itself is a notification that asks for
 //! nothing. The Notice on the Timeline is what says it in full either way; this
@@ -150,13 +150,14 @@ pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
 pub(crate) enum News {
     /// Driving stopped on something Verkstead decided to stop for, and the
     /// Conversation stays stopped until Resume is pressed — see
-    /// [`crate::halts`]. `stopped` is what ought to have been happening, with
+    /// [`crate::stopping`]. `stopped` is what ought to have been happening, with
     /// its first letter up: the same words the Notice opens with, so that the
     /// phone and the Timeline say the same thing about the same stop.
-    Halted { stopped: String },
+    Stopped { stopped: String },
 
-    /// The account a run was spending ran out of window, so the run is waiting
-    /// on the human or on the clock — see [`crate::limits`].
+    /// The account a run was spending ran out of window, which is a stop like
+    /// the one above it, said in the words that decide whether the human gets
+    /// up for it — see [`crate::limits`].
     OutOfWindow {
         profile: String,
         resets_at: Option<String>,
@@ -193,7 +194,7 @@ impl News {
             // The step rather than how it went wrong: which part of the run
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
-            News::Halted { stopped } => format!("{stopped} stopped on {branch}"),
+            News::Stopped { stopped } => format!("{stopped} stopped on {branch}"),
             // The account and when it comes back, because those are the two
             // things that decide whether the human does anything about it: an
             // account back in twenty minutes is one to leave alone.
@@ -220,8 +221,8 @@ impl News {
     /// What the log calls it, where a push could not be sent.
     fn about(&self) -> &'static str {
         match self {
-            News::Halted { .. } => "the halt",
-            News::OutOfWindow { .. } => "the Pause",
+            News::Stopped { .. } => "the stop",
+            News::OutOfWindow { .. } => "the stop for a window",
             News::OnAPullRequest { .. } => "the pull request",
             News::StageStarted { .. } => "the stage that started",
             News::RoadmapComplete { .. } => "the roadmap that is finished",
@@ -234,7 +235,7 @@ impl News {
 /// without making the thing that happened wait for it.
 ///
 /// Returns as soon as the work is handed to the runtime, exactly as a Set's push
-/// does: the caller's job is to put the halt, the pull request or the
+/// does: the caller's job is to put the stop, the pull request or the
 /// Pause on the record, and none of this may delay that or fail it. A push
 /// service that cannot be reached costs a notification and nothing else.
 pub(crate) fn told(pool: &SqlitePool, conversation_id: i64, news: News) {
@@ -473,7 +474,7 @@ mod tests {
     /// Every piece of news, as one Conversation would produce them.
     fn all() -> Vec<News> {
         vec![
-            News::Halted {
+            News::Stopped {
                 stopped: "Implementing the work".to_owned(),
             },
             News::OutOfWindow {
