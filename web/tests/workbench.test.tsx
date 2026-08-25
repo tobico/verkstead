@@ -42,6 +42,8 @@ import type {
   Turn,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
+// The element defaults, which is where the page's own line height is set.
+import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import {
   CLAMPED_LINES,
@@ -7078,7 +7080,7 @@ describe("a clamped document", () => {
 
     // And that line height is the body's, rather than a number this test made
     // up: a page set looser or tighter would clamp at a different height.
-    expect(stylesheet).toContain(`font: 16px/${LINE_HEIGHT} system-ui`);
+    expect(base).toContain(`font: 16px/${LINE_HEIGHT} system-ui`);
   });
 
   it("fades the cut into the card, and only where there is a cut", () => {

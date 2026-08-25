@@ -12,6 +12,8 @@ import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 
 import stylesheet from "../src/main.css?raw";
+// The two schemes' palettes, which is where the shadow itself is named.
+import tokens from "../src/styles/base.css?raw";
 import { Menu } from "../src/Menu";
 
 /// A menu with one row in it, which is enough of one to press.
@@ -185,7 +187,7 @@ describe("what every menu is drawn with", () => {
   /// In both schemes, because the light-mode shadow is invisible on dark paper
   /// and the dark-mode one would be a bruise on light.
   it("defines that shadow for either paper", () => {
-    expect(stylesheet.match(/--lift:/g)).toHaveLength(2);
+    expect(tokens.match(/--lift:/g)).toHaveLength(2);
   });
 
   /// The point of the unification: no menu carries a shadow of its own to drift

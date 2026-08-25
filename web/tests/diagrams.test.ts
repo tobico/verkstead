@@ -9,10 +9,12 @@ import { waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { drawDiagrams } from "../src/set/diagrams";
-// The stylesheet as text: the two rules asserted at the bottom are about a drawn
-// diagram, which is an SVG mermaid wrote and no component renders, so there is
-// nothing to query them off.
-import stylesheet from "../src/main.css?raw";
+// Two sheets as text. The palette, because what the theme is spent out of is
+// what the page defines; and the markdown, because the two rules asserted at the
+// bottom are about a drawn diagram — an SVG mermaid wrote and no component
+// renders, so there is nothing to query them off.
+import base from "../src/styles/base.css?raw";
+import markdown from "../src/styles/markdown.css?raw";
 
 /// A page carrying the source blocks the markdown renderer leaves behind —
 /// escaped, exactly as the server wrote them.
@@ -316,8 +318,8 @@ describe("the colours a Diagram is drawn in", () => {
     // is on no palette at all ends up on the page.
     for (const property of ink.asked()) {
       expect(
-        stylesheet.includes(`${property}:`),
-        `${property} should be a variable the stylesheet defines`,
+        base.includes(`${property}:`),
+        `${property} should be a variable the palette defines`,
       ).toBe(true);
     }
   });
@@ -329,7 +331,7 @@ describe("the colours a Diagram is drawn in", () => {
     // that left one of them undefined would draw that mark as nothing at all.
     for (const property of ink.asked()) {
       expect(
-        stylesheet.split(`${property}:`).length - 1,
+        base.split(`${property}:`).length - 1,
         `${property} should be defined in both schemes`,
       ).toBeGreaterThanOrEqual(2);
     }
@@ -341,12 +343,12 @@ describe("a drawn Diagram on the page", () => {
   /// drawn diagram has to be read out of: the SVG is mermaid's and there is no
   /// component to query it off.
   function block(selector: string): string {
-    const opened = stylesheet.indexOf(`${selector} {`);
+    const opened = markdown.indexOf(`${selector} {`);
     expect(opened, `the stylesheet should have a \`${selector}\` rule`).not.toBe(
       -1,
     );
 
-    return stylesheet.slice(opened, stylesheet.indexOf("}", opened));
+    return markdown.slice(opened, markdown.indexOf("}", opened));
   }
 
   it("fits the width it is given", () => {
@@ -365,8 +367,8 @@ describe("a drawn Diagram on the page", () => {
     // A mermaid diagram can ask for animated edges, and the animation arrives
     // inside the SVG in a stylesheet of mermaid's own — so this is the one place
     // in the file where turning something off has to out-rank an author.
-    const reduced = stylesheet.slice(
-      stylesheet.indexOf("@media (prefers-reduced-motion: reduce)"),
+    const reduced = markdown.slice(
+      markdown.indexOf("@media (prefers-reduced-motion: reduce)"),
     );
 
     expect(reduced).toContain(".diagram");

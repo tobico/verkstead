@@ -13,7 +13,7 @@ shrinks each step until the last task deletes it.
 
 ## Tasks
 
-- [ ] 01: Carve the global sheets — [details](01-carve-global-sheets.md)
+- [x] 01: Carve the global sheets — [details](01-carve-global-sheets.md)
 - [ ] 02: Rename the renderer's own classes — [details](02-rename-renderer-classes.md)
 - [ ] 03: Status components — [details](03-status-components.md)
 - [ ] 04: Pane chrome component — [details](04-pane-chrome-component.md)
