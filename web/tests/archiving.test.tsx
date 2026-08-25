@@ -10,6 +10,8 @@ import { fireEvent, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Archived } from "../src/api/types";
+// The one menu, which the standing badge is the trigger of.
+import menu from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
@@ -40,7 +42,7 @@ function press(page: ParentNode, text: string) {
 /// Open the standing menu — the badge is its title — and choose the one thing
 /// in it, which is the offer to close the Set unanswered.
 function reachForArchive(page: ParentNode) {
-  const trigger = page.querySelector(".standing > .menu-trigger");
+  const trigger = page.querySelector(`.standing > .${menu.trigger}`);
   expect(trigger, "expected the badge to open the standing menu").toBeTruthy();
   fireEvent.click(trigger!);
   press(page, "Archive unanswered");
@@ -62,7 +64,7 @@ describe("the offer to close a Set unanswered", () => {
     // The badge is the menu's title, and the offer is nowhere on the page
     // until the menu is asked for: archiving is almost never the right thing
     // to do to a Set.
-    const trigger = page.querySelector(".standing > .menu-trigger")!;
+    const trigger = page.querySelector(`.standing > .${menu.trigger}`)!;
     expect(trigger.querySelector(".liveness")!.textContent).toBe(
       "agent waiting",
     );
@@ -79,7 +81,7 @@ describe("the offer to close a Set unanswered", () => {
     // And it is the one menu the rest of the UI drops, rather than a second
     // one built here — which is what says it takes Escape, takes a press away
     // from it and stands off the page the way every other menu does.
-    expect(page.querySelector(".standing > .menu-drop button.archive")).toBe(
+    expect(page.querySelector(`.standing > .${menu.drop} button.archive`)).toBe(
       page.querySelector("button.archive"),
     );
   });

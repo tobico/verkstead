@@ -1,0 +1,25 @@
+/* Notifications on this device: the switch, and the line for what a switch cannot
+   say. Quiet like the Set's own standing line — it is read once, when the answer
+   is not the expected one, and then ignored for weeks.
+
+   The control has no box of its own. The switch belongs on the heading's line and
+   the line belongs under both, so its children are laid out by the header row
+   instead of by it — the same dissolving a Question's rendered markdown does. */
+
+.notifications {
+  display: contents;
+}
+
+.state {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Nothing to say, so nothing in the layout — but the paragraph stays in the
+   document, because a screen reader announces into a live region it was already
+   watching and not into one that has just appeared. */
+.state:empty {
+  display: none;
+}

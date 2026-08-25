@@ -15,6 +15,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
+// The wrap control, which is what the floating header makes room for.
+import toggle from "../src/Switch.module.css";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -564,20 +566,20 @@ describe("the floating header", () => {
     const header = headerOf(page);
     headingSpy().cross({ preface: false });
 
-    expect(header.querySelector(".switch")).toBeNull();
+    expect(header.querySelector(`.${toggle.switch}`)).toBeNull();
 
     spy().cross({ preface: true, diff: true });
     expect(
-      header.querySelector(".switch"),
+      header.querySelector(`.${toggle.switch}`),
       "the switch follows the section, so it stays put from the Diff's heading " +
         "down through its files",
     ).toBeTruthy();
 
     spy().cross({ "diff-1": true, "diff-2": true });
-    expect(header.querySelector(".switch")).toBeTruthy();
+    expect(header.querySelector(`.${toggle.switch}`)).toBeTruthy();
 
     spy().cross({ questions: true, q1: true });
-    expect(header.querySelector(".switch")).toBeNull();
+    expect(header.querySelector(`.${toggle.switch}`)).toBeNull();
   });
 
   it("is two views of the one setting, with the switch beside the Diff", async () => {
@@ -586,10 +588,10 @@ describe("the floating header", () => {
     spy().cross({ preface: true, diff: true });
 
     const beside = page.querySelector<HTMLInputElement>(
-      "section.diff .switch input",
+      `section.diff .${toggle.switch} input`,
     )!;
     const floating = page.querySelector<HTMLInputElement>(
-      ".page-header .switch input",
+      `.page-header .${toggle.switch} input`,
     )!;
 
     floating.click();
@@ -605,6 +607,6 @@ describe("the floating header", () => {
     const page = await reading(BARE);
     headingSpy().cross({ questions: false });
 
-    expect(headerOf(page).querySelector(".switch")).toBeNull();
+    expect(headerOf(page).querySelector(`.${toggle.switch}`)).toBeNull();
   });
 });

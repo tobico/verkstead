@@ -1,0 +1,192 @@
+/* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
+   chrome is here and only the paint is each menu's own: they hang the same way,
+   they are dismissed the same way, and they stand off the page by the same
+   shadow, which is what says a menu is in front of what it covers.
+
+   What is *not* the chrome is at the foot of this file: the four callers each
+   paint their own trigger and size their own drop, and those rules are written
+   against a class of the caller's and a class of this component's at once. They
+   are read through `:global` here for as long as the caller half is still in
+   `main.css`, and each of them goes to its caller's module as that caller
+   migrates. */
+
+/* The anchor everything below hangs from. */
+.menu {
+  position: relative;
+}
+
+/* The trigger keeps almost nothing of its own: what one of these looks like is
+   the caller's, and they look nothing like each other — a full-width button, a
+   pill, an ellipsis. Only the two things every one of them is. */
+.trigger {
+  font: inherit;
+  cursor: pointer;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* What a press away from the open menu lands on, so that it lands on nothing
+   else: a stray press that opened a conversation, or answered a question, is
+   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
+   is not in front of the page the way a dialog is, it is only on top of it. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+}
+
+/* The menu itself, hung under the trigger's far end. Over the page rather than
+   in the flow of it, so opening one does not move what it was opened from. */
+.drop {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 3;
+  padding: 0.3rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  box-shadow: var(--lift);
+}
+
+/* Every row of every menu: drawn as the text it is rather than as a control,
+   because a menu of buttons that looked like buttons would read as a form to
+   fill in. */
+.drop button,
+.drop a[role="menuitem"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+  color: inherit;
+  text-decoration: none;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.drop button:hover,
+.drop button:focus-visible,
+.drop a[role="menuitem"]:hover,
+.drop a[role="menuitem"]:focus-visible {
+  background: var(--paper);
+}
+
+.drop button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* A run of rows kept apart from the rest by a rule, where pressing one of them
+   does a different kind of thing than pressing the others. The two classes are
+   the sidebar's own — it is the caller that writes them on its rows — so they
+   go with `Conversations` when it moves. */
+.drop :global(.menu-group) {
+  margin-top: 0.3rem;
+  padding-top: 0.3rem;
+  border-top: 1px solid var(--edge);
+}
+
+.drop :global(.menu-heading) {
+  margin: 0;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The ⋯ trigger, of which there are two: what can be done to the Conversation
+   being read, and what there is beyond the conversations at all. Both sit at the
+   right edge of a pane's header beside the thing that header names, and a mark
+   is what fits there — so they are painted here, once, and the pair of them
+   cannot drift apart. */
+:global(.workbench-actions) > .trigger,
+:global(.conversation-actions) > .trigger {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+:global(.workbench-actions) > .trigger[aria-expanded="true"],
+:global(.conversation-actions) > .trigger[aria-expanded="true"] {
+  color: var(--ink);
+}
+
+/* Wider than the one word in it, so it reads as a menu with room for the next
+   entry rather than as a label that happened to appear under the mark. */
+:global(.workbench-actions) > .drop {
+  min-width: 9rem;
+}
+
+/* What can be done to the conversation as a whole: room under each action for
+   the sentence saying what it does, which is more than a row of a menu holds —
+   so this one is padded as a card rather than as a list. */
+:global(.conversation-actions) > .drop {
+  width: 17rem;
+  padding: 0.75rem;
+}
+
+/* Starting a conversation: the width of the pane, because it is the pane's one
+   action and the menu comes down the width of it. The mark is pushed to the far
+   end, where a dropdown's is. */
+:global(.new-conversation) > .trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+}
+
+/* As wide as the button it came down from, and over the list rather than in the
+   flow above it: opening it does not push the conversations down, which is the
+   whole of what the notices under the old box were doing. */
+:global(.new-conversation) > .drop {
+  left: 0;
+}
+
+/* How a waiting Set stands, at the far end of the provenance line: the badge is
+   the title of a small menu, and the way to close the Set if no agent ever comes
+   back for it is inside.
+
+   The badge as a pill, with the mark that says it opens: quiet, because waiting
+   is the ordinary state — the outline is only what says this one is pressable,
+   where the words around it are not. The word that colours it is the Liveness
+   itself, exactly as on a list row. */
+:global(.standing) > .trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+}
+
+/* Waiting on the archive rather than refusing the press, which is the one
+   disabled trigger here that is not a *no*. */
+:global(.standing) > .trigger:disabled {
+  cursor: progress;
+}
+
+/* One row, so it is as wide as its own words rather than as wide as anything. */
+:global(.standing) > .drop {
+  min-width: max-content;
+  padding: 0.25rem;
+}

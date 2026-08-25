@@ -4,6 +4,7 @@ import { Route, Router } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { onCleanup, onMount, type JSX } from "solid-js";
 
+import styles from "./App.module.css";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SetPage } from "./set/SetPage";
@@ -62,9 +63,11 @@ export function App(): JSX.Element {
   );
 }
 
-/// What every page sits in. The column the stylesheet sets its width on.
+/// What every page sits in. The column the stylesheets set its width on: the
+/// measure every page but one is read at is `main`'s own in `styles/base.css`,
+/// and the workbench's exception to it is this shell's, in `App.module.css`.
 function Shell(props: { children?: JSX.Element }): JSX.Element {
-  return <main>{props.children}</main>;
+  return <main class={styles.shell}>{props.children}</main>;
 }
 
 function NoSuchPage(): JSX.Element {

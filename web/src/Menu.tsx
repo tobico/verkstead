@@ -22,11 +22,13 @@
 import { Show, createSignal, createUniqueId, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
 
+import styles from "./Menu.module.css";
+
 /// A menu, and the button that drops it.
 export function Menu(props: {
-  /// Which menu this is, put on the anchor so the stylesheet can paint this
-  /// one's trigger and size its drop. The shared chrome is `.menu`,
-  /// `.menu-trigger`, `.menu-backdrop` and `.menu-drop` underneath it.
+  /// Which menu this is, put on the anchor so the caller can paint this one's
+  /// trigger and size its drop. The shared chrome is `Menu.module.css` — the
+  /// anchor, the trigger, the backdrop and the drop underneath it.
   class: string;
   /// What the trigger reads as. Whatever the caller would have put inside its
   /// own button — a word, a badge, a mark.
@@ -86,10 +88,10 @@ export function Menu(props: {
   onCleanup(() => document.removeEventListener("keydown", escape));
 
   return (
-    <div class={`menu ${props.class}`}>
+    <div class={`${styles.menu} ${props.class}`}>
       <button
         type="button"
-        class="menu-trigger"
+        class={styles.trigger}
         ref={trigger}
         aria-haspopup="menu"
         aria-expanded={open() ? "true" : "false"}
@@ -106,11 +108,11 @@ export function Menu(props: {
 
       <Show when={open()}>
         <div
-          class="menu-backdrop"
+          class={styles.backdrop}
           aria-hidden="true"
           onClick={() => setOpen(false)}
         />
-        <div class="menu-drop" id={id} role="menu" aria-label={props.name}>
+        <div class={styles.drop} id={id} role="menu" aria-label={props.name}>
           {props.children()}
         </div>
       </Show>

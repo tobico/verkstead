@@ -1,0 +1,16 @@
+/* The column every page sits in — see the `Shell` in `App.tsx`.
+
+   What that column measures is `main`'s own, in `styles/base.css`: it is what a
+   `main` element looks like before any class has touched it, and every page but
+   one is read at it. This is the exception, and the exception is the shell's to
+   make rather than the page's, because the shell is the element being widened.
+
+   The workbench is that one page: three panes side by side have nothing to do
+   with the measure, so they get the window instead. `.workbench` is the pane
+   grid's own class and is read through `:global` for as long as it is still in
+   `main.css`; the rule stays here when it moves, because what it changes is
+   this element. */
+.shell:has(:global(.workbench)) {
+  max-width: none;
+  padding: 0;
+}

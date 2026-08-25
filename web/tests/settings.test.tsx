@@ -36,6 +36,7 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
+import notifications from "../src/push/Notifications.module.css";
 import { Credentials } from "../src/settings/Credentials";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import { json, serving, whenever } from "./serving";
@@ -627,7 +628,9 @@ describe("the settings page", () => {
 
     await waitFor(() => screen.getByText(TOLD.github_token!.last_four));
 
-    expect(container.querySelector(".page-head .notifications")).not.toBeNull();
+    expect(
+      container.querySelector(`.page-head .${notifications.notifications}`),
+    ).not.toBeNull();
   });
 });
 

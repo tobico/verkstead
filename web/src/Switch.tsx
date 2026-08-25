@@ -11,6 +11,8 @@
 
 import type { JSX } from "solid-js";
 
+import styles from "./Switch.module.css";
+
 /// A labelled switch.
 ///
 /// `on` and `disabled` are read from the props, so the caller holds the state
@@ -30,8 +32,8 @@ export function Switch(props: {
   flip: (on: boolean) => void;
 }): JSX.Element {
   return (
-    <label class="switch">
-      <span class="switch-label">{props.label}</span>
+    <label class={styles.switch}>
+      <span>{props.label}</span>
       <input
         type="checkbox"
         role="switch"

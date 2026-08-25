@@ -10,6 +10,8 @@ import { waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SetView } from "../src/api/types";
+// The wrap control, which is the one on/off switch this page draws twice.
+import toggle from "../src/Switch.module.css";
 import { mount, reading, texts } from "./reading";
 import { json, readable, reads, serving, whenever } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -138,7 +140,7 @@ describe("the attached Diff", () => {
         "is headed for the box it holds, this Set having no Postscript",
     ).toEqual(["Preface", "Questions", "Comment"]);
     expect(
-      page.querySelector(".switch"),
+      page.querySelector(`.${toggle.switch}`),
       "and nowhere for word wrap to belong: it governs a Diff, and there is none",
     ).toBeNull();
   });
@@ -148,7 +150,7 @@ describe("word wrap", () => {
   /// The switch beside the Diff's heading.
   function wrapSwitch(page: ParentNode): HTMLInputElement {
     const found = page.querySelector<HTMLInputElement>(
-      "section.diff .switch input",
+      `section.diff .${toggle.switch} input`,
     );
     expect(
       found,

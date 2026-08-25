@@ -42,6 +42,8 @@ import type {
   Turn,
 } from "../src/api/types";
 import stylesheet from "../src/main.css?raw";
+// The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
+import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
@@ -186,8 +188,8 @@ function frame(container: ParentNode): HTMLElement {
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, ".conversation-actions > .menu-trigger"));
-  return drawn(container, ".conversation-actions > .menu-drop");
+  fireEvent.click(await drawn(container, `.conversation-actions > .${dropdown.trigger}`));
+  return drawn(container, `.conversation-actions > .${dropdown.drop}`);
 }
 
 /// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
@@ -195,8 +197,8 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
 async function openWorkbenchActions(
   container: ParentNode,
 ): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, ".workbench-actions > .menu-trigger"));
-  return drawn(container, ".workbench-actions > .menu-drop");
+  fireEvent.click(await drawn(container, `.workbench-actions > .${dropdown.trigger}`));
+  return drawn(container, `.workbench-actions > .${dropdown.drop}`);
 }
 
 /// Drop the new-conversation menu, which is where both ways of starting one
@@ -204,8 +206,8 @@ async function openWorkbenchActions(
 async function openNewConversation(
   container: ParentNode,
 ): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, ".new-conversation > .menu-trigger"));
-  return drawn(container, ".new-conversation > .menu-drop");
+  fireEvent.click(await drawn(container, `.new-conversation > .${dropdown.trigger}`));
+  return drawn(container, `.new-conversation > .${dropdown.drop}`);
 }
 
 /// The repos in that menu, in the order they are offered — waited for, because
@@ -372,7 +374,7 @@ describe("the workbench", () => {
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
     expect(
-      container.querySelector(".workbench-actions > .menu-drop"),
+      container.querySelector(`.workbench-actions > .${dropdown.drop}`),
     ).toBeNull();
     expect(screen.queryByText("Settings")).toBeNull();
     // And the link that used to sit under the conversations is gone with it.
@@ -902,9 +904,9 @@ describe("the new conversation menu", () => {
   it("keeps the repos out of the sidebar until the button is pressed", async () => {
     theWorkbench();
     const { container } = mount();
-    await drawn(container, ".new-conversation > .menu-trigger");
+    await drawn(container, `.new-conversation > .${dropdown.trigger}`);
 
-    expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull();
+    expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull();
   });
 
   it("closes once a repo has been chosen", async () => {
@@ -915,7 +917,7 @@ describe("the new conversation menu", () => {
     fireEvent.click((await repoRows(container))[0]!);
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
+      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
     );
   });
 
@@ -929,10 +931,10 @@ describe("the new conversation menu", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
+      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
     );
     expect(document.activeElement).toBe(
-      container.querySelector(".new-conversation > .menu-trigger"),
+      container.querySelector(`.new-conversation > .${dropdown.trigger}`),
     );
   });
 
@@ -943,10 +945,10 @@ describe("the new conversation menu", () => {
     const { container } = mount();
     await openNewConversation(container);
 
-    fireEvent.click(await drawn(container, ".new-conversation > .menu-backdrop"));
+    fireEvent.click(await drawn(container, `.new-conversation > .${dropdown.backdrop}`));
 
     await waitFor(() =>
-      expect(container.querySelector(".new-conversation > .menu-drop")).toBeNull(),
+      expect(container.querySelector(`.new-conversation > .${dropdown.drop}`)).toBeNull(),
     );
   });
 
@@ -978,7 +980,7 @@ describe("the new conversation menu", () => {
 
     fireEvent.click((await repoRows(container))[0]!);
 
-    const said = await drawn(container, `.new-conversation > .menu-drop .${notices.error}`);
+    const said = await drawn(container, `.new-conversation > .${dropdown.drop} .${notices.error}`);
     expect(said.textContent).toContain("down");
   });
 });
@@ -4096,7 +4098,7 @@ describe("aborting a conversation", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await drawn(container, ".conversation-actions > .menu-trigger");
+    await drawn(container, `.conversation-actions > .${dropdown.trigger}`);
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.

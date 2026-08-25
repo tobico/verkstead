@@ -1,0 +1,53 @@
+/* The one modal in the UI, which is one component — see `Modal.tsx`. A native
+   `dialog` opened with `showModal`, so the top layer, the backdrop, Escape and
+   the focus are the platform's; what is here is where the card sits and what it
+   is painted with.
+
+   The dialog is the frame and carries no padding of its own. A press on the
+   backdrop is reported as a press on the dialog, so padding there would make a
+   press on the card's own margin read as a press away from the card — which is
+   why the card underneath is what has the padding. */
+.modal {
+  width: min(28rem, calc(100% - 2rem));
+  padding: 0;
+  /* Rising from the bottom edge, which is where a thumb is. */
+  margin: auto auto 1rem;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.modal::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+/* Drawn as a card of the page is, because that is what it is: the same paper,
+   the same edge, a rounder corner for being the one thing in front. It scrolls
+   rather than the page behind it, and it stops short of the window so that what
+   is under it is still visibly there. */
+.card {
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.8rem;
+}
+
+/* Wider than a phone: the card sits in the middle rather than rising from the
+   bottom edge, where a thumb would have put it. */
+@media (min-width: 30rem) {
+  .modal {
+    margin: auto;
+  }
+}
+
+/* The two confirm sheets — the warning before a Response goes out with questions
+   left open, and the one before a Set is archived — open on their question
+   rather than on a heading, so the first paragraph of the card is what a title
+   would have been. `.confirm` is the Set page's own class and is read through
+   `:global` until that page moves, when this rule goes with it. */
+:global(.confirm) .card > p:first-child {
+  margin-top: 0;
+  font-weight: 600;
+}

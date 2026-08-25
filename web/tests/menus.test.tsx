@@ -11,10 +11,13 @@
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
 
-import stylesheet from "../src/main.css?raw";
+import { Menu } from "../src/Menu";
+// The one menu, both ways: the hashed names to query the page by, and the
+// source to read the rules off, jsdom laying nothing out to read them from.
+import menu from "../src/Menu.module.css";
+import stylesheet from "../src/Menu.module.css?raw";
 // The two schemes' palettes, which is where the shadow itself is named.
 import tokens from "../src/styles/base.css?raw";
-import { Menu } from "../src/Menu";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -41,12 +44,12 @@ function mount(): { container: HTMLElement; opened: () => number } {
 
 /// The trigger, which is the only part of a closed menu on the page.
 function trigger(container: ParentNode): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+  return container.querySelector<HTMLButtonElement>(`.${menu.trigger}`)!;
 }
 
 /// What it drops, or nothing where it is closed.
 function drop(container: ParentNode): HTMLElement | null {
-  return container.querySelector<HTMLElement>(".menu-drop");
+  return container.querySelector<HTMLElement>(`.${menu.drop}`);
 }
 
 describe("a dropdown menu", () => {
@@ -104,7 +107,7 @@ describe("a dropdown menu", () => {
     const { container } = mount();
     fireEvent.click(trigger(container));
 
-    fireEvent.click(container.querySelector(".menu-backdrop")!);
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
 
     await waitFor(() => expect(drop(container)).toBeNull());
   });
@@ -161,7 +164,8 @@ describe("a dropdown menu", () => {
 describe("the ⋯ at the head of a pane", () => {
   it("is painted once for the two places there is one", () => {
     expect(stylesheet).toContain(
-      ".workbench-actions > .menu-trigger,\n.conversation-actions > .menu-trigger {",
+      ":global(.workbench-actions) > .trigger,\n" +
+        ":global(.conversation-actions) > .trigger {",
     );
   });
 });
@@ -181,7 +185,7 @@ function block(selector: string): string {
 /// be plain which of the two is in front.
 describe("what every menu is drawn with", () => {
   it("stands off the page by the one shared shadow", () => {
-    expect(block(".menu-drop")).toContain("box-shadow: var(--lift);");
+    expect(block(".drop")).toContain("box-shadow: var(--lift);");
   });
 
   /// In both schemes, because the light-mode shadow is invisible on dark paper
@@ -193,13 +197,13 @@ describe("what every menu is drawn with", () => {
   /// The point of the unification: no menu carries a shadow of its own to drift
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
-    for (const menu of [
-      ".new-conversation > .menu-drop",
-      ".workbench-actions > .menu-drop",
-      ".conversation-actions > .menu-drop",
-      ".standing > .menu-drop",
+    for (const caller of [
+      ":global(.new-conversation) > .drop",
+      ":global(.workbench-actions) > .drop",
+      ":global(.conversation-actions) > .drop",
+      ":global(.standing) > .drop",
     ]) {
-      expect(block(menu)).not.toContain("box-shadow");
+      expect(block(caller)).not.toContain("box-shadow");
     }
   });
 });

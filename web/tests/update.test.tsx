@@ -17,7 +17,9 @@ import type {
   SettingsView,
   UpdateNotice,
 } from "../src/api/types";
+import notifications from "../src/push/Notifications.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
+import styles from "../src/update/UpdateNotice.module.css";
 import { mount } from "./listing";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -44,7 +46,7 @@ const beneath = () => [
   whenever("/api/ui/repos", json(REPOS)),
 ];
 
-const banner = () => document.querySelector(".update-notice");
+const banner = () => document.querySelector(`.${styles.notice}`);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -94,7 +96,7 @@ describe("the Update Notice", () => {
           !found.closest(".credentials") &&
           !found.closest(".profiles") &&
           !found.closest(".repos") &&
-          !found.closest(".notifications"),
+          !found.closest(`.${notifications.notifications}`),
       ),
     ).toHaveLength(0);
   });

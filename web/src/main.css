@@ -63,66 +63,6 @@
   margin: 0;
 }
 
-/* Notifications on this device: the switch, and the line for what a switch cannot
-   say. Quiet like the Set's own standing line — it is read once, when the answer
-   is not the expected one, and then ignored for weeks.
-
-   The control has no box of its own. The switch belongs on the heading's line and
-   the line belongs under both, so its children are laid out by the header row
-   instead of by it — the same dissolving a Question's rendered markdown does. */
-
-.notifications {
-  display: contents;
-}
-
-.notifications .state {
-  flex-basis: 100%;
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* Nothing to say, so nothing in the layout — but the paragraph stays in the
-   document, because a screen reader announces into a live region it was already
-   watching and not into one that has just appeared. */
-.notifications .state:empty {
-  display: none;
-}
-
-/* The Update Notice: one line about the server, above the list it is not part
-   of. It takes the page's column and no more, so the rows below start where
-   they always did and nothing is pushed out of the measure.
-
-   Drawn as the cards below are — the same paper, edge and radius — because it
-   sits in their column and a box of its own design would read as something that
-   had gone wrong rather than as something to do later. The accent down the
-   leading edge is the whole of what tells it from a row: enough to be noticed
-   on the way past, and not so much that a list of things actually waiting on
-   the human is competing with it.
-
-   The two halves wrap onto their own lines on a narrow window rather than
-   squeezing the sentence: on a phone this is a line of prose and a link under
-   it. */
-
-.update-notice {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.35rem 1rem;
-  margin-bottom: 1rem;
-  padding: 0.7rem 0.9rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-inline-start: 3px solid var(--accent);
-  border-radius: 0.6rem;
-  font-size: 0.9rem;
-}
-
-.update-notice a {
-  text-decoration: none;
-  white-space: nowrap;
-}
-
 /* The list pages — the Repos and the Agent Profiles — are drawn as the same
    card, because they are read the same way: a name, and a line of what the row
    is settled against. Only the last thing on the meta line differs. */
@@ -594,13 +534,6 @@
    have to be rebuilt — and its scroll position found again — every time the
    human walked back into it. */
 
-/* The one page that wants the window rather than the reading column: three
-   panes side by side have nothing to do with the measure. */
-main:has(.workbench) {
-  max-width: none;
-  padding: 0;
-}
-
 .workbench {
   display: grid;
 }
@@ -746,200 +679,12 @@ main:has(.workbench) {
   cursor: pointer;
 }
 
-/* The one modal in the UI, which is one component — see `Modal.tsx`. A native
-   `dialog` opened with `showModal`, so the top layer, the backdrop, Escape and
-   the focus are the platform's; what is here is where the card sits and what it
-   is painted with.
-
-   The dialog is the frame and carries no padding of its own. A press on the
-   backdrop is reported as a press on the dialog, so padding there would make a
-   press on the card's own margin read as a press away from the card — which is
-   why the card underneath is what has the padding. */
-.modal {
-  width: min(28rem, calc(100% - 2rem));
-  padding: 0;
-  /* Rising from the bottom edge, which is where a thumb is. */
-  margin: auto auto 1rem;
-  color: inherit;
-  background: none;
-  border: 0;
-}
-
-.modal::backdrop {
-  background: rgb(0 0 0 / 45%);
-}
-
-/* Drawn as a card of the page is, because that is what it is: the same paper,
-   the same edge, a rounder corner for being the one thing in front. It scrolls
-   rather than the page behind it, and it stops short of the window so that what
-   is under it is still visibly there. */
-.modal-card {
-  max-height: 80vh;
-  overflow-y: auto;
-  padding: 1.25rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.8rem;
-}
-
-/* Wider than a phone: the card sits in the middle rather than rising from the
-   bottom edge, where a thumb would have put it. */
-@media (min-width: 30rem) {
-  .modal {
-    margin: auto;
-  }
-}
-
-/* Every dropdown menu in the UI, which is one component — see `Menu.tsx`. The
-   chrome is here and only the paint is each menu's own: they hang the same way,
-   they are dismissed the same way, and they stand off the page by the same
-   shadow, which is what says a menu is in front of what it covers.
-
-   The anchor everything below hangs from. */
-.menu {
-  position: relative;
-}
-
-/* The trigger keeps almost nothing of its own: what one of these looks like is
-   the caller's, and they look nothing like each other — a full-width button, a
-   pill, an ellipsis. Only the two things every one of them is. */
-.menu-trigger {
-  font: inherit;
-  cursor: pointer;
-}
-
-.menu-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-/* What a press away from the open menu lands on, so that it lands on nothing
-   else: a stray press that opened a conversation, or answered a question, is
-   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
-   is not in front of the page the way a dialog is, it is only on top of it. */
-.menu-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-}
-
-/* The menu itself, hung under the trigger's far end. Over the page rather than
-   in the flow of it, so opening one does not move what it was opened from. */
-.menu-drop {
-  position: absolute;
-  top: calc(100% + 0.3rem);
-  right: 0;
-  z-index: 3;
-  padding: 0.3rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-  box-shadow: var(--lift);
-}
-
-/* Every row of every menu: drawn as the text it is rather than as a control,
-   because a menu of buttons that looked like buttons would read as a form to
-   fill in. */
-.menu-drop button,
-.menu-drop a[role="menuitem"] {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  font: inherit;
-  color: inherit;
-  text-decoration: none;
-  text-align: start;
-  background: transparent;
-  border: 0;
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.menu-drop button:hover,
-.menu-drop button:focus-visible,
-.menu-drop a[role="menuitem"]:hover,
-.menu-drop a[role="menuitem"]:focus-visible {
-  background: var(--paper);
-}
-
-.menu-drop button:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-/* The ⋯ trigger, of which there are two: what can be done to the Conversation
-   being read, and what there is beyond the conversations at all. Both sit at the
-   right edge of a pane's header beside the thing that header names, and a mark
-   is what fits there — so they are painted here, once, and the pair of them
-   cannot drift apart. */
-.workbench-actions > .menu-trigger,
-.conversation-actions > .menu-trigger {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
-
-.workbench-actions > .menu-trigger[aria-expanded="true"],
-.conversation-actions > .menu-trigger[aria-expanded="true"] {
-  color: var(--ink);
-}
-
-/* A run of rows kept apart from the rest by a rule, where pressing one of them
-   does a different kind of thing than pressing the others. */
-.menu-drop .menu-group {
-  margin-top: 0.3rem;
-  padding-top: 0.3rem;
-  border-top: 1px solid var(--edge);
-}
-
-.menu-drop .menu-heading {
-  margin: 0;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-}
-
-/* Wider than the one word in it, so it reads as a menu with room for the next
-   entry rather than as a label that happened to appear under the mark. */
-.workbench-actions > .menu-drop {
-  min-width: 9rem;
-}
-
 /* Starting a conversation: which repo the work is in, and nothing else — the
    branch name is prefilled by the server and the brief is written in the
    timeline. One decision, so one press: the button is the whole of the form,
    and the menu it drops is the anchor everything below hangs from. */
 .new-conversation {
   margin-bottom: 1.5rem;
-}
-
-/* The width of the pane, because it is the pane's one action and the menu comes
-   down the width of it. The mark is pushed to the far end, where a dropdown's
-   is. */
-.new-conversation > .menu-trigger {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 1rem;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-}
-
-/* As wide as the button it came down from, and over the list rather than in the
-   flow above it: opening it does not push the conversations down, which is the
-   whole of what the notices under the old box were doing. */
-.new-conversation > .menu-drop {
-  left: 0;
 }
 
 /* The roadmap's name over the stage that would be started, because on a phone
@@ -2838,17 +2583,10 @@ main:has(.workbench) {
 /* What can be done to the conversation as a whole. A menu rather than three
    buttons, because the last of them throws a worktree away and the header is
    somewhere the cursor passes on the way to everything else. Its trigger is the
-   ⋯ painted up with the sidebar's; what is its own is the drop.
+   ⋯ painted up with the sidebar's, and its wider drop is the one thing it has
+   of its own — both in `Menu.module.css`, with the rest of the menu.
 
-   Room under each action for the sentence saying what it does, which is more
-   than a row of a menu holds — so this one is padded as a card rather than as
-   a list. */
-.conversation-actions > .menu-drop {
-  width: 17rem;
-  padding: 0.75rem;
-}
-
-/* One block per action, so that a button and the line saying what it does read
+   One block per action, so that a button and the line saying what it does read
    as one thing and the next action is plainly a different one. */
 .conversation-actions .action + .action {
   margin-top: 0.9rem;
@@ -3485,11 +3223,6 @@ div.meta .failure {
   font-weight: 400;
 }
 
-/* Room for the switch, whatever the name is doing. */
-.page-header .switch {
-  flex: none;
-}
-
 .contents ol {
   margin: 0;
   padding: 0;
@@ -3566,89 +3299,6 @@ div.meta .failure {
   font-size: 0.8rem;
 }
 
-/* The one on/off control, wherever a device setting is offered: the words, and
-   the switch hard right so that two of them on different pages line up down the
-   same edge.
-
-   The checkbox is repainted rather than replaced — `appearance: none` takes the
-   browser's box away and leaves everything else about it, so the keyboard, the
-   label association and the focus ring all still belong to the browser. */
-
-.switch {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-
-.switch input {
-  appearance: none;
-  flex: none;
-  margin: 0;
-  /* The track. Sized in rem rather than em so that the switch is the same size
-     beside a heading as it is beside small print. */
-  width: 2.2rem;
-  height: 1.3rem;
-  padding: 0.15rem;
-  background: var(--card);
-  border: 1px solid var(--edge);
-  border-radius: 1rem;
-  cursor: inherit;
-  /* The knob is the box's own text, laid out by the track: `flex` puts it at
-     whichever end `justify-content` says, and that is the whole animation. */
-  display: flex;
-  justify-content: flex-start;
-}
-
-.switch input::before {
-  content: "";
-  width: 1rem;
-  height: 1rem;
-  background: var(--ink-soft);
-  border-radius: 50%;
-}
-
-.switch input:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-  justify-content: flex-end;
-}
-
-.switch input:checked::before {
-  background: var(--paper);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .switch input {
-    transition:
-      background 0.15s ease,
-      border-color 0.15s ease;
-  }
-
-  .switch input::before {
-    transition: background 0.15s ease;
-  }
-}
-
-.switch input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* A switch waiting on something says where it stands and will not be flipped
-   again until it gets there — so it is dimmed rather than redrawn, and the
-   cursor says the wait is the reason. */
-.switch:has(input:disabled) {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.switch input:disabled {
-  cursor: default;
-}
-
 /* A section heading with a control on the other end of its line. The heading
    keeps its own margin, so the row is only the arrangement. */
 .section-head {
@@ -3692,39 +3342,13 @@ div.meta .failure {
 
 /* How a waiting Set stands, at the far end of the provenance line: the badge
    is the title of a small menu, and the way to close the Set if no agent ever
-   comes back for it is inside. */
-
-/* The badge as a pill, with the mark that says it opens: quiet, because
-   waiting is the ordinary state — the outline is only what says this one is
-   pressable, where the words around it are not. The word that colours it is
-   the Liveness itself, exactly as on a list row. */
-.standing > .menu-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  background: transparent;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-}
-
-/* Waiting on the archive rather than refusing the press, which is the one
-   disabled trigger here that is not a *no*. */
-.standing > .menu-trigger:disabled {
-  cursor: progress;
-}
+   comes back for it is inside. The badge is that menu's trigger and the drop is
+   as wide as its one row — both painted in `Menu.module.css`, with the rest of
+   the menu. */
 
 /* Which way the menu will go, and no part of what the badge says. */
 .standing-mark {
   color: var(--ink-soft);
-}
-
-/* One row, so it is as wide as its own words rather than as wide as anything. */
-.standing > .menu-drop {
-  min-width: max-content;
-  padding: 0.25rem;
 }
 
 /* Quiet, and quieter than accept-all: archiving is almost never the right thing
@@ -4248,15 +3872,10 @@ div.meta .failure {
 
 /* The two confirm sheets — the warning before a Response goes out with
    questions left open, and the one before a Set is archived. Both are drawn
-   through the same `.modal` the settings page's form is, so what is left here
+   through the same `Modal` the settings page's form is, so what is left here
    is their own words. Each covers the page because it is the one thing to decide
    at that moment; neither refuses, so both ways out are buttons of equal
    weight. */
-
-.confirm .modal-card > p:first-child {
-  margin-top: 0;
-  font-weight: 600;
-}
 
 .confirm .unanswered {
   margin: 0.75rem 0;
