@@ -36,11 +36,15 @@ over whatever it had done. So *no stop resumes itself* is made true of the agent
 too, at the cost of the window the session would otherwise have worked through
 unwatched.
 
-The Hold goes with it, replaced by a rule: **a keystroke into a Screen resets
-the session's quiet clock.** No register, no hand-back, no badge. The rule
-protects a running session from being ended mid-intervention, which was the
-Hold's one job; the accepted loss is that it ends when the session exits — the
-ordinary end-of-session judgment then runs on whatever was left, held or not.
+The Hold goes too, and nothing replaces it. Typing into a Screen commits
+Verkstead to nothing: no register, no hand-back, no badge, and no clock a
+keystroke puts back. Somebody who wants the keyboard **stops the Conversation
+first**, and the one stop is what holds the run off while they work — the same
+act Steer makes for itself at click. A keystroke-resets-the-quiet-clock rule
+was considered here and dropped: what a keystroke would buy is one grace
+period, a number measured for an agent between prints, so it would read as
+protection while giving somebody who pauses to think almost none. Two ways to
+be protected was the thing this decision set out to stop having.
 
 ## Steer
 

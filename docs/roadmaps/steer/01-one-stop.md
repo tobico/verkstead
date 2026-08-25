@@ -4,11 +4,10 @@
 
 A Conversation is driven or it is stopped, and the workbench says so with one
 concept: Halt and Pause merged into a single stop, one badge, one Notice, one
-Resume — and the Hold gone, replaced by the keystroke-resets-the-quiet-clock
-rule. Demonstrable end to end: exhaust a usage window and press Stop on
-another Conversation, and both cards read as the same kind of stopped thing;
-type into a live Screen during a quiet spell and the session is not ended
-under you.
+Resume — and the Hold gone, with nothing in its place. Demonstrable end to
+end: exhaust a usage window and press Stop on another Conversation, and both
+cards read as the same kind of stopped thing; press Stop and type into a live
+Screen, and nothing ends the session or advances the run under you.
 
 ## Decisions in force
 
@@ -32,11 +31,12 @@ stage:
 - **Notification rules unchanged.** A stop Verkstead decided on is pushed;
   the human's own press and a stop nobody chose are not.
 - ***Blocked on you* badges any stopped Conversation.**
-- **The Hold is retired** (this amends ADR-0007). Its replacement is a rule:
-  a keystroke into a Screen resets the session's quiet clock. No register, no
-  hand-back, no badge — and, accepted explicitly in the grilling, no
-  protection once the session has exited: the end-of-session judgment then
-  runs on whatever was left.
+- **The Hold is retired** (this amends ADR-0007), and nothing replaces it.
+  Typing into a Screen commits Verkstead to nothing — no register, no
+  hand-back, no badge, and no clock a keystroke puts back. Somebody who wants
+  to intervene by hand presses **Stop** first, and the one stop is what holds
+  the run off while they do; a session typed into while the run is still
+  driving it is ended and advanced by the ordinary rules.
 - **Old records stay readable** (ADR-0006's rule): existing Pause Events on
   Timelines are the record of what happened and are not rewritten; the stored
   halt and pause rows are read into the one concept rather than destroyed.
@@ -58,11 +58,14 @@ stage:
    stopped card; one badge; reset time drawn as text beside the ordinary
    Resume.
    - A paused-by-window and a pressed-Stop Conversation draw the same shape.
-4. **Retire the Hold.** Delete `hold.rs` and the hand-back UI; the Screen's
-   input path touches the session's `Quiet` clock; drivers stop waiting on
-   `until_handed_back`.
-   - Typing during a quiet spell keeps the session alive; nothing to hand
-     back anywhere.
+4. **Retire the Hold.** Delete `hold.rs` and the hand-back UI; drivers stop
+   waiting on `until_handed_back`. Nothing takes its place, so the Screen's
+   input path keeps writing what it is sent straight through — and telling a
+   keystroke from a mouse report there was the Hold's business alone, so what
+   is left of that distinction goes with it.
+   - Typing into a driven session's Screen changes nothing about when it ends;
+     pressing Stop first is what holds the run off.
+   - Nothing to hand back anywhere.
 
 ## Re-verify at start
 
@@ -73,4 +76,4 @@ stage:
   all of them, not the remembered list).
 - Whether any new stop writer landed since 2026-08-25 (wrap-up watchers,
   checks) that must write the merged stop.
-- Push-notification wording that names "paused" or "halted".
+- Push-notification wording that names "paused", "halted" or "held".
