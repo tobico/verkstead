@@ -12,15 +12,17 @@
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
 //! but it does need a pairing, because sessions run there. **Grilling** carries
-//! a payload: a new brief — optional where one is already written, because
-//! empty there means grill the one that stands, and required where none is,
-//! because a grilling starts from a brief and a round steered into freezes the
-//! one it lands with — and a choice about how much of the last interview the
-//! session is primed with. **Implementing** carries the
-//! other one: an instruction, which is what the session it starts is sent off
-//! to do — optional where the branch has something to carry on, because writing
-//! nothing there means carry it on, and required where it has not, because
-//! there is otherwise nothing for that session to be about.
+//! a payload: a new brief, and a choice about how much of the last interview the
+//! session is primed with. **Implementing** carries the other one: an
+//! instruction, which is what the session it starts is sent off to do.
+//!
+//! **Both of those payloads are required exactly where nothing else answers for
+//! them.** Writing nothing under grilling means grill the brief that is already
+//! written, so it is required where none is — a grilling starts from a brief,
+//! and the one a steered round lands with is frozen where it lands. Writing
+//! nothing under implementing means carry on what the branch already holds, so
+//! it is required where it holds nothing. Either way the submit is held shut
+//! rather than offered and then refused.
 //!
 //! **The pairing is the conversation's, not the session's.** It is prefilled
 //! from what the conversation already runs the work under and what is picked is
@@ -83,7 +85,7 @@ export const STEER_REFUSAL: Record<ConversationSteered, string> = {
 
 /// Where a steer can send a conversation, and what each target means.
 ///
-/// Draft and closed are not here and never will be: each has a way in of its
+/// Draft and aborted are not here and never will be: each has a way in of its
 /// own. Wrapping up is the one of the four that is not always offered, which is
 /// what `offered` below draws it out by: a conversation whose work is on no
 /// pull request has no wrap-up to be steered into.
@@ -106,7 +108,7 @@ const TARGETS: {
   {
     target: "Grilling",
     label: "Grilling",
-    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been closed.",
+    note: "A new round: the work interviewed again, from a fresh brief if you write one. Whatever is missing is made — the branch for a draft, the worktree for a conversation that has been aborted.",
     runs: true,
     role: "grilling",
   },
