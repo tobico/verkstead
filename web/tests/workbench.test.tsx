@@ -2442,43 +2442,6 @@ function lay(element: Element, box: { at: number; wide: number }): void {
   Object.defineProperty(element, "offsetWidth", { value: box.wide });
 }
 
-/// Where the workbench hands this conversation's keyboard back.
-const HANDING_BACK = `/api/ui/conversations/${GRILLING.id}/hand-back`;
-
-/// The same conversation with the human at its session's keyboard: `running`
-/// says whether the session is still going, because a Hold outlives one.
-///
-/// A fixture has no Hold in it and never will — a Hold is a fact about a running
-/// server rather than a payload, and it is nowhere on the Timeline.
-function theHeld(running: boolean, ...answers: Parameters<typeof serving>) {
-  const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
-    "AgentOutput" in event
-      ? { AgentOutput: { ...event.AgentOutput, running } }
-      : event,
-  );
-
-  return serving(
-    whenever("/api/ui/conversations", json(SIDEBAR)),
-    whenever("/api/ui/repos", json(REPOS)),
-    whenever("/api/ui/profiles", json(PROFILES)),
-    whenever(
-      `/api/ui/conversations/${GRILLING.id}`,
-      json({
-        ...GRILLING,
-        timeline: altered,
-        held: OUTPUT.id,
-        blocked_on: OUTPUT.id,
-      }),
-    ),
-    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
-    whenever(CAPTURE_OF_IT, json(CAPTURE)),
-    whenever(SCREEN_OF_IT, json(SCREEN)),
-    // Last, so a test can hold one of those paths to an answer of its own: a
-    // later answer for a path replaces the earlier.
-    ...answers,
-  );
-}
-
 /// The workbench with the opened conversation altered, for the states no fixture
 /// holds — a refusal from the server, a worktree that has gone.
 function theWorkbenchWith(
@@ -3010,28 +2973,9 @@ describe("a session's output on the timeline", () => {
   /// browser gives one origin six connections and the reads queue behind each
   /// other.
   ///
-  /// Asked of the held session, because that is the one that opens on the Screen
-  /// without a click: what is being proved is that the record is never read at
-  /// all, rather than that it is not read twice.
-  it("does not read the transcript while the screen is what is showing", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-
-    const fetching = theHeld(true);
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, ".agent-output"));
-    (await attached()).says(PAINTED);
-    await drawn(container, ".details-pane .screen .xterm-rows");
-
-    expect(askedFor(fetching, TRANSCRIPT_OF_IT)).toBe(0);
-    // And the Capture with it, which is the read the Transcript's own answer
-    // would have decided.
-    expect(askedFor(fetching, CAPTURE_OF_IT)).toBe(0);
-  });
-
-  /// And it is read the moment it is asked for, which is what makes the reading
-  /// above something the pane put off rather than something it dropped.
+  /// So it is read the moment it is asked for and not before, which is what
+  /// makes the reading something the pane put off rather than something it
+  /// dropped.
   it("reads the transcript when the reader switches back to it", async () => {
     const fetching = theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -3671,12 +3615,11 @@ describe("watching a live session's screen", () => {
       expect(grid.textContent).toContain("and then it went quiet"),
     );
 
-    // Watching, and saying what typing into it would cost: the first keystroke
-    // takes the Hold, and a pane that let one be typed without saying so would
-    // be one that stopped Verkstead by surprise.
+    // Watching, and saying what typing into it does and does not do: typing
+    // works in the session, and the press that holds the run off is Stop.
     const said = await drawn(container, ".details-pane .screen .read-only");
     expect(said.textContent).toContain("Watching");
-    expect(said.textContent).toContain("hand it back");
+    expect(said.textContent).toContain("press Stop first");
 
     // Nothing was fetched: a request for the grid as the store last had it
     // would be a request for what the repaint has already replaced.
@@ -3883,7 +3826,7 @@ describe("watching a live session's screen", () => {
   });
 });
 
-describe("taking a live session's keyboard", () => {
+describe("putting something into a live session's screen", () => {
   /// The terminal the pane drew, as the browser gives a keystroke to one: xterm
   /// takes typing through the hidden textarea it keeps focus in, and turns each
   /// keypress into the bytes a session expects before anything of ours sees it.
@@ -3897,10 +3840,7 @@ describe("taking a live session's keyboard", () => {
   }
 
   /// What a watcher said up the socket, of the kind named.
-  function said(
-    socket: Attached,
-    kind: "Typed" | "Moused" | "Resized",
-  ): unknown[] {
+  function said(socket: Attached, kind: "PutIn" | "Resized"): unknown[] {
     return socket.sent
       .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
       .filter((wrote) => kind in wrote)
@@ -3951,15 +3891,14 @@ describe("taking a live session's keyboard", () => {
 
     await typeInto(container, "Enter", 13);
 
-    await waitFor(() => expect(said(socket, "Typed")).toEqual(["\r"]));
+    await waitFor(() => expect(said(socket, "PutIn")).toEqual(["\r"]));
     expect(grid.textContent).toBe(before);
   });
 
-  /// A paste is the keyboard too. It arrives at the terminal as an event of its
+  /// A paste goes up the same way. It arrives at the terminal as an event of its
   /// own rather than as a keypress, and what it carries is exactly what somebody
-  /// meant to put into the session — so it goes up as typing, and takes the Hold
-  /// the way a keystroke does.
-  it("sends a paste as typing", async () => {
+  /// meant to put into the session.
+  it("sends a paste up the socket", async () => {
     const { container, socket } = await watching();
 
     const typing = await drawn<HTMLTextAreaElement>(
@@ -3971,104 +3910,37 @@ describe("taking a live session's keyboard", () => {
       clipboardData: { getData: () => "cargo test" },
     });
 
-    await waitFor(() => expect(said(socket, "Typed")).toEqual(["cargo test"]));
-    expect(said(socket, "Moused")).toEqual([]);
+    await waitFor(() => expect(said(socket, "PutIn")).toEqual(["cargo test"]));
   });
 
-  /// And the mouse is not. A session whose interface tracks it has the terminal
+  /// And so does the mouse. A session whose interface tracks it has the terminal
   /// report every move, click and scroll down the same callback a keystroke
-  /// comes out of — so a cursor crossing a live Screen would take the Hold, and
-  /// silently stop Verkstead ending anything, if the two were not told apart.
-  ///
-  /// Told apart by what the human touched rather than by the bytes: nothing
-  /// about a mouse report distinguishes it from an arrow key on the wire. What
+  /// comes out of, and the two are not told apart: neither commits Verkstead to
+  /// anything, so what is on the wire is bytes a terminal is being sent. What
   /// the wheel is turned into here is one of them.
-  it("sends what the mouse did as the mouse, which takes nothing", async () => {
+  it("sends what the mouse did up the same socket", async () => {
     const { container, socket } = await watching();
 
     const grid = await drawn(container, ".details-pane .screen .xterm-screen");
 
     fireEvent.wheel(grid, { deltaY: 120 });
 
-    await waitFor(() => expect(said(socket, "Moused")).not.toEqual([]));
-
-    // And nothing of it went up as typing, which is the whole of the claim: the
-    // server takes the Hold on the one kind and never on the other.
-    expect(said(socket, "Typed")).toEqual([]);
+    await waitFor(() => expect(said(socket, "PutIn")).not.toEqual([]));
   });
 
-  /// A Hold is the server's answer rather than this page's memory of having
-  /// typed: one Hold is one Conversation's, and a phone that took it is one this
-  /// window has to be able to see and end.
-  it("says who has the keyboard, and hands it back on one press", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
+  /// Typing into a driven session commits Verkstead to nothing: no press to
+  /// undo it, and no badge saying the work has stopped. Somebody who wants the
+  /// run held off presses Stop first, which is a stop like any other.
+  it("neither draws a hand-back nor blocks the conversation on one", async () => {
+    const { container } = await watching();
 
-    const fetching = theHeld(
-      true,
-      whenever(HANDING_BACK, json("HandedBack"), "POST"),
-    );
+    await typeInto(container, "Enter", 13);
 
-    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const note = await drawn(container, ".details-pane .screen .read-only");
+    expect(note.textContent).toContain("press Stop first");
 
-    fireEvent.click(await drawn(container, ".agent-output"));
-
-    // Opened on the Screen rather than the Transcript, because that is what the
-    // badge points at and where the press is.
-    const socket = await attached();
-    socket.says(PAINTED);
-
-    const holding = await drawn(container, ".details-pane .screen .holding");
-    expect(holding.textContent).toContain("You have the keyboard");
-
-    fireEvent.click(await drawn(container, ".details-pane .hand-back"));
-
-    await waitFor(() =>
-      expect(
-        fetching.mock.calls.filter(
-          ([asked, init]) =>
-            String(asked) === HANDING_BACK && init?.method === "POST",
-        ),
-      ).toHaveLength(1),
-    );
-  });
-
-  /// And a session that exited while held still has the press. That is exactly
-  /// the case that is waiting to be judged: nothing about the run moves until
-  /// the keyboard goes back, so a pane that dropped the control once the session
-  /// went would be one the human could not get out of.
-  it("keeps the hand-back on a session that has ended", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-
-    theHeld(false, whenever(HANDING_BACK, json("HandedBack"), "POST"));
-
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    fireEvent.click(await drawn(container, ".agent-output"));
-
-    const holding = await drawn(container, ".details-pane .screen .holding");
-    expect(holding.textContent).toContain("the session has exited");
-    expect(await drawn(container, ".details-pane .hand-back")).toBeTruthy();
-
-    // Its Screen is the one it last stood on, fetched: there is nothing left to
-    // attach to, held or not.
-    expect(Attached.opened).toHaveLength(0);
-  });
-
-  /// The badge in the header says the work has stopped and points at the session
-  /// holding it up, which is the same badge a halt draws — a Hold is the other
-  /// thing the human can be blocked on, and the one that is nowhere on the
-  /// Timeline.
-  it("carries blocked on you while the hold lasts", async () => {
-    Attached.opened = [];
-    vi.stubGlobal("WebSocket", Attached);
-    theHeld(true);
-
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const badge = await drawn(container, ".timeline-pane .blocked");
-    expect(badge.textContent).toContain("Blocked on you");
+    expect(container.querySelector(".details-pane .hand-back")).toBeNull();
+    expect(container.querySelector(".timeline-pane .blocked")).toBeNull();
   });
 });
 

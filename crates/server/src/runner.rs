@@ -71,15 +71,6 @@ pub struct Pace {
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
 
-    /// How long a Hold stands before the human's devices are told about it.
-    ///
-    /// A reminder rather than a deadline: nothing ends when it passes — see
-    /// [`crate::push::when_it_has_stood`] — and it is here for the reason
-    /// [`Pace::checks`] is, that a caller standing a server up sets every one of
-    /// these at once. Minutes, because the human who took the keyboard has only
-    /// just put the phone down.
-    pub holding: Duration,
-
     /// And how long a Manual Task's session must have printed nothing before it
     /// is ended — see [`crate::manual`].
     ///
@@ -116,7 +107,6 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
-            holding: crate::push::HELD_A_WHILE,
             manual: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
             pauses: crate::limits::SWEPT_EVERY,
@@ -694,11 +684,6 @@ async fn follow_inline(
 
     let ended = session.ended().await;
 
-    // And if the human has its keyboard, that is all that has happened: an
-    // inline session that exits while held advances nothing until they hand it
-    // back, and what they left is then read the ordinary way below.
-    state.sessions.until_handed_back(conversation_id).await;
-
     // Verkstead ended it, which for an inline run means the human aborted the
     // Conversation: nothing was left to land because they stopped it. Answered
     // before the branch is read, since an aborted run has committed nothing and
@@ -873,11 +858,6 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
         state.sessions.end(conversation_id).await;
     }
 
-    // And a fix session that exited while held is one nothing has looked at yet:
-    // what the human left is for the check to be asked about again, and that
-    // question waits on the hand-back like every other.
-    state.sessions.until_handed_back(conversation_id).await;
-
     Some(event_id)
 }
 
@@ -968,10 +948,6 @@ async fn proposing(
     let event_id = session.event_id;
     let ended = session.ended().await;
 
-    // The session is over — and if the human has its keyboard, that is all that
-    // has happened. What it left is judged once they hand back, not before.
-    state.sessions.until_handed_back(conversation_id).await;
-
     // Verkstead ended it, which here means the human aborted the Conversation out
     // from under the wrap-up. There is nothing to ask them about: they have just
     // answered.
@@ -1033,14 +1009,7 @@ async fn committed_and_quiet(
             tokio::time::sleep(owed).await;
         }
 
-        // And the Hold last, as a backlog step's ending asks it — see
-        // [`landed_and_quiet`]. A fix session the human is typing into is one
-        // Verkstead ends nothing of, however quiet it goes.
-        if state.sessions.holding(conversation_id).is_none() {
-            return;
-        }
-
-        state.sessions.until_handed_back(conversation_id).await;
+        return;
     }
 }
 
@@ -1111,7 +1080,7 @@ async fn see_out(
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = landed_and_quiet(state, conversation_id, &worktree, &landing, &quiet, pace) => None,
+        _ = landed_and_quiet(&worktree, &landing, &quiet, pace) => None,
     };
 
     let Some(ended) = ended else {
@@ -1125,12 +1094,6 @@ async fn see_out(
         state.sessions.end(conversation_id).await;
         return Some(event_id);
     };
-
-    // The session is over — and if the human has its keyboard, that is all that
-    // has happened. A session that exits while held advances nothing: the run
-    // waits here, and the hand-back is what puts the ordinary rules below to
-    // whatever they left behind.
-    state.sessions.until_handed_back(conversation_id).await;
 
     // The session is over. It may have landed its step as its last act and
     // exited before a poll caught it, which is the ordinary shape of a session
@@ -1184,27 +1147,14 @@ async fn see_out(
     None
 }
 
-/// Wait until `landing` has landed, the session has been quiet for the grace
-/// period, *and* nobody is holding the keyboard.
+/// Wait until `landing` has landed and the session has been quiet for the grace
+/// period.
 ///
 /// Two loops rather than one condition, because the second is not a poll: once
 /// the step is done, what is left is sleeping out whatever quiet is still owed
 /// and looking again. Output arriving in the meantime lengthens the wait rather
 /// than ending it, and there is no cap on how long that may go on for.
-///
-/// The Hold is the third thing and it is asked last, after the other two are
-/// true: a held session is never ended by quiet, however long it stays quiet.
-/// Handing back does not end it either — what happens then is that this goes
-/// round again and asks the Worktree afresh, because the human has been working
-/// in it and what they left is what the ordinary rules judge.
-async fn landed_and_quiet(
-    state: &AppState,
-    conversation_id: i64,
-    worktree: &Path,
-    landing: &Landing,
-    quiet: &Quiet,
-    pace: Pace,
-) {
+async fn landed_and_quiet(worktree: &Path, landing: &Landing, quiet: &Quiet, pace: Pace) {
     loop {
         tokio::time::sleep(pace.poll).await;
 
@@ -1222,11 +1172,7 @@ async fn landed_and_quiet(
             tokio::time::sleep(owed).await;
         }
 
-        if state.sessions.holding(conversation_id).is_none() {
-            return;
-        }
-
-        state.sessions.until_handed_back(conversation_id).await;
+        return;
     }
 }
 

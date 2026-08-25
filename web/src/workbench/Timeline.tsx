@@ -222,7 +222,7 @@ export const REOPEN_REFUSAL: Record<ConversationReopened, string> = {
 /// behind it.
 ///
 /// Every other thing that stops a run does — a halt opens the Notice saying what
-/// stopped, a held session opens its screen — and a pause does not: what it has
+/// stopped — and a pause does not: what it has
 /// to say is three short facts and they are drawn whole in the list, with the
 /// press on them. So the badge selects it and stays put, rather than sending a
 /// narrow window away from the very thing there is to press.

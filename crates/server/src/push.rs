@@ -1,12 +1,11 @@
 //! Telling the devices what happened while nobody was watching.
 //!
 //! Two kinds of thing are worth a phone lighting up. **Needs-you**: a Question
-//! Set has arrived, a Hold has stood a while with nobody coming back to it,
-//! driving has halted on something Verkstead decided to stop for, or the account
-//! the run was spending ran out of window. And **milestones**: the work is on a
-//! pull request, a roadmap has moved on to its next stage or run out of stages,
-//! or a Conversation has reached Done. One push per subscribed device in every
-//! case,
+//! Set has arrived, driving has halted on something Verkstead decided to stop
+//! for, or the account the run was spending ran out of window. And
+//! **milestones**: the work is on a pull request, a roadmap has moved on to its
+//! next stage or run out of stages, or a Conversation has reached Done. One push
+//! per subscribed device in every case,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
 //! service worker to draw the notification and to know which page to open, and
@@ -24,13 +23,10 @@
 //! reached costs a notification, and never the Set, the pull request or the
 //! halt it was about.
 //!
-//! A Hold's push is a reminder and nothing more. It ends no Hold — only the
-//! hand-back does that — and it leaves nothing on the Timeline, which records
-//! the work rather than the watching. That holds for every push here: each is
-//! sent from the one place that already knows the thing happened, and none of
-//! them writes anything down.
+//! No push writes anything down. Each is sent from the one place that already
+//! knows the thing happened, and the record of it is whatever that place wrote.
 //!
-//! A halt's push is the opposite: the run has stopped and will not start again
+//! A halt's push is what a stop is worth: the run has stopped and will not start again
 //! until the human presses Resume, so a silent stop is one they find days late.
 //! Only the halts Verkstead decided on are worth a phone, though — a stop
 //! nobody chose is one a restart picks up unasked, and telling somebody about a
@@ -56,9 +52,6 @@ use verkstead_schema::QuestionSet;
 use verkstead_store::{PushSubscription, VapidKeys};
 use web_push_native::{Auth, WebPushBuilder};
 
-use crate::AppState;
-use crate::hold::Which;
-
 /// How long a push service should hold a notification for a phone that is off
 /// or out of signal. Half a day: a Question Set older than that has either been
 /// answered at a desk or is not going to be answered from a lock screen.
@@ -83,24 +76,15 @@ const CONTACT: &str = "https://github.com/tobico/verkstead";
 /// than serialized: ES256 is what VAPID is defined in terms of.
 const JWT_HEADER: &str = r#"{"typ":"JWT","alg":"ES256"}"#;
 
-/// How long a Hold stands before the human's devices are told about it, on a
-/// server nobody has said otherwise to.
-///
-/// Long enough that a human who typed and is still typing is not interrupted by
-/// news of their own keyboard, and short enough that one who put the phone down
-/// mid-intervention is told while the run they stalled still matters. What a
-/// server actually keeps to is [`crate::Pace::holding`].
-pub(crate) const HELD_A_WHILE: Duration = Duration::from_secs(5 * 60);
-
 /// What the service worker is handed: enough to draw the notification, and where
 /// tapping it goes.
 #[derive(Debug, Serialize)]
 struct Notice<'a> {
     /// The page the notification opens — a Set's own page for a Set, and the
-    /// held Conversation for a Hold.
+    /// Conversation for everything that happened to one.
     ///
     /// Said by the server rather than worked out by the worker, because what a
-    /// push is about is the server's to know: a phone woken by a Hold that
+    /// push is about is the server's to know: a phone woken by a stop that
     /// landed on a Question Set it is not about would be worse than no
     /// notification at all.
     path: String,
@@ -155,35 +139,6 @@ pub(crate) fn announce(pool: &SqlitePool, id: i64, set: &QuestionSet) {
     });
 }
 
-/// Tell the devices about a Hold once it has stood [`crate::Pace::holding`],
-/// and say nothing at all if the keyboard has gone back before then.
-///
-/// Returns as soon as the waiting is handed to the runtime: what the caller is
-/// doing is relaying a keystroke, and a reminder about it must not be able to
-/// slow that down.
-///
-/// One push per Hold, because it is one wait per Hold: nothing here loops, so a
-/// Hold that goes on standing is told about once and then left alone. The
-/// [`Which`] is what keeps it to *this* Hold — a Conversation handed back and
-/// typed into again in the meantime has a Hold of its own, with a wait of its
-/// own behind it.
-pub(crate) fn when_it_has_stood(state: &AppState, conversation_id: i64, which: Which) {
-    let state = state.clone();
-    let stood_a_while = state.sessions.pace().holding;
-
-    tokio::spawn(async move {
-        tokio::time::sleep(stood_a_while).await;
-
-        // Handed back, or handed back and taken again: either way this Hold is
-        // over, and nothing is owed about a Hold nobody is in.
-        if !state.sessions.still_held(conversation_id, which) {
-            return;
-        }
-
-        told(&state.pool, conversation_id, News::Waiting);
-    });
-}
-
 /// What a push about a Conversation is saying.
 ///
 /// One enum rather than a function each, because nearly all of it is common: a
@@ -193,9 +148,6 @@ pub(crate) fn when_it_has_stood(state: &AppState, conversation_id: i64, which: W
 /// of these it is to somebody glancing at a lock screen.
 #[derive(Debug, Clone)]
 pub(crate) enum News {
-    /// A Hold has stood a while with nobody coming back to the keyboard.
-    Waiting,
-
     /// Driving stopped on something Verkstead decided to stop for, and the
     /// Conversation stays stopped until Resume is pressed — see
     /// [`crate::halts`]. `stopped` is what ought to have been happening, with
@@ -238,7 +190,6 @@ impl News {
     /// work goes in, which is the rule that keeps a Question out of a Set's push.
     fn title(&self, branch: &str) -> String {
         match self {
-            News::Waiting => format!("{branch} is waiting for you"),
             // The step rather than how it went wrong: which part of the run
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
@@ -269,7 +220,6 @@ impl News {
     /// What the log calls it, where a push could not be sent.
     fn about(&self) -> &'static str {
         match self {
-            News::Waiting => "the Hold",
             News::Halted { .. } => "the halt",
             News::OutOfWindow { .. } => "the Pause",
             News::OnAPullRequest { .. } => "the pull request",
@@ -523,7 +473,6 @@ mod tests {
     /// Every piece of news, as one Conversation would produce them.
     fn all() -> Vec<News> {
         vec![
-            News::Waiting,
             News::Halted {
                 stopped: "Implementing the work".to_owned(),
             },

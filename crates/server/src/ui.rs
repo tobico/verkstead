@@ -30,7 +30,7 @@ use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationAborted,
     ConversationEntry, ConversationReopened, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, HandedBack, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
+    GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
     NewConversation, NewOrder, PauseResumed, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
     Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
     SettingsView, Standing, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
@@ -129,16 +129,6 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // piece of work — so it belongs at the end of the Timeline, where the
         // grilling start is.
         .route("/api/ui/conversations/{id}/reopen", post(reopen))
-        // And the one press that ends a Hold. Per Conversation rather than per
-        // Event, because a Conversation has one keyboard: which of its sessions
-        // the human took is the Conversation's own answer, and a route that made
-        // them name it would be one they could get wrong.
-        //
-        // A press rather than anything the socket does. A Hold ends only by
-        // being handed back — not by the socket dropping, not by the tab closing
-        // — so what ends one is a request of its own, which any device on the
-        // tailnet can make and which outlives whatever was watching.
-        .route("/api/ui/conversations/{id}/hand-back", post(hand_back))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -824,18 +814,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // [`crate::stops::ready`].
     let ready_to_stop = crate::stops::ready(conversation.state, halted.is_some());
 
-    // And what the human has taken the keyboard of, which is the other thing the
-    // work can be stopped on and the one that is nowhere on the Timeline: a Hold
-    // leaves no Event, because the Timeline records the work rather than the
-    // watching. Read off the running server, which is the only thing that knows.
-    let held = state.sessions.holding(id);
-
-    // The badge points at whichever of the three is in force, and at the Hold
-    // first. No two of them can really be in force together — nothing halts
-    // behind a Hold, and a run waiting a window out is one nothing is driving to
-    // halt — and where two somehow are, the keyboard is the thing the human is
-    // holding right now and the halt is the thing they have to press Resume on.
-    let blocked_on = held.or(halted).or(waiting_at);
+    // The badge points at whichever of the two is in force. Neither can really
+    // be in force with the other — a run waiting a window out is one nothing is
+    // driving to halt — and where both somehow are, the halt is the thing the
+    // human has to press Resume on.
+    let blocked_on = halted.or(waiting_at);
 
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
@@ -865,7 +848,6 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         direction: conversation.direction,
         pinned,
         blocked_on,
-        held,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers the Manual Task composer
         // exactly where nothing is running, and one Event of a session's is not
@@ -1558,39 +1540,6 @@ async fn reopen(State(state): State<AppState>, Path(id): Path<String>) -> HttpRe
             unavailable("the conversation could not be reopened")
         }
     }
-}
-
-/// `POST /api/ui/conversations/{id}/hand-back` — the human gives the keyboard
-/// back, and the Hold is over.
-///
-/// The only way one ends. Nothing here judges anything: what the human left is
-/// judged by whichever driver was waiting at the gate, by the ordinary
-/// end-of-session rules — the Step's commit landed so the run goes on, or it did
-/// not and driving halts. Handing back is what lets that question be asked, not
-/// what answers it.
-///
-/// Refused for nothing. A Conversation that is not held is one already handed
-/// back, which is the same answer arriving twice rather than a mistake.
-async fn hand_back(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(HandedBack::NotHeld).into_response();
-    };
-
-    if !state.sessions.hand_back(id) {
-        return Json(HandedBack::NotHeld).into_response();
-    }
-
-    tracing::info!(
-        conversation_id = id,
-        "the keyboard has been handed back, so Verkstead has this Conversation again",
-    );
-
-    // The badge goes with it, and it is drawn off the Conversation.
-    state
-        .nudges
-        .announce(Nudge::Conversation { conversation: id });
-
-    Json(HandedBack::HandedBack).into_response()
 }
 
 /// `POST /api/ui/conversations/{id}/grilling-pairing` — which account and model

@@ -671,24 +671,6 @@ direction: Direction | null,
  */
 blocked_on: number | null, 
 /**
- * Which of this Conversation's sessions the human has the keyboard of, or
- * `null` where it is Verkstead's.
- *
- * The Hold, said as the Event of the session it was taken on: the workbench
- * draws the hand-back control on that session's Screen, and a Hold with no
- * session to name would be one nobody could give back.
- *
- * Beside `blocked_on` rather than folded into it, though a Hold sets that
- * too. What the badge says is *the work has stopped and it is your move*,
- * and what this says is *which move* — where a halt is answered by pressing
- * Resume, a Hold is answered by handing the keyboard back.
- *
- * Never on the Timeline, however long it lasts: the Timeline records the
- * work rather than the watching. This is a fact about now, read off the
- * running server every time the Conversation is.
- */
-held: number | null, 
-/**
  * Whether a session is registered for this Conversation as of this read.
  *
  * The same fact the sidebar draws its working indicator from, said here
@@ -747,15 +729,6 @@ export type Direction = "inline" | "task-list" | "roadmap";
  * single "cannot start" would leave them guessing which.
  */
 export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "ProfileBroken" | "EmptyBrief" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
-
-/**
- * What handing a Conversation's keyboard back came to.
- *
- * The one way a Hold ends, and it ends by being pressed: no timeout, no release
- * on the socket dropping, because Verkstead resuming over a half-finished
- * intervention is worse than a stalled run.
- */
-export type HandedBack = "HandedBack" | "NotHeld";
 
 /**
  * The handoff document as the page receives it.
@@ -1898,16 +1871,11 @@ label?: string | null, message: string, };
 /**
  * And what a watcher says back up it.
  *
- * Three kinds of thing, each saying which it is: the socket is a conversation
- * in both directions, and what a watcher does to a Screen is look at it a
- * different size, type into it, or move a mouse over it.
- *
- * The last two carry the same thing — bytes on their way to the session's own
- * terminal — and are told apart for one reason, which is the Hold. Typing
- * takes it and mousing never does, so which of the two the human did has to
- * survive the crossing rather than be guessed at from the bytes.
+ * Two kinds of thing, each saying which it is: the socket is a conversation in
+ * both directions, and what a watcher does to a Screen is look at it a
+ * different size, or put something into it.
  */
-export type Watching = { "Resized": Size } | { "Typed": string } | { "Moused": string };
+export type Watching = { "Resized": Size } | { "PutIn": string };
 
 /**
  * A Conversation's worktree: where it is, and whether it is still there.

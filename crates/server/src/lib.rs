@@ -39,7 +39,6 @@ mod halts;
 /// session runs on — every sandbox binds one — so standing a router up that runs
 /// sessions means saying where they live.
 pub mod handoffs;
-mod hold;
 mod limits;
 mod manual;
 mod nudge;

@@ -36,37 +36,19 @@
 //! stood on and nothing will resize it again, so it is drawn at its own size and
 //! scrolls inside the pane where the pane is the shorter of the two.
 //!
-//! **And so does what is typed into it.** The first keystroke takes the Hold:
-//! the human is at the keyboard, Verkstead stops ending sessions and advancing
-//! runs, and the Conversation carries *blocked on you* until the keyboard is
-//! handed back. Nothing here draws the typing — a terminal's business is what it
-//! makes of a keystroke, and what it makes of one comes back down the socket
-//! like everything else it prints.
+//! **And so does what is put into it.** Keystrokes and mouse reports alike go up
+//! the socket and straight into the session's own terminal — the terminal hands
+//! both out of the one callback, and there is nothing here that has to tell them
+//! apart, because neither commits Verkstead to anything. Typing into a driven
+//! session changes nothing about when it ends; somebody who wants the run held
+//! off while they work presses **Stop** first.
 //!
-//! **The mouse goes up the same socket and takes nothing.** A session whose
-//! interface tracks the mouse has the terminal report every move, click and
-//! scroll over the grid, and the terminal hands those reports out of the one
-//! callback it hands keystrokes out of — so moving a cursor across a live Screen
-//! would take the Hold, and silently stop Verkstead ending anything, if the two
-//! were not told apart.
+//! Nothing here draws the typing either — a terminal's business is what it makes
+//! of a keystroke, and what it makes of one comes back down the socket like
+//! everything else it prints.
 //!
-//! **They are told apart here, by what the human did rather than by the bytes.**
-//! Bytes arriving on the heels of a key or a paste are typing; everything else —
-//! a mouse report, whatever the terminal makes of the wheel — is the mouse. This
-//! side is the only place that knows, a report being indistinguishable from
-//! typing by the time it is on the wire, so it says which it is and the server
-//! takes it at its word.
-//!
-//! **Handing back is a press, and it is the only way out.** Not closing the
-//! pane, not closing the tab: Verkstead resuming over a half-finished
-//! intervention is worse than a stalled run. So the control sits here for as
-//! long as the Hold does — on a session that has exited as much as on one still
-//! running, because a session that exited held is exactly one still waiting to
-//! be judged.
-//!
-//! A session that has ended and is not held is read-only, and says so: a
-//! terminal that silently swallows typing reads as broken rather than as
-//! read-only.
+//! A session that has ended is read-only, and says so: a terminal that silently
+//! swallows typing reads as broken rather than as read-only.
 //!
 //! **And a Screen with nothing on it yet says that.** An empty black rectangle
 //! is exactly what a terminal that has failed looks like, so until the first
@@ -78,7 +60,6 @@
 //! that decided the repaint. A reader who wants everything the session printed
 //! wants the Transcript beside this, or the Capture underneath it.
 
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import {
@@ -93,7 +74,7 @@ import {
 
 import "@xterm/xterm/css/xterm.css";
 
-import { handBack, loadScreen, screenSocket } from "../api/client";
+import { loadScreen, screenSocket } from "../api/client";
 import type {
   AgentOutputEvent,
   ConversationView,
@@ -104,29 +85,6 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 
-/// The events that say the human is at this pane's keyboard.
-///
-/// A key and a paste are the two the Hold was always about. `input` is the same
-/// thing arriving as inserted text rather than as a keypress, which is how a
-/// phone's keyboard and an input method reach a terminal — and it is only ever
-/// text entry, so nothing the mouse does can be mistaken for one.
-const TOUCHES = ["keydown", "paste", "input"] as const;
-
-/// How long after one of those what the terminal hands over still counts as
-/// having been typed.
-///
-/// A window rather than the same turn of the event loop, because the terminal
-/// does not always hand keyboard input over in the turn it arrived in: a key and
-/// a paste come straight back out, and text composed on an input method or a
-/// phone's keyboard comes a turn or two later. Long enough to cover the slowest
-/// of those and far too short to cover a human moving from the keyboard to the
-/// mouse.
-///
-/// It errs the one safe way. A mouse report landing inside the window is called
-/// typing, and the Hold it would take is one the keystroke that opened the
-/// window has already taken.
-const TYPING_LASTS = 500;
-
 export function Screen(props: {
   conversation: ConversationView;
   output: AgentOutputEvent;
@@ -134,13 +92,6 @@ export function Screen(props: {
   /// Whether this session is still printing, which is what decides where the
   /// Screen comes from — the socket or the fetch.
   const live = () => props.output.running;
-
-  /// Whether the human has this session's keyboard.
-  ///
-  /// The server's answer rather than this page's memory of having typed: one
-  /// Hold is one Conversation's, and a phone that took it is a Hold this laptop
-  /// has to be able to see and hand back.
-  const held = () => props.conversation.held === props.output.id;
 
   const screen = useReading(() => ({
     // The Event is in the key for the reason it is in the Transcript's: opening
@@ -161,18 +112,6 @@ export function Screen(props: {
     freshness: "static",
   }));
 
-  const queries = useQueryClient();
-
-  /// Give the keyboard back, and read the Conversation again: the badge, this
-  /// pane and whatever else the Hold was showing are all drawn off it.
-  const handingBack = useMutation(() => ({
-    mutationFn: () => handBack(props.conversation.id),
-    onSuccess: () => {
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
   /// Where the terminal is mounted, the terminal itself, and the addon that
   /// measures how much of a grid fits in the pane.
   let host: HTMLDivElement | undefined;
@@ -186,28 +125,6 @@ export function Screen(props: {
   /// is attached once when the terminal is made: a listener added per repaint
   /// would be one more copy of itself every time somebody resized a window.
   let putIn: ((said: Watching) => void) | undefined;
-
-  /// When the human last touched this pane's keyboard — see [`TOUCHES`] and
-  /// [`TYPING_LASTS`].
-  ///
-  /// Which of the two things the human did is the only thing that can be asked
-  /// here. A mouse report is escape sequences and so is an arrow key: no amount
-  /// of reading the bytes tells one from the other, and the event that caused
-  /// them is the only witness there is.
-  let touched = 0;
-
-  /// Whether what the terminal is handing over is the keyboard's.
-  const atTheKeyboard = () => Date.now() - touched < TYPING_LASTS;
-
-  /// The human touched the keyboard: a key, a paste, or text inserted whole,
-  /// which is how a phone's keyboard and an input method arrive. All three are
-  /// the keyboard as far as the Hold is concerned.
-  ///
-  /// Listened for on the pane in the capture phase, so each is heard before the
-  /// terminal's own handler turns it into bytes.
-  const fromTheKeyboard = () => {
-    touched = Date.now();
-  };
 
   /// What went wrong, where something did. The socket's own failures rather than
   /// the query's: a session that stops being watchable while somebody is
@@ -261,23 +178,12 @@ export function Screen(props: {
       //
       // And what the mouse does, which comes out of the same callback: the
       // terminal reports a move, a click or a scroll to the session the way it
-      // reports a keypress. Which of the two this is decides which kind goes up,
-      // and the only thing that knows is what the human just touched.
+      // reports a keypress, and it goes up as the same kind of thing.
       //
       // Nothing is drawn here for either: what the session makes of it comes
       // back as what the session printed, which is the one account of what
       // happened.
-      terminal.onData((input) =>
-        putIn?.(atTheKeyboard() ? { Typed: input } : { Moused: input }),
-      );
-
-      // Heard on the pane rather than on the textarea the terminal keeps focus
-      // in, and in the capture phase: both put these ahead of the terminal's own
-      // handlers, so the keyboard is known to have been touched before the bytes
-      // it caused come back out.
-      for (const touch of TOUCHES) {
-        host.addEventListener(touch, fromTheKeyboard, { capture: true });
-      }
+      terminal.onData((input) => putIn?.({ PutIn: input }));
     } else {
       terminal.resize(painted.columns, painted.rows);
     }
@@ -311,9 +217,7 @@ export function Screen(props: {
     );
 
     // Where this pane's keystrokes and mouse reports go for as long as this
-    // socket is the one watching. The first keystroke takes the Hold and no
-    // mouse report ever does, which is the server's to decide and to say:
-    // nothing here assumes anything was taken.
+    // socket is the one watching.
     putIn = (said) => {
       if (socket.readyState !== WebSocket.OPEN) {
         return;
@@ -404,13 +308,8 @@ export function Screen(props: {
   });
 
   // A terminal holds a parser, a buffer and its own listeners, none of which go
-  // away with the element it drew into — and this pane's own, the ones that say
-  // the human is at the keyboard, go with them.
+  // away with the element it drew into.
   onCleanup(() => {
-    for (const touch of TOUCHES) {
-      host?.removeEventListener(touch, fromTheKeyboard, { capture: true });
-    }
-
     terminal?.dispose();
   });
 
@@ -429,46 +328,22 @@ export function Screen(props: {
             it was printed for. */}
         <div class="screen" classList={{ live: live() }}>
           <div class="terminal-host" ref={host} />
-          {/* What the human may do with this Screen, said under it. A Hold
-              outranks everything else there is to say: it is the one thing here
-              that has stopped the work, and the way out of it is the press
-              beside the words. */}
+          {/* What the human may do with this Screen, said under it. */}
           <Show
-            when={held()}
+            when={lost()}
             fallback={
-              <Show
-                when={lost()}
-                fallback={
-                  <p class="note read-only">
-                    {!shown()
-                      ? "Waiting for this session's screen…"
-                      : live()
-                        ? "Watching. Type to take the keyboard — Verkstead stops until you hand it back."
-                        : "Read-only: this is what the session's terminal is showing."}
-                  </p>
-                }
-              >
-                <p class="error">
-                  The connection to this session's screen was lost.
-                </p>
-              </Show>
+              <p class="note read-only">
+                {!shown()
+                  ? "Waiting for this session's screen…"
+                  : live()
+                    ? "Watching. Type to work in this session — press Stop first if the run must not advance under you."
+                    : "Read-only: this is what the session's terminal is showing."}
+              </p>
             }
           >
-            <div class="holding">
-              <p class="note">
-                {live()
-                  ? "You have the keyboard. Verkstead is recording and nothing else."
-                  : "You have the keyboard, and the session has exited. Nothing is judged until you hand it back."}
-              </p>
-              <button
-                type="button"
-                class="hand-back"
-                disabled={handingBack.isPending}
-                onClick={() => handingBack.mutate()}
-              >
-                Hand back
-              </button>
-            </div>
+            <p class="error">
+              The connection to this session's screen was lost.
+            </p>
           </Show>
         </div>
       </Match>

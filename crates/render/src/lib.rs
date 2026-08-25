@@ -35,7 +35,7 @@ pub use conversations::{
     BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved,
     By, Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationAborted,
     ConversationEntry, ConversationReopened, ConversationStopped, ConversationView,
-    GrillingStarted, HandedBack, HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted,
+    GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, ManualTaskStarted,
     ManualTaskSubmission, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,
     PauseEnded, PauseEvent, PauseResumed, PinnedEvent, ProposalView, PullRequestComment,
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,

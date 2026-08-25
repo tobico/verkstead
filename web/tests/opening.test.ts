@@ -2,9 +2,9 @@
 //!
 //! Every push the server sends names the page it is about — see `Notice` in
 //! `crates/server/src/push.rs` — because what a push is about is the server's to
-//! know. A Question Set names its own page; a Hold names the Conversation whose
-//! session is being held, so that a phone woken by one lands on the session it
-//! is holding rather than on a Set it is not about.
+//! know. A Question Set names its own page; a stop names the Conversation it
+//! stopped, so that a phone woken by one lands on the work that stopped rather
+//! than on a Set it is not about.
 
 import { describe, expect, it } from "vitest";
 
@@ -17,10 +17,10 @@ const SET = {
   project: "verkstead",
 };
 
-/// And a Hold that has stood a while with nobody coming back to it.
-const HOLD = {
+/// And a run that stopped on something Verkstead decided to stop for.
+const HALT = {
   path: "/conversations/3",
-  title: "rate-limiting is waiting for you",
+  title: "Implementing the work stopped on rate-limiting",
   project: "verkstead",
 };
 
@@ -39,11 +39,11 @@ describe("tapping a notification", () => {
     expect(sw.opened).toEqual([]);
   });
 
-  it("opens the Conversation a Hold's push was about", async () => {
+  it("opens the Conversation a stop's push was about", async () => {
     const sw = worker();
     const open = sw.opens();
 
-    await sw.pushes(HOLD);
+    await sw.pushes(HALT);
     await sw.taps(sw.shown[0]!);
 
     expect(open.navigated).toEqual([`${ORIGIN}/conversations/3`]);
@@ -53,7 +53,7 @@ describe("tapping a notification", () => {
   it("opens a window where the human left none", async () => {
     const sw = worker();
 
-    await sw.pushes(HOLD);
+    await sw.pushes(HALT);
     await sw.taps(sw.shown[0]!);
 
     // The ordinary case for a phone: the app is closed, and the notification is
@@ -94,7 +94,7 @@ describe("the notification a push shows", () => {
 
     await sw.pushes(SET);
     await sw.pushes(SET);
-    await sw.pushes(HOLD);
+    await sw.pushes(HALT);
 
     const tags = sw.shown.map((notification) => notification.options.tag);
 

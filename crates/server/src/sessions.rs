@@ -35,7 +35,6 @@ use verkstead_schema::Nudge;
 
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
-use crate::hold::{Holds, Which};
 use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
@@ -62,7 +61,7 @@ const FLUSH_EVERY: Duration = Duration::from_millis(500);
 /// Short, because what it measures is a terminal rather than an agent: claude
 /// repaints its spinner many times a second while it is working, so a session
 /// that has printed nothing for this long is one that has stopped — sitting on
-/// a Blocking Ask, or waiting for the human at a Hold. Three seconds is clear
+/// a Blocking Ask, or waiting for the human. Three seconds is clear
 /// of the longest gap a working session leaves, and short enough that the mark
 /// says so while it still matters.
 pub(crate) const IDLE_AFTER: Duration = Duration::from_secs(3);
@@ -237,14 +236,6 @@ pub(crate) struct Sessions {
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
-
-    /// The Holds the human has taken on them — see [`crate::hold`].
-    ///
-    /// Beside the sessions register rather than in it, because a Hold outlives
-    /// the session it was taken on: a session that exits while held is one
-    /// nothing may judge until the keyboard comes back, and a register that
-    /// forgot the Hold as the session ended would be one that judged it anyway.
-    holds: Holds,
 }
 
 /// The Worktree of one Conversation, held for as long as one thing is using it.
@@ -446,7 +437,6 @@ impl Sessions {
             agents: Some(Arc::new(agents)),
             running: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
-            holds: Holds::none(),
         }
     }
 
@@ -457,7 +447,6 @@ impl Sessions {
             agents: None,
             running: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
-            holds: Holds::none(),
         }
     }
 
@@ -627,43 +616,6 @@ impl Sessions {
             .as_ref()
             .map(|agents| agents.pace)
             .unwrap_or_default()
-    }
-
-    /// The human typed into the Screen of `event_id`'s session: take the Hold.
-    ///
-    /// Which Hold was taken, where this keystroke is the one that took it — see
-    /// [`Holds::take`], and [`crate::hold`] for what a Hold costs Verkstead.
-    pub(crate) fn hold(&self, conversation_id: i64, event_id: i64) -> Option<Which> {
-        self.holds.take(conversation_id, event_id)
-    }
-
-    /// Whether the Hold numbered `which` is the one still in force — see
-    /// [`Holds::still_held`].
-    pub(crate) fn still_held(&self, conversation_id: i64, which: Which) -> bool {
-        self.holds.still_held(conversation_id, which)
-    }
-
-    /// Which of this Conversation's sessions the human has the keyboard of, or
-    /// `None` where it is Verkstead's.
-    ///
-    /// What the *blocked on you* badge points at while a Hold is in force, and
-    /// what the workbench draws its hand-back control from.
-    pub(crate) fn holding(&self, conversation_id: i64) -> Option<i64> {
-        self.holds.holding(conversation_id)
-    }
-
-    /// The human has handed the keyboard back. `false` is a hand-back that
-    /// arrived twice — see [`Holds::hand_back`].
-    pub(crate) fn hand_back(&self, conversation_id: i64) -> bool {
-        self.holds.hand_back(conversation_id)
-    }
-
-    /// Wait until nothing is holding this Conversation's keyboard.
-    ///
-    /// The gate every driver asks before it ends a session or advances a run —
-    /// see [`crate::hold`], which is where the reasons for it are.
-    pub(crate) async fn until_handed_back(&self, conversation_id: i64) {
-        self.holds.until_handed_back(conversation_id).await
     }
 
     /// Run `pairing`'s agent on `prompt`, inside `conversation`'s sandbox, and
@@ -980,20 +932,7 @@ impl Sessions {
     /// Conversation that was never started and every one whose session has
     /// already ended.
     ///
-    /// Any Hold on it goes with the session. Verkstead itself never gets this
-    /// far with one in force — every driver waits at the gate first, which is
-    /// what a Hold *is* — so an end that meets one is the human's own act:
-    /// aborting the Conversation, accepting the proposal the grilling made, or
-    /// choosing what to do about a run that stopped. Each of those is them
-    /// answering, and a keyboard nobody is at is one already handed back.
     pub(crate) async fn end(&self, conversation_id: i64) {
-        if self.holds.hand_back(conversation_id) {
-            tracing::info!(
-                conversation_id,
-                "a held session was ended by the human, so the Hold ended with it",
-            );
-        }
-
         let running = self
             .running
             .lock()

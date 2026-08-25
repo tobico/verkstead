@@ -21,7 +21,6 @@ import type {
   ConversationStopped,
   ConversationView,
   GrillingStarted,
-  HandedBack,
   ManualTaskStarted,
   PauseResumed,
   ProfileChoice,
@@ -340,16 +339,6 @@ export function abortConversation(id: number): Promise<ConversationAborted> {
 /// is checked out again on the same branch, which is the server's to do.
 export function reopenConversation(id: number): Promise<ConversationReopened> {
   return post<ConversationReopened>(`/api/ui/conversations/${id}/reopen`, {});
-}
-
-/// Give a session's keyboard back, which is the one thing that ends a Hold.
-///
-/// Not the socket closing and not the tab going: Verkstead resuming over a
-/// half-finished intervention is worse than a stalled run, so ending one is a
-/// press. What the human left is then judged by the ordinary end-of-session
-/// rules, which is the server's to do and not this side's.
-export function handBack(id: number): Promise<HandedBack> {
-  return post<HandedBack>(`/api/ui/conversations/${id}/hand-back`, {});
 }
 
 /// Go on without waiting for the account's window to come back.

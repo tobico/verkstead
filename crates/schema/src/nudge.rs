@@ -47,8 +47,8 @@ pub enum Nudge {
     /// used to cycle with the viewer's poll, and the poll is gone (ADR-0009).
     Liveness { conversation: i64 },
 
-    /// One Conversation moved in some other way: an Event on its Timeline, its
-    /// lifecycle, the Hold on its keyboard.
+    /// One Conversation moved in some other way: an Event on its Timeline, or
+    /// its lifecycle.
     ///
     /// This is the Conversation everywhere it is drawn, its row in the sidebar
     /// included — a lifecycle that moved is a row that reads differently.

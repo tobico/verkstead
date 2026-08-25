@@ -16,7 +16,7 @@ Roadmap stage: [01: One stop](docs/roadmaps/steer/01-one-stop.md)
 
 ## Tasks
 
-- [ ] 01: Retire the Hold — [details](01-retire-the-hold.md)
+- [x] 01: Retire the Hold — [details](01-retire-the-hold.md)
 - [ ] 02: One stop, one record — [details](02-one-stop-one-record.md)
 - [ ] 03: No stop resumes itself — [details](03-no-stop-resumes-itself.md)
 - [ ] 04: One stopped presentation — [details](04-one-stopped-presentation.md)

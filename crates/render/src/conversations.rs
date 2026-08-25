@@ -291,23 +291,6 @@ pub struct ConversationView {
     /// own, which is why this sits beside `state` rather than in it.
     pub blocked_on: Option<i64>,
 
-    /// Which of this Conversation's sessions the human has the keyboard of, or
-    /// `null` where it is Verkstead's.
-    ///
-    /// The Hold, said as the Event of the session it was taken on: the workbench
-    /// draws the hand-back control on that session's Screen, and a Hold with no
-    /// session to name would be one nobody could give back.
-    ///
-    /// Beside `blocked_on` rather than folded into it, though a Hold sets that
-    /// too. What the badge says is *the work has stopped and it is your move*,
-    /// and what this says is *which move* — where a halt is answered by pressing
-    /// Resume, a Hold is answered by handing the keyboard back.
-    ///
-    /// Never on the Timeline, however long it lasts: the Timeline records the
-    /// work rather than the watching. This is a fact about now, read off the
-    /// running server every time the Conversation is.
-    pub held: Option<i64>,
-
     /// Whether a session is registered for this Conversation as of this read.
     ///
     /// The same fact the sidebar draws its working indicator from, said here
@@ -1091,14 +1074,9 @@ pub enum Shown {
 
 /// And what a watcher says back up it.
 ///
-/// Three kinds of thing, each saying which it is: the socket is a conversation
-/// in both directions, and what a watcher does to a Screen is look at it a
-/// different size, type into it, or move a mouse over it.
-///
-/// The last two carry the same thing — bytes on their way to the session's own
-/// terminal — and are told apart for one reason, which is the Hold. Typing
-/// takes it and mousing never does, so which of the two the human did has to
-/// survive the crossing rather than be guessed at from the bytes.
+/// Two kinds of thing, each saying which it is: the socket is a conversation in
+/// both directions, and what a watcher does to a Screen is look at it a
+/// different size, or put something into it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Watching {
@@ -1107,49 +1085,19 @@ pub enum Watching {
     /// reaches the session's own terminal, so its interface redraws to fit.
     Resized(Size),
 
-    /// What the human typed, on its way to the session's own terminal.
+    /// What the watcher put in, on its way to the session's own terminal.
     ///
-    /// The first of these takes the Hold: from then on Verkstead records and
-    /// nothing else until the keyboard is handed back — see the Hold in
-    /// `CONTEXT.md`. Whatever the terminal makes of it comes back the ordinary
-    /// way, in among what the session printed, because that is the one account
-    /// of what happened.
+    /// Keystrokes and mouse reports alike: a session whose interface tracks the
+    /// mouse is sent a report of every move, click and scroll over its Screen,
+    /// down the path a keystroke takes, and neither commits Verkstead to
+    /// anything. Whatever the terminal makes of what arrives comes back the
+    /// ordinary way, in among what the session printed, because that is the one
+    /// account of what happened.
     ///
     /// Text rather than a key: what a terminal takes is bytes, and the browser's
     /// own terminal has already turned a keypress into the ones a session
     /// expects.
-    Typed(String),
-
-    /// What the mouse did, on its way to the same terminal.
-    ///
-    /// A session whose interface tracks the mouse is sent a report of every
-    /// move, click and scroll over its Screen, down the path a keystroke takes
-    /// — so one of these is a keystroke in every respect but the one that
-    /// matters here: **it never takes the Hold**. The Hold is the human
-    /// deliberately intervening, and a cursor crossing a live Screen is not
-    /// that.
-    ///
-    /// Written through whether the Conversation is held or not, exactly as
-    /// [`Watching::Typed`] is: a human mid-intervention uses the mouse as much
-    /// as the keyboard.
-    Moused(String),
-}
-
-/// What handing a Conversation's keyboard back came to.
-///
-/// The one way a Hold ends, and it ends by being pressed: no timeout, no release
-/// on the socket dropping, because Verkstead resuming over a half-finished
-/// intervention is worse than a stalled run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum HandedBack {
-    /// The Hold is over: Verkstead has the Conversation again, and whatever the
-    /// human left is judged by the ordinary end-of-session rules.
-    HandedBack,
-
-    /// There was no Hold to end. The same answer arriving twice — a second
-    /// device, or a press repeated — rather than a refusal.
-    NotHeld,
+    PutIn(String),
 }
 
 /// How big a Screen is, in characters.
