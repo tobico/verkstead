@@ -60,7 +60,7 @@ pub use conversations::{
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};
-pub use pauses::{By, Pause, Resumed, Resuming, pause, resume_pause};
+pub use pauses::{Pause, Resuming, pause, resume_pause};
 pub use placements::place_conversations;
 pub use profiles::{
     AgentType, Deleting, Pairing, Profile, ProfileFacts, Saving, create_profile, delete_profile,
@@ -74,8 +74,7 @@ pub use push::{
 pub use repos::{Repo, load_repo, register_repo, registered_repos};
 pub use session_names::session_id;
 pub use stops::{
-    Decision, Resetting, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop,
-    resetting_stops, stop, stopped,
+    Decision, Stopped, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop, stopped,
 };
 pub use transcripts::{append_transcript, transcript, transcript_after};
 pub use waits::{WaitHeld, Waits};

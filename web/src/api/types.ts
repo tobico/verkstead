@@ -372,11 +372,6 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "OutsideWatchedPaths";
 
 /**
- * The two things that end a wait.
- */
-export type By = "Human" | "Reset";
-
-/**
  * One session's Capture, whole, as the details pane receives it.
  *
  * Byte for byte, control sequences and all: what a terminal was sent is what a
@@ -945,20 +940,6 @@ export type PairingView = { profile: ProfileEntry,
 model: string | null, };
 
 /**
- * How a Pause ended: what started the work again, and when.
- *
- * Named for the Pause rather than for the resuming, because [`Resumed`] is
- * already what pressing **Resume** on a halt answers with. The two are
- * different things said with one word — one is a wait that is over, the other
- * is a run that has been started again — so this takes the longer name.
- */
-export type PauseEnded = { by: By, 
-/**
- * When it ended, RFC 3339.
- */
-at: string, };
-
-/**
  * A run waiting an account's window out, as the Timeline shows it.
  *
  * Nothing here went wrong, which is what makes it a different Event from the
@@ -983,15 +964,21 @@ profile: string,
 said: string, 
 /**
  * When the window resets, RFC 3339 — or `null` where what the session
- * printed carried no time this build could read as one, which is a wait the
- * human ends.
+ * printed carried no time the Verkstead that wrote this could read as one.
+ *
+ * An instant, unlike the reset words a stop carries, because this is a row
+ * a Verkstead of before wrote and nothing rewrites one.
  */
 resets_at: string | null, 
 /**
- * What ended the wait, or `null` while it is still on — which is the state
- * the run is stopped in, and what the resume press is drawn for.
+ * When the wait ended, RFC 3339 — or `null` while it is still on, which is
+ * the state the run is stopped in, and what the resume press is drawn for.
+ *
+ * *What* ended it is not here. A wait used to end two ways, the reset time
+ * passing being one of them; no stop resumes itself now, so a wait that is
+ * over was ended by a press.
  */
-resumed: PauseEnded | null, };
+resumed: string | null, };
 
 /**
  * What became of pressing resume.

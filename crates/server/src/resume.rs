@@ -113,12 +113,14 @@ pub(crate) async fn resume(
     // over, stop or no stop: two agents in one Worktree is the failure every
     // launch here is arranged to make impossible. So the stop is taken away —
     // which is the whole of what Resume can add to a Conversation something is
-    // already working in — and nothing is launched: the driver seeing that
-    // session out advances past the stop the moment it ends.
+    // already working in — and nothing is launched here.
     //
-    // What reaches this is a stop written over a session that was left running:
-    // an account out of window, whose agent holds its own session at the limit.
-    // Every other stop is written with nothing running, or ends what was.
+    // Every stop is written with nothing running or ends what was, an exhausted
+    // window included, so a stop that reaches this is one caught in the moment
+    // between the two: a session asked to end and not yet reaped. Nothing
+    // advances out of that moment either, a session Verkstead ended advancing
+    // nothing — so what this press buys is the badge going, and the press after
+    // it starts the work.
     if state.sessions.working().contains(&conversation_id) {
         if stopped {
             clear(state, conversation_id).await?;

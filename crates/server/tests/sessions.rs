@@ -627,10 +627,6 @@ const BRISKLY: Pace = Pace {
     // about something else say nothing about it, and the ones that are about it
     // keep [`SWEEPING`].
     stalls: Duration::from_secs(600),
-    // And the same again for the other sweep, for the same reason: a run
-    // waiting an account's window out ends its own wait, and only the test
-    // about that wants to watch it happen.
-    pauses: Duration::from_secs(600),
 };
 
 /// And the same at a pace that does look, for the tests that are about the
@@ -641,18 +637,6 @@ const BRISKLY: Pace = Pace {
 /// number of seconds it waits before noticing is not part of the answer.
 const SWEEPING: Pace = Pace {
     stalls: Duration::from_millis(100),
-    ..BRISKLY
-};
-
-/// And the same for the other sweep, for the one test that watches a wait end
-/// itself.
-///
-/// A server looks over the runs waiting an account's window out every minute.
-/// What is being asked here is whether a window that has come back starts the
-/// work again with nobody pressing anything, and the number of seconds it waits
-/// before noticing is not part of the answer.
-const RESUMING: Pace = Pace {
-    pauses: Duration::from_millis(100),
     ..BRISKLY
 };
 
@@ -911,12 +895,6 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// to watch it do so — see [`SWEEPING`].
 async fn grilling_swept(stub: &str) -> Grilling {
     grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
-}
-
-/// The same, on a server that looks for a window that has come back briskly
-/// enough to watch it do so — see [`RESUMING`].
-async fn grilling_resuming(stub: &str) -> Grilling {
-    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, RESUMING).await
 }
 
 /// The same, over a directory the caller already has the name of — which is
@@ -6980,11 +6958,14 @@ async fn running_out(fixture: &Grilling) {
 
 /// An account that runs out of window mid-run: the run stops with a Notice
 /// naming the account and the line the session printed, the devices are told,
-/// and nothing else is launched until somebody presses Resume.
+/// the session that printed it is ended, and nothing else is launched until
+/// somebody presses Resume.
 ///
-/// The agent waits too — that is settled, and it is why the reset time is on the
-/// stop at all. What Verkstead adds is that the wait is answerable from a phone
-/// instead of being a session that has gone quiet for no stated reason.
+/// The agent waits too, and that is exactly why the session goes: no stop
+/// resumes itself, so an agent left holding would wake when the window came
+/// back and work on inside a Conversation that reads as stopped. What Verkstead
+/// puts in its place is a wait answerable from a phone instead of a session that
+/// has gone quiet for no stated reason.
 #[tokio::test]
 async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
     let fixture = grilling(&out_of_window(
@@ -7080,6 +7061,15 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
         "one push for the wait, however long it lasts",
     );
 
+    assert!(
+        outputs(&fixture.view().await)
+            .iter()
+            .all(|session| !session.running),
+        "and no session is running behind the stop: the agent would have held its \
+         own at the limit and worked on when the window came back, inside a \
+         Conversation that reads as stopped",
+    );
+
     let worktree = PathBuf::from(fixture.view().await.worktree.unwrap().path);
 
     assert_eq!(
@@ -7115,11 +7105,21 @@ async fn the_humans_press_starts_a_stopped_run_again_where_it_stopped() {
          nothing about how the stop ends",
     );
 
-    // The agent is holding its own session at the limit, and nothing starts a
-    // second one in a Worktree one is working in. So what the press does here is
-    // take the stop away, and the driver that is seeing that session out carries
-    // the run on the moment it ends.
-    assert_eq!(fixture.resume().await, Resumed::AlreadyDriven);
+    // The stop ended the session that printed the banner — no stop resumes
+    // itself, so an agent left holding would have carried on unwatched — and
+    // the driver that was seeing it out advanced nothing past the stop. So the
+    // press finds a Worktree with nothing running in it, and what it does is
+    // recompute the step and launch.
+    fixture
+        .until(|view| {
+            outputs(view)
+                .iter()
+                .all(|session| !session.running)
+                .then_some(())
+        })
+        .await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
 
     // The rest of the backlog, worked by sessions of its own: the run picked up
     // at the step it had reached rather than starting over.
@@ -7162,52 +7162,47 @@ async fn the_humans_press_starts_a_stopped_run_again_where_it_stopped() {
     );
 }
 
-/// And nobody presses anything: the reset time passes, and the run goes on by
-/// itself.
+/// And nobody presses anything: the reset passing changes nothing at all.
 ///
-/// Swept rather than timed, which is what makes it survive a restart — nothing
-/// holds a clock across the process, so a window that came back while the server
-/// was down is one the next sweep finds already due. Which is also how this test
-/// reaches it: the sentence names a time that has been and gone.
+/// The sentence names a time that has been and gone, so anything reading it as a
+/// moment would find it due the instant the stop was written. Nothing does: the
+/// reset is words on the card, the run waits for the press like every other, and
+/// there is no clock anywhere for it to wait on instead.
 #[tokio::test]
-async fn the_window_coming_back_starts_a_stopped_run_again_on_its_own() {
-    let fixture = grilling_resuming(&out_of_window(
+async fn a_reset_that_has_been_and_gone_starts_nothing() {
+    let fixture = grilling(&out_of_window(
         "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
     ))
     .await;
 
     running_out(&fixture).await;
 
-    // Nothing is pressed here at all. The sweep reads the reset time, finds it
-    // has passed, and starts the work again.
-    let subjects = fixture
-        .until(|view| {
-            let landed = commits(view);
-            (landed.len() == 4).then(|| {
-                landed
-                    .iter()
-                    .map(|commit| commit.subject.clone())
-                    .collect::<Vec<_>>()
-            })
-        })
-        .await;
+    let notice = fixture.stopped().await;
 
     assert_eq!(
-        subjects,
-        vec![
-            "chore: plan the rate limiter".to_owned(),
-            "feat: 01-count.md".to_owned(),
-            "feat: 02-refuse.md".to_owned(),
-            "chore: finish rate-limiting".to_owned(),
-        ],
-        "the backlog was worked through from where it stopped",
+        fixture.stop_on_the_record().await.resets.as_deref(),
+        Some("2020-01-01T00:00:00Z"),
+        "the reset is on the stop in the words the session printed it in",
     );
+
+    let landed = commits(&fixture.view().await).len();
+
+    // Long enough for anything running on a clock to have come round.
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let view = fixture.view().await;
 
     assert_eq!(
-        view.blocked_on, None,
-        "the stop the window wrote is gone, and nothing is waiting on the human",
+        commits(&view).len(),
+        landed,
+        "the backlog did not go on: the task after the one that landed is still \
+         waiting to be worked",
+    );
+    assert_eq!(
+        view.blocked_on,
+        Some(notice.id),
+        "and the Conversation is still blocked on the human, which is what a stop \
+         nothing resumes for itself comes to",
     );
     assert_eq!(
         notices(&view).len(),

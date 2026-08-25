@@ -1399,7 +1399,7 @@ async fn resume_pause(
         return Json(PauseResumed::NoSuchPause).into_response();
     };
 
-    match crate::limits::resume(&state, id, event, store::By::Human).await {
+    match crate::limits::resume(&state, id, event).await {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, event_id = event, "starting a paused run again failed");
@@ -1638,23 +1638,17 @@ async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -
 }
 
 /// A Pause as the viewer receives it: which account ran out, when it comes back,
-/// and what ended the wait if anything has.
+/// and whether the wait is over.
 ///
-/// The one Event whose whole self rides on the Timeline. Held to the viewer's
-/// vocabulary here, as a lifecycle state is, because the two enums are one pair
-/// of words said in two crates that do not depend on each other.
+/// The one Event whose whole self rides on the Timeline. Four strings across a
+/// seam that holds no enum any more: what ended a wait was the last of those,
+/// and there is one way left for one to end.
 fn waiting(pause: store::Pause) -> verkstead_render::Waiting {
     verkstead_render::Waiting {
         profile: pause.profile,
         said: pause.said,
         resets_at: pause.resets_at,
-        resumed: pause.resumed.map(|resumed| verkstead_render::PauseEnded {
-            by: match resumed.by {
-                store::By::Human => verkstead_render::By::Human,
-                store::By::Reset => verkstead_render::By::Reset,
-            },
-            at: resumed.at,
-        }),
+        resumed: pause.resumed,
     }
 }
 

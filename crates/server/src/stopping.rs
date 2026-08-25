@@ -120,7 +120,7 @@ impl<'a> Decided<'a> {
             }),
             Self::OutOfWindow { profile, resets } => Some(crate::push::News::OutOfWindow {
                 profile: profile.to_owned(),
-                resets_at: resets.map(str::to_owned),
+                resets: resets.map(str::to_owned),
             }),
             Self::Human | Self::Nobody => None,
         }

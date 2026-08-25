@@ -1,15 +1,15 @@
-//! A run waiting an account's window out, and the one thing the human can do
-//! about it.
+//! A Pause a Verkstead of before put on a timeline, and the one thing the human
+//! can do about it.
 //!
-//! Nothing has gone wrong here, which is the whole difference between this and
-//! the interruption it is drawn like: the account is out of window, the agent is
-//! waiting for the same reset, and Verkstead has stopped launching anything so
-//! that a run which has stopped says so instead of going quiet.
+//! Nothing writes another. An account out of window stops a run the way
+//! everything else does now — one notice, one badge, one Resume — and what is
+//! drawn here is a record of a wait that happened, kept because ADR-0006's rule
+//! is that the record is read rather than rewritten.
 //!
-//! So there is one press rather than three remedies, and it is not a decision to
-//! be talked into: *go on without waiting* is the only thing the human can add,
-//! and it may well be the wrong thing to do — the window is coming back either
-//! way. The wait ends by itself when it does.
+//! So there is one press and no remedies: *go on without waiting* takes the
+//! stop the wait was read onto its conversation as away, and the run picks up
+//! from where it stopped. No wait ends by itself — no stop resumes itself — so
+//! a stored one that is still open is waiting on that press and nothing else.
 //!
 //! Whole on the timeline, with nothing behind a details pane. What it has to say
 //! is a profile's name, a time and the line the session printed, and a pane that
@@ -19,23 +19,15 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Show, createSignal, type JSX } from "solid-js";
 
 import { resumePause } from "../api/client";
-import type {
-  By,
-  ConversationView,
-  PauseEvent,
-  PauseResumed,
-} from "../api/types";
+import type { ConversationView, PauseEvent, PauseResumed } from "../api/types";
 import { utcStamp } from "../set/when";
 
-/// What each way the wait ended is called.
+/// What the line reads once the wait is over.
 ///
-/// One record for the line the timeline gives it afterwards, so what the human
-/// pressed and what they read back cannot come to be called different things —
-/// the same arrangement the remedies have.
-export const RESUMED_BY: Record<By, string> = {
-  Human: "Went on without waiting",
-  Reset: "The window came back",
-};
+/// One string, because there is one way a wait ends: the human presses. There
+/// was a time when the reset time passing ended one too, and no stop resumes
+/// itself now.
+export const WENT_ON = "Went on without waiting";
 
 /// And each way of being refused the press.
 ///
@@ -45,8 +37,7 @@ export const RESUMED_BY: Record<By, string> = {
 export const RESUME_REFUSAL: Record<PauseResumed, string> = {
   Resumed: "",
   NoSuchPause: "This pause is gone.",
-  AlreadyResumed:
-    "The wait was already over — the window came back, or a second press. The first ending stands.",
+  AlreadyResumed: "The wait was already over — a second press. The first ending stands.",
 };
 
 /// A run waiting an account's window out, as the timeline shows it: which
@@ -56,9 +47,9 @@ export const RESUME_REFUSAL: Record<PauseResumed, string> = {
 /// interruption has, and for the same reason: there is something to press inside
 /// it.
 ///
-/// Once it is over the press goes and what ended it stays, because the record is
-/// what a timeline is: a long run against a busy account collects one of these a
-/// day, each saying how that day's wait ended.
+/// Once it is over the press goes and the line saying so stays, because the
+/// record is what a timeline is: a long run against a busy account collects one
+/// of these a day, each saying that day's wait was ended.
 export function Pause(props: {
   conversation: ConversationView;
   waiting: PauseEvent;
@@ -95,11 +86,7 @@ export function Pause(props: {
           />
         }
       >
-        {(resumed) => (
-          <p class="resumed" classList={{ [resumed().by]: true }}>
-            {RESUMED_BY[resumed().by]}
-          </p>
-        )}
+        <p class="resumed">{WENT_ON}</p>
       </Show>
     </article>
   );
@@ -143,8 +130,8 @@ function Waiting(props: {
       </button>
       <p class="note">
         The run starts again from where it stopped. Nothing changes about the
-        account, and the worktree is left exactly as the session left it — the
-        agent is waiting for the same reset, so it may simply wait again.
+        account, and the worktree is left exactly as the session left it — so a
+        window that has not come back will stop it again.
       </p>
 
       <Show when={refused()}>

@@ -160,7 +160,7 @@ pub(crate) enum News {
     /// up for it — see [`crate::limits`].
     OutOfWindow {
         profile: String,
-        resets_at: Option<String>,
+        resets: Option<String>,
     },
 
     /// The work the Conversation was for is on a pull request, and the wrap-up
@@ -200,11 +200,11 @@ impl News {
             // account back in twenty minutes is one to leave alone.
             News::OutOfWindow {
                 profile,
-                resets_at: Some(resets_at),
-            } => format!("{profile} is out of window until {resets_at}"),
+                resets: Some(resets),
+            } => format!("{profile} is out of window until {resets}"),
             News::OutOfWindow {
                 profile,
-                resets_at: None,
+                resets: None,
             } => format!("{profile} is out of window"),
             News::OnAPullRequest { number } => format!("{branch} is on pull request #{number}"),
             // Read by the stage rather than by the branch: a stage is a
@@ -479,11 +479,11 @@ mod tests {
             },
             News::OutOfWindow {
                 profile: "implementation".to_owned(),
-                resets_at: Some("2026-08-24T05:00:00Z".to_owned()),
+                resets: Some("3pm".to_owned()),
             },
             News::OutOfWindow {
                 profile: "implementation".to_owned(),
-                resets_at: None,
+                resets: None,
             },
             News::OnAPullRequest { number: 41 },
             News::StageStarted {

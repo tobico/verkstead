@@ -1150,12 +1150,23 @@ async fn relay(
             _ = tokio::time::sleep_until(deadline), if !pending.is_empty() => {
                 flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
                 // On the same cadence as the flush, and after it: what is being
-                // looked for is in what was just written down, and a Pause the
+                // looked for is in what was just written down, and a stop the
                 // Timeline had no output under would be a wait with nothing
                 // above it saying where the session had got to.
-                limits
+                //
+                // A limit found there stops the run and ends this session, in
+                // that order — see [`crate::limits`], which writes the stop and
+                // leaves the ending here because this is the task it is running
+                // inside.
+                if limits
                     .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
-                    .await;
+                    .await
+                    && !ending
+                {
+                    ending = true;
+                    end_the_sandbox(child, event_id);
+                }
+
                 flushed = Instant::now();
             }
             _ = tokio::time::sleep_until(following), if tail.is_some() => {
@@ -1172,9 +1183,14 @@ async fn relay(
                     // moment it moves: a backend that says its window is spent
                     // in its own log and not on its display would otherwise go
                     // unnoticed until the terminal happened to say something.
-                    limits
+                    if limits
                         .look(pool, nudges, tail.as_ref().and_then(Tail::latest))
-                        .await;
+                        .await
+                        && !ending
+                    {
+                        ending = true;
+                        end_the_sandbox(child, event_id);
+                    }
                 }
 
                 tailed = Instant::now();
@@ -1192,13 +1208,7 @@ async fn relay(
             }
             _ = &mut stopping, if !ending => {
                 ending = true;
-                // The whole sandbox, which is what makes this reach the session
-                // inside it: bwrap's child is the first process of a namespace
-                // of its own, and a namespace whose first process is gone is a
-                // namespace with nothing left in it.
-                if let Err(error) = child.start_kill() {
-                    tracing::error!(error = ?error, event_id, "a session would not be ended");
-                }
+                end_the_sandbox(child, event_id);
             }
         }
     }
@@ -1210,12 +1220,10 @@ async fn relay(
     flush(pool, nudges, printing, &mut pending, &reading, told(&tail)).await;
 
     // And no look at it, deliberately: everything from here down is a session
-    // that has gone. A limit the agent waits out never ends its session — that
-    // is the whole of why a Pause is a wait rather than a failure — so a limit
-    // in a session's last words is a session that did not come back from one,
-    // which is the stop whoever is driving is about to write. Pausing as well
-    // would leave the run stopped on two things at once, and Resume would
-    // launch nothing.
+    // that has gone. A limit in a session's last words is one it did not come
+    // back from, which is the stop whoever is driving is about to write — and a
+    // stop written here would be the run stopped on two things at once, with
+    // Resume launching nothing.
 
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
@@ -1255,6 +1263,23 @@ async fn relay(
     }
 
     ended
+}
+
+/// End the sandbox a session runs in, which is what reaches the session itself:
+/// bwrap's child is the first process of a namespace of its own, and a namespace
+/// whose first process is gone is a namespace with nothing left in it.
+///
+/// Asked for rather than waited on — the relay reads the terminal to its close
+/// and reaps the child on its way out, which is the one place a session is ever
+/// waited for. Its two callers are the word from outside that a session is to
+/// end, and a stop the relay itself has just written for an exhausted window.
+///
+/// Nothing is refused for. A child that will not take the signal is one already
+/// gone, which is the same instruction arriving too late to be needed.
+fn end_the_sandbox(child: &mut Child, event_id: i64) {
+    if let Err(error) = child.start_kill() {
+        tracing::error!(error = ?error, event_id, "a session would not be ended");
+    }
 }
 
 /// What the session's log says of it, for the summary the Timeline reads —

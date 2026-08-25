@@ -448,39 +448,19 @@ pub struct PauseEvent {
     pub said: String,
 
     /// When the window resets, RFC 3339 — or `null` where what the session
-    /// printed carried no time this build could read as one, which is a wait the
-    /// human ends.
+    /// printed carried no time the Verkstead that wrote this could read as one.
+    ///
+    /// An instant, unlike the reset words a stop carries, because this is a row
+    /// a Verkstead of before wrote and nothing rewrites one.
     pub resets_at: Option<String>,
 
-    /// What ended the wait, or `null` while it is still on — which is the state
-    /// the run is stopped in, and what the resume press is drawn for.
-    pub resumed: Option<PauseEnded>,
-}
-
-/// How a Pause ended: what started the work again, and when.
-///
-/// Named for the Pause rather than for the resuming, because [`Resumed`] is
-/// already what pressing **Resume** on a halt answers with. The two are
-/// different things said with one word — one is a wait that is over, the other
-/// is a run that has been started again — so this takes the longer name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct PauseEnded {
-    pub by: By,
-
-    /// When it ended, RFC 3339.
-    pub at: String,
-}
-
-/// The two things that end a wait.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum By {
-    /// The human said so, from the workbench or from their phone.
-    Human,
-
-    /// The reset time passed.
-    Reset,
+    /// When the wait ended, RFC 3339 — or `null` while it is still on, which is
+    /// the state the run is stopped in, and what the resume press is drawn for.
+    ///
+    /// *What* ended it is not here. A wait used to end two ways, the reset time
+    /// passing being one of them; no stop resumes itself now, so a wait that is
+    /// over was ended by a press.
+    pub resumed: Option<String>,
 }
 
 /// What became of pressing resume.
@@ -1457,7 +1437,7 @@ pub struct Waiting {
     pub profile: String,
     pub said: String,
     pub resets_at: Option<String>,
-    pub resumed: Option<PauseEnded>,
+    pub resumed: Option<String>,
 }
 
 /// The handoff as an Event, rendered on the way — the same rendering the Brief

@@ -11,8 +11,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    By, Event, Pause, Resumed, Resuming, open_database, pause, register_repo, resume_pause,
-    start_conversation, timeline,
+    Event, Pause, Resuming, open_database, pause, register_repo, resume_pause, start_conversation,
+    timeline,
 };
 
 /// The sentence claude prints when an account is out of window, as a Verkstead
@@ -134,27 +134,50 @@ async fn a_stored_pause_with_no_reset_time_reads_back_too() {
     assert_eq!(on_the_timeline(&pool, id).await.len(), 1);
 }
 
-/// The two things that ended a wait are one row, and the record keeps which it
-/// was: *the window came back* and *somebody decided not to wait for it* read
-/// differently on a Timeline afterwards.
+/// That a wait is over is on the record, and stamped. What ended it is not:
+/// there is one way left, and every wait that ends ends by a press.
 #[tokio::test]
-async fn what_ended_the_wait_is_on_the_record() {
+async fn a_wait_that_ended_is_on_the_record() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
 
     let event = stored(&pool, id, "fable", SAID, None).await;
 
     assert_eq!(
-        resume_pause(&pool, id, event, By::Reset).await.unwrap(),
+        resume_pause(&pool, id, event).await.unwrap(),
         Resuming::Resumed,
     );
 
-    let Some(Resumed { by, at }) = pause(&pool, id, event).await.unwrap().unwrap().resumed else {
+    let Some(at) = pause(&pool, id, event).await.unwrap().unwrap().resumed else {
         panic!("the Pause reads as still waiting");
     };
 
-    assert_eq!(by, By::Reset, "the window came back on its own");
     assert!(!at.is_empty(), "and it is stamped");
+}
+
+/// A row a Verkstead of before ended reads as ended, whichever of its two
+/// answers it was written with. The word it kept is nothing this build asks
+/// about, and rewriting the row to drop it would be rewriting the record.
+#[tokio::test]
+async fn a_wait_a_verkstead_of_before_ended_still_reads_as_over() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    let event = stored(&pool, id, "fable", SAID, None).await;
+
+    sqlx::query(
+        "UPDATE pauses SET resumed_by = 'reset', resumed_at = '2026-08-24T05:00:00.000Z'
+         WHERE event_id = ?",
+    )
+    .bind(event)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        pause(&pool, id, event).await.unwrap().unwrap().resumed,
+        Some("2026-08-24T05:00:00.000Z".to_owned()),
+    );
 }
 
 /// The human presses from a phone twice over. The second one is not an error and
@@ -167,23 +190,13 @@ async fn a_wait_that_is_over_stays_over() {
     let event = stored(&pool, id, "fable", SAID, None).await;
 
     assert_eq!(
-        resume_pause(&pool, id, event, By::Human).await.unwrap(),
+        resume_pause(&pool, id, event).await.unwrap(),
         Resuming::Resumed,
     );
     assert_eq!(
-        resume_pause(&pool, id, event, By::Reset).await.unwrap(),
+        resume_pause(&pool, id, event).await.unwrap(),
         Resuming::AlreadyResumed,
         "the first ending stands",
-    );
-
-    assert_eq!(
-        pause(&pool, id, event)
-            .await
-            .unwrap()
-            .unwrap()
-            .resumed
-            .map(|resumed| resumed.by),
-        Some(By::Human),
     );
 }
 
@@ -208,7 +221,7 @@ async fn a_pause_belongs_to_the_conversation_it_is_on() {
 
     assert_eq!(pause(&pool, other, event).await.unwrap(), None);
     assert_eq!(
-        resume_pause(&pool, other, event, By::Human).await.unwrap(),
+        resume_pause(&pool, other, event).await.unwrap(),
         Resuming::NoSuchPause,
     );
     assert_eq!(

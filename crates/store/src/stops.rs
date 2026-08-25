@@ -103,16 +103,6 @@ pub struct Stopped {
     pub resets: Option<String>,
 }
 
-/// One Conversation stopped with a reset time on it, for whatever is still
-/// waiting that time out.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Resetting {
-    pub conversation_id: i64,
-
-    /// The reset the stop carries, exactly as it was written down.
-    pub resets: String,
-}
-
 /// The columns a stop lives in, added to `conversations` rather than declared
 /// with it.
 ///
@@ -378,31 +368,6 @@ pub async fn stopped(pool: &SqlitePool, conversation_id: i64) -> Result<Option<S
         at,
         resets,
     }))
-}
-
-/// Every stop carrying a reset time, across every Conversation.
-///
-/// What the sweep that ends a wait on its reset reads. Everything at once
-/// rather than a question per Conversation, and for the reason the stall sweep
-/// reads the sessions register once: this is a look over the whole server, and
-/// nearly always comes back with nothing.
-pub async fn resetting_stops(pool: &SqlitePool) -> Result<Vec<Resetting>> {
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, stopped_resets FROM conversations
-         WHERE stopped_at IS NOT NULL AND stopped_resets IS NOT NULL
-         ORDER BY id",
-    )
-    .fetch_all(pool)
-    .await
-    .context("reading the stops that name a time a window comes back")?;
-
-    Ok(rows
-        .into_iter()
-        .map(|(conversation_id, resets)| Resetting {
-            conversation_id,
-            resets,
-        })
-        .collect())
 }
 
 /// Ask for the run to stop once whatever is running now has reached its end.

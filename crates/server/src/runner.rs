@@ -90,15 +90,6 @@ pub struct Pace {
     /// how often Verkstead looks at things, and a stall is one of the things it
     /// looks for.
     pub stalls: Duration,
-
-    /// And how often the runs waiting an account's window out are looked over
-    /// for one whose window has come back — see [`crate::limits`].
-    ///
-    /// Its own field rather than [`Pace::stalls`] said twice, because the two
-    /// sweeps look for different things: a server tuned to notice a stalled
-    /// Conversation briskly has not asked to be told about a reset any sooner,
-    /// and a wait that ends a minute late costs nothing at all.
-    pub pauses: Duration,
 }
 
 impl Default for Pace {
@@ -109,7 +100,6 @@ impl Default for Pace {
             checks: crate::checks::ASKED_EVERY,
             manual: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
-            pauses: crate::limits::SWEPT_EVERY,
         }
     }
 }

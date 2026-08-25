@@ -5988,8 +5988,8 @@ describe("a pause on the timeline", () => {
   });
 
   /// The record is what a timeline is: a long run against a busy account
-  /// collects one of these a day, each saying how that day's wait ended.
-  it("shows what ended the wait once something has, and stops offering", async () => {
+  /// collects one of these a day, each saying that day's wait was ended.
+  it("shows that the wait was ended once it has been, and stops offering", async () => {
     thePaused({
       blocked_on: null,
       timeline: WAITING.timeline.map((entry) =>
@@ -5997,10 +5997,7 @@ describe("a pause on the timeline", () => {
           ? {
               Pause: {
                 ...entry.Pause,
-                resumed: {
-                  by: "Reset" as const,
-                  at: "2026-08-03T05:00:04.000Z",
-                },
+                resumed: "2026-08-03T05:00:04.000Z",
               },
             }
           : entry,
@@ -6011,13 +6008,13 @@ describe("a pause on the timeline", () => {
     const waiting = await drawn(container, ".timeline .pause");
 
     expect(waiting.querySelector(".resumed")!.textContent).toBe(
-      "The window came back",
+      "Went on without waiting",
     );
     expect(waiting.querySelector(".resuming")).toBeNull();
     expect(waiting.classList.contains("open")).toBe(false);
   });
-
-  /// The window came back while the page was open, or a second press. Not an
+  /// A second press, from the other device. Not an error, and said in words
+  /// rather than retried.
   /// error, and said in words rather than retried.
   it("says so when the wait was already over", async () => {
     thePaused(

@@ -440,13 +440,8 @@ fn routed(
     // take up: a restart holds no driver registrations at all, so what is still
     // undriven after everything that resumes has resumed is what genuinely has
     // nobody — see [`stalls`].
+
     stalls::sweeping(&state, resumed);
-
-    // And the runs waiting an account's window out, whose windows go on coming
-    // back while the server is down: nothing holds a clock across the process,
-    // so the first sweep is what finds one already due — see [`limits`].
-    limits::sweeping(&state);
-
     Router::new()
         // The one route that is nobody's Conversation: whether the server is up
         // is not a question about a piece of work.

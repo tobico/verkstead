@@ -6,13 +6,27 @@
 //! and the only thing that tells it apart is the words it carries about when
 //! the account comes back. See [`crate::stopping`], which writes it.
 //!
-//! **The agent waits too, and Verkstead neither turns that off nor depends on
-//! it.** The claude in use holds its session when the limit lands and carries on
-//! by itself when the window comes back, under a setting of its own. Nothing here
-//! reaches into that configuration. What the stop adds is that the wait is
-//! *said*: the Timeline names the account that ran out and when it comes back,
-//! the devices are told, and there is a press to start again — instead of a
-//! session that has gone quiet for no stated reason.
+//! **The agent waits too, and the stop ends its session.** The claude in use
+//! holds its session when the limit lands and carries on by itself when the
+//! window comes back, under a setting of its own. Nothing here reaches into that
+//! configuration — but nothing waits for it either, and that is what makes the
+//! session go: no stop resumes itself, so an agent left holding would wake at
+//! the reset and work on inside a Conversation that reads as stopped, and the
+//! press that came the next morning would launch over whatever it had done.
+//! What the stop costs, then, is the window the session would have worked
+//! through unwatched; what it buys is one rule about stopping.
+//!
+//! The stop is written first and the ending follows it, which is the order a
+//! Force stop uses and for the same reason: a session Verkstead ended advances
+//! nothing, so the driver seeing it out goes straight to its next launch, and
+//! the stop has to be there when it looks. And the ending is the relay's rather
+//! than this module's, because the watcher runs inside the relay task of the
+//! very session it is ending — see [`Watch::look`].
+//!
+//! What the stop adds beyond that is that the wait is *said*: the Timeline names
+//! the account that ran out and the words it printed about coming back, the
+//! devices are told, and there is a press to start again — instead of a session
+//! that has gone quiet for no stated reason.
 //!
 //! **Recognition is one sentence, said once.** [`EXHAUSTED`] is the whole of what
 //! is matched, because the wording is the backend's and will move: claude 2.1.234
@@ -39,11 +53,7 @@
 //! and does nothing else, so a run picked up again finds the repository exactly
 //! as the session left it — the same promise every other stop makes.
 
-use std::time::Duration;
-
 use sqlx::SqlitePool;
-use time::format_description::well_known::Rfc3339;
-use time::{OffsetDateTime, Time, UtcOffset};
 use verkstead_render::PauseResumed;
 use verkstead_schema::Nudge;
 
@@ -65,21 +75,6 @@ const EXHAUSTED: &str = "usage limit reached";
 /// not one whose earliest bytes hold the sentence.
 const HELD: usize = 8 * 1024;
 
-/// How often the runs waiting a window out are looked over, as [`crate::Pace`]
-/// has it by default.
-///
-/// A minute. A window resets on the hour and this is a wait rather than a race,
-/// so noticing one a minute late costs nothing — and the sweep is one read that
-/// nearly always comes back with nothing, which is not a thing to do in a tight
-/// loop for the years a server is up.
-pub(crate) const SWEPT_EVERY: Duration = Duration::from_secs(60);
-
-/// How long to give the machine to say what offset it keeps local time at.
-///
-/// Asked of `date`, once per stop written. A machine that will not answer within
-/// this leaves the reset time unread, which is a stop carrying no reset words.
-const ASKED_WITHIN: Duration = Duration::from_secs(5);
-
 /// What a session said about its account being out of window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Exhausted {
@@ -96,8 +91,7 @@ pub(crate) struct Exhausted {
 ///
 /// Pure and cheap on purpose: this runs on every flush of every session, twice a
 /// second while an agent talks, so everything the stop needs beyond *whether* —
-/// the reset time, the machine's offset — is worked out afterwards and only on a
-/// hit.
+/// the words the reset is in — is worked out afterwards and only on a hit.
 pub(crate) fn exhausted(text: &str) -> Option<Exhausted> {
     text.lines()
         .map(crate::capture::plain)
@@ -142,178 +136,92 @@ fn decoration(character: char) -> bool {
 /// The same as a pattern, so the trim above reads as what it does.
 const DECORATION: fn(char) -> bool = decoration;
 
-/// When the window resets, out of the sentence that said it was exhausted.
+/// When the window resets, in the words the sentence said it in — or `None`
+/// where it named no such thing.
 ///
-/// Two shapes, and both of them carry enough to be one moment:
+/// Words to show and nothing else: the reset time is information beside the
+/// Resume button, not a moment anything acts on, so what is kept is the word
+/// the display drew rather than this build's reading of it. `3pm` stays `3pm`,
+/// which is what somebody sitting at that machine will look at their own clock
+/// for.
 ///
-/// - an instant written whole, RFC 3339, which is what a record written by a
-///   machine for a machine looks like;
-/// - a clock time — `3pm`, `3:30pm`, `15:00` — which is what a display written
-///   for somebody sitting at the machine looks like, and which is the shape
-///   claude 2.1.234 actually prints. It has no date and no zone in it, so the
-///   missing halves are supplied here: `offset` is the one the machine keeps
-///   local time at, and the date is whichever of today and tomorrow makes the
-///   time still to come.
+/// Two shapes are recognised, which are the two a display writes:
 ///
-/// `now` and `offset` are handed in rather than read, which is what makes this
-/// answerable without a clock: the same sentence at the same moment reads as the
-/// same instant every time.
-fn resets_at(said: &str, now: OffsetDateTime, offset: UtcOffset) -> Option<OffsetDateTime> {
-    written_whole(said).or_else(|| next_clock(said, now, offset))
-}
-
-/// An RFC 3339 instant anywhere in the sentence.
+/// - a clock time — `3pm`, `3:30pm`, `15:00` — which is what claude 2.1.234
+///   actually prints;
+/// - an instant written whole, which is what a record written by a machine for
+///   a machine looks like.
 ///
-/// Every word of it is tried rather than the shape being anticipated: an instant
-/// is long, distinctive and self-checking, so a word that parses as one is one.
-fn written_whole(said: &str) -> Option<OffsetDateTime> {
-    said.split(|character: char| character.is_whitespace())
+/// The first word of either shape, decoration trimmed off both ends. Pure and
+/// cheap, because it is read on the flush that found the sentence.
+fn resets(said: &str) -> Option<String> {
+    said.split_whitespace()
         .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
-        .find_map(|word| OffsetDateTime::parse(word, &Rfc3339).ok())
+        .find(|word| written_whole(word) || clock(word))
+        .map(str::to_owned)
 }
 
-/// The next moment the machine's clock reads `said`'s clock time.
+/// Whether one word is an instant written whole: a date, `T`, and a time of day
+/// under it.
 ///
-/// Strictly ahead of `now`, which is what makes "resets at 3pm" read as this
-/// afternoon before three and as tomorrow afternoon after it. A window that has
-/// only just reset is never read as one a day away: the sentence is written when
-/// the limit lands, and the reset it names is always still to come.
-fn next_clock(said: &str, now: OffsetDateTime, offset: UtcOffset) -> Option<OffsetDateTime> {
-    let clock = said.split_whitespace().find_map(clock)?;
-
-    let here = now.to_offset(offset);
-    let today = here.replace_time(clock);
-
-    let at = match today > here {
-        true => today,
-        false => here
-            .date()
-            .next_day()?
-            .with_time(clock)
-            .assume_offset(offset),
+/// By shape rather than by parsing, deliberately: nothing here reads a reset
+/// time as a moment, and a word only has to be recognisable as one to be worth
+/// showing. What comes after the minutes — seconds, a fraction, a zone — is the
+/// instant's own business.
+fn written_whole(word: &str) -> bool {
+    let Some((date, time)) = word.split_once(['T', 't']) else {
+        return false;
     };
 
-    Some(at.to_offset(UtcOffset::UTC))
+    let dated = matches!(date.split('-').collect::<Vec<&str>>()[..], [year, month, day]
+        if digits(year, 4) && digits(month, 2) && digits(day, 2));
+
+    let Some((hour, rest)) = time.split_once(':') else {
+        return false;
+    };
+
+    let minute: String = rest.chars().take(2).collect();
+
+    dated && digits(hour, 2) && digits(&minute, 2)
 }
 
-/// One word read as a time of day, or `None` where it is an ordinary word.
+/// And whether one word is a time of day.
 ///
 /// The three ways a display writes one: `3pm`, `3:30pm` and `15:00` — with the
-/// twelve-hour ones taking their meridiem attached, because that is how they are
-/// drawn. A word ending in a meridiem it cannot use, or naming an hour there is
-/// none of, is not a time.
-fn clock(word: &str) -> Option<Time> {
-    let word = word.trim_matches(|character: char| !character.is_alphanumeric());
+/// twelve-hour ones taking their meridiem attached, because that is how they
+/// are drawn. A word ending in a meridiem it cannot use, or naming an hour
+/// there is none of, is not a time.
+///
+/// A bare number is never one. It is a number — a version, a count of files,
+/// the 40 in "40 paths" — and showing one as a reset would tell the human a
+/// time nobody said anything about.
+fn clock(word: &str) -> bool {
     let lowered = word.to_ascii_lowercase();
 
-    let (digits, meridiem) = match lowered.strip_suffix("am") {
-        Some(digits) => (digits, Some(false)),
+    let (figures, meridiem) = match lowered.strip_suffix("am") {
+        Some(digits) => (digits, true),
         None => match lowered.strip_suffix("pm") {
-            Some(digits) => (digits, Some(true)),
-            None => (lowered.as_str(), None),
+            Some(digits) => (digits, true),
+            None => (lowered.as_str(), false),
         },
     };
 
-    let digits = digits.trim();
-    let (hour, minute) = match digits.split_once(':') {
-        Some((hour, minute)) => (hour, minute.parse::<u8>().ok()?),
-        // Only with a meridiem on it. A bare number is a number — a version, a
-        // count of files, the 40 in "40 paths" — and reading one as an hour would
-        // pause a run on arithmetic.
-        None => (digits, 0),
+    let Some((hour, minute)) = figures.split_once(':').map(|(hour, minute)| {
+        (
+            hour,
+            minute.parse::<u8>().ok().filter(|minute| *minute < 60),
+        )
+    }) else {
+        // Only with a meridiem on it, and then only an hour of the twelve.
+        return meridiem && matches!(figures.parse::<u8>(), Ok(hour) if hour <= 12);
     };
 
-    let hour: u8 = hour.parse().ok()?;
-
-    let hour = match meridiem {
-        // Noon is 12pm and midnight is 12am, which is the one place the
-        // twelve-hour clock does not simply add twelve.
-        Some(true) => 12 + hour % 12,
-        Some(false) => hour % 12,
-        None if digits.contains(':') => hour,
-        None => return None,
-    };
-
-    Time::from_hms(hour, minute, 0).ok()
+    minute.is_some() && matches!(hour.parse::<u8>(), Ok(hour) if hour <= 23)
 }
 
-/// The same against the clock, asking the machine for its offset only where the
-/// sentence needs one.
-///
-/// An instant written whole carries its own zone, so a machine that will not say
-/// what offset it keeps costs nothing there. It is only a clock time that has a
-/// half missing — see [`next_clock`].
-async fn resets_when(said: &str) -> Option<OffsetDateTime> {
-    if let Some(at) = written_whole(said) {
-        return Some(at);
-    }
-
-    resets_at(said, OffsetDateTime::now_utc(), local_offset().await?)
-}
-
-/// The offset the machine keeps local time at, asked of the machine itself.
-///
-/// A clock time is written for somebody sitting at that machine, so the zone it
-/// is missing is that machine's. Asked of `date`, which every system has, rather
-/// than carried as a timezone database this build has no other use for — and
-/// asked per stop rather than held, so a server that has been up across a
-/// daylight-saving change still reads the sentence in the offset the sentence was
-/// written in.
-///
-/// `None` is a machine that would not answer, or an answer that is not an offset.
-/// The stop then carries no reset words, which changes nothing about how it ends:
-/// every stop waits for a press.
-async fn local_offset() -> Option<UtcOffset> {
-    let asking = tokio::process::Command::new("date").arg("+%z").output();
-
-    let said = match tokio::time::timeout(ASKED_WITHIN, asking).await {
-        Ok(Ok(said)) if said.status.success() => said.stdout,
-        Ok(Ok(said)) => {
-            tracing::warn!(status = %said.status, "the machine would not say what offset it keeps");
-            return None;
-        }
-        Ok(Err(error)) => {
-            tracing::warn!(error = ?error, "asking the machine what offset it keeps failed");
-            return None;
-        }
-        Err(_) => {
-            tracing::warn!("the machine took too long to say what offset it keeps");
-            return None;
-        }
-    };
-
-    read_offset(String::from_utf8_lossy(&said).trim())
-}
-
-/// `+1000`, `-0430`, `+00` or `Z` as an offset.
-///
-/// Split out from the asking so that what the machine says can be read without a
-/// machine to say it.
-fn read_offset(said: &str) -> Option<UtcOffset> {
-    if said == "Z" || said == "z" {
-        return Some(UtcOffset::UTC);
-    }
-
-    let (sign, digits) = said.split_at_checked(1)?;
-
-    let sign: i8 = match sign {
-        "+" => 1,
-        "-" => -1,
-        _ => return None,
-    };
-
-    let digits: String = digits.chars().filter(char::is_ascii_digit).collect();
-
-    let (hours, minutes) = match digits.len() {
-        2 => (digits.parse::<i8>().ok()?, 0),
-        4 => (
-            digits[..2].parse::<i8>().ok()?,
-            digits[2..].parse::<i8>().ok()?,
-        ),
-        _ => return None,
-    };
-
-    UtcOffset::from_hms(sign * hours, sign * minutes, 0).ok()
+/// Whether a run of characters is exactly `count` ASCII digits.
+fn digits(said: &str, count: usize) -> bool {
+    said.len() == count && said.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 /// One session, watched for the sentence that says its account is out of window.
@@ -391,7 +299,19 @@ impl Watch {
     /// record a session leaves behind — see [`crate::transcript`]. It is looked at
     /// beside the terminal rather than instead of it: a backend that says so in
     /// its log and not on its display would otherwise go unnoticed.
-    pub(crate) async fn look(&mut self, pool: &SqlitePool, nudges: &Nudges, said: Option<&str>) {
+    ///
+    /// `true` is *this session is to end*, which is what a stop having just been
+    /// written comes to. The relay is what ends it, because the relay is what
+    /// this is running inside: ending a session the ordinary way waits for that
+    /// relay to be over, and a call to it here would be waiting on itself. See
+    /// the module head for why the session goes at all.
+    #[must_use = "a stop for an exhausted window ends the session it stopped"]
+    pub(crate) async fn look(
+        &mut self,
+        pool: &SqlitePool,
+        nudges: &Nudges,
+        said: Option<&str>,
+    ) -> bool {
         // Whether the terminal said anything at all since the last look, which is
         // what tells a session going on from a session standing still — see
         // [`Watch::raised`], which is let go on the first of those and never on
@@ -434,11 +354,11 @@ impl Watch {
                 self.raised = false;
             }
 
-            return;
+            return false;
         };
 
         if self.raised {
-            return;
+            return false;
         }
 
         self.raised = true;
@@ -451,12 +371,11 @@ impl Watch {
             &self.profile,
             &found.said,
         )
-        .await;
+        .await
     }
 }
-
-/// Stop the run: write the stop, its Notice and the reset words, and tell the
-/// human's devices.
+/// Stop the run: write the stop, its Notice and the reset words, tell the
+/// human's devices, and say that the session is to end.
 ///
 /// The one stop and nothing of its own — see [`crate::stopping::stop`]. What is
 /// particular to a window is only what the stop is told: the account that ran
@@ -467,10 +386,13 @@ impl Watch {
 /// The pool and the Nudges, because that is all this half of the server has:
 /// the watcher runs inside the relay task of the session that printed the line.
 ///
-/// Nothing is refused for. A stop that could not be written is a run that waits
-/// with nothing saying so, which is a thing to see in the log and the same thing
-/// either way: the session goes on waiting, because the agent's own wait is not
-/// Verkstead's to end.
+/// `true` is *end the session*, which is every way of this returning but one:
+/// a Conversation that reads as stopped must have nothing running behind it,
+/// whether this stop is the one that stopped it or the second to arrive. The
+/// exception is a stop that could not be written at all — nothing is refused
+/// for here, but ending a session over a stop that is not on the record would
+/// be a run advancing with nothing to hold it off, so the log is where that
+/// goes and the session is left alone.
 async fn out_of_window(
     pool: &SqlitePool,
     nudges: &Nudges,
@@ -478,23 +400,21 @@ async fn out_of_window(
     session: i64,
     profile: &str,
     said: &str,
-) {
-    // Only now, and only once per stop: reading the reset time is a word or two
-    // of parsing and, for a clock time, a question to the machine — and the
-    // flush this was reached from runs twice a second.
-    let resets = resets_when(said)
-        .await
-        .and_then(|at| at.format(&Rfc3339).ok());
+) -> bool {
+    // Only now, and only once per stop: the flush this was reached from runs
+    // twice a second, and the words the reset is in are worth a look at the
+    // sentence only once the sentence has said something.
+    let resets = resets(said);
 
     // What ought to have been happening, in the words every other stop names it
     // in: the Notice opens with it, and a stop for a window is not a different
     // kind of sentence.
     let lifecycle = match store::load_conversation(pool, conversation_id).await {
         Ok(Some(conversation)) => conversation.state,
-        Ok(None) => return,
+        Ok(None) => return false,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the Conversation whose account ran out failed");
-            return;
+            return false;
         }
     };
 
@@ -516,21 +436,28 @@ async fn out_of_window(
         // A run that is already stopped, which is what the banner redrawing in
         // different words comes to. The first Notice is the one the human was
         // told about.
-        Ok(None) => tracing::info!(
-            conversation_id,
-            session,
-            "an account ran out of window on a run that had already stopped"
-        ),
-        Ok(Some(notice)) => tracing::warn!(
-            conversation_id,
-            notice,
-            session,
-            profile,
-            resets = resets.as_deref().unwrap_or("unread"),
-            "an account ran out of window, so the run has stopped"
-        ),
+        Ok(None) => {
+            tracing::info!(
+                conversation_id,
+                session,
+                "an account ran out of window on a run that had already stopped"
+            );
+            true
+        }
+        Ok(Some(notice)) => {
+            tracing::warn!(
+                conversation_id,
+                notice,
+                session,
+                profile,
+                resets = resets.as_deref().unwrap_or("unread"),
+                "an account ran out of window, so the run has stopped"
+            );
+            true
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "a run could not be stopped on a usage limit");
+            false
         }
     }
 }
@@ -540,20 +467,30 @@ async fn out_of_window(
 ///
 /// The card that offers this is one drawn over a stored Pause Event: nothing
 /// writes another, and what stops a run for a window now is the one stop. What
-/// is left for this to do is close the row — the record of how that wait ended —
+/// is left for this to do is close the row — the record that the wait is over —
 /// and then press the one Resume, which is what clears the stop the Pause was
 /// read onto its Conversation as.
 ///
 /// Nothing is reverted, reset or stashed. A stop never touched the Worktree, so
 /// there is nothing to put back: the run picks up from wherever the session left
 /// the repository.
+///
+/// Through the one standing way in — see [`crate::resume`] — rather than through
+/// anything of this module's own. What ought to be running after a stop is the
+/// same question Resume asks after any other, recomputed from the state the
+/// Conversation is in now, and a second answer to it here would be a second
+/// thing to keep true. Clearing the stop is that press's, which is why nothing
+/// here clears one.
+///
+/// [`crate::resume::Resuming::Pressed`], because there is nothing else left to
+/// be: a wait ends when the human ends it, so a wrapping Conversation's spent
+/// check-fix attempts are forgotten the way they are for any other press.
 pub(crate) async fn resume(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
-    by: store::By,
 ) -> anyhow::Result<PauseResumed> {
-    let resuming = store::resume_pause(&state.pool, conversation_id, event_id, by).await?;
+    let resuming = store::resume_pause(&state.pool, conversation_id, event_id).await?;
 
     match resuming {
         store::Resuming::NoSuchPause => return Ok(PauseResumed::NoSuchPause),
@@ -564,7 +501,6 @@ pub(crate) async fn resume(
     tracing::info!(
         conversation_id,
         event_id,
-        by = ?by,
         "a run that was waiting on a usage limit is going on again"
     );
 
@@ -572,99 +508,18 @@ pub(crate) async fn resume(
         conversation: conversation_id,
     });
 
-    let resuming = match by {
-        store::By::Human => crate::resume::Resuming::Pressed,
-        store::By::Reset => crate::resume::Resuming::Restarted,
-    };
-
-    driving_again(state, conversation_id, resuming).await;
-
-    Ok(PauseResumed::Resumed)
-}
-
-/// Start driving the Conversation again, where nothing is driving it.
-///
-/// Through the one standing way in — see [`crate::resume`] — rather than through
-/// anything of this module's own. What ought to be running after a stop is the
-/// same question Resume asks after any other, recomputed from the state the
-/// Conversation is in now, and a second answer to it here would be a second
-/// thing to keep true. Clearing the stop is that press's, which is why nothing
-/// here clears one.
-///
-/// The one thing [`crate::resume::Resuming`] turns on is whether a wrapping
-/// Conversation's spent check-fix attempts are forgotten. A human who has read
-/// the stop and pressed is asking for another go; a window coming back has been
-/// read by nobody, exactly as a restart has.
-async fn driving_again(state: &AppState, conversation_id: i64, resuming: crate::resume::Resuming) {
-    match crate::resume::resume(state, conversation_id, resuming).await {
+    match crate::resume::resume(state, conversation_id, crate::resume::Resuming::Pressed).await {
         Ok(resumed) => tracing::info!(
             conversation_id,
             resumed = ?resumed,
             "the run that was stopped on a usage limit was asked to go on"
         ),
         Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "starting a run again after its window came back failed");
+            tracing::error!(error = ?error, conversation_id, "starting a run again after a usage limit failed");
         }
     }
-}
 
-/// End every stop whose window has come back, from now until the process stops.
-///
-/// A sweep rather than a timer per stop, and that is what makes the reset
-/// survive a restart: nothing holds a clock across the process, so a window that
-/// came back while the server was down is one the first sweep finds already due.
-///
-/// On [`crate::Pace::pauses`], which is a knob of its own rather than the stall
-/// sweep's: the two look for different things, and a server tuned to notice one
-/// briskly has not asked to be told about the other any sooner.
-pub(crate) fn sweeping(state: &AppState) {
-    let state = state.clone();
-
-    tokio::spawn(async move {
-        loop {
-            sweep(&state).await;
-
-            tokio::time::sleep(state.sessions.pace().pauses).await;
-        }
-    });
-}
-
-/// One look over every stop that names a time its window comes back.
-///
-/// Nothing is refused for and nothing is returned: this runs unattended with
-/// nobody watching, and what it has to say it says on the Timeline or in the log.
-pub(crate) async fn sweep(state: &AppState) {
-    let resetting = match store::resetting_stops(&state.pool).await {
-        Ok(resetting) => resetting,
-        Err(error) => {
-            tracing::error!(error = ?error, "listing the runs stopped on a usage limit failed");
-            return;
-        }
-    };
-
-    let now = OffsetDateTime::now_utc();
-
-    for stop in resetting {
-        let Ok(resets) = OffsetDateTime::parse(&stop.resets, &Rfc3339) else {
-            tracing::error!(
-                conversation_id = stop.conversation_id,
-                resets = stop.resets,
-                "a stop names a reset time nothing can read"
-            );
-            continue;
-        };
-
-        if resets > now {
-            continue;
-        }
-
-        driving_again(
-            state,
-            stop.conversation_id,
-            crate::resume::Resuming::Restarted,
-        )
-        .await;
-    }
+    Ok(PauseResumed::Resumed)
 }
 
 #[cfg(test)]
@@ -758,92 +613,47 @@ mod tests {
         assert!(exhausted(&watch.printed).is_some());
     }
 
-    /// A clock time on the machine's own offset: this afternoon before three,
-    /// and tomorrow afternoon after it.
+    /// The reset is kept in the words the display drew it in. A clock time is
+    /// what claude 2.1.234 prints, and `3pm` beside a Resume button is what
+    /// somebody looks at their own clock for.
     #[test]
-    fn a_clock_time_is_the_next_moment_the_machines_clock_reads_it() {
-        let sydney = UtcOffset::from_hms(10, 0, 0).unwrap();
-        let said = "Usage limit reached · continuing automatically at 3pm · esc to cancel";
-
-        // 2026-08-24 13:00 in Sydney, which is 03:00 UTC.
-        let before = OffsetDateTime::parse("2026-08-24T03:00:00Z", &Rfc3339).unwrap();
+    fn the_reset_is_kept_in_the_words_the_display_drew_it_in() {
         assert_eq!(
-            resets_at(said, before, sydney),
-            Some(OffsetDateTime::parse("2026-08-24T05:00:00Z", &Rfc3339).unwrap()),
-            "3pm today, which is 05:00 UTC",
-        );
-
-        // And 16:00 in Sydney, which is past it.
-        let after = OffsetDateTime::parse("2026-08-24T06:00:00Z", &Rfc3339).unwrap();
-        assert_eq!(
-            resets_at(said, after, sydney),
-            Some(OffsetDateTime::parse("2026-08-25T05:00:00Z", &Rfc3339).unwrap()),
-            "3pm tomorrow",
+            resets("✻ Usage limit reached · continuing automatically at 3pm · esc to cancel"),
+            Some("3pm".to_owned()),
         );
     }
 
-    /// The three ways a display writes a time of day.
+    /// The shapes a display writes a time in, and the instant a machine writes
+    /// for another machine. Each read back as the word it was.
     #[test]
-    fn the_shapes_a_display_writes_a_time_in_are_all_read() {
-        let utc = UtcOffset::UTC;
-        let now = OffsetDateTime::parse("2026-08-24T01:00:00Z", &Rfc3339).unwrap();
-
+    fn the_shapes_a_reset_is_written_in_are_all_recognised() {
         for (said, expected) in [
-            ("resets at 3pm", "2026-08-24T15:00:00Z"),
-            ("resets at 3:30pm", "2026-08-24T15:30:00Z"),
-            ("resets at 11:05am", "2026-08-24T11:05:00Z"),
-            ("resets at 15:00", "2026-08-24T15:00:00Z"),
-            ("resets at 12am", "2026-08-25T00:00:00Z"),
-            ("resets at 12pm", "2026-08-24T12:00:00Z"),
+            ("resets at 3pm", "3pm"),
+            ("resets at 3:30pm", "3:30pm"),
+            ("resets at 11:05am", "11:05am"),
+            ("resets at 15:00", "15:00"),
+            ("resets at 12am", "12am"),
+            ("resets (2026-08-24T15:00:00Z)", "2026-08-24T15:00:00Z"),
+            ("resets at 2026-08-24T15:00Z", "2026-08-24T15:00Z"),
         ] {
-            assert_eq!(
-                resets_at(said, now, utc),
-                Some(OffsetDateTime::parse(expected, &Rfc3339).unwrap()),
-                "{said:?}",
-            );
+            assert_eq!(resets(said), Some(expected.to_owned()), "{said:?}");
         }
     }
 
-    /// An instant written whole, which is what a record written for a machine
-    /// looks like. Read wherever in the sentence it sits.
-    #[test]
-    fn an_instant_written_whole_is_read_as_it_stands() {
-        let now = OffsetDateTime::parse("2026-08-24T01:00:00Z", &Rfc3339).unwrap();
-
-        assert_eq!(
-            resets_at(
-                "Usage limit reached (resets 2026-08-24T15:00:00Z)",
-                now,
-                UtcOffset::UTC,
-            ),
-            Some(OffsetDateTime::parse("2026-08-24T15:00:00Z", &Rfc3339).unwrap()),
-        );
-    }
-
-    /// A sentence with no time in it leaves the stop with no reset words, which
-    /// is a stop that says only that the account ran out. A bare number is never
-    /// read as an hour: the display writes "3pm" or "15:00", and reading "40" as
-    /// four in the afternoon would show a reset nobody said anything about.
+    /// A sentence with no time in it carries no reset words, which is a stop
+    /// that says only that the account ran out. A bare number is never read as
+    /// an hour: the display writes "3pm" or "15:00", and showing "40" as four in
+    /// the afternoon would name a time nobody said anything about.
     #[test]
     fn a_sentence_with_no_time_in_it_carries_none() {
-        let now = OffsetDateTime::parse("2026-08-24T01:00:00Z", &Rfc3339).unwrap();
-
         for said in [
             "Usage limit reached · continuing shortly · esc to cancel",
             "Usage limit reached · continuing automatically when it resets",
             "Usage limit reached after 40 turns",
+            "Usage limit reached on claude 2.1.234",
         ] {
-            assert_eq!(resets_at(said, now, UtcOffset::UTC), None, "{said:?}");
+            assert_eq!(resets(said), None, "{said:?}");
         }
-    }
-
-    /// What `date +%z` says, in the shapes it says it in.
-    #[test]
-    fn the_machines_own_offset_is_read_as_it_prints_it() {
-        assert_eq!(read_offset("+1000"), UtcOffset::from_hms(10, 0, 0).ok());
-        assert_eq!(read_offset("-0430"), UtcOffset::from_hms(-4, -30, 0).ok());
-        assert_eq!(read_offset("+0000"), Some(UtcOffset::UTC));
-        assert_eq!(read_offset("Z"), Some(UtcOffset::UTC));
-        assert_eq!(read_offset("nowhere"), None);
     }
 }
