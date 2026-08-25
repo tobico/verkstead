@@ -10,6 +10,7 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Notifications } from "../src/push/Notifications";
+import styles from "../src/push/Notifications.module.css";
 import { AUTH, ENDPOINT, KEY, P256DH, nothing, pushing, subscription } from "./pushing";
 import { json, serving } from "./serving";
 
@@ -27,14 +28,14 @@ async function control() {
   // switch is disabled, which is the one state every test here starts past.
   await waitFor(() => expect(flip.disabled).toBe(false));
 
-  return { container, flip, state: () => container.querySelector(".state")!.textContent };
+  return { container, flip, state: () => container.querySelector(`.${styles.state}`)!.textContent };
 }
 
 /// The same, for a device the control will never enable — where waiting for the
 /// switch to come alive would be waiting forever.
 async function stalled(says: string) {
   const { container } = render(() => <Notifications />);
-  await waitFor(() => expect(container.querySelector(".state")!.textContent).toContain(says));
+  await waitFor(() => expect(container.querySelector(`.${styles.state}`)!.textContent).toContain(says));
   return { container, flip: screen.getByRole("switch") as HTMLInputElement };
 }
 
@@ -145,7 +146,7 @@ describe("the notifications switch", () => {
     // nothing for it, so "on" would be a lie the human finds out about by
     // missing a Set.
     expect(flip.checked).toBe(false);
-    expect(container.querySelector(".state")!.textContent).toContain(
+    expect(container.querySelector(`.${styles.state}`)!.textContent).toContain(
       "allow them in its settings",
     );
   });
@@ -174,7 +175,7 @@ describe("the notifications switch", () => {
     flip.click();
 
     await waitFor(() =>
-      expect(container.querySelector(".state")!.textContent).toContain(
+      expect(container.querySelector(`.${styles.state}`)!.textContent).toContain(
         "blocked for this device",
       ),
     );

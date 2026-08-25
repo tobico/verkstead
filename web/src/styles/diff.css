@@ -1,0 +1,269 @@
+/* The Diff: one foldable section per file, each scrolling sideways on its own
+   so a long line never widens the page under it. And the syntax colouring
+   inside it.
+
+   Both are HTML that `crates/render` writes and the page injects, so every name
+   in this file is the renderer's or syntect's and none of them can be hashed —
+   which is the whole of why the file exists. The section the two components draw
+   *around* this markup is theirs and is hashed like anything else: see
+   `set/Diff.module.css`, which reaches the names below through `:global`.
+
+   The renderer's own names are camelCase, like every class we write. The
+   `tok-*` family at the foot of this file is the documented exception: only the
+   prefix is ours and the suffix is generated from a syntect scope, so renaming
+   it would mean post-processing generated HTML. Mermaid's DOM and xterm's are
+   the same exception for the same reason. */
+
+.diffFile {
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+  /* The rounded corners have to clip the hunks, whose backgrounds run to the
+     edges. */
+  overflow: hidden;
+}
+
+.diffFile > summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  padding: 0.6rem 0.8rem;
+  cursor: pointer;
+}
+
+.diffPath {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  /* A long path breaks rather than pushing the tally off the row. */
+  overflow-wrap: anywhere;
+}
+
+.diffStatus {
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.diffStat {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+}
+
+.diffStat .add {
+  color: var(--added);
+}
+
+.diffStat .del {
+  color: var(--removed);
+}
+
+.diffNote {
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--edge);
+}
+
+.diffHunkHeader {
+  margin: 0;
+  padding: 0.3rem 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  background: var(--hunk);
+  border-top: 1px solid var(--edge);
+  border-bottom: 1px solid var(--edge);
+  overflow-wrap: anywhere;
+}
+
+/* The scroll lives here — inside the file, never on the page. */
+.diffLines {
+  margin: 0;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  tab-size: 4;
+}
+
+/* On a phone the code alone is set smaller, which is worth more here than
+   anywhere else on the page: every column it buys is a column of a line that no
+   longer has to be scrolled to. The Diff's chrome around it — the path, the
+   hunk header, the tally — keeps its size, because there is one of each per
+   file and nothing is gained by making the few things that name a file harder
+   to read. A line long enough to overflow even so is what the wrap switch is
+   for. */
+@media (width < 40rem) {
+  .diffLines {
+    font-size: 0.65rem;
+  }
+
+  /* And the line numbers go entirely, which is five more columns of code: on a
+     phone there is no room for a column that only says where you already are,
+     and the hunk header above still says where the lines start. The marker
+     stays — which side of the change a line is on is not something the colour
+     alone should have to carry. */
+  .diffNumber {
+    display: none;
+  }
+
+  /* The gutter is the marker's alone once the numbers are gone, so a wrapped
+     line hangs off the code and not off a column that is no longer drawn. */
+  .diffFile {
+    --diff-number-width: 0px;
+  }
+}
+
+/* The lines are wrapped in a box as wide as the longest of them, which is what
+   gives the line below a scrolled width to fill. Without it each line measured
+   itself against the *visible* width instead — `code` is inline, so the `pre` was
+   the containing block — and the wash behind a short line stopped at the right
+   edge of the viewport and got left behind as soon as the hunk was scrolled. */
+.diffLines > code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* Each line is a block of its own so its background reaches the full scrolled
+   width, not just as far as its text. */
+.diffLine {
+  display: block;
+  padding-right: 0.8rem;
+}
+
+/* The Diff git did not write has no line cells to hold its text off the edge, so
+   the inset is the block's own. */
+.diffVerbatim > code {
+  padding: 0.3rem 0.8rem;
+}
+
+/* The number column and the marker each sit in a cell of their own, and each
+   cell's `width` has to cover the padding inside it: `box-sizing: border-box`
+   above counts padding within the width, so a cell measured for its glyph alone
+   comes out narrower than the glyph and spills into the code beside it.
+
+   Neither cell is part of what a selection picks up, so a hunk copied off the
+   page comes out as code to paste into an editor rather than as a patch. */
+
+/* Named on the file rather than measured twice, because the wrap rules below
+   have to indent by exactly the width of these two and a drift between them
+   would show as code that does not line up with itself. */
+.diffFile {
+  /* Four characters, and the same four for every file on the page: the width
+     the reading column above reserves. Cut to each file's own highest line
+     instead, it put the code of a hundred-line file and a thousand-line one in
+     different places, and a Diff of both did not line up with itself. Four is
+     what a line number takes past the point where a file is long enough to need
+     more — the renderer gives 11234 as `11e3`. */
+  --diff-number-width: calc(4ch + 1.2rem);
+  --diff-marker-width: calc(1ch + 0.5rem);
+  --diff-gutter: calc(var(--diff-number-width) + var(--diff-marker-width));
+}
+
+.diffNumber {
+  display: inline-block;
+  width: var(--diff-number-width);
+  padding: 0 0.6rem;
+  text-align: right;
+  color: var(--ink-soft);
+  user-select: none;
+}
+
+.diffLine .marker {
+  display: inline-block;
+  width: var(--diff-marker-width);
+  padding-right: 0.5rem;
+  color: var(--ink-soft);
+  user-select: none;
+}
+
+.diffLine.add {
+  background: var(--added-wash);
+}
+
+.diffLine.del {
+  background: var(--removed-wash);
+}
+
+.diffLine.add .marker {
+  color: var(--added);
+}
+
+.diffLine.del .marker {
+  color: var(--removed);
+}
+
+/* The aside about the lines gets the two cells the lines get, empty, so it starts
+   where they start — nothing more to inset it by. */
+.diffLine.aside {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* Token colouring, on top of the +/- wash. The classes are syntect's scope
+   atoms: an outer span carries the broad scope and inner ones refine it, so the
+   more specific colour wins by being nested. Anything not named here keeps the
+   line's own colour, which is what an unhighlighted file gets throughout.
+
+   Kebab-case, and staying that way — see the head of this file. */
+
+.tok-comment {
+  color: var(--tok-comment);
+  font-style: italic;
+}
+
+.tok-string {
+  color: var(--tok-string);
+}
+
+.tok-constant {
+  color: var(--tok-constant);
+}
+
+.tok-keyword,
+.tok-storage {
+  color: var(--tok-keyword);
+}
+
+.tok-entity.tok-name {
+  color: var(--tok-name);
+}
+
+.tok-support {
+  color: var(--tok-support);
+}
+
+/* Where a jump from the Set page's table of contents lands when it names a file:
+   that file's own fold, clear of whatever the page has pinned across its top
+   edge — the nav's bar below one width, the floating header above it — which is
+   `--jump-clear` in `set/Contents.module.css`, that being what does the pinning.
+   Here rather than beside the component because the fold is the renderer's; the
+   section around it keeps the same clearance in `set/Diff.module.css`. */
+.diffFile {
+  scroll-margin-top: var(--jump-clear);
+}
+
+/* The Gutter the Set page reserves down its left once the window is wide — see
+   `set/Sheet.module.css`, where it is named and the rest of what reserves it is
+   set. */
+@media (min-width: 60rem) {
+  /* And the Diff's own gutter cut to the page's: the marker keeps the width it
+     measures for itself and the number column takes what is left, so the two
+     come to exactly a card edge and a Gutter and the code starts on the axis.
+     The numbers are set against the marker rather than out at the card edge, so
+     whatever room this leaves over shows as air to their left. */
+  .diffFile {
+    --diff-number-width: calc(1rem + var(--gutter) - var(--diff-marker-width));
+  }
+}

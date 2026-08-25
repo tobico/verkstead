@@ -17,7 +17,13 @@ import type {
   SettingsView,
   UpdateNotice,
 } from "../src/api/types";
+import profileList from "../src/profiles/ProfileList.module.css";
+import notifications from "../src/push/Notifications.module.css";
+import repoList from "../src/repos/RepoList.module.css";
+import credentials from "../src/settings/Credentials.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
+import page from "../src/settings/SettingsPage.module.css";
+import styles from "../src/update/UpdateNotice.module.css";
 import { mount } from "./listing";
 import { json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -44,7 +50,7 @@ const beneath = () => [
   whenever("/api/ui/repos", json(REPOS)),
 ];
 
-const banner = () => document.querySelector(".update-notice");
+const banner = () => document.querySelector(`.${styles.notice}`);
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -91,10 +97,10 @@ describe("the Update Notice", () => {
     expect(
       pressable.filter(
         (found) =>
-          !found.closest(".credentials") &&
-          !found.closest(".profiles") &&
-          !found.closest(".repos") &&
-          !found.closest(".notifications"),
+          !found.closest(`.${credentials.credentials}`) &&
+          !found.closest(`.${profileList.profiles}`) &&
+          !found.closest(`.${repoList.repos}`) &&
+          !found.closest(`.${notifications.notifications}`),
       ),
     ).toHaveLength(0);
   });
@@ -105,11 +111,11 @@ describe("the Update Notice", () => {
 
     await waitFor(() => expect(banner()).not.toBeNull());
 
-    const page = container.querySelector(".list-page")!;
-    const configured = page.querySelector(".credentials")!;
+    const column = container.querySelector(`.${page.listPage}`)!;
+    const configured = column.querySelector(`.${credentials.credentials}`)!;
     // Inside the page's column rather than beside it, and before everything the
     // page is for.
-    expect(banner()!.parentElement).toBe(page);
+    expect(banner()!.parentElement).toBe(column);
     expect(
       banner()!.compareDocumentPosition(configured) &
         Node.DOCUMENT_POSITION_FOLLOWING,

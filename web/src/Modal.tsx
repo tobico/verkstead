@@ -28,10 +28,13 @@
 import { Show, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
+import styles from "./Modal.module.css";
+
 /// What a modal is told, whether it is up or not.
 type Sheet = {
-  /// Which modal this is, put on the dialog so the stylesheet can size this
-  /// one's card. The shared chrome is `.modal` and `.modal-card` underneath it.
+  /// Which modal this is, put on the dialog so the caller can size this one's
+  /// card. The shared chrome is `Modal.module.css` — the dialog, and the card
+  /// underneath it.
   class: string;
   /// Said when the modal has closed itself, which is what Escape and a press on
   /// the backdrop come back as. Nothing here changes `open`; the caller does,
@@ -90,7 +93,7 @@ function Drawn(props: Sheet): JSX.Element {
 
   return (
     <dialog
-      class={`modal ${props.class}`}
+      class={`${styles.modal} ${props.class}`}
       ref={dialog}
       aria-label={props.name}
       aria-labelledby={props.labelledBy}
@@ -103,7 +106,7 @@ function Drawn(props: Sheet): JSX.Element {
         if (event.target === dialog) dialog.close();
       }}
     >
-      <div class="modal-card">{props.children}</div>
+      <div class={styles.card}>{props.children}</div>
     </dialog>
   );
 }

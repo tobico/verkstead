@@ -47,7 +47,7 @@ pub fn to_html(diff: &str) -> Option<DiffView> {
         // Marked as verbatim, because it has none of the line cells that hold a
         // hunk's text off the left edge and so needs the inset put on it.
         let mut html = format!(
-            r#"<details class="diff-file" id="diff-1" open><summary><span class="diff-path">{AS_IT_ARRIVED}</span></summary><div class="diff-hunk"><pre class="diff-lines diff-verbatim"><code>"#
+            r#"<details class="diffFile" id="diff-1" open><summary><span class="diffPath">{AS_IT_ARRIVED}</span></summary><div class="diffHunk"><pre class="diffLines diffVerbatim"><code>"#
         );
         html.push_str(&escaped(diff));
         html.push_str("</code></pre></div></details>");
@@ -344,13 +344,13 @@ impl FileDiff {
         // Open, because a Diff is there to be read — but foldable, so a long
         // file can be got out of the way on a phone.
         out.push_str(&format!(
-            r#"<details class="diff-file" id="diff-{position}" open><summary><span class="diff-path">"#
+            r#"<details class="diffFile" id="diff-{position}" open><summary><span class="diffPath">"#
         ));
         out.push_str(&escaped(&self.path));
         out.push_str("</span>");
 
         if let Some(status) = self.status {
-            out.push_str(r#"<span class="diff-status">"#);
+            out.push_str(r#"<span class="diffStatus">"#);
             out.push_str(status);
             out.push_str("</span>");
         }
@@ -358,13 +358,13 @@ impl FileDiff {
         let (added, removed) = self.counted();
         if added > 0 || removed > 0 {
             out.push_str(&format!(
-                r#"<span class="diff-stat"><span class="add">+{added}</span><span class="del">−{removed}</span></span>"#
+                r#"<span class="diffStat"><span class="add">+{added}</span><span class="del">−{removed}</span></span>"#
             ));
         }
         out.push_str("</summary>");
 
         if let Some(note) = self.note {
-            out.push_str(r#"<p class="diff-note">"#);
+            out.push_str(r#"<p class="diffNote">"#);
             out.push_str(note);
             out.push_str("</p>");
         }
@@ -396,12 +396,12 @@ impl FileDiff {
 
 impl Hunk {
     fn render(&self, out: &mut String, syntax: Option<&SyntaxReference>) {
-        out.push_str(r#"<div class="diff-hunk"><p class="diff-hunk-header">"#);
+        out.push_str(r#"<div class="diffHunk"><p class="diffHunkHeader">"#);
         out.push_str(&escaped(&self.header));
 
         // No newlines between the lines: each is a block of its own, so one here
         // would show up as a blank line.
-        out.push_str(r#"</p><pre class="diff-lines"><code>"#);
+        out.push_str(r#"</p><pre class="diffLines"><code>"#);
         for line in &self.lines {
             line.render(out, syntax);
         }
@@ -413,12 +413,12 @@ impl Line {
     fn render(&self, out: &mut String, syntax: Option<&SyntaxReference>) {
         let (class, marker) = self.kind.marked();
 
-        out.push_str(&format!(r#"<span class="diff-line {class}">"#));
+        out.push_str(&format!(r#"<span class="diffLine {class}">"#));
 
         // Always the column, even where there is no number to put in it: an
         // empty cell is what keeps a removed line's code in line with the code
         // above and below it.
-        out.push_str(r#"<span class="diff-number">"#);
+        out.push_str(r#"<span class="diffNumber">"#);
         if let Some(number) = self.number {
             out.push_str(&numbered(number));
         }
@@ -505,7 +505,7 @@ mod tests {
         let html = rendered(MODIFIED_AND_NEW);
 
         assert_eq!(
-            html.matches(r#"class="diff-file""#).count(),
+            html.matches(r#"class="diffFile""#).count(),
             2,
             "expected one section per file:\n{html}"
         );
@@ -526,17 +526,17 @@ mod tests {
         let html = rendered(MODIFIED_AND_NEW);
 
         assert_eq!(
-            html.matches(r#"diff-line add"#).count(),
+            html.matches(r#"diffLine add"#).count(),
             3,
             "expected the three added lines marked:\n{html}"
         );
         assert_eq!(
-            html.matches(r#"diff-line del"#).count(),
+            html.matches(r#"diffLine del"#).count(),
             1,
             "expected the one removed line marked:\n{html}"
         );
         assert_eq!(
-            html.matches(r#"diff-line ctx"#).count(),
+            html.matches(r#"diffLine ctx"#).count(),
             2,
             "expected the two context lines marked:\n{html}"
         );
@@ -621,7 +621,7 @@ mod tests {
         let html = rendered(TWO_HUNKS);
 
         assert!(
-            html.contains(r#"<span class="diff-line del"><span class="diff-number"></span>"#),
+            html.contains(r#"<span class="diffLine del"><span class="diffNumber"></span>"#),
             "the column is still there and simply empty, so the code of a \
              removed line stays in line with the code around it:\n{html}",
         );
@@ -730,7 +730,7 @@ mod tests {
             "nothing highlights .zzz, so no tokens should be marked:\n{html}"
         );
         assert!(
-            html.contains("diff-line add") && html.contains("diff-line del"),
+            html.contains("diffLine add") && html.contains("diffLine del"),
             "the +/- colouring stands on its own:\n{html}"
         );
         assert!(html.contains("retries = 5"), "{html}");
@@ -888,7 +888,7 @@ mod tests {
              addressable:\n{html}"
         );
         assert!(
-            html.contains("diff-verbatim"),
+            html.contains("diffVerbatim"),
             "having no line cells to hold its text off the edge, it has to say \
              so and be inset by the stylesheet instead:\n{html}"
         );

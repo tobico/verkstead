@@ -1,0 +1,21 @@
+/* The small act, wherever one is offered — see `QuietButton.tsx`.
+
+   An outline rather than a filled button: what these do is open a form or change
+   one row, which is a smaller thing than the Save at the foot of the form they
+   open, and a page of buttons all painted as the primary one says nothing about
+   which of them matters. The accent is on the words rather than behind them, so
+   a heading with one of these on the end of it still reads as a heading.
+
+   The whole of what one looks like is this rule. A context that wants one drawn
+   differently styles the class it hands the component — see the `class` prop —
+   and what it writes lands beside this rather than instead of it. */
+.quiet {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--accent);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}

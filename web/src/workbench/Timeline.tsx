@@ -86,14 +86,23 @@ import type {
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
+import app from "../App.module.css";
 import { Menu } from "../Menu";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
+// The badge and the sentence a Set this build cannot read is drawn with, taken
+// from the page that draws the whole record rather than kept a second time
+// here: the row and the page are one record read at two distances.
+import unreadable from "../set/Unreadable.module.css";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
+import { PaneHead } from "./PaneHead";
 import { Pause } from "./Pause";
 import { Setup } from "./Setup";
+import styles from "./Timeline.module.css";
+import shell from "./Workbench.module.css";
 import { keeping } from "./settling";
 
 /// How much of a commit's hash the timeline shows.
@@ -268,7 +277,13 @@ export const CLAMPED_LINES = 5;
 /// watches the markdown inside the clamp, whose height is the document's own, so
 /// a rendering that changed and a pane that was resized both come back through
 /// it.
-function Clamped(props: { class: string; html: string }): JSX.Element {
+function Clamped(props: {
+  /// The module's name for whichever document this is, put on the rendering
+  /// rather than on the cut around it: the three of them are read at the
+  /// measure, and the clamp is the same clamp for all three.
+  class: string;
+  html: string;
+}): JSX.Element {
   let clamp: HTMLDivElement | undefined;
   let body: HTMLDivElement | undefined;
 
@@ -294,7 +309,7 @@ function Clamped(props: { class: string; html: string }): JSX.Element {
   });
 
   return (
-    <div class="clamp" classList={{ cut: cut() }} ref={clamp}>
+    <div class={styles.clamp} classList={{ [styles.cut!]: cut() }} ref={clamp}>
       <div class={`${props.class} markdown`} innerHTML={props.html} ref={body} />
     </div>
   );
@@ -312,6 +327,9 @@ function Clamped(props: { class: string; html: string }): JSX.Element {
 /// long as it is a draft: a field is not a thing to press, and neither is the
 /// setup standing under it.
 function Openable(props: {
+  /// The module's name for which of the three documents this card is. The card
+  /// is told rather than asking, because what a Brief is and what a Handoff is
+  /// is the caller's to know.
   kind: string;
   selected: boolean;
   open: (() => void) | null;
@@ -322,7 +340,10 @@ function Openable(props: {
   return (
     <article
       class={props.kind}
-      classList={{ openable: props.open !== null, selected: props.selected }}
+      classList={{
+        [styles.openable!]: props.open !== null,
+        [styles.selected!]: props.selected,
+      }}
       role={props.open === null ? undefined : "button"}
       tabindex={props.open === null ? undefined : 0}
       aria-pressed={props.open === null ? undefined : props.selected}
@@ -356,16 +377,14 @@ export function Timeline(props: {
           of them travel with it, so there is no strip of scrolling record
           between the title and the pinned items and nothing to keep a pinned
           block's own offset in step with. */}
-      <div class="pane-chrome">
-        <div class="pane-head">
-          {/* The way back out of this level, which is the whole of what a narrow
-              window offers instead of the pane beside it. Drawn always and
-              hidden by the stylesheet where all three panes are on screen at
-              once. */}
-          <button type="button" class="pane-back" onClick={props.back}>
-            ← Conversations
-          </button>
-          <h1>{props.conversation.branch}</h1>
+      <div class={shell.paneChrome}>
+        {/* The way back out of this level, which is the whole of what a narrow
+            window offers instead of the pane beside it. Drawn always and hidden
+            by the pane head where all three panes are on screen at once. */}
+        <PaneHead
+          back={{ to: "Conversations", go: props.back }}
+          title={props.conversation.branch}
+        >
           {/* What the work has stopped on, said where the conversation is named
               rather than only down in the list: a timeline is long by the time a
               run gets far enough to stop, and a badge the human had to go
@@ -375,7 +394,7 @@ export function Timeline(props: {
             {(event) => (
               <button
                 type="button"
-                class="blocked"
+                class={styles.blocked}
                 onClick={() => {
                   props.select(event());
 
@@ -395,11 +414,15 @@ export function Timeline(props: {
               control that paged into it would page into nothing. Hidden by the
               stylesheet anyway where all three panes are on screen at once. */}
           <Show when={props.selected !== null}>
-            <button type="button" class="pane-forward" onClick={props.details}>
+            <button
+              type="button"
+              class={styles.paneForward}
+              onClick={props.details}
+            >
               Details →
             </button>
           </Show>
-        </div>
+        </PaneHead>
 
         <Pinned
           conversation={props.conversation}
@@ -409,10 +432,10 @@ export function Timeline(props: {
         />
       </div>
 
-      <ol class="timeline">
+      <ol class={styles.timeline}>
         <For each={props.conversation.timeline}>
           {(event, index) => (
-            <li class="timeline-event">
+            <li class={styles.timelineEvent}>
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
                   {(brief) => (
@@ -595,30 +618,34 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <Show when={props.conversation.ready_to_resume}>
-      <div class="resume">
+      <div class={styles.resume}>
         <h2>Nothing is driving this</h2>
 
         <button
           type="button"
-          class="resume-conversation"
+          class={styles.resumeConversation}
           disabled={press.isPending}
           onClick={() => press.mutate()}
         >
           {press.isPending ? "Resuming…" : "Resume"}
         </button>
 
-        <p class="note">
+        <Note>
           Verkstead works out what should be running from where the work now
           stands, and starts it.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{RESUME_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>
+              {RESUME_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
         </Show>
         <Show when={press.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The conversation could not be resumed: {press.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -711,13 +738,14 @@ function ManualTaskComposer(props: {
 
   return (
     <Show when={offered()}>
-      <div class="manual-task-composer">
+      <div class={styles.manualTaskComposer}>
         <h2>Do something by hand</h2>
 
         <label for="manual-task">What should the agent do?</label>
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`, which the brief's field uses for the same reason. */}
-        <div class="grow" data-value={instruction()}>
+            `.grow` in `App.module.css`, which the brief's field uses for the
+            same reason. */}
+        <div class={app.grow} data-value={instruction()}>
           <textarea
             id="manual-task"
             rows="1"
@@ -733,16 +761,16 @@ function ManualTaskComposer(props: {
         {/* Drawn only once the list is here, the way the setup's pickers are:
             a select whose value is set before its options exist is a select
             showing nothing. */}
-        <div class="manual-task-profile">
+        <div class={styles.manualTaskProfile}>
           <label for="manual-task-pairing">Run it as</label>
           <Show
             when={profiles.data}
             fallback={
-              <p class="note">
+              <Note>
                 {profiles.isError
                   ? `Could not read the agent profiles: ${profiles.error?.message}`
                   : "Reading the agent profiles…"}
-              </p>
+              </Note>
             }
           >
             {(saved) => (
@@ -769,7 +797,7 @@ function ManualTaskComposer(props: {
 
         <button
           type="button"
-          class="start-manual-task"
+          class={styles.startManualTask}
           disabled={
             submit.isPending || instruction().trim() === "" || running() === ""
           }
@@ -783,18 +811,22 @@ function ManualTaskComposer(props: {
           {submit.isPending ? "Starting…" : "Set it going"}
         </button>
 
-        <p class="note">
+        <Note>
           One session, outside the grilling and the implementation. Nothing about
           the conversation moves — what it leaves behind is what it commits.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{MANUAL_TASK_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>
+              {MANUAL_TASK_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
         </Show>
         <Show when={submit.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The manual task could not be started: {submit.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -825,7 +857,7 @@ function Pinned(props: {
 }): JSX.Element {
   return (
     <Show when={props.conversation.pinned.length > 0}>
-      <div class="pinned">
+      <div class={styles.pinned}>
         <Show
           when={props.conversation.pinned.length > 1}
           fallback={
@@ -897,9 +929,9 @@ function Carousel(props: {
   let from: number | null = null;
 
   return (
-    <div class="carousel">
+    <div class={styles.carousel}>
       <div
-        class="showing"
+        class={styles.showing}
         onTouchStart={(event) => {
           from = event.changedTouches[0]?.clientX ?? null;
         }}
@@ -929,7 +961,7 @@ function Carousel(props: {
           over the card would be two buttons in the way of it. */}
       <button
         type="button"
-        class="step back"
+        class={`${styles.step} ${styles.back}`}
         aria-label="Previous pinned card"
         onClick={() => turn(showing() - 1)}
       >
@@ -937,7 +969,7 @@ function Carousel(props: {
       </button>
       <button
         type="button"
-        class="step on"
+        class={`${styles.step} ${styles.on}`}
         aria-label="Next pinned card"
         onClick={() => turn(showing() + 1)}
       >
@@ -948,7 +980,7 @@ function Carousel(props: {
           straight to any of them. Each is named for the card it turns to rather
           than numbered, because that is what a reader who cannot see the dots
           needs to know about it. */}
-      <ol class="dots">
+      <ol class={styles.dots}>
         <For each={cards()}>
           {(card, index) => (
             <li>
@@ -1046,16 +1078,24 @@ function PullRequest(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <article class="pull-request" classList={{ selected: props.selected }}>
-      <div class="event-head">
+    <article
+      class={styles.pullRequest}
+      classList={{ [styles.selected!]: props.selected }}
+    >
+      <div class={styles.eventHead}>
         <h2>Pull request</h2>
-        <span class="number">#{props.opened.number}</span>
-        <a class="out" href={props.opened.url} target="_blank" rel="noreferrer">
+        <span class={styles.number}>#{props.opened.number}</span>
+        <a
+          class={styles.out}
+          href={props.opened.url}
+          target="_blank"
+          rel="noreferrer"
+        >
           On GitHub
         </a>
       </div>
 
-      <button type="button" class="open-pull-request" onClick={props.open}>
+      <button type="button" class={styles.openPullRequest} onClick={props.open}>
         {props.opened.title}
       </button>
     </article>
@@ -1070,7 +1110,7 @@ function PullRequest(props: {
 /// word is what those get.
 function Box(props: { done: boolean }): JSX.Element {
   return (
-    <span class="box" aria-hidden="true">
+    <span class={styles.box} aria-hidden="true">
       {props.done ? "☑" : "☐"}
     </span>
   );
@@ -1090,31 +1130,31 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
   return (
-    <article class="task-list">
-      <div class="event-head">
+    <article class={styles.taskList}>
+      <div class={styles.eventHead}>
         <h2>Task list</h2>
         <Show when={props.tasks.feature !== ""}>
-          <span class="feature">{props.tasks.feature}</span>
+          <span class={styles.feature}>{props.tasks.feature}</span>
         </Show>
-        <span class="progress">
+        <span class={styles.progress}>
           {done()} of {props.tasks.tasks.length} done
         </span>
       </div>
 
-      <ol class="tasks">
+      <ol class={styles.tasks}>
         <For each={props.tasks.tasks}>
           {(task) => (
-            <li classList={{ done: task.done }}>
+            <li classList={{ [styles.done!]: task.done }}>
               <Box done={task.done} />
-              <span class="what">{task.title}</span>
+              <span class={styles.what}>{task.title}</span>
               {/* At the far end of the row, where it is out of the way of the
                   reading: what a backlog is scanned for is which titles are
                   left, and a number is what one is quoted by afterwards. */}
-              <span class="n">{task.number}</span>
+              <span class={styles.n}>{task.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, so a list read aloud or copied out still says
                   which tasks are finished. */}
-              <span class="state">{task.done ? "done" : "to do"}</span>
+              <span class={styles.state}>{task.done ? "done" : "to do"}</span>
             </li>
           )}
         </For>
@@ -1136,28 +1176,30 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
   const done = () => props.stages.stages.filter((stage) => stage.done).length;
 
   return (
-    <article class="stage-list">
-      <div class="event-head">
+    <article class={styles.stageList}>
+      <div class={styles.eventHead}>
         <h2>Roadmap</h2>
-        <span class="feature">{props.stages.title || props.stages.name}</span>
-        <span class="progress">
+        <span class={styles.feature}>
+          {props.stages.title || props.stages.name}
+        </span>
+        <span class={styles.progress}>
           {done()} of {props.stages.stages.length} done
         </span>
       </div>
 
-      <ol class="stages">
+      <ol class={styles.stages}>
         <For each={props.stages.stages}>
           {(stage) => (
-            <li classList={{ done: stage.done }}>
+            <li classList={{ [styles.done!]: stage.done }}>
               <Box done={stage.done} />
-              <span class="what">{stage.title}</span>
+              <span class={styles.what}>{stage.title}</span>
               {/* At the far end of the row, as a task's is, and for the reason
                   a task's is. */}
-              <span class="n">{stage.number}</span>
+              <span class={styles.n}>{stage.number}</span>
               {/* The word travels with the row rather than being drawn by the
                   stylesheet, for the reason a task's does: a list read aloud
                   or copied out still says which stages are finished. */}
-              <span class="state">{stage.done ? "done" : "to do"}</span>
+              <span class={styles.state}>{stage.done ? "done" : "to do"}</span>
             </li>
           )}
         </For>
@@ -1186,11 +1228,15 @@ function Handoff(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <Openable kind="handoff" selected={props.selected} open={props.open}>
-      <div class="event-head">
+    <Openable
+      kind={styles.handoff!}
+      selected={props.selected}
+      open={props.open}
+    >
+      <div class={styles.eventHead}>
         <h2>Handoff</h2>
       </div>
-      <Clamped class="handoff-body" html={props.handoff.html} />
+      <Clamped class={styles.handoffBody!} html={props.handoff.html} />
     </Openable>
   );
 }
@@ -1204,7 +1250,9 @@ function Handoff(props: {
 /// file the repository records its process in — reads better set apart from the
 /// prose around it.
 function Notice(props: { notice: NoticeEvent }): JSX.Element {
-  return <div class="notice markdown" innerHTML={props.notice.html} />;
+  return (
+    <div class={`${styles.notice} markdown`} innerHTML={props.notice.html} />
+  );
 }
 
 /// What the human asked for by hand: the instruction a Manual Task was set
@@ -1227,11 +1275,15 @@ function ManualTask(props: {
   open: () => void;
 }): JSX.Element {
   return (
-    <Openable kind="manual-task" selected={props.selected} open={props.open}>
-      <div class="event-head">
+    <Openable
+      kind={styles.manualTask!}
+      selected={props.selected}
+      open={props.open}
+    >
+      <div class={styles.eventHead}>
         <h2>Manual task</h2>
       </div>
-      <Clamped class="manual-task-body" html={props.manual.html} />
+      <Clamped class={styles.manualTaskBody!} html={props.manual.html} />
     </Openable>
   );
 }
@@ -1249,7 +1301,10 @@ function ManualTask(props: {
 /// was. The state it came from is [`movedFrom`]'s to say.
 function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
   return (
-    <p class="moved" classList={{ [props.moved.state.toLowerCase()]: true }}>
+    <p
+      class={styles.moved}
+      classList={{ [styles[props.moved.state.toLowerCase()]!]: true }}
+    >
       {props.from} → {props.moved.state}
     </p>
   );
@@ -1273,34 +1328,33 @@ function AgentOutput(props: {
   return (
     <button
       type="button"
-      class="agent-output"
-      classList={{
-        selected: props.selected,
-        running: props.output.running,
-      }}
+      class={styles.agentOutput}
+      classList={{ [styles.selected!]: props.selected }}
       aria-pressed={props.selected}
       onClick={props.open}
     >
-      <span class="event-head">
-        <span class="what">Agent output</span>
+      <span class={styles.eventHead}>
+        <span class={styles.what}>Agent output</span>
         {/* How far the conversation has got. A session with no Transcript to
             count has no metric at all rather than a zero: there is nothing here
             that took turns, and a `0 turns` would be a claim about it. */}
         <Show when={props.output.turns !== null}>
-          <span class="turns">
+          <span class={styles.turns}>
             {props.output.turns} {props.output.turns === 1 ? "turn" : "turns"}
           </span>
         </Show>
         {/* And whether anything is still writing it, at the right edge — the
             same mark a sidebar card says the same thing with. */}
-        <Mark running={props.output.running} idle={props.output.idle} />
+        <Mark
+          running={props.output.running}
+          idle={props.output.idle}
+          class={styles.rowMark}
+        />
       </span>
-      <span class="latest">
+      <span class={styles.latest}>
         <Show
           when={props.output.latest !== ""}
-          fallback={
-            <span class="empty">Nothing printed yet.</span>
-          }
+          fallback={<Empty inline>Nothing printed yet.</Empty>}
         >
           {props.output.latest}
         </Show>
@@ -1349,39 +1403,47 @@ function QuestionSet(props: {
   return (
     <button
       type="button"
-      class="question-set"
-      classList={{ selected: props.selected, waiting: waiting() }}
+      class={styles.questionSet}
+      classList={{
+        [styles.selected!]: props.selected,
+        [styles.waiting!]: waiting(),
+      }}
       aria-pressed={props.selected}
       onClick={props.open}
     >
-      <span class="event-head">
-        <span class="what">Question set</span>
-        <span class="set-title">{props.asked.title}</span>
+      <span class={styles.eventHead}>
+        <span class={styles.what}>Question set</span>
+        <span class={styles.setTitle}>{props.asked.title}</span>
         <Show when={waiting()}>
-          <span class="live">waiting on you</span>
+          <span class={styles.live}>waiting on you</span>
         </Show>
         <Show when={deferred()}>
-          <span class="deferred">deferred</span>
+          <span class={styles.deferred}>deferred</span>
         </Show>
         <Show when={archived()}>
-          <span class="closed">closed unanswered</span>
+          <span class={styles.closed}>closed unanswered</span>
         </Show>
       </span>
 
       {/* Spans rather than the blocks this reads as, laid out as blocks by the
           stylesheet: everything here is inside a button, and a button holds
           phrasing. */}
-      <span class="asked">
+      <span class={styles.asked}>
         <For each={props.asked.rows}>
           {(row) => (
-            <span class="ask" classList={{ nested: row.nested }}>
-              <span class="n">{row.name}</span>
-              <span class="question">{row.question}</span>
-              <span class="answer">
+            <span
+              class={styles.ask}
+              classList={{ [styles.nested!]: row.nested }}
+            >
+              <span class={styles.n}>{row.name}</span>
+              <span class={styles.question}>{row.question}</span>
+              <span class={styles.answer}>
                 <Show
                   when={row.answer !== ""}
                   fallback={
-                    <span class="open">{waiting() ? "—" : "unanswered"}</span>
+                    <span class={styles.open}>
+                      {waiting() ? "—" : "unanswered"}
+                    </span>
                   }
                 >
                   {row.answer}
@@ -1413,17 +1475,17 @@ function UnreadableSet(props: {
   return (
     <button
       type="button"
-      class="question-set unreadable"
-      classList={{ selected: props.selected }}
+      class={`${styles.questionSet} ${styles.unreadable}`}
+      classList={{ [styles.selected!]: props.selected }}
       aria-pressed={props.selected}
       onClick={props.open}
     >
-      <span class="event-head">
-        <span class="what">Question set</span>
-        <span class="unreadable-badge">cannot be read</span>
+      <span class={styles.eventHead}>
+        <span class={styles.what}>Question set</span>
+        <span class={unreadable.unreadableBadge}>cannot be read</span>
       </span>
 
-      <span class="unreadable-why">{props.asked.why}</span>
+      <span class={unreadable.unreadableWhy}>{props.asked.why}</span>
     </button>
   );
 }
@@ -1457,25 +1519,25 @@ function Commit(props: {
   return (
     <button
       type="button"
-      class="commit"
-      classList={{ selected: props.selected }}
+      class={styles.commit}
+      classList={{ [styles.selected!]: props.selected }}
       aria-pressed={props.selected}
       onClick={props.open}
     >
-      <span class="event-head">
-        <span class="what">Commit</span>
-        <span class="sha">{props.commit.sha.slice(0, ABBREVIATED)}</span>
+      <span class={styles.eventHead}>
+        <span class={styles.what}>Commit</span>
+        <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
       </span>
 
-      <span class="subject">{props.commit.subject}</span>
+      <span class={styles.subject}>{props.commit.subject}</span>
 
-      <span class="changed">
-        <span class="files">{files()}</span>
+      <span class={styles.changed}>
+        <span class={styles.files}>{files()}</span>
         {/* The signs travel with the numbers rather than being drawn by the
             stylesheet, so a row read aloud or copied out still says which way
             each of them went. */}
-        <span class="added">+{props.commit.insertions}</span>
-        <span class="removed">−{props.commit.deletions}</span>
+        <span class={styles.added}>+{props.commit.insertions}</span>
+        <span class={styles.removed}>−{props.commit.deletions}</span>
       </span>
 
       {/* Under the counts, because the counts are how much moved and this is
@@ -1484,7 +1546,7 @@ function Commit(props: {
           and by the stylesheet alone — plain prose is lines of one height, so
           there is nothing here for an observer to measure. */}
       <Show when={props.commit.snippet}>
-        {(snippet) => <span class="snippet">{snippet()}</span>}
+        {(snippet) => <span class={styles.snippet}>{snippet()}</span>}
       </Show>
     </button>
   );
@@ -1535,11 +1597,11 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <Show when={props.conversation.state === "Draft"}>
-      <div class="start-grilling">
+      <div class={styles.startGrilling}>
         <button
           type="button"
-          class="start"
-          classList={{ inert: !ready() }}
+          class={styles.start}
+          classList={{ [styles.inert!]: !ready() }}
           // Only ever `disabled` for a press already in flight. Not being ready
           // is the other thing entirely: that press has an answer to give.
           disabled={start.isPending}
@@ -1554,24 +1616,28 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
           when={ready()}
           fallback={
             <Show when={missing()}>
-              <p class="note wanting">
+              <Note>
                 This needs a brief, and both pairings chosen and working.
-              </p>
+              </Note>
             </Show>
           }
         >
-          <p class="note">
+          <Note>
             This creates the branch and its worktree, and freezes the brief.
-          </p>
+          </Note>
         </Show>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{GRILL_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>
+              {GRILL_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
         </Show>
         <Show when={start.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The grilling could not be started: {start.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -1610,27 +1676,31 @@ function Reopen(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <Show when={props.conversation.state === "Done"}>
-      <div class="reopen">
+      <div class={styles.reopen}>
         <button
           type="button"
-          class="reopen-conversation"
+          class={styles.reopenConversation}
           disabled={reopen.isPending}
           onClick={() => reopen.mutate()}
         >
           {reopen.isPending ? "Reopening…" : "Reopen with a new brief"}
         </button>
-        <p class="note">
+        <Note>
           A second round on the same branch. The brief above stays where it is —
           this adds one to write, and the worktree comes back if it has gone.
-        </p>
+        </Note>
 
         <Show when={refused()}>
-          {(outcome) => <p class="error">{REOPEN_REFUSAL[outcome()]}</p>}
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>
+              {REOPEN_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
         </Show>
         <Show when={reopen.isError}>
-          <p class="error">
+          <ErrorLine class={styles.failure}>
             The conversation could not be reopened: {reopen.error?.message}
-          </p>
+          </ErrorLine>
         </Show>
       </div>
     </Show>
@@ -1716,7 +1786,7 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <Menu
-      class="conversation-actions"
+      class={styles.conversationActions!}
       label="Conversation actions"
       name="Conversation actions"
       closer={(close) => (shut = close)}
@@ -1725,79 +1795,85 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
       {() => (
         <>
           <Show when={props.conversation.ready_to_stop}>
-            <div class="action">
+            <div class={styles.action}>
               <button
                 type="button"
                 role="menuitem"
-                class="stop"
+                class={styles.stop}
                 disabled={stop.isPending}
                 onClick={() => stop.mutate()}
               >
                 {stop.isPending ? "Stopping…" : "Stop"}
               </button>
-              <p class="note">Pause after the current task until you resume.</p>
+              <Note>Pause after the current task until you resume.</Note>
               <Show when={halting() === "Stopping"}>
-                <p class="note waiting">
+                <Note class={styles.waiting}>
                   The session running now finishes its task first. Nothing will
                   be started after it.
-                </p>
+                </Note>
               </Show>
             </div>
 
             <Show when={props.conversation.working}>
-              <div class="action">
+              <div class={styles.action}>
                 <button
                   type="button"
                   role="menuitem"
-                  class="force-stop"
+                  class={styles.forceStop}
                   disabled={force.isPending}
                   onClick={() => force.mutate()}
                 >
                   {force.isPending ? "Stopping…" : "Force stop"}
                 </button>
-                <p class="note">Halt any running tasks and stop immediately.</p>
+                <Note>Halt any running tasks and stop immediately.</Note>
               </div>
             </Show>
           </Show>
 
           <Show
             when={props.conversation.state !== "Aborted"}
-            fallback={<p class="note">This conversation has been aborted.</p>}
+            fallback={<Note>This conversation has been aborted.</Note>}
           >
-            <div class="action">
+            <div class={styles.action}>
               <button
                 type="button"
                 role="menuitem"
-                class="abort"
+                class={styles.abort}
                 disabled={abort.isPending}
                 onClick={() => abort.mutate()}
               >
                 {abort.isPending ? "Aborting…" : "Abort conversation"}
               </button>
-              <p class="note">
+              <Note>
                 Permanently end the conversation and delete the worktree. The
                 branch stays where it is.
-              </p>
+              </Note>
             </div>
           </Show>
 
           <Show when={halting() && STOP_REFUSAL[halting()!]}>
-            <p class="error">{STOP_REFUSAL[halting()!]}</p>
+            <ErrorLine class={styles.failure}>
+              {STOP_REFUSAL[halting()!]}
+            </ErrorLine>
           </Show>
           <Show when={stop.isError || force.isError}>
-            <p class="error">
+            <ErrorLine class={styles.failure}>
               The conversation could not be stopped:{" "}
               {stop.error?.message ?? force.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
 
           <Show when={refused()}>
-            {(outcome) => <p class="error">{ABORT_REFUSAL[outcome()]}</p>}
+            {(outcome) => (
+              <ErrorLine class={styles.failure}>
+                {ABORT_REFUSAL[outcome()]}
+              </ErrorLine>
+            )}
           </Show>
           <Show when={abort.isError}>
-            <p class="error">
+            <ErrorLine class={styles.failure}>
               The conversation could not be aborted: {abort.error?.message}
-            </p>
+            </ErrorLine>
           </Show>
         </>
       )}
@@ -1917,7 +1993,7 @@ function Brief(props: {
 
   return (
     <Openable
-      kind="brief"
+      kind={styles.brief!}
       selected={props.selected}
       open={frozen() ? props.open : null}
     >
@@ -1925,7 +2001,7 @@ function Brief(props: {
           saying so, and a line that changed as fast as this one was read past
           on a card the eye is meant to be typing into. What a save cannot do
           is still said, under the field, in words. */}
-      <div class="event-head">
+      <div class={styles.eventHead}>
         <h2>Brief</h2>
       </div>
 
@@ -1935,7 +2011,7 @@ function Brief(props: {
           <Show
             when={props.brief.markdown !== ""}
             fallback={
-              <p class="empty">
+              <Empty>
                 <Show
                   when={props.conversation.adopting}
                   fallback={<>Nothing was written.</>}
@@ -1943,23 +2019,26 @@ function Brief(props: {
                   Nothing written yet — adopting the stage is what puts its
                   brief here.
                 </Show>
-              </p>
+              </Empty>
             }
           >
             <Show
               when={frozen()}
               fallback={
-                <div class="brief-body markdown" innerHTML={props.brief.html} />
+                <div
+                  class={`${styles.briefBody} markdown`}
+                  innerHTML={props.brief.html}
+                />
               }
             >
-              <Clamped class="brief-body" html={props.brief.html} />
+              <Clamped class={styles.briefBody!} html={props.brief.html} />
             </Show>
           </Show>
         }
       >
         {/* A copy of what has been typed gives the field its height — see
-            `.grow`. */}
-        <div class="grow" data-value={text()}>
+            `.grow` in `App.module.css`. */}
+        <div class={app.grow} data-value={text()}>
           <textarea
             rows="1"
             aria-label="Brief"
@@ -1978,10 +2057,16 @@ function Brief(props: {
           the human was typing is still explained on the card it happened to
           once the card has gone back to being a rendering. */}
       <Show when={refused()}>
-        {(outcome) => <p class="error">{BRIEF_REFUSAL[outcome()]}</p>}
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {BRIEF_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
       </Show>
       <Show when={save.isError}>
-        <p class="error">The brief could not be saved: {save.error?.message}</p>
+        <ErrorLine class={styles.failure}>
+          The brief could not be saved: {save.error?.message}
+        </ErrorLine>
       </Show>
 
       {/* Under the brief, and only while the conversation is drafting: the

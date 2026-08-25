@@ -20,6 +20,8 @@
 
 import { Show, type JSX } from "solid-js";
 
+import styles from "./Mark.module.css";
+
 /// What each mark says when it is read aloud, which is the whole of what a
 /// screen reader gets from one — see the module note above.
 ///
@@ -33,12 +35,26 @@ export const SPOKEN = {
 } as const;
 
 /// The mark for one session, or nothing where it is over.
-export function Mark(props: { running: boolean; idle: boolean }): JSX.Element {
+export function Mark(props: {
+  running: boolean;
+  idle: boolean;
+  /// Where the mark stands in the line it was drawn into — the `class` prop
+  /// the menu, the modal and the notices already take. Which ring is drawn is
+  /// this component's; where it sits belongs to whatever drew the line, and
+  /// is styled by whoever passes it and never here.
+  class?: string;
+}): JSX.Element {
   const which = () => (props.idle ? "idle" : "working");
 
   return (
     <Show when={props.running}>
-      <span class={`mark ${which()}`} role="img" aria-label={SPOKEN[which()]} />
+      <span
+        class={[styles.mark, styles[which()], props.class]
+          .filter(Boolean)
+          .join(" ")}
+        role="img"
+        aria-label={SPOKEN[which()]}
+      />
     </Show>
   );
 }

@@ -1,0 +1,122 @@
+/* The Repos section of the settings page: the list of what is registered, and
+   the form that adds to it — see `RepoList.tsx`.
+
+   The Agent Profiles above are the same card read the same way, and their
+   module carries a copy of it rather than either of them sharing one: two
+   lists that look alike today are still two lists, and a rule they held in
+   common would make every change to one a decision about the other.
+
+   The heading each section of this page is topped with is `sectionHead`, page
+   vocabulary rather than this module's: it is defined once in `App.module.css`
+   and `RepoList.tsx` writes it beside its own. */
+
+.repos {
+  margin-bottom: 1.5rem;
+}
+
+.repos h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* A registered repo is a list row with nowhere to go yet, so the card is the
+   row's own rather than a link's. */
+.row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.row .title {
+  font-weight: 600;
+}
+
+.row .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The two things on the meta line that are quoted rather than said: a path the
+   filesystem knows by, and the branch name git does. */
+.row .path,
+.row .branch {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Registering a repo: a path typed, and the button that sends it. The label
+   stands over the field, because what has to be understood before typing is
+   that the path is an absolute one — and the whole of it is drawn over the page
+   as a modal, so the box around it is the card the modal already draws. */
+.form h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.form label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.form input {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.85rem;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.buttons button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The one button that undoes rather than does, drawn as the outline of the one
+   beside it — as the profile form's cancel is. */
+.buttons .cancel {
+  color: var(--accent);
+  background: none;
+}
+
+.form .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}

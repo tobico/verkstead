@@ -1,0 +1,51 @@
+/* What happens next on an adopting conversation, in the place `Start grilling`
+   stands on every other one and never at the same time: an adopting
+   conversation has no brief to write and nothing to grill. What it names is the
+   roadmap and the stage the press would start. See `Adoption.tsx`. */
+
+.adoption {
+  margin-top: 1rem;
+}
+
+.adoption h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.roadmap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0 0 0.25rem;
+}
+
+.roadmapTitle {
+  color: var(--ink-soft);
+}
+
+.stage {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+.adopt {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.adopt:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
