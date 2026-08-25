@@ -16,6 +16,6 @@ retires nothing until stage 02's Steer can replace it.
 
 ## Stages
 
-- [ ] 01: One stop — [brief](01-one-stop.md)
+- [ ] 01: One stop — [brief](01-one-stop.md) *(in progress: `one-stop`)*
 - [ ] 02: Steer — [brief](02-steer.md)
 - [ ] 03: Close and the retirements — [brief](03-close-and-retirements.md)
