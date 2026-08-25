@@ -163,8 +163,8 @@ impl Grilling {
 
             assert!(
                 Instant::now() < deadline,
-                "the session never got there. The Timeline says: {:?}",
-                output(&view)
+                "the session never got there. The Timeline says: {}",
+                standing(&view),
             );
 
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1065,6 +1065,43 @@ async fn bench_at_pace(spill: tempfile::TempDir, stub: &str, gh: &str, pace: Pac
 /// The one agent-output Event on a Timeline, where there is one yet.
 fn output(view: &ConversationView) -> Option<&AgentOutputEvent> {
     outputs(view).into_iter().next()
+}
+
+/// Where a Conversation had got to, for the assertion that gave up waiting for
+/// it to get somewhere else.
+///
+/// Every session it has run and every Notice on it, rather than the first
+/// session alone. A run that stops short is nearly always one whose *second*
+/// session never started or never said what was expected, and a message naming
+/// only the first says the same thing whichever of those it was — which is a
+/// failure that has to be reproduced before it can be read, and this suite is
+/// slower to reproduce on some machines than on others.
+fn standing(view: &ConversationView) -> String {
+    let sessions: Vec<String> = outputs(view)
+        .iter()
+        .map(|output| {
+            format!(
+                "#{} {:?} ({} lines{})",
+                output.id,
+                output.latest,
+                output.lines,
+                if output.running { ", running" } else { "" },
+            )
+        })
+        .collect();
+
+    let notices: Vec<String> = said(view)
+        .iter()
+        .map(|notice| format!("#{} {:?}", notice.id, notice.html))
+        .collect();
+
+    format!(
+        "state {:?}, blocked_on {:?}; sessions [{}]; notices [{}]",
+        view.state,
+        view.blocked_on,
+        sessions.join(", "),
+        notices.join(", "),
+    )
 }
 
 /// All of them, in order — a Conversation has one per session it has run, and
