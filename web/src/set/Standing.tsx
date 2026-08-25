@@ -17,6 +17,8 @@ import { Modal } from "../Modal";
 import { archiveSet } from "../api/client";
 import type { Archived, Liveness } from "../api/types";
 import { ErrorLine, Note } from "../notices";
+import page from "./Sheet.module.css";
+import styles from "./Standing.module.css";
 import { clearDraft } from "./sheet";
 
 /// What the badge says. The word that colours it is the Liveness itself, which
@@ -97,18 +99,18 @@ export function Standing(props: {
   return (
     <>
       <Menu
-        class="standing"
+        class={styles.standing!}
         name="How this Set stands"
         disabled={archive.isPending}
         closer={(close) => (shut = close)}
         trigger={
           <>
-            <span class={`liveness ${props.liveness}`}>
+            <span class={`${styles.liveness} ${styles[props.liveness]}`}>
               {archive.isPending ? "Archiving…" : BADGE[props.liveness]}
             </span>
             {/* Which way the menu will go, and no part of what the badge
                 says. */}
-            <span class="standing-mark" aria-hidden="true">
+            <span class={styles.standingMark} aria-hidden="true">
               ▾
             </span>
           </>
@@ -118,7 +120,7 @@ export function Standing(props: {
           <button
             type="button"
             role="menuitem"
-            class="archive"
+            class={styles.archive}
             onClick={() => {
               shut();
               setConfirming(true);
@@ -129,7 +131,11 @@ export function Standing(props: {
         )}
       </Menu>
       <Show when={failed()}>
-        {(said) => <ErrorLine inline class="failure">{said()}</ErrorLine>}
+        {(said) => (
+          <ErrorLine inline class={styles.failure}>
+            {said()}
+          </ErrorLine>
+        )}
       </Show>
       {/* The one irreversible thing on the page, so it is asked about in as many
           words — including that it cannot be undone, which is what tells this
@@ -137,17 +143,19 @@ export function Standing(props: {
           not the one button leaves the Set pending, which is the safe way round
           for the only act here that cannot be taken back. */}
       <Modal
-        class="confirm"
+        class={page.confirm!}
         open={confirming()}
         close={() => setConfirming(false)}
         labelledBy="archive-title"
       >
-        <p id="archive-title">Archive this Set unanswered?</p>
-        <Note class="caveat">{ARCHIVE_WARNING}</Note>
-        <div class="confirm-actions">
+        <p id="archive-title" class={page.confirmTitle}>
+          Archive this Set unanswered?
+        </p>
+        <Note class={page.caveat}>{ARCHIVE_WARNING}</Note>
+        <div class={page.confirmActions}>
           <button
             type="button"
-            class="secondary"
+            class={page.secondary}
             onClick={() => setConfirming(false)}
           >
             Keep it pending

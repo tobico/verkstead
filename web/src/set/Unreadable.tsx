@@ -19,6 +19,10 @@
 import type { JSX } from "solid-js";
 
 import type { UnreadableSet } from "../api/types";
+// The provenance line is the sheet's: a Set this build cannot read still says
+// where it came from, in the same place a readable one does.
+import page from "./Sheet.module.css";
+import styles from "./Unreadable.module.css";
 
 /// One unreadable Set, top to bottom: what it is, why this build cannot read it,
 /// and the body as it was stored.
@@ -34,10 +38,10 @@ export function Unreadable(props: {
     <>
       {props.lead}
       <h1>Question set {props.set.id}</h1>
-      <div class="meta">
-        <span class="unreadable-badge">cannot be read</span>
+      <div class={page.meta}>
+        <span class={styles.unreadableBadge}>cannot be read</span>
       </div>
-      <p class="unreadable-why">
+      <p class={styles.unreadableWhy}>
         This build cannot read the Set as it was stored, so there is nothing to
         draw the questions from and nothing to answer. What was asked is still on
         the record, below, exactly as it was written: {props.set.why}
@@ -46,9 +50,9 @@ export function Unreadable(props: {
           scrolls inside its own block rather than widening the page — a stored
           Set carries a Preface and a Diff, and one long line of JSON is not a
           reason for the column beside it to move. */}
-      <section class="stored-body" id="stored-body">
+      <section class={styles.storedBody} id="stored-body">
         <h2 class="section-heading">As it was stored</h2>
-        <pre class="stored-json">{props.set.body}</pre>
+        <pre class={styles.storedJson}>{props.set.body}</pre>
       </section>
     </>
   );

@@ -149,7 +149,13 @@ main {
    Every block the markdown dialect reads in lines is named here, the rule that
    parts two of them included, because what is left out is exactly what the
    room was widened for: a table, a Diagram and a fence keep the card. On a
-   window too narrow for the difference to exist, the cap simply never binds. */
+   window too narrow for the difference to exist, the cap simply never binds.
+
+   What is measured here is what has no component to measure it: the renderer's
+   own markup, and the field every page grows to fit what is typed into it. The
+   blocks that are some component's — an Option on offer, the human's own words
+   on the record, the submit — read `--measure` from their own modules, this
+   being where the width is named. */
 .markdown > p,
 .markdown > ul,
 .markdown > ol,
@@ -161,23 +167,9 @@ main {
 .markdown > h5,
 .markdown > h6,
 .markdown > hr,
-/* The human's own words on the record are prose too, and read the same way. */
-.ask.decided .answer-text,
-.set-comment.decided .comment,
-/* And what is written or chosen rather than read: a field is as wide as the
-   words going into it, and an Option is one line of words on offer. The Answer
-   Table is not an exception to this — it is a table, and takes what its
-   columns want. */
-.grow,
-.options {
+/* A field is as wide as the words going into it. */
+.grow {
   max-width: var(--measure);
-}
-
-/* These stand where a card stands rather than inside one, so the measure alone
-   would leave them a card's padding short of the prose they sit under. */
-.counter-question,
-.submit button {
-  max-width: calc(var(--measure) + 2rem);
 }
 
 h1 {

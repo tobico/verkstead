@@ -3,12 +3,14 @@
    they are dismissed the same way, and they stand off the page by the same
    shadow, which is what says a menu is in front of what it covers.
 
-   What is *not* the chrome is at the foot of this file: the four callers each
-   paint their own trigger and size their own drop, and those rules are written
-   against a class of the caller's and a class of this component's at once. They
-   are read through `:global` here for as long as the caller half is still in
-   `main.css`, and each of them goes to its caller's module as that caller
-   migrates. */
+   What is *not* the chrome is at the foot of this file: the three callers left
+   here each paint their own trigger and size their own drop, and those rules
+   are written against a class of the caller's and a class of this component's
+   at once. They are read through `:global` for as long as the caller half is
+   still in `main.css`. A caller that has migrated cannot be read that way any
+   more — its class is hashed too — so it paints its trigger and its drop from
+   its own module, reaching them by the elements they are; the Set page's
+   standing badge is the first, in `set/Standing.module.css`. */
 
 /* The anchor everything below hangs from. */
 .menu {
@@ -159,34 +161,3 @@
   left: 0;
 }
 
-/* How a waiting Set stands, at the far end of the provenance line: the badge is
-   the title of a small menu, and the way to close the Set if no agent ever comes
-   back for it is inside.
-
-   The badge as a pill, with the mark that says it opens: quiet, because waiting
-   is the ordinary state — the outline is only what says this one is pressable,
-   where the words around it are not. The word that colours it is the Liveness
-   itself, exactly as on a list row. */
-:global(.standing) > .trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0.7rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-  background: transparent;
-  border: 1px solid var(--edge);
-  border-radius: 999px;
-}
-
-/* Waiting on the archive rather than refusing the press, which is the one
-   disabled trigger here that is not a *no*. */
-:global(.standing) > .trigger:disabled {
-  cursor: progress;
-}
-
-/* One row, so it is as wide as its own words rather than as wide as anything. */
-:global(.standing) > .drop {
-  min-width: max-content;
-  padding: 0.25rem;
-}

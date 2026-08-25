@@ -10,6 +10,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { QuestionView, SetView } from "../src/api/types";
+// The faces themselves, which the nav's module names: a kind is one of these
+// rather than a word, so this is where the spelling lives.
+import contents from "../src/set/Contents.module.css";
 import {
   anchor,
   inside,
@@ -210,14 +213,14 @@ describe("the parts of the page the spy watches", () => {
       "so a path in the bar is set as the Diff sets it, and the two read as " +
         "the same name",
     ).toEqual([
-      "contents-section",
-      "contents-section",
-      "contents-path",
-      "contents-path",
-      "contents-section",
-      "contents-question",
-      "contents-question",
-      "contents-section",
+      contents.section,
+      contents.section,
+      contents.path,
+      contents.path,
+      contents.section,
+      contents.question,
+      contents.question,
+      contents.section,
     ]);
   });
 

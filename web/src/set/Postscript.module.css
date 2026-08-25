@@ -1,0 +1,58 @@
+/* What the agent closed the Set with, and the box it is introducing — one card
+   holding both, because they are one thing to read: an invitation and the place
+   to take it up. A box that followed the card read as a separate thing that
+   happened to come after it. See `Postscript.tsx`.
+
+   The card's own padding is the whole of the inset, so the comment inside it
+   keeps no margin of its own; what it does keep is a gap from the prose above,
+   on the Sets that closed with any. */
+
+/* A section like the Preface and the Questions, and headed like them: the
+   heading is above the card rather than inside it, and the gap under it is
+   `.section-heading`'s own. */
+.postscript {
+  margin-top: 1.5rem;
+  /* Where a jump from the table of contents lands — see `--jump-clear` in
+     `Contents.module.css`. */
+  scroll-margin-top: var(--jump-clear);
+}
+
+/* The same box the Preface's body is — see `.prefaceBody` in
+   `Sheet.module.css`, which is the same five lines and has to stay the same
+   five — drawn around the body rather than being it, because the comment sits
+   inside the card with it: both are the agent's own prose, said at either end
+   of the Set, and one drawn as a card while the other was loose prose would
+   read as two different kinds of thing. */
+.postscriptCard {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* The rendered markdown itself carries no box: `.markdown` in
+   `styles/markdown.css` holds the blocks' own rhythm, and the card above is the
+   whole of the inset. */
+.postscriptBody {
+  /* Nothing. The card is the box. */
+}
+
+/* And the gap between the agent's prose and whatever is taking it up — the
+   field on the sheet, the comment on the record. Said about whatever follows
+   the body rather than about the box itself: the box is `Sheet.module.css`'s
+   `.setComment`, and a Set that closed with no Postscript has no body for
+   anything to follow. */
+.postscriptBody + * {
+  margin-top: 0.75rem;
+}
+
+/* The Gutter this section reserves down its left once the window is wide, with
+   nothing to hang in it: the axis is the page's rather than each section's, so
+   a card holds it empty exactly as the Preface's does. What the Gutter is and
+   why is in `Sheet.module.css`, where it is named. */
+@media (min-width: 60rem) {
+  .postscriptCard {
+    --bleed: var(--gutter);
+    padding-left: calc(1rem + var(--gutter));
+  }
+}

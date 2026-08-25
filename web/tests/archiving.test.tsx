@@ -13,6 +13,11 @@ import type { Archived } from "../src/api/types";
 // The one menu, which the standing badge is the trigger of.
 import menu from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
+// The page's own vocabulary and the badge's, which is where these names live
+// now.
+import sheet from "../src/set/Sheet.module.css";
+import standing from "../src/set/Standing.module.css";
+import setPage from "../src/set/SetPage.module.css";
 import { draftKey } from "../src/set/sheet";
 import { answering, posts } from "./reading";
 import { json, readable } from "./serving";
@@ -42,7 +47,7 @@ function press(page: ParentNode, text: string) {
 /// Open the standing menu — the badge is its title — and choose the one thing
 /// in it, which is the offer to close the Set unanswered.
 function reachForArchive(page: ParentNode) {
-  const trigger = page.querySelector(`.standing > .${menu.trigger}`);
+  const trigger = page.querySelector(`.${standing.standing} > .${menu.trigger}`);
   expect(trigger, "expected the badge to open the standing menu").toBeTruthy();
   fireEvent.click(trigger!);
   press(page, "Archive unanswered");
@@ -64,25 +69,25 @@ describe("the offer to close a Set unanswered", () => {
     // The badge is the menu's title, and the offer is nowhere on the page
     // until the menu is asked for: archiving is almost never the right thing
     // to do to a Set.
-    const trigger = page.querySelector(`.standing > .${menu.trigger}`)!;
-    expect(trigger.querySelector(".liveness")!.textContent).toBe(
+    const trigger = page.querySelector(`.${standing.standing} > .${menu.trigger}`)!;
+    expect(trigger.querySelector(`.${standing.liveness}`)!.textContent).toBe(
       "agent waiting",
     );
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(page.querySelector("button.archive")).toBeNull();
+    expect(page.querySelector(`button.${standing.archive}`)).toBeNull();
 
     fireEvent.click(trigger);
 
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(page.querySelector("button.archive")!.textContent).toBe(
+    expect(page.querySelector(`button.${standing.archive}`)!.textContent).toBe(
       "Archive unanswered",
     );
 
     // And it is the one menu the rest of the UI drops, rather than a second
     // one built here — which is what says it takes Escape, takes a press away
     // from it and stands off the page the way every other menu does.
-    expect(page.querySelector(`.standing > .${menu.drop} button.archive`)).toBe(
-      page.querySelector("button.archive"),
+    expect(page.querySelector(`.${standing.standing} > .${menu.drop} button.${standing.archive}`)).toBe(
+      page.querySelector(`button.${standing.archive}`),
     );
   });
 
@@ -92,8 +97,10 @@ describe("the offer to close a Set unanswered", () => {
       standing: { Waiting: "disconnected" },
     });
 
-    const badge = page.querySelector(".standing .liveness")!;
-    expect(badge.className).toBe("liveness disconnected");
+    const badge = page.querySelector(`.${standing.standing} .${standing.liveness}`)!;
+    expect(badge.className).toBe(
+      `${standing.liveness} ${standing.disconnected}`,
+    );
     expect(badge.textContent).toBe("agent disconnected");
   });
 
@@ -106,12 +113,12 @@ describe("the offer to close a Set unanswered", () => {
       standing: { Waiting: "deferred" },
     });
 
-    const badge = page.querySelector(".standing .liveness")!;
-    expect(badge.className).toBe("liveness deferred");
+    const badge = page.querySelector(`.${standing.standing} .${standing.liveness}`)!;
+    expect(badge.className).toBe(`${standing.liveness} ${standing.deferred}`);
     expect(badge.textContent).toBe("no agent waiting");
 
     reachForArchive(page);
-    expect(page.querySelector(".confirm")).toBeTruthy();
+    expect(page.querySelector(`.${sheet.confirm}`)).toBeTruthy();
   });
 
   it("is not offered on a Set that has already settled", async () => {
@@ -121,7 +128,7 @@ describe("the offer to close a Set unanswered", () => {
     });
 
     expect(
-      page.querySelector(".standing"),
+      page.querySelector(`.${standing.standing}`),
       "nothing is waiting on a settled Set, and there is nothing left to close",
     ).toBeNull();
   });
@@ -131,7 +138,7 @@ describe("the offer to close a Set unanswered", () => {
 
     reachForArchive(page);
 
-    const asking = page.querySelector("dialog.confirm")!;
+    const asking = page.querySelector(`dialog.${sheet.confirm}`)!;
     expect((asking as HTMLDialogElement).open, "opened as a modal").toBe(true);
     // The one irreversible act in the UI has to be asked about as one — and it
     // has to say where the Set stays, because it is not being deleted.
@@ -144,7 +151,7 @@ describe("the offer to close a Set unanswered", () => {
     expect(posts(fetching), "nothing has been sent").toHaveLength(0);
 
     press(page, "Keep it pending");
-    expect(page.querySelector(".confirm")).toBeNull();
+    expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "and still nothing was sent").toHaveLength(0);
   });
 });
@@ -162,7 +169,7 @@ describe("closing a Set unanswered", () => {
     reachForArchive(page);
     // The dialog's own button, which is the second one reading this.
     fireEvent.click(
-      page.querySelector(".confirm-actions button:last-child") as HTMLElement,
+      page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
     );
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
@@ -173,9 +180,9 @@ describe("closing a Set unanswered", () => {
     // The Set was not discarded, it was closed — so the page stays on it and
     // says so, which is the confirmation that nothing was lost. The way out
     // leads where it always did: the Conversation this Set was asked from.
-    await waitFor(() => expect(page.querySelector(".archived-at")).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${sheet.archivedAt}`)).toBeTruthy());
     expect(history.get()).toBe(`/sets/${WAITING.id}`);
-    expect(page.querySelector("a.back")!.getAttribute("href")).toBe(
+    expect(page.querySelector(`a.${setPage.back}`)!.getAttribute("href")).toBe(
       `/conversations/${WAITING.conversation}`,
     );
   });
@@ -191,7 +198,7 @@ describe("closing a Set unanswered", () => {
 
     reachForArchive(page);
     fireEvent.click(
-      page.querySelector(".confirm-actions button:last-child") as HTMLElement,
+      page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
     );
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
@@ -208,12 +215,12 @@ describe("closing a Set unanswered", () => {
 
       reachForArchive(page);
       fireEvent.click(
-        page.querySelector(".confirm-actions button:last-child") as HTMLElement,
+        page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
       );
 
       await waitFor(() => expect(posts(fetching)).toHaveLength(1));
       await waitFor(() =>
-        expect(page.querySelector(`.meta .${notices.error}`)!.textContent).toContain(
+        expect(page.querySelector(`.${sheet.meta} .${notices.error}`)!.textContent).toContain(
           said,
         ),
       );
@@ -228,12 +235,12 @@ describe("closing a Set unanswered", () => {
 
     reachForArchive(page);
     fireEvent.click(
-      page.querySelector(".confirm-actions button:last-child") as HTMLElement,
+      page.querySelector(`.${sheet.confirmActions} button:last-child`) as HTMLElement,
     );
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
-      expect(page.querySelector(`.meta .${notices.error}`)!.textContent).toContain(
+      expect(page.querySelector(`.${sheet.meta} .${notices.error}`)!.textContent).toContain(
         "the Question Set could not be archived",
       ),
     );

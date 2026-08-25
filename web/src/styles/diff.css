@@ -289,6 +289,17 @@
   color: var(--tok-support);
 }
 
+/* Where a jump from the Set page's table of contents lands: the section's own
+   heading, and each file's fold. Both keep clear of whatever the page has
+   pinned across its top edge — the nav's bar below one width, the floating
+   header above it — which is `--jump-clear` in `set/Contents.module.css`, that
+   being what does the pinning. Here rather than beside the component, because
+   these are the names this sheet owns and a module has no way to spell one. */
+.diff,
+.diffFile {
+  scroll-margin-top: var(--jump-clear);
+}
+
 /* The Gutter the Set page reserves down its left once the window is wide — see
    `main.css`, where it is named and the rest of what reserves it is set. */
 @media (min-width: 60rem) {

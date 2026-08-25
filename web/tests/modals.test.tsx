@@ -21,9 +21,9 @@ import { Modal } from "../src/Modal";
 // source to read the rules off, jsdom laying nothing out to read them from.
 import modal from "../src/Modal.module.css";
 import stylesheet from "../src/Modal.module.css?raw";
-// What is left in the one stylesheet, for the half of this that is about what
-// the confirm sheets no longer draw for themselves.
-import theRest from "../src/main.css?raw";
+// The Set page's own vocabulary, where the two confirm sheets are, for the half
+// of this that is about what they no longer draw for themselves.
+import sheets from "../src/set/Sheet.module.css?raw";
 
 /// A modal that starts open, with the way it was closed recorded.
 function mount(): {
@@ -167,8 +167,8 @@ describe("what every modal is drawn with", () => {
   /// The point of one component: no sheet drawn over the page carries a backdrop
   /// or a box of its own to drift away from the shared one.
   it("leaves the confirm sheets nothing of their own to draw", () => {
-    expect(theRest).not.toContain(".confirm-backdrop");
-    expect(theRest).not.toContain("\n.confirm {\n");
+    expect(sheets).not.toContain(".confirm-backdrop");
+    expect(sheets).not.toContain("\n.confirm {\n");
   });
 });
 

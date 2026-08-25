@@ -91,6 +91,10 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Picker } from "../picking";
+// The badge and the sentence a Set this build cannot read is drawn with, taken
+// from the page that draws the whole record rather than kept a second time
+// here: the row and the page are one record read at two distances.
+import unreadable from "../set/Unreadable.module.css";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { PaneHead } from "./PaneHead";
@@ -1422,10 +1426,10 @@ function UnreadableSet(props: {
     >
       <span class="event-head">
         <span class="what">Question set</span>
-        <span class="unreadable-badge">cannot be read</span>
+        <span class={unreadable.unreadableBadge}>cannot be read</span>
       </span>
 
-      <span class="unreadable-why">{props.asked.why}</span>
+      <span class={unreadable.unreadableWhy}>{props.asked.why}</span>
     </button>
   );
 }

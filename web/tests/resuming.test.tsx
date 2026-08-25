@@ -22,6 +22,9 @@ import type {
 
   TimelineEvent,
 } from "../src/api/types";
+// The badge on a waiting Set, and the date a settled one carries.
+import sheet from "../src/set/Sheet.module.css";
+import standing from "../src/set/Standing.module.css";
 import { askedFor, json, readable, reads, serving, whenever } from "./serving";
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
@@ -160,14 +163,14 @@ describe("coming back to the app", () => {
     const { container } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: this is
     // the page as it was left.
-    await waitFor(() => expect(container.querySelector(".standing")).toBeTruthy());
+    await waitFor(() => expect(container.querySelector(`.${standing.standing}`)).toBeTruthy());
 
     reopened();
 
     // Answered from another device in the meantime, so the page the human comes
     // back to is the record rather than the form they left.
     await waitFor(() =>
-      expect(container.querySelector(".answered-at")).toBeTruthy(),
+      expect(container.querySelector(`.${sheet.answeredAt}`)).toBeTruthy(),
     );
   });
 

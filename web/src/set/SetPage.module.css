@@ -1,0 +1,15 @@
+/* One Question Set as a page of its own — see `SetPage.tsx`.
+
+   Everything about drawing one is the sheet's; what is this page's own is the
+   one thing a page has that a details pane does not. */
+
+/* The way back out, in the same slot every page keeps it in. The settings page
+   draws the same link and still takes it from `main.css`; it gets a copy of
+   these four lines in its own module when it migrates, the way the two list
+   pages take a copy of the row they share. */
+.back {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  text-decoration: none;
+}

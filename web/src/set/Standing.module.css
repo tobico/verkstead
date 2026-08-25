@@ -1,0 +1,89 @@
+/* Where a still-waiting Set stands, at the far end of the provenance line: the
+   badge is the title of a small menu, and the way to close the Set if no agent
+   ever comes back for it is inside. See `Standing.tsx`.
+
+   The menu's chrome is `Menu.module.css` — how it hangs, how it is dismissed,
+   what a row looks like. What is here is this menu's own paint: the badge it
+   drops from, the width of the one row it drops, and the word that colours the
+   badge.
+
+   The trigger and the drop are `Menu`'s own elements, so they are reached by
+   what they are rather than by a class this module cannot spell: the trigger is
+   the one button the menu holds directly, and the drop is the one thing in it
+   with a menu's role. */
+
+/* Where the badge sits on the line — the far end, whichever of the two the
+   standing puts there. The settled Set's dates say the same in
+   `Sheet.module.css`, where the line is. */
+.standing {
+  margin-left: auto;
+}
+
+/* The badge as a pill, with the mark that says it opens: quiet, because waiting
+   is the ordinary state — the outline is only what says this one is pressable,
+   where the words around it are not. The word that colours it is the Liveness
+   itself, exactly as on a list row. */
+.standing > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--edge);
+  border-radius: 999px;
+}
+
+/* Waiting on the archive rather than refusing the press, which is the one
+   disabled trigger in the app that is not a *no*. */
+.standing > button:disabled {
+  cursor: progress;
+}
+
+/* One row, so the drop is as wide as its own words rather than as wide as
+   anything. */
+.standing > [role="menu"] {
+  min-width: max-content;
+  padding: 0.25rem;
+}
+
+/* A word rather than a light, because a Set is read on a phone and "agent
+   disconnected" has to read as itself without a legend. */
+.liveness.disconnected {
+  color: var(--removed);
+  font-weight: 500;
+}
+
+/* Waiting is the ordinary state and stays as quiet as the rest of the line; a
+   Deferred Ask stays quiet too, nobody being meant to wait on one, so there is
+   nothing wrong to point at. Both are spelled out because the badge takes its
+   class from the Liveness itself — a variant this module did not name would
+   reach the page as no class at all. */
+.waiting,
+.deferred {
+  color: inherit;
+}
+
+/* Which way the menu will go, and no part of what the badge says. */
+.standingMark {
+  color: var(--ink-soft);
+}
+
+/* Quiet, and quieter than accept-all: archiving is almost never the right thing
+   to do to a Set, and the one time it is, the human came here for it. It is not
+   a danger button either — nothing is destroyed, the Set is filed. */
+.standing .archive {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  color: var(--ink-soft);
+  border-radius: 0.35rem;
+}
+
+/* Its own full line under the provenance, so a refusal is not squeezed in
+   beside the badge. */
+.failure {
+  flex-basis: 100%;
+  margin: 0;
+}

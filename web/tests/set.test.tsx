@@ -15,6 +15,14 @@ import { screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Response as Decided } from "../src/api/types";
+// The page's own vocabulary, and the four components that keep names of their
+// own beside it.
+import contents from "../src/set/Contents.module.css";
+import closing from "../src/set/Postscript.module.css";
+import setPage from "../src/set/SetPage.module.css";
+import sheet from "../src/set/Sheet.module.css";
+import standing from "../src/set/Standing.module.css";
+import illegible from "../src/set/Unreadable.module.css";
 import {
   mount,
   reading,
@@ -58,7 +66,7 @@ const SETTLED_STAMP = "2025-08-03 09:07 UTC";
 /// anywhere on the page: the table of contents lists a Question by its label too,
 /// so `Q3` names two things in the document and only one of them is a question.
 function named(page: ParentNode, label: string): HTMLElement {
-  const found = [...page.querySelectorAll<HTMLElement>(".ask .text > .label")].find(
+  const found = [...page.querySelectorAll<HTMLElement>(`.${sheet.ask} .${sheet.text} > .${sheet.label}`)].find(
     (head) => head.textContent === label,
   );
   expect(found, `expected the question ${label}`).toBeTruthy();
@@ -72,7 +80,7 @@ function named(page: ParentNode, label: string): HTMLElement {
 /// emphasis — so what is matched is whichever element holds them and the row is
 /// found from there.
 function optionRow(text: string | RegExp): HTMLElement {
-  const row = screen.getByText(text, { exact: false }).closest("li.option");
+  const row = screen.getByText(text, { exact: false }).closest(`li.${sheet.option}`);
   expect(row, `expected the Option ${text} in a row of its own`).toBeTruthy();
   return row as HTMLElement;
 }
@@ -98,10 +106,10 @@ describe("reading a Set", () => {
     const page = await reading(WAITING);
 
     expect(page.querySelector("h1")!.textContent).toBe(WAITING.title);
-    expect(page.querySelector(".meta .project")!.textContent).toBe(
+    expect(page.querySelector(`.${sheet.meta} .${sheet.project}`)!.textContent).toBe(
       WAITING.project,
     );
-    expect(page.querySelector(".meta .branch")!.textContent).toBe(
+    expect(page.querySelector(`.${sheet.meta} .${sheet.branch}`)!.textContent).toBe(
       WAITING.branch,
     );
   });
@@ -112,14 +120,14 @@ describe("reading a Set", () => {
     expect(page.querySelector("h1")!.textContent).toBe(WAITING.title);
     // The line itself stands — how the Set stands lives at its far end — but
     // it says nothing about where the ask came from.
-    expect(page.querySelector(".meta .project")).toBeNull();
-    expect(page.querySelector(".meta .branch")).toBeNull();
+    expect(page.querySelector(`.${sheet.meta} .${sheet.project}`)).toBeNull();
+    expect(page.querySelector(`.${sheet.meta} .${sheet.branch}`)).toBeNull();
   });
 
   it("puts the Preface in as the server rendered it", async () => {
     const page = await reading(WAITING);
 
-    const preface = page.querySelector("section.preface .preface-body")!;
+    const preface = page.querySelector(`section.${sheet.preface} .${sheet.prefaceBody}`)!;
     expect(preface.className).toContain("markdown");
     expect(preface.innerHTML).toContain("<code>POST /v1/messages</code>");
     expect(preface.innerHTML).toContain(
@@ -130,13 +138,13 @@ describe("reading a Set", () => {
   it("shows no Preface section for a Set with no Preface", async () => {
     const page = await reading({ ...WAITING, preface_html: null });
 
-    expect(page.querySelector(".preface")).toBeNull();
+    expect(page.querySelector(`.${sheet.preface}`)).toBeNull();
   });
 
   it("draws every Question and Sub-question in the order they were asked", async () => {
     const page = await reading(WAITING);
 
-    expect(texts(page, ".ask .label")).toEqual([
+    expect(texts(page, `.${sheet.ask} .${sheet.label}`)).toEqual([
       "Q1",
       "Q2",
       "Q2a",
@@ -145,14 +153,14 @@ describe("reading a Set", () => {
     ]);
     // One level of nesting, and the Sub-questions under the Question that asked
     // them.
-    const nested = page.querySelector("#q2 .subquestions")!;
-    expect(texts(nested as HTMLElement, ".ask .label")).toEqual(["Q2a", "Q2b"]);
+    const nested = page.querySelector(`#q2 .${sheet.subquestions}`)!;
+    expect(texts(nested as HTMLElement, `.${sheet.ask} .${sheet.label}`)).toEqual(["Q2a", "Q2b"]);
   });
 
   it("offers every Option of every question", async () => {
     const page = await reading(DIAGRAMMED);
 
-    expect(texts(page, ".option .option-text")).toEqual([
+    expect(texts(page, `.${sheet.option} .${sheet.optionText}`)).toEqual([
       "In-process, per instance.",
       "In Redis, shared across instances.",
       "A bare 429.",
@@ -161,7 +169,7 @@ describe("reading a Set", () => {
       "A rounded number.",
     ]);
     // Selecting is by number, so every row carries the Option's own.
-    expect(texts(page, ".option .n")).toEqual(["1", "2", "1", "2", "1", "2"]);
+    expect(texts(page, `.${sheet.option} .${sheet.n}`)).toEqual(["1", "2", "1", "2", "1", "2"]);
   });
 
   it("offers nothing on a question that has no Options", async () => {
@@ -170,9 +178,9 @@ describe("reading a Set", () => {
     // Q2b and Q3 offer nothing to choose between, so they get no list of
     // Options at all — just their text.
     for (const bare of ["Q2b", "Q3"]) {
-      const ask = named(page, bare).closest(".ask")!;
+      const ask = named(page, bare).closest(`.${sheet.ask}`)!;
       expect(
-        ask.querySelector(".options"),
+        ask.querySelector(`.${sheet.options}`),
         `${bare} offers no Options, so it should have no list of them`,
       ).toBeNull();
     }
@@ -202,8 +210,8 @@ describe("reading a Set", () => {
     const page = await reading(WAITING);
 
     for (const label of ["Q1", "Q2a"]) {
-      const text = named(page, label).closest(".text")!;
-      expect(text.firstElementChild!.className).toBe("label");
+      const text = named(page, label).closest(`.${sheet.text}`)!;
+      expect(text.firstElementChild!.className).toBe(sheet.label);
       expect(text.lastElementChild!.className).toContain("markdown");
     }
   });
@@ -224,11 +232,11 @@ describe("reading a Set", () => {
   it("marks the Recommendation, and only the one", async () => {
     const page = await reading(WAITING);
 
-    expect(page.querySelectorAll(".option .star")).toHaveLength(1);
+    expect(page.querySelectorAll(`.${sheet.option} .${sheet.star}`)).toHaveLength(1);
     // The emphasis the agent put on it, rather than the word anywhere: `redis`
     // is also a code span in Q1's own text.
-    expect(optionRow(/^Redis$/).className).toBe("option recommended");
-    expect(optionRow("Counter::local").className).toBe("option");
+    expect(optionRow(/^Redis$/).className).toBe(`${sheet.option} ${sheet.recommended}`);
+    expect(optionRow("Counter::local").className).toBe(sheet.option);
   });
 
   it("names and anchors the Questions, and every Question in them", async () => {
@@ -275,15 +283,15 @@ describe("the record of a settled Set", () => {
     // is what the outline hangs off and the word is what a reader who cannot see
     // one is told; both have to be on it, and neither on the other Option.
     const chosen = optionRow("Counter::local");
-    expect(chosen.className).toBe("option chosen");
-    expect(chosen.querySelector(".chose")!.textContent).toBe("chosen");
-    expect(chosen.querySelector(".star")).toBeNull();
+    expect(chosen.className).toBe(`${sheet.option} ${sheet.chosen}`);
+    expect(chosen.querySelector(`.${sheet.chose}`)!.textContent).toBe("chosen");
+    expect(chosen.querySelector(`.${sheet.star}`)).toBeNull();
 
     const recommended = optionRow(/^Redis$/);
-    expect(recommended.className).toBe("option recommended");
-    expect(recommended.querySelector(".star")).toBeTruthy();
+    expect(recommended.className).toBe(`${sheet.option} ${sheet.recommended}`);
+    expect(recommended.querySelector(`.${sheet.star}`)).toBeTruthy();
     expect(
-      recommended.querySelector(".chose"),
+      recommended.querySelector(`.${sheet.chose}`),
       "the Recommendation was not taken, and the page must not read as if it was",
     ).toBeNull();
 
@@ -296,7 +304,7 @@ describe("the record of a settled Set", () => {
   it("shows what was written", async () => {
     const page = await reading(ANSWERED);
 
-    expect(texts(page, ".answer-text")).toEqual([
+    expect(texts(page, `.${sheet.answerText}`)).toEqual([
       "Your thoughtsand document them in the changelog",
       "Your answerkeep them short",
     ]);
@@ -305,17 +313,17 @@ describe("the record of a settled Set", () => {
   it("reads a Heading as the words over its Sub-questions and never as one left open", async () => {
     const page = await reading(withHeading(ANSWERED));
 
-    const heading = page.querySelector(".ask.heading")!;
+    const heading = page.querySelector(`.${sheet.ask}.${sheet.heading}`)!;
     expect(heading, "expected the Heading drawn").toBeTruthy();
-    expect(heading.querySelector(".label")!.textContent).toBe("Q2");
+    expect(heading.querySelector(`.${sheet.label}`)!.textContent).toBe("Q2");
 
     // The fixture's Response still carries an entry naming Q2 — it was answered
     // before Headings existed. Nothing is drawn from it: a Question that asked
     // nothing cannot have been left open, and saying so would report a decision
     // nobody was ever asked to make.
-    expect(heading.querySelector(".unanswered")).toBeNull();
-    expect(heading.querySelector(".answer-text")).toBeNull();
-    expect(heading.querySelector(".options")).toBeNull();
+    expect(heading.querySelector(`.${sheet.unanswered}`)).toBeNull();
+    expect(heading.querySelector(`.${sheet.answerText}`)).toBeNull();
+    expect(heading.querySelector(`.${sheet.options}`)).toBeNull();
   });
 
   it("says of a question that went back open that it went back unanswered", async () => {
@@ -325,7 +333,7 @@ describe("the record of a settled Set", () => {
     // question is part of what the agent was told, not an omission.
     expect(page.querySelector("#q2a, #q3")).toBeTruthy();
     expect(page.innerHTML).toContain("What should Retry-After say?");
-    expect(texts(page, ".unanswered")).toEqual([
+    expect(texts(page, `.${sheet.unanswered}`)).toEqual([
       "Unanswered — the agent was told this one is still open.",
       "Unanswered — the agent was told this one is still open.",
     ]);
@@ -334,22 +342,22 @@ describe("the record of a settled Set", () => {
   it("says what was said about the Set as a whole, and when it was answered", async () => {
     const page = await reading(ANSWERED);
 
-    expect(page.querySelector(".answered-at")!.textContent).toBe(
+    expect(page.querySelector(`.${sheet.answeredAt}`)!.textContent).toBe(
       `Answered ${SETTLED}`,
     );
     // The exact minute rides behind the words, as the tooltip.
-    expect(page.querySelector(".answered-at")!.getAttribute("title")).toBe(
+    expect(page.querySelector(`.${sheet.answeredAt}`)!.getAttribute("title")).toBe(
       SETTLED_STAMP,
     );
-    const comment = page.querySelector("section.set-comment.decided")!;
-    expect(comment.querySelector(".comment")!.textContent).toBe(
+    const comment = page.querySelector(`section.${sheet.setComment}.${sheet.decided}`)!;
+    expect(comment.querySelector(`.${sheet.comment}`)!.textContent).toBe(
       "Do the in-process one first; we can move it later.",
     );
   });
 
   it("heads the closing section for what it holds, and anchors it for the nav", async () => {
     const withOne = await reading(withPostscript(ANSWERED));
-    const section = withOne.querySelector("section.postscript")!;
+    const section = withOne.querySelector(`section.${closing.postscript}`)!;
 
     expect(section.id, "the id the table of contents jumps to").toBe(
       "postscript",
@@ -362,22 +370,22 @@ describe("the record of a settled Set", () => {
     // than naming something the agent never wrote.
     const without = await reading(ANSWERED);
     expect(
-      without.querySelector("section.postscript h2")!.textContent,
+      without.querySelector(`section.${closing.postscript} h2`)!.textContent,
     ).toBe("Comment");
   });
 
   it("closes an answered Set with the Postscript, wrapped around what was said about it", async () => {
     const page = await reading(withPostscript(ANSWERED));
 
-    const postscript = page.querySelector("section.postscript")!;
+    const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(postscript, "expected the Postscript drawn").toBeTruthy();
-    const body = postscript.querySelector(".postscript-body")!;
+    const body = postscript.querySelector(`.${closing.postscriptBody}`)!;
     expect(body.className).toContain("markdown");
     expect(body.innerHTML).toContain("<code>ops/export</code>");
 
     // Nested exactly as it is on the sheet, so the record reads the way the
     // page it was filled in on did.
-    const comment = postscript.querySelector(".set-comment.decided")!;
+    const comment = postscript.querySelector(`.${sheet.setComment}.${sheet.decided}`)!;
     expect(comment, "expected the comment inside the Postscript").toBeTruthy();
     expect(body.nextElementSibling).toBe(comment);
   });
@@ -389,10 +397,10 @@ describe("the record of a settled Set", () => {
     // answer.
     const page = await reading(withPostscript(ARCHIVED));
 
-    const postscript = page.querySelector("section.postscript")!;
+    const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(postscript, "expected the Postscript drawn").toBeTruthy();
-    expect(postscript.previousElementSibling!.className).toContain("questions");
-    expect(page.querySelector(".set-comment")).toBeNull();
+    expect(postscript.previousElementSibling!.className).toContain(sheet.questions!);
+    expect(page.querySelector(`.${sheet.setComment}`)).toBeNull();
   });
 
   it("draws no card at all for a settled Set with nothing to close it", async () => {
@@ -400,17 +408,17 @@ describe("the record of a settled Set", () => {
     // side, so there is nothing for a card to hold and none is drawn.
     const page = await reading(ARCHIVED);
 
-    expect(page.querySelector(".postscript")).toBeNull();
-    expect(page.querySelector(".set-comment")).toBeNull();
+    expect(page.querySelector(`.${closing.postscript}`)).toBeNull();
+    expect(page.querySelector(`.${sheet.setComment}`)).toBeNull();
   });
 
   it("keeps the card for a Set commented on without a Postscript", async () => {
     const page = await reading(ANSWERED);
 
-    const postscript = page.querySelector("section.postscript")!;
+    const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(postscript, "the comment is still read in a card").toBeTruthy();
-    expect(postscript.querySelector(".postscript-body")).toBeNull();
-    expect(postscript.querySelector(".set-comment.decided")).toBeTruthy();
+    expect(postscript.querySelector(`.${closing.postscriptBody}`)).toBeNull();
+    expect(postscript.querySelector(`.${sheet.setComment}.${sheet.decided}`)).toBeTruthy();
   });
 
   it("offers nothing to press", async () => {
@@ -423,8 +431,8 @@ describe("the record of a settled Set", () => {
     // around the record rather than anything that acts on it. Counted rather than
     // excused, so a button that does act on the Set still fails this.
     expect(page.querySelectorAll("button")).toHaveLength(1);
-    expect(page.querySelector("button")!.className).toBe("contents-bar");
-    expect(page.querySelector(".questions")!.className).toContain("decided");
+    expect(page.querySelector("button")!.className).toBe(contents.bar);
+    expect(page.querySelector(`.${sheet.questions}`)!.className).toContain(sheet.decided!);
   });
 
   it("is read for what was asked as well as for what was decided", async () => {
@@ -434,7 +442,7 @@ describe("the record of a settled Set", () => {
       expect(page.innerHTML).toContain("<li>in-process, per instance</li>");
       expect(page.innerHTML).toContain("<code>redis</code>");
       expect(page.innerHTML).toContain("<td>Retry-After</td>");
-      expect(page.querySelector(".preface-body")).toBeTruthy();
+      expect(page.querySelector(`.${sheet.prefaceBody}`)).toBeTruthy();
     }
   });
 
@@ -453,11 +461,11 @@ describe("the record of a settled Set", () => {
 
     // A Response that resolved nothing is still a Response, and has to read as
     // one rather than as a page whose Answers failed to arrive.
-    expect(page.querySelector(".counter-question")!.textContent).toContain(
+    expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
       "The comment below is the whole Response",
     );
-    expect(page.querySelectorAll(".unanswered")).toHaveLength(5);
-    expect(page.querySelector(".set-comment .comment")!.textContent).toBe(
+    expect(page.querySelectorAll(`.${sheet.unanswered}`)).toHaveLength(5);
+    expect(page.querySelector(`.${sheet.setComment} .${sheet.comment}`)!.textContent).toBe(
       nothing.comment,
     );
   });
@@ -480,31 +488,31 @@ describe("the record of a settled Set", () => {
       standing: { Answered: { submitted_at: "2026-08-03T09:07:11.000Z", response: silent } },
     });
 
-    expect(page.querySelector(".counter-question")).toBeNull();
+    expect(page.querySelector(`.${sheet.counterQuestion}`)).toBeNull();
     expect(
-      page.querySelectorAll(".unanswered"),
+      page.querySelectorAll(`.${sheet.unanswered}`),
       "the rows are the whole of the account, and they were always there",
     ).toHaveLength(5);
-    expect(page.querySelector(".set-comment")).toBeNull();
+    expect(page.querySelector(`.${sheet.setComment}`)).toBeNull();
   });
 
   it("reads a Set closed unanswered as a record with no Response behind it", async () => {
     const page = await reading(ARCHIVED);
 
-    expect(page.querySelector(".archived-at")!.textContent).toBe(
+    expect(page.querySelector(`.${sheet.archivedAt}`)!.textContent).toBe(
       `Archived unanswered ${SETTLED}`,
     );
-    expect(page.querySelector(".answered-at")).toBeNull();
-    expect(page.querySelector(".counter-question")!.textContent).toContain(
+    expect(page.querySelector(`.${sheet.answeredAt}`)).toBeNull();
+    expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
       "This Set was archived unanswered",
     );
 
     // Nothing was decided, and only a Response can leave a question open — so
     // no Option is marked and no question claims the agent was told anything.
-    expect(page.querySelector(".option.chosen")).toBeNull();
-    expect(page.querySelectorAll(".unanswered")).toHaveLength(0);
+    expect(page.querySelector(`.${sheet.option}.${sheet.chosen}`)).toBeNull();
+    expect(page.querySelectorAll(`.${sheet.unanswered}`)).toHaveLength(0);
     // The Recommendation is still the agent's, and still marked.
-    expect(page.querySelectorAll(".option .star")).toHaveLength(1);
+    expect(page.querySelectorAll(`.${sheet.option} .${sheet.star}`)).toHaveLength(1);
   });
 
   it("leads back to the Conversation the Set was asked from", async () => {
@@ -512,7 +520,7 @@ describe("the record of a settled Set", () => {
     // Event on one Timeline and there is nowhere else for reading it to lead.
     for (const set of [WAITING, ANSWERED, ARCHIVED]) {
       const page = await reading(set);
-      const out = page.querySelector("a.back")!;
+      const out = page.querySelector(`a.${setPage.back}`)!;
       expect(out.getAttribute("href")).toBe(`/conversations/${set.conversation}`);
       expect(out.textContent).toBe("← Conversation");
     }
@@ -557,8 +565,8 @@ describe("the record of a question whose Options were declared as a table", () =
   /// makes this the record.
   function table(page: ParentNode, label: string): HTMLTableElement {
     const drawn = named(page, label)
-      .closest(".ask")
-      ?.querySelector("table.answer-table");
+      .closest(`.${sheet.ask}`)
+      ?.querySelector(`table.${sheet.answerTable}`);
     expect(drawn, `expected an Answer Table on ${label}`).toBeTruthy();
     return drawn as HTMLTableElement;
   }
@@ -613,15 +621,15 @@ describe("the record of a question whose Options were declared as a table", () =
     // the class is what the treatment hangs off and the word is what a reader
     // who cannot see one is told.
     const chosen = row(page, "Q1", 1);
-    expect(chosen.className).toContain("chosen");
-    expect(chosen.querySelector(".chose")!.textContent).toBe("chosen");
-    expect(chosen.querySelector(".star")).toBeNull();
+    expect(chosen.className).toContain(sheet.chosen!);
+    expect(chosen.querySelector(`.${sheet.chose}`)!.textContent).toBe("chosen");
+    expect(chosen.querySelector(`.${sheet.star}`)).toBeNull();
 
     const recommended = row(page, "Q1", 2);
-    expect(recommended.className).toContain("recommended");
-    expect(recommended.querySelector(".star")).toBeTruthy();
+    expect(recommended.className).toContain(sheet.recommended!);
+    expect(recommended.querySelector(`.${sheet.star}`)).toBeTruthy();
     expect(
-      recommended.querySelector(".chose"),
+      recommended.querySelector(`.${sheet.chose}`),
       "the Recommendation was not taken, and the row must not read as if it was",
     ).toBeNull();
 
@@ -649,10 +657,10 @@ describe("the record of a question whose Options were declared as a table", () =
 
     // Q2a is a table and was left Unanswered: the table changes how its Options
     // are shown, not how the outcome is said.
-    const asked = named(page, "Q2a").closest(".ask")!;
-    expect(asked.querySelector("tr.chosen")).toBeNull();
-    expect(asked.querySelector(".chose")).toBeNull();
-    expect(asked.querySelector(".unanswered")!.textContent).toBe(
+    const asked = named(page, "Q2a").closest(`.${sheet.ask}`)!;
+    expect(asked.querySelector(`tr.${sheet.chosen}`)).toBeNull();
+    expect(asked.querySelector(`.${sheet.chose}`)).toBeNull();
+    expect(asked.querySelector(`.${sheet.unanswered}`)!.textContent).toBe(
       "Unanswered — the agent was told this one is still open.",
     );
   });
@@ -663,25 +671,25 @@ describe("the record of a question whose Options were declared as a table", () =
     // The table is drawn, because what was asked is still worth reading — and
     // nothing on it is marked chosen, because nobody chose.
     expect(table(page, "Q1").querySelectorAll("tbody tr")).toHaveLength(2);
-    expect(page.querySelector("tr.chosen")).toBeNull();
-    expect(page.querySelector(".chose")).toBeNull();
-    expect(page.querySelectorAll(".unanswered")).toHaveLength(0);
+    expect(page.querySelector(`tr.${sheet.chosen}`)).toBeNull();
+    expect(page.querySelector(`.${sheet.chose}`)).toBeNull();
+    expect(page.querySelectorAll(`.${sheet.unanswered}`)).toHaveLength(0);
 
     // The head-of-page account is the one it has always been.
-    expect(page.querySelector(".counter-question")!.textContent).toContain(
+    expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
       "This Set was archived unanswered",
     );
     // The Recommendation is still the agent's, and still marked on its row.
-    expect(row(page, "Q1", 2).querySelector(".star")).toBeTruthy();
+    expect(row(page, "Q1", 2).querySelector(`.${sheet.star}`)).toBeTruthy();
   });
 
   it("leaves a question that declared no axes the list it always was", async () => {
     const page = await reading(withTable(ANSWERED));
 
     // Q2 declared none, so nothing about how its record reads moved.
-    const asked = named(page, "Q2").closest(".ask")!;
-    expect(asked.querySelector("ul.options"), "expected Q2 still a list").toBeTruthy();
-    expect(page.querySelectorAll("ul.options")).toHaveLength(1);
+    const asked = named(page, "Q2").closest(`.${sheet.ask}`)!;
+    expect(asked.querySelector(`ul.${sheet.options}`), "expected Q2 still a list").toBeTruthy();
+    expect(page.querySelectorAll(`ul.${sheet.options}`)).toHaveLength(1);
   });
 });
 
@@ -710,19 +718,19 @@ describe("a Set this build cannot read", () => {
   it("says so, with the stored body under it and the way back out", async () => {
     const page = await unreadably(UNREADABLE);
 
-    expect(page.querySelector(".unreadable-badge")!.textContent).toBe(
+    expect(page.querySelector(`.${illegible.unreadableBadge}`)!.textContent).toBe(
       "cannot be read",
     );
     // Serde's own sentence, which names the field that has left the schema.
-    expect(page.querySelector(".unreadable-why")!.textContent).toContain(
+    expect(page.querySelector(`.${illegible.unreadableWhy}`)!.textContent).toContain(
       "accepted_by",
     );
     // And the record itself, byte for byte: it is what was asked, and the whole
     // of what there is left to show of it.
-    expect(page.querySelector(".stored-json")!.textContent).toBe(
+    expect(page.querySelector(`.${illegible.storedJson}`)!.textContent).toBe(
       UNREADABLE.body,
     );
-    expect(page.querySelector(".back")!.getAttribute("href")).toBe(
+    expect(page.querySelector(`.${setPage.back}`)!.getAttribute("href")).toBe(
       `/conversations/${UNREADABLE.conversation}`,
     );
   });
@@ -732,8 +740,8 @@ describe("a Set this build cannot read", () => {
 
     // No sheet, because a Response is checked against Questions nobody here can
     // read; and no standing menu, so there is no archiving behind it either.
-    expect(page.querySelector(".questions")).toBeNull();
-    expect(page.querySelector(".standing-trigger")).toBeNull();
+    expect(page.querySelector(`.${sheet.questions}`)).toBeNull();
+    expect(page.querySelector(`.${standing.standing}`)).toBeNull();
     expect(page.querySelectorAll("button")).toHaveLength(0);
   });
 });

@@ -13,6 +13,7 @@ import { RefusedError, loadSet } from "../api/client";
 import type { SetReading, SetView, UnreadableSet } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import styles from "./SetPage.module.css";
 import { Sheet } from "./Sheet";
 import { Unreadable } from "./Unreadable";
 
@@ -91,7 +92,7 @@ function unreadable(reading: SetReading): UnreadableSet | undefined {
 /// that is the pane's header rather than a link to the page it is already on.
 function Back(props: { to: number }): JSX.Element {
   return (
-    <A href={`/conversations/${props.to}`} class="back">
+    <A href={`/conversations/${props.to}`} class={styles.back}>
       ← Conversation
     </A>
   );

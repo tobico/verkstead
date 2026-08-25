@@ -42,12 +42,3 @@
   }
 }
 
-/* The two confirm sheets — the warning before a Response goes out with questions
-   left open, and the one before a Set is archived — open on their question
-   rather than on a heading, so the first paragraph of the card is what a title
-   would have been. `.confirm` is the Set page's own class and is read through
-   `:global` until that page moves, when this rule goes with it. */
-:global(.confirm) .card > p:first-child {
-  margin-top: 0;
-  font-weight: 600;
-}

@@ -18,7 +18,7 @@ shrinks each step until the last task deletes it.
 - [x] 03: Status components — [details](03-status-components.md)
 - [x] 04: Pane chrome component — [details](04-pane-chrome-component.md)
 - [x] 05: Root and small components — [details](05-root-and-small-components.md)
-- [ ] 06: The set/ directory — [details](06-set-directory.md)
+- [x] 06: The set/ directory — [details](06-set-directory.md)
 - [ ] 07: Timeline and event rows — [details](07-timeline-and-event-rows.md)
 - [ ] 08: Detail panes — [details](08-detail-panes.md)
 - [ ] 09: Workbench shell — [details](09-workbench-shell.md)

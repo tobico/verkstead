@@ -24,6 +24,7 @@
 import type { JSX } from "solid-js";
 import { Show } from "solid-js";
 
+import styles from "./Postscript.module.css";
 import { closing } from "./outline";
 
 /// The Set's Postscript, wrapped around whatever closes it — the field on the
@@ -38,18 +39,21 @@ export function Postscript(props: {
   children?: JSX.Element;
 }): JSX.Element {
   return (
-    <section class="postscript" id="postscript">
+    <section class={styles.postscript} id="postscript">
       {/* Named and anchored like the Preface: the heading is what a jump from
           the table of contents lands on, and the id is what it jumps to — see
           `closing` in `outline.ts`, which names it by the same rule. */}
       <h2 class="section-heading">{closing(props.html)}</h2>
-      <div class="postscript-card">
+      <div class={styles.postscriptCard}>
         <Show when={props.html}>
           {(html) => (
             /* Marked as rendered markdown, so the agent's headings, lists and
                code get the same rules here as they get in the Preface — the
                card around it is all that is the Postscript's own. */
-            <div class="postscript-body markdown" innerHTML={html()} />
+            <div
+              class={`${styles.postscriptBody} markdown`}
+              innerHTML={html()}
+            />
           )}
         </Show>
         {props.children}

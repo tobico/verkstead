@@ -45,6 +45,11 @@ import stylesheet from "../src/main.css?raw";
 // The one menu, which all three of this page's ⋯ and dropdowns are drawn as.
 import dropdown from "../src/Menu.module.css";
 import notices from "../src/notices.module.css";
+// The set page as it is drawn inside a details pane: its nav, its sections, and
+// the record of a Set this build cannot read.
+import contents from "../src/set/Contents.module.css";
+import sheet from "../src/set/Sheet.module.css";
+import illegible from "../src/set/Unreadable.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
@@ -4709,7 +4714,7 @@ describe("a question set on the timeline", () => {
 
     const pane = screen.getByLabelText("Details");
     await waitFor(() => {
-      if (!pane.querySelector(".preface")) {
+      if (!pane.querySelector(`.${sheet.preface}`)) {
         throw new Error("the document has not been drawn");
       }
     });
@@ -4772,24 +4777,24 @@ describe("a question set on the timeline", () => {
 
     const pane = screen.getByLabelText("Details");
     await waitFor(() => {
-      if (!pane.querySelector(".preface")) {
+      if (!pane.querySelector(`.${sheet.preface}`)) {
         throw new Error("the document has not been drawn");
       }
     });
 
-    const nav = pane.querySelector("nav.contents");
+    const nav = pane.querySelector(`nav.${contents.contents}`);
     expect(nav, "expected the Set's contents in the pane").toBeTruthy();
 
     // The same entries the page lists, in the same order — this is the Set
     // page's own nav rather than a second reading of the document.
     expect(
-      [...nav!.querySelectorAll("a.contents-link")].map((line) =>
+      [...nav!.querySelectorAll(`a.${contents.link}`)].map((line) =>
         line.getAttribute("href"),
       ),
     ).toEqual(["#preface", "#questions", "#q1", "#q2", "#q3", "#postscript"]);
 
     // And it picks its shape from the pane rather than from the window.
-    expect(nav!.classList.contains("contents-paned")).toBe(true);
+    expect(nav!.classList.contains(contents.paned!)).toBe(true);
   });
 
   /// The floating header names where the reader is across the top of the column
@@ -4801,9 +4806,9 @@ describe("a question set on the timeline", () => {
     fireEvent.click(await drawn(container, ".question-set"));
 
     const pane = screen.getByLabelText("Details");
-    await drawn(pane, "nav.contents");
+    await drawn(pane, `nav.${contents.contents}`);
 
-    expect(pane.querySelector(".page-header")).toBeNull();
+    expect(pane.querySelector(`.${contents.header}`)).toBeNull();
   });
 });
 
@@ -4815,11 +4820,11 @@ describe("a question set the build cannot read", () => {
     await drawn(container, ".question-set");
     const row = container.querySelector(".question-set.unreadable")!;
 
-    expect(row.querySelector(".unreadable-badge")!.textContent).toBe(
+    expect(row.querySelector(`.${illegible.unreadableBadge}`)!.textContent).toBe(
       "cannot be read",
     );
     // Serde's own sentence, which names the field that has left the schema.
-    expect(row.querySelector(".unreadable-why")!.textContent).toContain(
+    expect(row.querySelector(`.${illegible.unreadableWhy}`)!.textContent).toContain(
       "accepted_by",
     );
     // No table, because there is nothing to draw one from — and nothing asking
@@ -4839,7 +4844,7 @@ describe("a question set the build cannot read", () => {
 
     const pane = screen.getByLabelText("Details");
     const stored = await waitFor(() => {
-      const found = pane.querySelector(".stored-json");
+      const found = pane.querySelector(`.${illegible.storedJson}`);
       if (!found) {
         throw new Error("the stored body has not been drawn");
       }
@@ -4848,7 +4853,7 @@ describe("a question set the build cannot read", () => {
 
     expect(stored.textContent).toBe(unreadable(unreadableSet).body);
     // The one thing the timeline's rows are not: a sheet to fill in.
-    expect(pane.querySelector(".questions")).toBeNull();
+    expect(pane.querySelector(`.${sheet.questions}`)).toBeNull();
   });
 });
 
@@ -5480,12 +5485,12 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
 
     // The section the diff is, and then its folds — the same anchors the
     // renderer stamped on them, in the order the paths beside it name.
     expect(
-      [...nav.querySelectorAll("a.contents-link")].map((line) =>
+      [...nav.querySelectorAll(`a.${contents.link}`)].map((line) =>
         line.getAttribute("href"),
       ),
     ).toEqual(["#commit-diff", "#diff-1", "#diff-2"]);
@@ -5493,7 +5498,7 @@ describe("the contents of a details pane", () => {
     // The whole path rides behind the line, which is where a nav this narrow
     // can be read out in full.
     expect(
-      [...nav.querySelectorAll(".contents-entry a")].map((line) =>
+      [...nav.querySelectorAll(`.${contents.entry} a`)].map((line) =>
         line.getAttribute("title"),
       ),
     ).toEqual(COMMIT_PANE.diff!.paths);
@@ -5507,10 +5512,10 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
 
     expect(
-      [...nav.querySelectorAll("a.contents-link")].map((line) =>
+      [...nav.querySelectorAll(`a.${contents.link}`)].map((line) =>
         line.getAttribute("href"),
       ),
     ).toEqual(["#commit-summary", "#commit-diff", "#diff-1", "#diff-2"]);
@@ -5535,7 +5540,7 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
     const fold = container.querySelector<HTMLDetailsElement>(
       ".details-pane #diff-2",
     )!;
@@ -5555,7 +5560,7 @@ describe("the contents of a details pane", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
-    await drawn(container, ".details-pane nav.contents");
+    await drawn(container, `.details-pane nav.${contents.contents}`);
 
     await waitFor(() =>
       expect(watched).toEqual(
@@ -5571,9 +5576,9 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
-    expect(nav.classList.contains("contents-paned")).toBe(true);
-    expect(nav.classList.contains("contents-roomy")).toBe(false);
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    expect(nav.classList.contains(contents.paned!)).toBe(true);
+    expect(nav.classList.contains(contents.roomy!)).toBe(false);
   });
 
   it("stands in the margin once the pane is wide enough for one", async () => {
@@ -5583,8 +5588,8 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".timeline-event > .commit"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
-    expect(nav.classList.contains("contents-roomy")).toBe(true);
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    expect(nav.classList.contains(contents.roomy!)).toBe(true);
   });
 
   /// The same answer on the other pane that holds a nav, from the same
@@ -5596,8 +5601,8 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".question-set"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
-    expect(nav.classList.contains("contents-roomy")).toBe(true);
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    expect(nav.classList.contains(contents.roomy!)).toBe(true);
   });
 
   /// The window is wide enough for the page's own sidebar at every width these
@@ -5609,9 +5614,9 @@ describe("the contents of a details pane", () => {
 
     fireEvent.click(await drawn(container, ".question-set"));
 
-    const nav = await drawn(container, ".details-pane nav.contents");
-    expect(nav.classList.contains("contents-roomy")).toBe(false);
-    expect(nav.querySelector(".contents-bar")).toBeTruthy();
+    const nav = await drawn(container, `.details-pane nav.${contents.contents}`);
+    expect(nav.classList.contains(contents.roomy!)).toBe(false);
+    expect(nav.querySelector(`.${contents.bar}`)).toBeTruthy();
   });
 });
 

@@ -31,6 +31,9 @@ import type {
   TimelineEvent,
   TranscriptView,
 } from "../src/api/types";
+// The badge on a waiting Set, and the date a settled one carries.
+import sheet from "../src/set/Sheet.module.css";
+import standing from "../src/set/Standing.module.css";
 import { drawn } from "./bench";
 import {
   askedFor,
@@ -637,7 +640,7 @@ describe("what a Nudge is about", () => {
     window.history.pushState({}, "", `/sets/${WAITING.id}`);
     const fetching = serving(...BESIDE, json(readingOf(WAITING)), json(readingOf(DISCONNECTED)));
     const { container } = render(() => <App />);
-    await drawn(container, ".liveness.waiting");
+    await drawn(container, `.${standing.liveness}.${standing.waiting}`);
     stream().opens();
 
     // Scoped to a Conversation, and the Set is keyed by its own id: what a page
@@ -647,7 +650,7 @@ describe("what a Nudge is about", () => {
 
     // The verdict used to cycle with the ten-second poll. The poll is gone, so
     // the agent letting go of its wait is a Nudge of its own (ADR-0009).
-    await drawn(container, ".liveness.disconnected");
+    await drawn(container, `.${standing.liveness}.${standing.disconnected}`);
     expect(askedFor(fetching, `/api/ui/sets/${WAITING.id}`)).toBe(2);
   });
 });
@@ -814,14 +817,14 @@ describe("a Nudge relayed by the worker", () => {
     const { container: page } = render(() => <App />);
     // The badge and the menu under it belong to a Set still waiting: the page
     // as it was drawn.
-    await waitFor(() => expect(page.querySelector(".standing")).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${standing.standing}`)).toBeTruthy());
 
     await pushed(container);
 
     // A relayed Nudge says nothing at all where a streamed one says a kind, and
     // gets the reaction a kind nobody recognises gets: everything this page is
     // showing, which here is a Set answered elsewhere in the meantime.
-    await waitFor(() => expect(page.querySelector(".answered-at")).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${sheet.answeredAt}`)).toBeTruthy());
   });
 
   it("ignores a message that is not a Nudge", async () => {

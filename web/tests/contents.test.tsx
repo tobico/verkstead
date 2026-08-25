@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SetView } from "../src/api/types";
 // The wrap control, which is what the floating header makes room for.
 import toggle from "../src/Switch.module.css";
+// The nav's own names, which are the module's now rather than the page's.
+import contents from "../src/set/Contents.module.css";
 import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
@@ -142,14 +144,14 @@ function headingSpy(): Spy {
 
 /// The nav, which every page has.
 function navOf(page: ParentNode): HTMLElement {
-  const nav = page.querySelector<HTMLElement>("nav.contents");
+  const nav = page.querySelector<HTMLElement>(`nav.${contents.contents}`);
   expect(nav, "expected a table of contents in the page").toBeTruthy();
   return nav as HTMLElement;
 }
 
 /// Every jump the nav offers, in the order it lists them.
 function jumps(nav: ParentNode): string[] {
-  return [...nav.querySelectorAll("a.contents-link")].map(
+  return [...nav.querySelectorAll(`a.${contents.link}`)].map(
     (link) => link.getAttribute("href") ?? "",
   );
 }
@@ -166,7 +168,7 @@ function line(nav: ParentNode, anchor: string): HTMLAnchorElement {
 /// Read off the marked line rather than out of a class list, because what the
 /// highlight is worth is which part of the page it names.
 function highlighted(nav: ParentNode): string {
-  const lit = nav.querySelectorAll("a.contents-link.contents-here");
+  const lit = nav.querySelectorAll(`a.${contents.link}.${contents.here}`);
   expect(lit, "exactly one line is ever the highlight").toHaveLength(1);
   return lit[0]!.getAttribute("href")!.replace("#", "");
 }
@@ -174,7 +176,7 @@ function highlighted(nav: ParentNode): string {
 /// What the bar says it is at — the whole of the nav on a narrow viewport,
 /// until it is tapped.
 function barSays(nav: ParentNode): string {
-  const said = nav.querySelector(".contents-bar-name");
+  const said = nav.querySelector(`.${contents.barName}`);
   expect(said, "expected a bar naming where the reader is").toBeTruthy();
   return said!.textContent ?? "";
 }
@@ -262,9 +264,9 @@ describe("the table of contents", () => {
 
       // Which of the bar and the sidebar the reader gets is the stylesheet's
       // business at a width, so there is no second copy to fall out of step.
-      expect(page.querySelectorAll("nav.contents")).toHaveLength(1);
-      expect(page.querySelectorAll("button.contents-bar")).toHaveLength(1);
-      expect(page.querySelectorAll("ol.contents-sections")).toHaveLength(1);
+      expect(page.querySelectorAll(`nav.${contents.contents}`)).toHaveLength(1);
+      expect(page.querySelectorAll(`button.${contents.bar}`)).toHaveLength(1);
+      expect(page.querySelectorAll(`ol.${contents.sections}`)).toHaveLength(1);
 
       // A Set is read for what it asked about however it stands.
       for (const jump of ["#preface", "#diff-1", "#questions", "#q1"]) {
@@ -283,7 +285,7 @@ describe("the highlight", () => {
       "a page nobody has scrolled reads as being at the top of it",
     ).toBe("preface");
     expect(
-      nav.querySelectorAll(".contents-within"),
+      nav.querySelectorAll(`.${contents.within}`),
       "the quiet mark is on the section the highlight is inside, and at the " +
         "top of the page there is none",
     ).toHaveLength(0);
@@ -309,7 +311,7 @@ describe("the highlight", () => {
     expect(
       line(nav, "diff").className,
       "and the Diff only says they are in it",
-    ).toContain("contents-within");
+    ).toContain(contents.within!);
     expect(
       line(nav, "diff").getAttribute("aria-current"),
       "the section around them is not where they are",
@@ -450,11 +452,11 @@ describe("the bar", () => {
 
   it("arrives shut, with the entries in the page all the same", async () => {
     const nav = navOf(await reading(WAITING));
-    const bar = nav.querySelector("button.contents-bar")!;
+    const bar = nav.querySelector(`button.${contents.bar}`)!;
 
     expect(bar.getAttribute("aria-expanded")).toBe("false");
     expect(bar.getAttribute("aria-controls")).toBe("contents-list");
-    expect(nav.className, "nothing has opened it yet").toBe("contents");
+    expect(nav.className, "nothing has opened it yet").toBe(contents.contents!);
     expect(
       nav.querySelector("#contents-list"),
       "the same list the sidebar draws, so opening the bar has nothing to fetch",
@@ -463,33 +465,33 @@ describe("the bar", () => {
 
   it("brings the list down, and puts it away again", async () => {
     const nav = navOf(await reading(WAITING));
-    const bar = nav.querySelector<HTMLButtonElement>("button.contents-bar")!;
+    const bar = nav.querySelector<HTMLButtonElement>(`button.${contents.bar}`)!;
 
     bar.click();
-    expect(nav.className).toBe("contents contents-open");
+    expect(nav.className).toBe(`${contents.contents} ${contents.open}`);
     expect(bar.getAttribute("aria-expanded")).toBe("true");
 
     bar.click();
-    expect(nav.className).toBe("contents");
+    expect(nav.className).toBe(contents.contents!);
   });
 
   it("puts the list away on Escape", async () => {
     const nav = navOf(await reading(WAITING));
-    nav.querySelector<HTMLButtonElement>("button.contents-bar")!.click();
+    nav.querySelector<HTMLButtonElement>(`button.${contents.bar}`)!.click();
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
 
     expect(
       nav.className,
       "a list drawn over the page has to be dismissible from the keyboard",
-    ).toBe("contents");
+    ).toBe(contents.contents!);
   });
 
   it("puts the list away on a tap beside it, and presses nothing", async () => {
     const nav = navOf(await reading(WAITING));
-    nav.querySelector<HTMLButtonElement>("button.contents-bar")!.click();
+    nav.querySelector<HTMLButtonElement>(`button.${contents.bar}`)!.click();
 
-    const backdrop = nav.querySelector<HTMLElement>(".contents-backdrop");
+    const backdrop = nav.querySelector<HTMLElement>(`.${contents.backdrop}`);
     expect(
       backdrop,
       "the tap taking the list back must not also press something on the page " +
@@ -498,18 +500,18 @@ describe("the bar", () => {
     expect(backdrop!.getAttribute("aria-hidden")).toBe("true");
 
     backdrop!.click();
-    expect(nav.className).toBe("contents");
-    expect(nav.querySelector(".contents-backdrop")).toBeNull();
+    expect(nav.className).toBe(contents.contents!);
+    expect(nav.querySelector(`.${contents.backdrop}`)).toBeNull();
   });
 
   it("puts itself away when a line is pressed", async () => {
     const nav = navOf(await reading(WAITING));
-    nav.querySelector<HTMLButtonElement>("button.contents-bar")!.click();
+    nav.querySelector<HTMLButtonElement>(`button.${contents.bar}`)!.click();
 
     line(nav, "q1").click();
 
     expect(nav.className, "the list has done what it was opened for").toBe(
-      "contents",
+      contents.contents!,
     );
   });
 });
@@ -518,7 +520,7 @@ describe("the floating header", () => {
   /// What the header says, which is a breadcrumb rather than one line: the
   /// sidebar beside it already says both halves with two highlights.
   function headerOf(page: ParentNode): HTMLElement {
-    const header = page.querySelector<HTMLElement>(".page-header");
+    const header = page.querySelector<HTMLElement>(`.${contents.header}`);
     expect(header, "expected the floating header").toBeTruthy();
     return header as HTMLElement;
   }
@@ -529,14 +531,14 @@ describe("the floating header", () => {
 
     // At the top of the page it would be naming a heading the reader can see
     // right under it, and saying nothing.
-    expect(header.querySelector(".page-header-chrome")).toBeNull();
+    expect(header.querySelector(`.${contents.headerChrome}`)).toBeNull();
 
     headingSpy().cross({ preface: false });
-    expect(header.querySelector(".page-header-chrome")).toBeTruthy();
+    expect(header.querySelector(`.${contents.headerChrome}`)).toBeTruthy();
 
     // And scrolling back up puts it away again.
     headingSpy().cross({ preface: true });
-    expect(header.querySelector(".page-header-chrome")).toBeNull();
+    expect(header.querySelector(`.${contents.headerChrome}`)).toBeNull();
   });
 
   it("names where the reader is, and says it once", async () => {
@@ -548,14 +550,14 @@ describe("the floating header", () => {
 
     spy().cross({ preface: true, diff: true, "diff-1": true });
     expect(
-      texts(header, ".page-header-section"),
+      texts(header, `.${contents.headerSection}`),
       "a file is named under the section it is in",
     ).toEqual(["Diff"]);
-    expect(header.querySelector(".page-header-name")!.textContent).toBe(
+    expect(header.querySelector(`.${contents.headerName}`)!.textContent).toBe(
       "src/limits.rs",
     );
     expect(
-      header.querySelector(".page-header-where")!.getAttribute("aria-hidden"),
+      header.querySelector(`.${contents.headerWhere}`)!.getAttribute("aria-hidden"),
       "the sidebar's own line already carries aria-current, and a second copy " +
         "of the answer is a second thing to hear",
     ).toBe("true");
@@ -591,7 +593,7 @@ describe("the floating header", () => {
       `section.diff .${toggle.switch} input`,
     )!;
     const floating = page.querySelector<HTMLInputElement>(
-      `.page-header .${toggle.switch} input`,
+      `.${contents.header} .${toggle.switch} input`,
     )!;
 
     floating.click();

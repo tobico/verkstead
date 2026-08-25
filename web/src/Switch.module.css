@@ -81,9 +81,3 @@
   cursor: default;
 }
 
-/* Room for the switch, whatever the name is doing. `.page-header` is the Set
-   page's floating header and is read through `:global` until that page moves,
-   when this rule goes with it. */
-:global(.page-header) .switch {
-  flex: none;
-}

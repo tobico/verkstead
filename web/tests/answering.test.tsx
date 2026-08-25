@@ -15,6 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Submitted } from "../src/api/types";
 import notices from "../src/notices.module.css";
+// The sheet's own vocabulary, and the two classes the form alone draws.
+import submitting from "../src/set/Answering.module.css";
+import closing from "../src/set/Postscript.module.css";
+import sheet from "../src/set/Sheet.module.css";
 import { draftKey } from "../src/set/sheet";
 import {
   answering,
@@ -109,10 +113,14 @@ describe("the sheet a waiting Set is answered on", () => {
     const { page } = await answering(WAITING);
 
     expect(page.querySelector("#set-comment")).toBeTruthy();
-    for (const absent of [".answered-at", ".counter-question", ".chosen"]) {
+    for (const absent of [
+      `.${sheet.answeredAt}`,
+      `.${sheet.counterQuestion}`,
+      `.${sheet.chosen}`,
+    ]) {
       expect(
         page.querySelector(absent),
-        `nothing has been decided here, so ${absent} does not belong`,
+        "nothing has been decided here, so " + absent + " does not belong",
       ).toBeNull();
     }
   });
@@ -138,9 +146,9 @@ describe("the sheet a waiting Set is answered on", () => {
   it("marks the Recommendation and preselects nothing", async () => {
     const { page } = await answering(WAITING);
 
-    expect(page.querySelectorAll(".option .star")).toHaveLength(1);
+    expect(page.querySelectorAll(`.${sheet.option} .${sheet.star}`)).toHaveLength(1);
     expect(
-      page.querySelector(".option.recommended input")!.getAttribute("value"),
+      page.querySelector(`.${sheet.option}.${sheet.recommended} input`)!.getAttribute("value"),
       "the ★ is on Q1's second Option, which is where the agent put it",
     ).toBe("2");
     expect(
@@ -165,7 +173,7 @@ describe("the sheet a waiting Set is answered on", () => {
     // The text is still drawn — it is what the Sub-questions under it are read
     // against — and it is still the anchor the nav jumps to.
     expect(page.querySelector("#q2"), "expected Q2 still on the page").toBeTruthy();
-    expect(texts(page, ".ask.heading .label")).toEqual(["Q2"]);
+    expect(texts(page, `.${sheet.ask}.${sheet.heading} .${sheet.label}`)).toEqual(["Q2"]);
 
     expect(
       page.querySelector('textarea[name="Q2-free-text"]'),
@@ -203,17 +211,17 @@ describe("the sheet a waiting Set is answered on", () => {
   it("closes the sheet with the Postscript, wrapped around the comment box", async () => {
     const { page } = await answering(withPostscript(WAITING));
 
-    const postscript = page.querySelector("section.postscript")!;
+    const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(postscript, "expected the Postscript drawn").toBeTruthy();
     // Rendered markdown, drawn by the same rules as everything else the agent
     // wrote — a code span in it included.
-    const body = postscript.querySelector(".postscript-body")!;
+    const body = postscript.querySelector(`.${closing.postscriptBody}`)!;
     expect(body.className).toContain("markdown");
     expect(body.innerHTML).toContain("<code>ops/export</code>");
 
     // Inside the card rather than after it, directly under the prose that is
     // inviting something into it: the two are one thing to read.
-    const comment = postscript.querySelector(".set-comment")!;
+    const comment = postscript.querySelector(`.${sheet.setComment}`)!;
     expect(comment, "expected the box inside the Postscript").toBeTruthy();
     expect(body.nextElementSibling).toBe(comment);
 
@@ -226,13 +234,13 @@ describe("the sheet a waiting Set is answered on", () => {
   it("draws the card around the box for a Set that closed with none", async () => {
     const { page } = await answering(WAITING);
 
-    const postscript = page.querySelector("section.postscript")!;
+    const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(
       postscript,
       "the box is on every Set, so the card holding it is too",
     ).toBeTruthy();
-    expect(postscript.querySelector(".postscript-body")).toBeNull();
-    expect(postscript.querySelector(".set-comment")).toBeTruthy();
+    expect(postscript.querySelector(`.${closing.postscriptBody}`)).toBeNull();
+    expect(postscript.querySelector(`.${sheet.setComment}`)).toBeTruthy();
   });
 
   it("prompts every field by its placeholder and starts it one line tall", async () => {
@@ -374,8 +382,8 @@ describe("a question whose Options were declared as a table", () => {
     const { page } = await answering(withTable(WAITING));
 
     // Q1's ★ is on its second Option, which is where the agent put it.
-    expect(table(page, "Q1").querySelectorAll(".star")).toHaveLength(1);
-    expect(row(page, "Q1", 2).className).toContain("recommended");
+    expect(table(page, "Q1").querySelectorAll(`.${sheet.star}`)).toHaveLength(1);
+    expect(row(page, "Q1", 2).className).toContain(sheet.recommended!);
 
     // Q2a is a table too, and nothing on it is recommended — so the column that
     // would only ever be empty is not drawn at all.
@@ -408,9 +416,9 @@ describe("a question whose Options were declared as a table", () => {
     // Q2 declared none, so nothing about it moved.
     const list = page
       .querySelector('input[name="Q2-option"]')!
-      .closest("ul.options");
+      .closest(`ul.${sheet.options}`);
     expect(list, "expected Q2 still drawn as the radio list").toBeTruthy();
-    expect(page.querySelectorAll("ul.options")).toHaveLength(1);
+    expect(page.querySelectorAll(`ul.${sheet.options}`)).toHaveLength(1);
   });
 
   it("selects on a tap anywhere in the row, and clears on a second", async () => {
@@ -522,7 +530,7 @@ describe("submitting a Response", () => {
     // And the page stays on the Set, read back as the decision that was made —
     // which is the confirmation that the agent has its answer. There is no list
     // for the Set's absence to be the confirmation on any more.
-    await waitFor(() => expect(page.querySelector(".answered-at")).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${sheet.answeredAt}`)).toBeTruthy());
     expect(history.get()).toBe(`/sets/${WAITING.id}`);
   });
 
@@ -535,7 +543,7 @@ describe("submitting a Response", () => {
     press(page, "Submit");
 
     expect(
-      page.querySelector(".confirm"),
+      page.querySelector(`.${sheet.confirm}`),
       "no offered choice was overlooked, so there is nothing to warn about",
     ).toBeNull();
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
@@ -547,15 +555,15 @@ describe("submitting a Response", () => {
     fireEvent.click(option(page, "Q1", 1));
     press(page, "Submit");
 
-    const warning = page.querySelector("dialog.confirm")!;
+    const warning = page.querySelector(`dialog.${sheet.confirm}`)!;
     expect((warning as HTMLDialogElement).open, "opened as a modal").toBe(true);
     expect(
-      texts(warning, ".unanswered li"),
+      texts(warning, `.${sheet.unanswered} li`),
       "Q2b and Q3 offered nothing, so skipping them is not warned about",
     ).toEqual(["Q2", "Q2a"]);
 
     press(page, "Keep answering");
-    expect(page.querySelector(".confirm")).toBeNull();
+    expect(page.querySelector(`.${sheet.confirm}`)).toBeNull();
     expect(posts(fetching), "nothing was sent").toHaveLength(0);
   });
 
@@ -587,7 +595,7 @@ describe("submitting a Response", () => {
     }
     press(page, "Submit");
 
-    const button = page.querySelector<HTMLButtonElement>(".submit button")!;
+    const button = page.querySelector<HTMLButtonElement>(`.${submitting.submit} button`)!;
     expect(button.textContent).toBe("Sending…");
     expect(button.disabled).toBe(true);
 
@@ -604,14 +612,14 @@ describe("a submit that did not land", () => {
     }
     press(page, "Submit");
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
-    await waitFor(() => expect(page.querySelector(`.submit .${notices.error}`)).toBeTruthy());
+    await waitFor(() => expect(page.querySelector(`.${submitting.submit} .${notices.error}`)).toBeTruthy());
     return page;
   }
 
   it("says the Set had already been answered", async () => {
     const page = await refused("AlreadyAnswered");
 
-    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
       "The first Response stands",
     );
   });
@@ -619,7 +627,7 @@ describe("a submit that did not land", () => {
   it("says the Set was archived, which closed it for good", async () => {
     const page = await refused("Archived");
 
-    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
       "archived unanswered",
     );
   });
@@ -627,7 +635,7 @@ describe("a submit that did not land", () => {
   it("says the Set is no longer here", async () => {
     const page = await refused("NoSuchSet");
 
-    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toBe(
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toBe(
       "This Set is no longer here.",
     );
   });
@@ -635,7 +643,7 @@ describe("a submit that did not land", () => {
   it("carries back what the server said the Response failed to resolve", async () => {
     const page = await refused({ Rejected: ["Q2b is unaccounted for"] });
 
-    expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
+    expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
       "Q2b is unaccounted for",
     );
   });
@@ -652,7 +660,7 @@ describe("a submit that did not land", () => {
 
     await waitFor(() => expect(posts(fetching)).toHaveLength(1));
     await waitFor(() =>
-      expect(page.querySelector(`.submit .${notices.error}`)!.textContent).toContain(
+      expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
         "the Response could not be taken",
       ),
     );

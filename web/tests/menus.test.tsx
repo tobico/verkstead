@@ -18,6 +18,10 @@ import menu from "../src/Menu.module.css";
 import stylesheet from "../src/Menu.module.css?raw";
 // The two schemes' palettes, which is where the shadow itself is named.
 import tokens from "../src/styles/base.css?raw";
+// The one caller whose paint has already gone home to its own module, which
+// reaches this component's parts by the elements they are rather than by a
+// class it cannot spell.
+import standing from "../src/set/Standing.module.css?raw";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -170,14 +174,14 @@ describe("the ⋯ at the head of a pane", () => {
   });
 });
 
-/// What one rule declares, read off the stylesheet by the selector that carries
+/// What one rule declares, read off a stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
-function block(selector: string): string {
-  const at = stylesheet.indexOf(`\n${selector} {\n`);
+function block(selector: string, sheet: string = stylesheet): string {
+  const at = sheet.indexOf(`\n${selector} {\n`);
   expect(at, `expected the stylesheet to hold \`${selector}\``).toBeGreaterThan(
     -1,
   );
-  return stylesheet.slice(at, stylesheet.indexOf("\n}", at));
+  return sheet.slice(at, sheet.indexOf("\n}", at));
 }
 
 /// One shadow rather than one apiece, which is the visible half of there being
@@ -201,9 +205,13 @@ describe("what every menu is drawn with", () => {
       ":global(.new-conversation) > .drop",
       ":global(.workbench-actions) > .drop",
       ":global(.conversation-actions) > .drop",
-      ":global(.standing) > .drop",
     ]) {
       expect(block(caller)).not.toContain("box-shadow");
     }
+
+    // And the caller that has migrated, in its own module.
+    expect(block(".standing > [role=\"menu\"]", standing)).not.toContain(
+      "box-shadow",
+    );
   });
 });
