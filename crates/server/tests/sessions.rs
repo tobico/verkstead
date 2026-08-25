@@ -640,28 +640,6 @@ const SWEEPING: Pace = Pace {
     ..BRISKLY
 };
 
-/// And the same again with a grace nothing here can outrun, for the tests about
-/// an account running out of window.
-///
-/// Those stubs commit their task and *then* draw the banner, because that is the
-/// case worth asking about: the account runs out between two steps. Which puts
-/// a stretch of silence — the `rm`, the `sed`, `git add`, `git commit` — between
-/// the last thing the session printed and the moment its step reads as landed.
-/// [`BRISKLY`]'s three hundred milliseconds is shorter than a `git commit` on a
-/// slow machine, and a session that has landed its step and been quiet for the
-/// grace is one Verkstead ends — rightly, and before there is a banner to
-/// recognise. So these tests would pass on a fast machine and fail on a loaded
-/// one, which is the one thing a test must not do.
-///
-/// Three seconds rather than a number tuned to a commit, because nothing here is
-/// asking about the grace at all: what these tests watch is the *stop* ending
-/// the session, and the grace has only to stay out of its way. A real server's
-/// is five.
-const SPENDING: Pace = Pace {
-    grace: Duration::from_secs(3),
-    ..BRISKLY
-};
-
 /// What stands where the host's `gh` goes: a branch with a pull request on it,
 /// and nothing said on it yet.
 ///
@@ -917,12 +895,6 @@ async fn grilling_asking(stub: &str, gh: &str) -> Grilling {
 /// to watch it do so — see [`SWEEPING`].
 async fn grilling_swept(stub: &str) -> Grilling {
     grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SWEEPING).await
-}
-
-/// And on one that will not end a session for having gone quiet while it commits
-/// — see [`SPENDING`], and the stub the usage-limit tests run against.
-async fn grilling_spending(stub: &str) -> Grilling {
-    grilling_at_pace(tempfile::tempdir().unwrap(), stub, PULL_REQUEST, SPENDING).await
 }
 
 /// The same, over a directory the caller already has the name of — which is
@@ -6996,7 +6968,7 @@ async fn running_out(fixture: &Grilling) {
 /// has gone quiet for no stated reason.
 #[tokio::test]
 async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
-    let fixture = grilling_spending(&out_of_window(
+    let fixture = grilling(&out_of_window(
         "Usage limit reached \\xc2\\xb7 continuing automatically at 2026-08-24T05:00:00Z \\xc2\\xb7 esc to cancel",
     ))
     .await;
@@ -7120,7 +7092,7 @@ async fn an_account_out_of_window_stops_the_run_and_tells_the_devices() {
 /// waits on — and the backlog picks up from where it stopped.
 #[tokio::test]
 async fn the_humans_press_starts_a_stopped_run_again_where_it_stopped() {
-    let fixture = grilling_spending(&out_of_window("Usage limit reached")).await;
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
 
     running_out(&fixture).await;
 
@@ -7198,7 +7170,7 @@ async fn the_humans_press_starts_a_stopped_run_again_where_it_stopped() {
 /// there is no clock anywhere for it to wait on instead.
 #[tokio::test]
 async fn a_reset_that_has_been_and_gone_starts_nothing() {
-    let fixture = grilling_spending(&out_of_window(
+    let fixture = grilling(&out_of_window(
         "Usage limit reached \\xc2\\xb7 continuing automatically at 2020-01-01T00:00:00Z",
     ))
     .await;
@@ -7243,7 +7215,7 @@ async fn a_reset_that_has_been_and_gone_starts_nothing() {
 /// An exhausted account is a wait, never a reason to spend a different one.
 #[tokio::test]
 async fn nothing_moves_a_stopped_conversation_onto_another_profile() {
-    let fixture = grilling_spending(&out_of_window("Usage limit reached")).await;
+    let fixture = grilling(&out_of_window("Usage limit reached")).await;
 
     let before = fixture.view().await;
 
