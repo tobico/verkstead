@@ -27,9 +27,17 @@ stage:
   the pipeline instead of leaving the Conversation stopped beside its own
   work. The folding rule simplifies with it — the never-folded-into carve-out
   for Manual Task sessions goes with the feature.
-- **Old records stay readable.** Timelines holding Manual Task Events and the
-  stored word `aborted` are the record; read them as they were written
-  (ADR-0006's rule) rather than rewriting history to the new names.
+- **Old records stay readable.** Timelines holding Manual Task Events are the
+  record; read them as they were written (ADR-0006's rule) rather than dropping
+  them. The instruction is drawn as plain text once the composer has gone —
+  *settled when this stage was planned* — because the card was part of the
+  feature and the Event is part of the record.
+- **The stored word does move**, which is this stage's one departure from the
+  bullet above — *settled when this stage was planned*. `aborted` is not a
+  record of anything the human said: it is how the lifecycle happens to be
+  spelled, in the state column and in the body of every move Event. New rows say
+  `closed` and a migration moves the old ones, so a Timeline reads as one
+  vocabulary rather than two.
 
 ## Proposed tasks (provisional)
 
