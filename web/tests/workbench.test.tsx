@@ -7541,21 +7541,56 @@ describe("the pinned pull request", () => {
     expect(out.href).toBe(OPENED.url);
   });
 
-  /// Pinned is a thing an event is: it is drawn outside the record, and the
-  /// move into wrapping is what says on the record that it arrived.
-  it("is drawn above the record rather than in it", async () => {
+  /// Pinned and on the record both: the sticky block holds it in view for as
+  /// long as the work is on it, and the record has it where it happened.
+  it("is drawn in the pinned block and on the record", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
     expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.pullRequest}`)).toBeNull();
+
+    const listed = container.querySelector<HTMLElement>(
+      `.${timeline.timeline} .${timeline.pullRequest}`,
+    )!;
+    expect(listed.querySelector(`.${timeline.openPullRequest}`)!.textContent).toBe(
+      OPENED.title,
+    );
+
+    // Where it happened, which is the move into wrapping the same pull request
+    // wrote: the record reads on past it.
+    const record = [...container.querySelectorAll(`.${timeline.timeline} > li`)];
+    expect(record.findIndex((row) => row.contains(listed))).toBeLessThan(
+      record.length - 1,
+    );
 
     const moves = [...container.querySelectorAll(`.${timeline.timeline} .${timeline.moved}`)].map(
       (line) => line.textContent,
     );
     expect(moves.at(-1)).toBe("Implementing → Wrapping");
+  });
+
+  /// One card in two places, so opening either is opening the pull request:
+  /// the pane is the same pane, and both copies read as selected because there
+  /// is one selection and it is this event.
+  it("opens the same pane from either copy, and marks both", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.pullRequest}`,
+    );
+    fireEvent.click(listed.querySelector(`.${timeline.openPullRequest}`)!);
+
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+    expect(
+      [...container.querySelectorAll(`.${timeline.pullRequest}`)].map((card) =>
+        card.classList.contains(timeline.selected!),
+      ),
+    ).toEqual([true, true]);
   });
 
   it("shows what is on it in the details pane, fetched rather than remembered", async () => {

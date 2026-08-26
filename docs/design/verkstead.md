@@ -313,7 +313,7 @@ Timeline events:
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
 | Task list | inline, pinned | — |
 | Stage list | inline, pinned | — |
-| PR | name + id, pinned | fetched commit list and comments |
+| PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
 | Notice | inline, nothing to do about it | — |
 
 - **A stop is a notice and nothing to answer** (*settled 2026-08-24, building
@@ -332,7 +332,11 @@ Timeline events:
   a pointer, and a swipe across it does where there is not. What fronts on
   opening is the card the conversation is blocked on — a PR with feedback
   waiting — and otherwise the first of the fixed order; nothing is remembered
-  between visits, and a single pinned card gets none of the furniture.
+  between visits, and a single pinned card gets none of the furniture. A pinned
+  card that is also a moment on the record is drawn in both places — one card,
+  the same behaviour either way, and the same selection behind both — because a
+  record with the moment folded out of it would be a record missing it. The PR
+  is the one so far: it is the only pinned card with a stamp of its own.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

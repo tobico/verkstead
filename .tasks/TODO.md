@@ -24,7 +24,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 12: Archive Closed conversations — [details](12-archive-closed.md)
 - [x] 13: Show archived, and Unarchive — [details](13-show-archived.md)
 - [x] 14: Context menu on cards — [details](14-card-context-menu.md)
-- [ ] 15: The PR card twice — [details](15-pull-request-twice.md)
+- [x] 15: The PR card twice — [details](15-pull-request-twice.md)
 - [ ] 16: Backlog and roadmap rows — [details](16-backlog-roadmap-rows.md)
 - [ ] 17: Task list detail page — [details](17-task-list-detail.md)
 - [ ] 18: Roadmap detail page — [details](18-roadmap-detail.md)

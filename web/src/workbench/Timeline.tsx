@@ -6,11 +6,18 @@
 //! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
-//! now, the stage list and the PR as those stages arrive. They are not on the
-//! record and do not scroll with it: each is the current state of something the
-//! work is against rather than a moment in it. More than one of them is a
-//! carousel rather than a stack, because everything pinned is held above the
-//! record and a stack of them is what the record is pushed down by.
+//! now, the stage list and the PR as those stages arrive. They do not scroll
+//! with the record: each is the current state of something the work is against,
+//! and is worth having on screen whichever part of the record is being read.
+//! More than one of them is a carousel rather than a stack, because everything
+//! pinned is held above the record and a stack of them is what the record is
+//! pushed down by.
+//!
+//! One of them is a moment as well — the pull request, which the finish step
+//! opened at a time worth keeping — and that one is drawn in both places: the
+//! same card in the pinned block and on the record where it happened. A second
+//! appearance rather than a move, for the reason the running session's strip
+//! below is one: what the record says happened should stay on it.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. Three of them
@@ -492,6 +499,22 @@ export function Timeline(props: {
                       selected={props.selected === commit().id}
                       open={() => {
                         props.select(commit().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                {/* The pull request where it happened, which is the same card
+                    the pinned block above holds still: one event drawn twice.
+                    Selecting from either marks both, because both are the one
+                    pull request and there is one details pane behind it. */}
+                <Match when={"PullRequest" in event && event.PullRequest}>
+                  {(opened) => (
+                    <PullRequest
+                      opened={opened()}
+                      selected={props.selected === opened().id}
+                      open={() => {
+                        props.select(opened().id);
                         props.details();
                       }}
                     />
@@ -997,6 +1020,10 @@ function Card(props: {
 /// details pane, fetched from GitHub when this is opened. The link out is a link
 /// rather than part of the button: merging is the human's act and it happens
 /// over there, so getting there must not depend on this page's own panes.
+///
+/// Drawn twice, from the pinned block and from the record, because it belongs in
+/// both. The two are the same Event and so the same selection: opening either
+/// opens the one details pane, and both read as selected while it is open.
 function PullRequest(props: {
   opened: PullRequestEvent;
   selected: boolean;

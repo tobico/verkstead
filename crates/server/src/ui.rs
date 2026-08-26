@@ -900,12 +900,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         working: writing.is_some(),
         timeline: timeline
             .into_iter()
-            // `filter_map` rather than `map`, for the one Event that is on the
-            // record and not in the list: the pull request is drawn pinned above
-            // the Timeline — see `pinned` above — and what says on the record
-            // that it arrived is the move into Wrapping right beside it.
-            .filter_map(|event| {
-                Some(match event.event {
+            // Every kind in, none held back: the record is the whole of what
+            // happened, and the one Event that is pinned as well — the pull
+            // request, see `pinned` above — is handed over twice rather than
+            // moved out of here.
+            .map(|event| {
+                match event.event {
                     // Rendered on the way out where there is markdown to render —
                     // see [`verkstead_render`]. A move has none: it is one state.
                     store::Event::Brief(markdown) => verkstead_render::brief_event(
@@ -1035,12 +1035,21 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         lifecycle(target),
                         instruction.as_deref(),
                     ),
-                    // The one kind that is not in the list: it is drawn pinned
-                    // above the Timeline instead. Dropped by name rather than by
-                    // a catch-all, so a kind added later has to be decided about
-                    // rather than silently disappearing.
-                    store::Event::PullRequest(_) => return None,
-                })
+                    // The one kind that is pinned as well as listed, handed
+                    // over twice for the page to draw twice: the sticky block
+                    // above the record keeps it in view, and here is the moment
+                    // it happened. Both copies are the same card made the same
+                    // way — see [`verkstead_render::pull_request_reached`].
+                    store::Event::PullRequest(opened) => verkstead_render::pull_request_reached(
+                        event.id,
+                        event.at,
+                        verkstead_render::PullRequestSummary {
+                            number: opened.number,
+                            title: opened.title,
+                            url: opened.url,
+                        },
+                    ),
+                }
             })
             .collect(),
     };

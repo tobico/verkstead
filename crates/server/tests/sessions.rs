@@ -3537,6 +3537,39 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(opened.title, "Rate limiting");
     assert_eq!(opened.url, "https://github.com/tobico/verkstead/pull/41");
 
+    // And the same pull request is on the record where it happened: pinned is
+    // something an Event is *as well as* being listed, so the sticky block
+    // holds it in view and the record keeps the moment the work went up for
+    // review. One card in two places, so both are the same Event.
+    let listed = view
+        .timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        listed,
+        [opened],
+        "the record carries the pinned card itself"
+    );
+
+    // Where it happened, which is before the move it wrote.
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::PullRequest(_)));
+    let moved = view.timeline.iter().rposition(
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping),
+    );
+
+    assert!(
+        at < moved,
+        "the PR is on the record before the move it wrote"
+    );
+
     // The move is on the record like every other, and it is the last thing to
     // have happened.
     assert_eq!(

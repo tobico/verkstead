@@ -43,7 +43,8 @@ pub use conversations::{
     TaskEntry, TaskListEvent, TimelineEvent, UnreadableSetEvent, Watching, Worktree,
     agent_output_event, brief_event, commit_event, commit_pane, handoff_event, manual_task_event,
     moved_event, notice_event, proposal_view, pull_request_details, pull_request_event,
-    question_set_event, stage_list_event, steer_event, task_list_event, unreadable_set_event,
+    pull_request_reached, question_set_event, stage_list_event, steer_event, task_list_event,
+    unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,

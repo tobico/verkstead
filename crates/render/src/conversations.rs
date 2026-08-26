@@ -474,6 +474,16 @@ pub enum TimelineEvent {
     /// difference between the pipeline arriving somewhere and a human deciding
     /// it should be there.
     Steer(SteerEvent),
+
+    /// The pull request the finish step opened, at the moment it reached the
+    /// Timeline.
+    ///
+    /// The one Event that is a [`PinnedEvent`] as well, and it is one card drawn
+    /// twice rather than two cards: the sticky block keeps the pull request in
+    /// view for as long as the work is on it, and this is where it happened. A
+    /// record that folded it out would be a record missing the moment the work
+    /// went up for review.
+    PullRequest(PullRequestEvent),
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -1381,13 +1391,27 @@ pub fn stage_list_event(name: String, title: String, stages: Vec<StageEntry>) ->
 /// number, a title and a URL — and here beside the rest for the reason a move
 /// is: one place knows how a Timeline is made.
 pub fn pull_request_event(id: i64, at: String, opened: PullRequestSummary) -> PinnedEvent {
-    PinnedEvent::PullRequest(PullRequestEvent {
+    PinnedEvent::PullRequest(pull_request(id, at, opened))
+}
+
+/// The same pull request as the Event on the record, which is where it happened.
+///
+/// Made by the same call as the pinned one above, because the two are one card
+/// in two places: a Timeline that built them separately could come to hand over
+/// two pull requests that disagreed.
+pub fn pull_request_reached(id: i64, at: String, opened: PullRequestSummary) -> TimelineEvent {
+    TimelineEvent::PullRequest(pull_request(id, at, opened))
+}
+
+/// The pull request itself, which each of the two above wraps in its own kind.
+fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestEvent {
+    PullRequestEvent {
         id,
         at,
         number: opened.number,
         title: opened.title,
         url: opened.url,
-    })
+    }
 }
 
 /// What the caller of [`pull_request_event`] hands over: the pull request as the
