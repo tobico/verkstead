@@ -80,27 +80,32 @@
    pinned card is worth having in view rather than worth having all of at once.
    One pinned card is not one of these at all, and is drawn exactly as it was.
 
-   Positioned, because the arrows are over the card's own edges. */
-.carousel {
-  position: relative;
-}
+   Two things in it, in the order they are read in: the dots that say how many
+   cards there are, and the deck the cards themselves are dealt into. It needs
+   no rule of its own for that — what each of the two is is below.
 
-/* The card that is showing. A sideways drag across it is the carousel's to read
-   as a swipe; an up-and-down one is still the pane's to scroll with, which is
-   what `pan-y` leaves the browser holding. */
-.carousel > .showing {
+   The deck the cards are dealt into: the one showing, and — while a turn is
+   running — the one it is leaving behind, laid over it. A sideways drag across
+   it is the carousel's to read as a swipe; an up-and-down one is still the
+   pane's to scroll with, which is what `pan-y` leaves the browser holding.
+
+   Positioned, because everything the carousel lays over a card — the card it is
+   leaving and both arrows — is positioned against this rather than against the
+   block the dots are also in. */
+.carousel > .deck {
+  position: relative;
   touch-action: pan-y;
 }
 
 /* The way between cards where there is a pointer to reach it with. Nothing at
    all where there is not: a touch device swipes the card, and two buttons lying
    over it would be two buttons in the way of the thing they are about. */
-.carousel > .step {
+.deck > .step {
   display: none;
 }
 
 @media (hover: hover) {
-  .carousel > .step {
+  .deck > .step {
     display: grid;
     position: absolute;
     top: 50%;
@@ -124,30 +129,135 @@
     visibility: hidden;
   }
 
-  .carousel:hover > .step,
-  .carousel:focus-within > .step {
+  .carousel:hover .step,
+  .carousel:focus-within .step {
     visibility: visible;
   }
 
-  .carousel > .back {
+  .deck > .back {
     left: 0.35rem;
   }
 
-  .carousel > .on {
+  .deck > .on {
     right: 0.35rem;
+  }
+
+  /* And the room the arrows need, which is the card's to give: they lie over
+     its own edges, so a card that did not stand back from them would have them
+     lying over its words. Only here — where there is no pointer there are no
+     arrows to clear, and a card in a phone-width pane has no width to spare. */
+  .deck .taskList,
+  .deck .stageList,
+  .deck .pullRequest {
+    padding-inline: 2.4rem;
   }
 }
 
-/* And the dots beneath: how many cards there are, and which one is showing.
+/* The turn itself: the card arriving and the card being left both slide the way
+   the deck is travelling, and the deck holds the pair for as long as it takes.
+   `SLIDE` in `Timeline.tsx` is this same fifth of a second written the other
+   side, because what takes the leaving card away again is the script.
+
+   Given only where motion is welcome, as the record's tab indicator is. Under
+   `prefers-reduced-motion` the card being left is not drawn at all, and what is
+   left is the instant swap this replaced. */
+.deck > .leaving {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The card arriving is what the deck stands as tall as, so the one being left
+     is laid over it rather than kept in the flow beside it — and given no
+     bottom edge, so it keeps its own height instead of being stretched to the
+     other's. */
+  .deck > .leaving {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+
+  /* And neither of them is drawn outside the width they are travelling across. */
+  .deck:has(> .leaving) {
+    overflow: hidden;
+  }
+
+  .deck > .arriving.onward {
+    animation: arriveOnward 0.2s ease-in-out;
+  }
+
+  .deck > .leaving.onward {
+    animation: leaveOnward 0.2s ease-in-out;
+  }
+
+  .deck > .arriving.backward {
+    animation: arriveBackward 0.2s ease-in-out;
+  }
+
+  .deck > .leaving.backward {
+    animation: leaveBackward 0.2s ease-in-out;
+  }
+}
+
+/* Onwards is leftwards, the way a page turns: what arrives comes in from the
+   right, and what it replaces goes off to the left. Backwards is the same
+   journey the other way. */
+@keyframes arriveOnward {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes leaveOnward {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes arriveBackward {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes leaveBackward {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* And the dots above: how many cards there are, and which one is showing.
    Always drawn, pointer or none — they are the whole of what the carousel says
    about itself, and a swipe with nothing counting it is a card that came from
-   nowhere. */
+   nowhere.
+
+   Above the card rather than beneath it, because the cards are not the same
+   height as each other: dots underneath would move every time the card changed,
+   and they are the one part of the carousel that has to hold still to be aimed
+   at. */
 .carousel > .dots {
   list-style: none;
   display: flex;
   justify-content: center;
   gap: 0.25rem;
-  margin: 0.4rem 0 0;
+  margin: 0 0 0.4rem;
   padding: 0;
 }
 

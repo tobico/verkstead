@@ -7089,12 +7089,20 @@ describe("the pinned carousel", () => {
   /// The dots are the whole of what the carousel says about itself: how many
   /// there are, and which one of them is being read. Each is named for the card
   /// it turns to, so a reader who cannot see them is told the same thing.
-  it("counts them beneath the card and marks the one showing", async () => {
+  ///
+  /// Above the card rather than beneath it: the cards are not the same height
+  /// as each other, so dots underneath would move every time the card changed.
+  it("counts them above the card and marks the one showing", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const dots = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`);
     const buttons = [...dots.querySelectorAll("button")];
+
+    // First of the carousel's own children, which is what puts them above the
+    // deck the cards are dealt into.
+    expect(dots.previousElementSibling).toBeNull();
+    expect(dots.nextElementSibling?.className).toContain(timeline.deck);
 
     expect(buttons.map((dot) => dot.getAttribute("aria-label"))).toEqual([
       "Task list",
@@ -7118,7 +7126,11 @@ describe("the pinned carousel", () => {
     await waitFor(() =>
       expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).not.toBeNull(),
     );
-    expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull();
+    // The card it turned off is held in the deck while the slide runs, and gone
+    // once it has.
+    await waitFor(() =>
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull(),
+    );
     expect(
       dots.querySelectorAll("button")[2]!.getAttribute("aria-current"),
     ).toBe("true");
@@ -7149,32 +7161,92 @@ describe("the pinned carousel", () => {
   /// swipe is what they are, and two buttons lying over the card would be two
   /// buttons in the way of it.
   it("keeps the arrows for pointer devices", async () => {
-    expect(timelineCss).toContain(".carousel > .step {\n  display: none;\n}");
+    expect(timelineCss).toContain(".deck > .step {\n  display: none;\n}");
     expect(timelineCss).toContain(
-      "@media (hover: hover) {\n  .carousel > .step {\n    display: grid;",
+      "@media (hover: hover) {\n  .deck > .step {\n    display: grid;",
     );
+  });
+
+  /// The arrows lie over the card's own edges, so the card stands back from
+  /// them — and only where there are arrows to stand back from.
+  it("gives the cards room for the arrows where there are arrows", async () => {
+    const [, hovering] = timelineCss.split("@media (hover: hover) {");
+
+    expect(hovering).toContain(
+      "  .deck .taskList,\n  .deck .stageList,\n  .deck .pullRequest {\n    padding-inline: 2.4rem;\n  }",
+    );
+  });
+
+  /// The slide is the stylesheet's, gated the way the record's tab indicator
+  /// is: where motion is not wanted the card being left is not drawn at all,
+  /// and the swap is the instant one this replaced.
+  it("slides between cards only where motion is welcome", async () => {
+    expect(timelineCss).toContain(".deck > .leaving {\n  display: none;\n}");
+
+    const [, moving] = timelineCss.split(
+      "@media (prefers-reduced-motion: no-preference) {",
+    );
+
+    expect(moving).toContain(".deck > .arriving.onward {\n    animation: arriveOnward");
+    expect(moving).toContain(".deck > .leaving.onward {\n    animation: leaveOnward");
+    expect(moving).toContain(".deck > .arriving.backward {\n    animation: arriveBackward");
+    expect(moving).toContain(".deck > .leaving.backward {\n    animation: leaveBackward");
+  });
+
+  /// Both cards are in the deck while a turn runs, each wearing the part it is
+  /// playing and the way the deck is travelling — which is all the stylesheet
+  /// needs to move the pair together.
+  it("holds both cards while a turn runs, and only that long", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const deck = await drawn(container, `.${timeline.pinned} .${timeline.deck}`);
+    fireEvent.click(deck.querySelector(`.${timeline.step}.${timeline.on}`)!);
+
+    // Read on the spot rather than waited for: the pair are there the moment the
+    // arrow is pressed, and one of them is gone again a fifth of a second later.
+    const leaving = deck.querySelector(`.${timeline.leaving}`);
+    expect(leaving?.className).toContain(timeline.onward);
+    expect(leaving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+
+    const arriving = deck.querySelector(`.${timeline.arriving}`);
+    expect(arriving?.className).toContain(timeline.onward);
+    expect(arriving?.querySelector(`.${timeline.stageList}`)).not.toBeNull();
+
+    // And back the other way, which the pair say too.
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    fireEvent.click(deck.querySelector(`.${timeline.step}.${timeline.back}`)!);
+
+    expect(deck.querySelector(`.${timeline.leaving}`)?.className).toContain(
+      timeline.backward,
+    );
+
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    expect(deck.querySelector(`.${timeline.arriving}`)).toBeNull();
+    expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull();
   });
 
   it("turns the card on a swipe across it", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const showing = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.showing}`);
+    const deck = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.deck}`);
 
     // Leftwards is onwards, the way a page turns.
-    swipe(showing, 200, 200 - SWIPE);
+    swipe(deck, 200, 200 - SWIPE);
     await waitFor(() =>
-      expect(showing.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
     );
 
-    swipe(showing, 200, 200 + SWIPE);
+    swipe(deck, 200, 200 + SWIPE);
     await waitFor(() =>
-      expect(showing.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     // A press that slid a little is still a press, and turns nothing.
-    swipe(showing, 200, 200 - (SWIPE - 1));
-    expect(showing.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    swipe(deck, 200, 200 - (SWIPE - 1));
+    expect(deck.querySelector(`.${timeline.stageList}`)).toBeNull();
   });
 
   /// Which card the reader is put in front of: the one the work has stopped on,

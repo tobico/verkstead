@@ -45,6 +45,7 @@ import {
   Match,
   Show,
   Switch,
+  createMemo,
   createSignal,
   onCleanup,
   onMount,
@@ -682,15 +683,41 @@ function Pinned(props: {
 /// flick across a card in a phone-width pane counts.
 export const SWIPE = 40;
 
+/// How long a turn between cards takes, in milliseconds.
+///
+/// The stylesheet is what runs the slide and this is what clears up after it, so
+/// the two are the same number written twice — see `.arriving` in
+/// `Timeline.module.css`.
+export const SLIDE = 200;
+
+/// One card in the deck: which of the pinned cards it is, and what it is doing
+/// there. `showing` is the ordinary state and the only one with nothing in
+/// flight; the other two are the pair a turn holds side by side while it runs.
+type Pane = {
+  index: number;
+  part: "showing" | "leaving" | "arriving";
+  onward: boolean;
+};
+
 /// The carousel: one pinned card showing, and the ways to the others.
 ///
-/// Dots beneath saying how many there are and which is showing, arrows over the
+/// Dots above saying how many there are and which is showing, arrows over the
 /// card's edges where there is a pointer to reach them with, and a swipe across
 /// the card where there is not. All three are the same move, which is why they
 /// are one function between them.
 ///
+/// Above rather than beneath, because the cards are not the same height as each
+/// other: dots under them would move every time the card changed, and they are
+/// the one part of the carousel that has to hold still to be aimed at.
+///
 /// It wraps: with two or three cards, an arrow that stopped at the end would be
 /// a dead control most of the time.
+///
+/// A turn slides. For as long as one runs the deck holds both cards — the one
+/// leaving and the one arriving — and the stylesheet moves the pair the way the
+/// deck is travelling. Whether they move at all is the stylesheet's to say too:
+/// under `prefers-reduced-motion` the leaving card is not drawn and the swap is
+/// the instant one this replaced.
 ///
 /// Which card fronts is [`fronting`]'s to say, and it says it once — when the
 /// conversation is opened and this is built. Nothing is remembered between
@@ -712,19 +739,91 @@ function Carousel(props: {
   /// task file goes.
   const showing = () => Math.min(at(), cards().length - 1);
 
+  /// The turn that is running, where there is one: the card it left, and the
+  /// way it is going. Nothing at all while the deck is at rest.
+  const [turning, setTurning] = createSignal<{
+    from: number;
+    onward: boolean;
+  } | null>(null);
+
+  let running: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(running));
+
   /// Turn to a card, counting round both ends.
   const turn = (to: number) => {
     const many = cards().length;
-    setAt(((to % many) + many) % many);
+    const was = showing();
+    const next = ((to % many) + many) % many;
+    if (next === was) {
+      return;
+    }
+
+    // Which way it travels is read before the count is folded back into the
+    // list: turning on past the last card is still travelling onwards, and the
+    // card it lands on is the first.
+    setTurning({ from: was, onward: to > was });
+    setAt(next);
+    clearTimeout(running);
+    running = setTimeout(() => setTurning(null), SLIDE);
   };
+
+  /// What the deck is holding: the card showing, and — while a turn runs — the
+  /// card it is leaving behind as well, in the order they travel in.
+  ///
+  /// Held still unless a turn changed one of them. The conversation is re-read
+  /// the whole time it is open, and a re-read that rebuilt the deck would
+  /// restart a slide that nothing asked for.
+  const deck = createMemo<Pane[]>(
+    () => {
+      const going = turning();
+      const now: Pane = { index: showing(), part: "showing", onward: true };
+      if (!going || going.from > cards().length - 1) {
+        return [now];
+      }
+      return [
+        { index: going.from, part: "leaving", onward: going.onward },
+        { ...now, part: "arriving", onward: going.onward },
+      ];
+    },
+    [],
+    {
+      equals: (was, now) =>
+        was.length === now.length &&
+        was.every(
+          (pane, index) =>
+            pane.index === now[index]!.index &&
+            pane.part === now[index]!.part &&
+            pane.onward === now[index]!.onward,
+        ),
+    },
+  );
 
   /// Where the finger went down, in the coordinates it will come back up in.
   let from: number | null = null;
 
   return (
     <div class={styles.carousel}>
+      {/* The dots, above the card: how many cards there are, which one is
+          showing, and a way straight to any of them. Each is named for the card
+          it turns to rather than numbered, because that is what a reader who
+          cannot see the dots needs to know about it. */}
+      <ol class={styles.dots}>
+        <For each={cards()}>
+          {(card, index) => (
+            <li>
+              <button
+                type="button"
+                aria-label={named(card)}
+                aria-current={showing() === index() ? "true" : undefined}
+                onClick={() => turn(index())}
+              />
+            </li>
+          )}
+        </For>
+      </ol>
+
       <div
-        class={styles.showing}
+        class={styles.deck}
         onTouchStart={(event) => {
           from = event.changedTouches[0]?.clientX ?? null;
         }}
@@ -741,54 +840,60 @@ function Carousel(props: {
           }
         }}
       >
-        <Card
-          event={cards()[showing()]!}
-          selected={props.selected}
-          select={props.select}
-          details={props.details}
-        />
-      </div>
-
-      {/* The arrows, which the stylesheet draws only where there is a pointer:
-          on a touch device the swipe is what these are, and two buttons lying
-          over the card would be two buttons in the way of it. */}
-      <button
-        type="button"
-        class={`${styles.step} ${styles.back}`}
-        aria-label="Previous pinned card"
-        onClick={() => turn(showing() - 1)}
-      >
-        ‹
-      </button>
-      <button
-        type="button"
-        class={`${styles.step} ${styles.on}`}
-        aria-label="Next pinned card"
-        onClick={() => turn(showing() + 1)}
-      >
-        ›
-      </button>
-
-      {/* And the dots: how many cards there are, which one is showing, and a way
-          straight to any of them. Each is named for the card it turns to rather
-          than numbered, because that is what a reader who cannot see the dots
-          needs to know about it. */}
-      <ol class={styles.dots}>
-        <For each={cards()}>
-          {(card, index) => (
-            <li>
-              <button
-                type="button"
-                aria-label={named(card)}
-                aria-current={showing() === index() ? "true" : undefined}
-                onClick={() => turn(index())}
-              />
-            </li>
+        <For each={deck()}>
+          {(pane) => (
+            <Show when={cards()[pane.index]}>
+              {(card) => (
+                <div class={parting(pane)}>
+                  <Card
+                    event={card()}
+                    selected={props.selected}
+                    select={props.select}
+                    details={props.details}
+                  />
+                </div>
+              )}
+            </Show>
           )}
         </For>
-      </ol>
+
+        {/* The arrows, which the stylesheet draws only where there is a
+            pointer: on a touch device the swipe is what these are, and two
+            buttons lying over the card would be two buttons in the way of it.
+
+            Inside the deck rather than beside it, so that what they are
+            centred against is the card rather than the card and its dots. */}
+        <button
+          type="button"
+          class={`${styles.step} ${styles.back}`}
+          aria-label="Previous pinned card"
+          onClick={() => turn(showing() - 1)}
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          class={`${styles.step} ${styles.on}`}
+          aria-label="Next pinned card"
+          onClick={() => turn(showing() + 1)}
+        >
+          ›
+        </button>
+      </div>
     </div>
   );
+}
+
+/// What a card in the deck wears: nothing where the deck is at rest, and while a
+/// turn runs the part it is playing and the way the deck is travelling — which
+/// is between them everything the stylesheet needs to slide it.
+function parting(pane: Pane): string | undefined {
+  if (pane.part === "showing") {
+    return undefined;
+  }
+
+  const part = pane.part === "leaving" ? styles.leaving : styles.arriving;
+  return `${part} ${pane.onward ? styles.onward : styles.backward}`;
 }
 
 /// Which card is showing when a conversation is opened: the one needing
