@@ -23,6 +23,11 @@
 //! ticks itself off ticks it here. Nothing is stored for it, so it cannot come
 //! to disagree with the branch it is read off.
 //!
+//! Those same files are what the details pane is built from, one level deeper:
+//! the index says what the roadmap is made of, and each `NN-<slug>.md` beside it
+//! is the brief that stage is worked from — see [`documents`], which reads them
+//! whole rather than counting their boxes.
+//!
 //! ## The other reading
 //!
 //! [`abandoned`] and what hangs off it read a **Repo** instead, at a commit,
@@ -33,11 +38,12 @@
 //! the way the bytes are fetched differs — `ls-tree` and `show` against the
 //! Repo's own git directory rather than files off a checkout.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use verkstead_render::{
-    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, StageEntry, StageListEvent,
+    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, RoadmapPane, StageEntry,
+    StageListEvent, StageSource,
 };
 
 use crate::checklist;
@@ -404,6 +410,110 @@ fn name(directory: &Path) -> String {
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned()
+}
+
+/// The roadmap opened: every stage brief of it, rendered, in the order the index
+/// has them.
+///
+/// `None` for everything [`showing`] draws no card for, and for the same reasons
+/// — no Worktree, no base commit, or nothing under that name this branch has
+/// written to and can read as a roadmap. All of them are a pane with nothing to
+/// draw, which is a 404 at the route.
+///
+/// `name` comes off the card that was pressed, which is a directory name out of
+/// this Conversation's own reading. It is checked against [`touched`] all the
+/// same, before anything is joined onto a path: the roadmaps this branch wrote
+/// to are the roadmaps this Conversation is about, so the check is the answer to
+/// *which roadmap is this* and to *whose name is this* at once.
+///
+/// A brief is found by the number its file name leads with rather than by the
+/// link the entry carries, for [`crate::tasks::documents`]'s reason: the number
+/// is what the roadmap turns on, and a link is a string out of a file in a
+/// repository.
+///
+/// Blocking work, so it happens off the runtime's threads — this is a git read,
+/// a directory read and a file read per stage.
+pub(crate) async fn documents(
+    worktree: Option<PathBuf>,
+    base: Option<String>,
+    name: String,
+) -> Option<RoadmapPane> {
+    let (Some(worktree), Some(base)) = (worktree, base) else {
+        return None;
+    };
+
+    match tokio::task::spawn_blocking(move || opened(&worktree, &base, &name)).await {
+        Ok(pane) => pane,
+        Err(error) => {
+            tracing::error!(error = ?error, "reading a Worktree's stage briefs failed");
+            None
+        }
+    }
+}
+
+/// The briefs of `worktree`'s `name` roadmap, or `None` where there is no
+/// roadmap of that name to open — which is what [`roadmaps`] would leave out,
+/// said the same way.
+fn opened(worktree: &Path, base: &str, name: &str) -> Option<RoadmapPane> {
+    if !touched(worktree, base).contains(name) {
+        return None;
+    }
+
+    let directory = worktree.join(ROADMAPS).join(name);
+
+    let list = std::fs::read_to_string(directory.join(INDEX)).ok()?;
+
+    let files = briefs(&directory);
+
+    let stages: Vec<StageSource> = list
+        .lines()
+        .filter_map(checklist::entry)
+        .map(|entry| StageSource {
+            number: entry.label.to_owned(),
+            title: entry.title.to_owned(),
+            // The box, and nothing else — see the module docs. A stage's brief
+            // stays where it is for ever, so a done stage has a document like
+            // any other and the section says so on its heading.
+            done: entry.checked,
+            // Absent only where the roadmap names a brief nobody wrote, or one
+            // that will not be read. Both are the same nothing to draw, and the
+            // pane says so in words.
+            markdown: files
+                .get(&entry.number)
+                .and_then(|file| std::fs::read_to_string(directory.join(file)).ok()),
+        })
+        .collect();
+
+    if stages.is_empty() {
+        return None;
+    }
+
+    Some(verkstead_render::roadmap_pane(
+        name.to_owned(),
+        checklist::heading(&list),
+        stages,
+    ))
+}
+
+/// The stage briefs in a roadmap's directory, by the number each of them leads
+/// with.
+///
+/// `ROADMAP.md` is not one of them, carrying no number — which is the index
+/// leaving itself out for free. A directory that will not be read comes back
+/// empty, and every stage is drawn as a brief that is not there to read, which
+/// is what it would be.
+fn briefs(directory: &Path) -> HashMap<u32, String> {
+    let Ok(listed) = std::fs::read_dir(directory) else {
+        return HashMap::new();
+    };
+
+    listed
+        .flatten()
+        .filter_map(|file| {
+            let name = file.file_name().to_string_lossy().into_owned();
+            Some((crate::tasks::numbered(&name)?, name))
+        })
+        .collect()
 }
 
 /// A roadmap in a registered Repo that nothing is driving, with the stage
@@ -934,6 +1044,12 @@ Turns this askance clone into Verkstead.
         fn lists(&self) -> Vec<StageListEvent> {
             roadmaps(self.path(), &self.base)
         }
+
+        /// And one of them opened, which is the same reading a level deeper:
+        /// the briefs the stages name rather than the boxes beside them.
+        fn opened(&self, name: &str) -> Option<RoadmapPane> {
+            opened(self.path(), &self.base, name)
+        }
     }
 
     fn write(worktree: &Path, name: &str, index: &str) {
@@ -1100,6 +1216,152 @@ Turns this askance clone into Verkstead.
         assert_eq!(lists[0].name, "mvp");
         assert_eq!(lists[0].title, "");
         assert_eq!(lists[0].stages.len(), 1);
+    }
+
+    /// The card says which stages there are; the pane says what each of them is
+    /// for. Both are one reading of the roadmap, so the entries line up.
+    #[test]
+    fn the_pane_holds_one_section_per_stage_in_the_roadmaps_own_order() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "01-workbench.md", "# 1. Workbench\n");
+
+        let pane = repo.opened("mvp").expect("there is a roadmap to open");
+
+        assert_eq!(pane.name, "mvp");
+        assert_eq!(pane.title, "MVP roadmap");
+        assert_eq!(
+            pane.stages
+                .iter()
+                .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+                .collect::<Vec<_>>(),
+            [
+                ("01", "Workbench", true),
+                ("02", "Grilling", true),
+                ("03", "Implementation", false),
+            ]
+        );
+    }
+
+    /// The one place this parts company with a backlog: a stage's brief stays
+    /// where it is for ever, so a done stage has a document like any other and
+    /// the box beside it is the whole of what says it is finished.
+    #[test]
+    fn a_done_stage_carries_its_brief_all_the_same() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief(
+            "mvp",
+            "01-workbench.md",
+            "# 1. Workbench\n\nThree panes, read from `docs/design/`.\n",
+        );
+
+        let pane = repo.opened("mvp").unwrap();
+        let html = pane.stages[0].html.as_deref().expect("that file is there");
+
+        assert!(pane.stages[0].done);
+        assert!(
+            html.contains("<h1>1. Workbench</h1>"),
+            "rendered as markdown, like every other document on this wire: {html}",
+        );
+        assert!(html.contains("<code>docs/design/</code>"), "{html}");
+    }
+
+    /// A brief is found by the number its name leads with rather than by the
+    /// link the entry carries — the number is what the roadmap turns on, and a
+    /// link is a string out of a file in a repository.
+    #[test]
+    fn a_brief_is_found_by_its_number_rather_than_by_the_link() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n- [ ] 01: Workbench — [brief](../../../escape.md)\n",
+        );
+        repo.brief("mvp", "01-workbench.md", "# 1. Workbench\n");
+
+        let pane = repo.opened("mvp").unwrap();
+
+        assert!(
+            pane.stages[0]
+                .html
+                .as_deref()
+                .unwrap()
+                .contains("<h1>1. Workbench</h1>"),
+            "the file beside the index, whatever the link says",
+        );
+    }
+
+    /// A stage the roadmap names a brief for that nobody wrote. Nothing to draw,
+    /// and the pane says so in words rather than leaving a gap.
+    #[test]
+    fn a_stage_whose_brief_is_not_there_has_nothing_to_draw() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "01-workbench.md", "\n   \n");
+
+        let pane = repo.opened("mvp").unwrap();
+
+        assert_eq!(
+            pane.stages[0].html, None,
+            "a file left behind with nothing in it is the same as no file",
+        );
+        assert_eq!(pane.stages[2].html, None, "and one that was never written");
+    }
+
+    /// The renderer in the page is loaded for the pane rather than for a stage,
+    /// so the flag is asked of all of them at once.
+    #[test]
+    fn a_diagram_in_any_stage_brief_is_what_the_pane_draws_with() {
+        let plain = Repo::with(&[]);
+        plain.write("mvp", MVP);
+        plain.brief("mvp", "01-workbench.md", "Just words.\n");
+
+        assert!(!plain.opened("mvp").unwrap().diagrams);
+
+        let drawn = Repo::with(&[]);
+        drawn.write("mvp", MVP);
+        drawn.brief(
+            "mvp",
+            "03-implementation.md",
+            "```mermaid\nflowchart LR\n  in --> out\n```\n",
+        );
+        let pane = drawn.opened("mvp").unwrap();
+
+        assert!(pane.diagrams);
+        assert!(
+            pane.stages[2]
+                .html
+                .as_deref()
+                .unwrap()
+                .contains("<pre class=\"mermaid\">"),
+            "held for the renderer in the page rather than drawn here",
+        );
+    }
+
+    /// The ways there is nothing to open, which are the ways there is nothing to
+    /// draw a card for — and the name being checked against them is what keeps a
+    /// path out of a URL from being joined onto anything.
+    #[test]
+    fn a_name_this_branch_has_not_written_to_is_nothing_to_open() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+
+        assert!(
+            repo.opened("mvp").is_none(),
+            "a roadmap this branch never touched is not this Conversation's",
+        );
+
+        repo.write("public-release", MVP);
+
+        assert!(repo.opened("public-release").is_some());
+        assert!(repo.opened("mvp").is_none());
+        assert!(repo.opened("..").is_none());
+        assert!(repo.opened("../../etc").is_none());
+
+        // And a roadmap this branch did write to whose index plans nothing,
+        // which is a heading over nothing in either place it would be drawn.
+        repo.write("empty", "# Nothing planned yet\n");
+
+        assert!(repo.opened("empty").is_none());
     }
 
     /// The formats are the repository's rather than Verkstead's, so the proof

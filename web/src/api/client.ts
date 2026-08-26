@@ -36,6 +36,7 @@ import type {
   RepoEntry,
   Response as Decided,
   Resumed,
+  RoadmapPane,
   Screen,
   SetReading,
   SettingsEdit,
@@ -281,6 +282,21 @@ export function loadCommitPane(
 /// reach it by: there is one backlog per conversation, and this is it.
 export function loadBacklogPane(id: number): Promise<BacklogPane> {
   return get<BacklogPane>(`/api/ui/conversations/${id}/backlog`);
+}
+
+/// The roadmap opened: every stage brief one of them holds, rendered.
+///
+/// Named by the roadmap rather than by the conversation, which is where this
+/// parts company with the backlog above: a worktree holds one `.tasks/` and may
+/// hold any number of roadmaps, so the card that opens this says which of them
+/// it is. Encoded, because that name is a directory name out of a repository.
+export function loadRoadmapPane(
+  id: number,
+  name: string,
+): Promise<RoadmapPane> {
+  return get<RoadmapPane>(
+    `/api/ui/conversations/${id}/roadmap/${encodeURIComponent(name)}`,
+  );
 }
 
 /// What is on the pull request the finish step opened: its commit list and its

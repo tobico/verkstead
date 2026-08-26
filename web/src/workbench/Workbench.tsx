@@ -28,8 +28,8 @@
 //! What is open is held here rather than in the Timeline, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
-//! the backlog is the exception, being read off the worktree rather than
-//! recorded, and it names itself by a word instead of an id.
+//! the backlog and the roadmap are the exceptions, being read off the worktree
+//! rather than recorded, and they name themselves by a word instead of an id.
 //!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
@@ -78,7 +78,8 @@ import { Conversations } from "./Conversations";
 import { Document } from "./Document";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
-import { Timeline, type Opening } from "./Timeline";
+import { Roadmap } from "./Roadmap";
+import { Timeline, roadmapOpened, type Opening } from "./Timeline";
 import styles from "./Workbench.module.css";
 import {
   ALL_THREE,
@@ -240,8 +241,8 @@ export function Workbench(): JSX.Element {
   const [pane, setPane] = createSignal<Pane>("conversations");
 
   /// What the details pane is showing, where anything is open: a Timeline
-  /// Event, or the backlog, which has no Event to be named by — see
-  /// [`Opening`].
+  /// Event, or the backlog or a roadmap, neither of which has an Event to be
+  /// named by — see [`Opening`].
   const [event, setEvent] = createSignal<Opening | null>(null);
 
   /// Which layout is standing, which decides how many dividers there are and
@@ -484,9 +485,10 @@ function Reading(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog is none of these and is not looked for here at all: it has no
-  /// Event, being read off the worktree every time the Conversation is, so the
-  /// pane draws it from the selection itself — see the `Switch` below.
+  /// The backlog and the roadmap are none of these and are not looked for here
+  /// at all: neither has an Event, both being read off the worktree every time
+  /// the Conversation is, so the pane draws them from the selection itself —
+  /// see the `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
 
@@ -608,17 +610,28 @@ function Reading(props: {
         <Show when={conversation.data}>
           {(conversation) => (
             <Switch>
-              {/* The backlog, which is the one thing this pane draws that is
-                  not an Event: it is read off the worktree every time the
-                  Conversation is, so there is nothing on the record to name it
-                  by and the card names it by the word instead. Ahead of the
-                  Events because it is not among them — [`opened`] looks for an
-                  id, and this selection is not one. */}
+              {/* The backlog and the roadmap, which are the two things this
+                  pane draws that are not Events: each is read off the worktree
+                  every time the Conversation is, so there is nothing on the
+                  record to name either by and the cards name them by a word
+                  instead. Ahead of the Events because they are not among them —
+                  [`opened`] looks for an id, and neither selection is one. */}
               <Match when={props.event === "backlog"}>
                 <Backlog
                   conversation={conversation()}
                   back={() => props.pane("timeline")}
                 />
+              </Match>
+              {/* And which roadmap, a worktree being allowed any number of
+                  them where it has one `.tasks/`. */}
+              <Match when={roadmapOpened(props.event)}>
+                {(name) => (
+                  <Roadmap
+                    conversation={conversation()}
+                    name={name()}
+                    back={() => props.pane("timeline")}
+                  />
+                )}
               </Match>
               <Match when={opened(conversation())}>
                 {(open) => (

@@ -27,4 +27,4 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 15: The PR card twice — [details](15-pull-request-twice.md)
 - [x] 16: Backlog and roadmap rows — [details](16-backlog-roadmap-rows.md)
 - [x] 17: Task list detail page — [details](17-task-list-detail.md)
-- [ ] 18: Roadmap detail page — [details](18-roadmap-detail.md)
+- [x] 18: Roadmap detail page — [details](18-roadmap-detail.md)

@@ -116,6 +116,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // rather than remembered, so there is no Event id to reach it by — see
         // [`backlog`].
         .route("/api/ui/conversations/{id}/backlog", get(backlog))
+        // And the roadmap opened, which is every stage brief one of them holds.
+        // Named by the roadmap rather than by the Conversation, which is the one
+        // place this parts company with the backlog above: a Worktree holds one
+        // `.tasks/` and may hold any number of roadmaps — see [`roadmap`].
+        .route("/api/ui/conversations/{id}/roadmap/{name}", get(roadmap))
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
         // remembered, and the reason is stronger here than for either of the two
@@ -1352,6 +1357,44 @@ async fn backlog(State(state): State<AppState>, Path(id): Path<String>) -> HttpR
     }
 }
 
+/// `GET /api/ui/conversations/{id}/roadmap/{name}` — every stage brief the named
+/// roadmap holds, rendered.
+///
+/// Its own request for the backlog's reason, and read off the Worktree the same
+/// way. What is different is the name in the path: a Worktree holds one
+/// `.tasks/` and may hold any number of roadmaps, so the card that opens this
+/// says which of them it is.
+///
+/// The name is a directory name off a card the server itself drew, and it is
+/// checked against the roadmaps this branch has written to before anything is
+/// joined onto a path — see [`crate::stages::documents`].
+///
+/// A Conversation with no Worktree, no roadmap of that name, or nothing readable
+/// in it is one there is no pane to draw about, which is a 404 for the reason
+/// the backlog's is.
+async fn roadmap(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_roadmap();
+    };
+
+    let (worktree, base) = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => (conversation.worktree, conversation.base_commit),
+        Ok(None) => return no_such_roadmap(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the roadmap could not be read");
+        }
+    };
+
+    match crate::stages::documents(worktree, base, name).await {
+        Some(pane) => Json(pane).into_response(),
+        None => no_such_roadmap(),
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
 /// request the finish step opened: its commit list and its comments.
 ///
@@ -2147,6 +2190,16 @@ fn no_such_backlog() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no backlog on that Conversation"),
+    )
+}
+
+/// And no roadmap of that name to open — no Conversation, no Worktree left, or
+/// nothing this branch wrote under that name that reads as a roadmap. Worded
+/// without telling them apart for the backlog's reason.
+fn no_such_roadmap() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no roadmap of that name on that Conversation"),
     )
 }
 

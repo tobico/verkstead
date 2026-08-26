@@ -1,0 +1,79 @@
+/* A stack of documents in the details pane, one boxed section at a time — the
+   backlog's task documents and a roadmap's stage briefs alike. See
+   `Documents.tsx`.
+
+   One stylesheet for both, because they are the same page read at two levels:
+   a task document and a stage brief are the same kind of thing, and two copies
+   of these rules would be two designs waiting to drift apart.
+
+   Nothing about the markdown itself is here: `.markdown` in `styles/markdown.css`
+   holds the blocks' own rhythm, and the box around it is all that is a section's
+   own. */
+
+/* What the stack is of, under the header — the same words the card carries, so
+   a pane walked into on a phone says which backlog or roadmap this is. */
+.feature {
+  margin: 0 0 1rem;
+  color: var(--ink-soft);
+}
+
+/* One document: the heading outside the box and the markdown inside it, which
+   is what makes this and a Set's Preface look alike. */
+.section {
+  max-width: var(--measure);
+  margin: 0 0 1.5rem;
+  /* Where a jump from the table of contents lands, clear of whatever is pinned
+     across the top edge — `--jump-clear` in `set/Contents.module.css`, which is
+     what does the pinning. A commit's Message reads the same number. */
+  scroll-margin-top: var(--jump-clear);
+}
+
+/* The number leads the heading rather than trailing it, which is the other way
+   round from the card's rows: a card is scanned for which titles are left, and
+   a stack of documents is walked down by number. */
+.section h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.section .n {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.section .what {
+  min-width: 0;
+}
+
+/* Whatever else the heading carries, at the far end of it: a stage says whether
+   it is done, and a task says nothing, its document being gone when it is. */
+.section .mark {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+/* The box the rendered markdown sits in. The same box a Set's Preface draws
+   around its body — see `.prefaceBody` in `set/Sheet.module.css`, which is the
+   same five lines and has to stay the same five, because these documents and a
+   Set's Preface are the same kind of thing read the same way. */
+.document,
+.missing {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* A section with no document to draw: a task whose file has gone, which is what
+   says it is done, or a roadmap naming a brief nobody wrote. In the box where
+   the document would have been, so the section reads as what it is rather than
+   as a document that would not load. */
+.missing {
+  margin: 0;
+  color: var(--ink-soft);
+  font-style: italic;
+}

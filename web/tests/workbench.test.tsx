@@ -34,6 +34,7 @@ import type {
   ProfileEntry,
   PullRequestDetails,
   Resumed,
+  RoadmapPane,
   Screen,
   Shown,
   ShowingArchived,
@@ -62,8 +63,6 @@ import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
 // one session's record and the terminal it was printed on, and a pull request.
-import backlogPane from "../src/workbench/Backlog.module.css";
-import backlogCss from "../src/workbench/Backlog.module.css?raw";
 import commitPane from "../src/workbench/Commit.module.css";
 // The Diff section the commit pane draws, which is the Set page's own component
 // and so the Set page's own module.
@@ -73,6 +72,10 @@ import diffSection from "../src/set/Diff.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
+// And the one module the two plan panes share: a backlog's task documents and
+// a roadmap's stage briefs are the same stack of boxed sections.
+import documents from "../src/workbench/Documents.module.css";
+import documentsCss from "../src/workbench/Documents.module.css?raw";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
 import marksCss from "../src/workbench/Mark.module.css?raw";
@@ -7140,10 +7143,10 @@ describe("the task list opened", () => {
       await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
     );
 
-    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
 
     const sections = [
-      ...container.querySelectorAll(`.${shell.detailsPane} .${backlogPane.task}`),
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
     ];
 
     expect(sections.map((section) => section.id)).toEqual(
@@ -7151,21 +7154,21 @@ describe("the task list opened", () => {
     );
     expect(
       sections.map((section) => [
-        section.querySelector(`.${backlogPane.n}`)!.textContent,
-        section.querySelector(`.${backlogPane.what}`)!.textContent,
+        section.querySelector(`.${documents.n}`)!.textContent,
+        section.querySelector(`.${documents.what}`)!.textContent,
       ]),
     ).toEqual(BACKLOG.tasks.map((task) => [task.number, task.title]));
 
     // The Preface's own treatment: the heading outside the box, the rendered
     // markdown in it, put in the page as the server wrote it.
     const outstanding = sections[BACKLOG.tasks.findIndex((task) => !task.done)]!;
-    const body = outstanding.querySelector(`.${backlogPane.document}`)!;
+    const body = outstanding.querySelector(`.${documents.document}`)!;
 
     expect(body.classList).toContain("markdown");
     expect(body.querySelector("h2")!.textContent).toBe("What to build");
-    expect(outstanding.querySelector("h2")!.closest(`.${backlogPane.document}`)).toBeNull();
-    expect(backlogCss).toContain(
-      ".document,\n.finished {\n  padding: 1rem;\n  background: var(--card);",
+    expect(outstanding.querySelector("h2")!.closest(`.${documents.document}`)).toBeNull();
+    expect(documentsCss).toContain(
+      ".document,\n.missing {\n  padding: 1rem;\n  background: var(--card);",
     );
 
     expect(askedFor(fetching, THE_BACKLOG)).toBeGreaterThan(0);
@@ -7181,22 +7184,22 @@ describe("the task list opened", () => {
       await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
     );
 
-    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
 
     const sections = [
-      ...container.querySelectorAll(`.${shell.detailsPane} .${backlogPane.task}`),
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
     ];
 
     expect(
-      sections.map((section) => section.querySelector(`.${backlogPane.finished}`) !== null),
+      sections.map((section) => section.querySelector(`.${documents.missing}`) !== null),
     ).toEqual(BACKLOG.tasks.map((task) => task.done));
 
     const done = sections[BACKLOG.tasks.findIndex((task) => task.done)]!;
 
-    expect(done.querySelector(`.${backlogPane.finished}`)!.textContent).toBe(
+    expect(done.querySelector(`.${documents.missing}`)!.textContent).toBe(
       "Finished, and the document removed.",
     );
-    expect(done.querySelector(`.${backlogPane.document}`)).toBeNull();
+    expect(done.querySelector(`.${documents.document}`)).toBeNull();
   });
 
   /// The set page's own table of contents, one line per task: a finished one is
@@ -7230,7 +7233,7 @@ describe("the task list opened", () => {
       await drawn(container, `.${timeline.timeline} .${timeline.taskList}`),
     );
 
-    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
 
     const both = [...container.querySelectorAll(`.${timeline.taskList}`)];
 
@@ -7254,7 +7257,7 @@ describe("the task list opened", () => {
     expect(head.querySelector("h1")!.textContent).toBe("Task list");
     expect(head.textContent).not.toContain("Close");
     expect(
-      (await drawn(container, `.${shell.detailsPane} .${backlogPane.feature}`)).textContent,
+      (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
     ).toBe(BACKLOG.feature);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
@@ -7393,8 +7396,10 @@ describe("the pinned stage list", () => {
   });
 
   /// Pinned beside the backlog and the pull request, and drawn the same way:
-  /// above the record and again on it, with nothing to pin, unpin or open.
-  it("is drawn above the record and asks the human for nothing", async () => {
+  /// above the record and again on it, with nothing to pin or unpin. What it
+  /// does have is the one press its whole surface is — the briefs its stages
+  /// name, in the details pane.
+  it("is drawn above the record and is one press and nothing else", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
@@ -7402,6 +7407,9 @@ describe("the pinned stage list", () => {
 
     expect(list.closest(`.${timeline.timeline}`)).toBeNull();
     expect(list.querySelectorAll("button")).toHaveLength(0);
+    expect(list.textContent).not.toContain("Pin");
+    expect(list.getAttribute("role")).toBe("button");
+    expect(list.getAttribute("aria-pressed")).toBe("false");
   });
 
   /// And on the record at the row that says the roadmap landed, drawn from the
@@ -7486,6 +7494,207 @@ describe("the pinned stage list", () => {
     await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
     expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
+  });
+});
+
+/// The roadmap opened, as the details pane fetches it: one brief per stage, done
+/// or not — a stage's brief stays where it is for ever.
+///
+/// Written by hand rather than taken from a fixture, as the backlog pane's is:
+/// the fixtures are of the conversation endpoint, and this is a pane's own
+/// payload.
+const ROADMAP_PANE: RoadmapPane = {
+  name: ROADMAP.name,
+  title: ROADMAP.title,
+  diagrams: false,
+  stages: ROADMAP.stages.map((stage) => ({
+    number: stage.number,
+    title: stage.title,
+    done: stage.done,
+    html:
+      stage.number === "04"
+        ? null
+        : `<h1>${stage.number}. ${stage.title}</h1>\n<h2>What to build</h2>\n` +
+          `<p>The ${stage.title.toLowerCase()} of it.</p>`,
+  })),
+};
+
+/// Where the details pane fetches it from — the conversation and the roadmap's
+/// own directory name, a worktree being allowed any number of roadmaps.
+const THE_ROADMAP = `/api/ui/conversations/${STAGED.id}/roadmap/${ROADMAP.name}`;
+
+describe("the stage list opened", () => {
+  /// What the card is pressed for: the briefs its stages name, which is the one
+  /// thing about a roadmap the card cannot show — the backlog pane one level up,
+  /// drawn by the same component into the same boxed sections.
+  it("draws every stage brief as its own boxed section, in the roadmap's order", async () => {
+    const fetching = theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(sections.map((section) => section.id)).toEqual(
+      ROADMAP.stages.map((stage) => `stage-${stage.number}`),
+    );
+    expect(
+      sections.map((section) => [
+        section.querySelector(`.${documents.n}`)!.textContent,
+        section.querySelector(`.${documents.what}`)!.textContent,
+      ]),
+    ).toEqual(ROADMAP.stages.map((stage) => [stage.number, stage.title]));
+
+    // The Preface's own treatment, as the backlog pane draws it: the heading
+    // outside the box, the rendered markdown in it.
+    const body = sections[0]!.querySelector(`.${documents.document}`)!;
+
+    expect(body.classList).toContain("markdown");
+    expect(body.querySelector("h2")!.textContent).toBe("What to build");
+    expect(sections[0]!.querySelector("h2")!.closest(`.${documents.document}`)).toBeNull();
+
+    expect(askedFor(fetching, THE_ROADMAP)).toBeGreaterThan(0);
+  });
+
+  /// A stage's brief stays where it is for ever, so a done stage has a document
+  /// like any other and the heading is where the done state goes — the other way
+  /// round from a task, whose file going is what says it is done.
+  it("marks the done stages on their own headings, briefs and all", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
+    ).toEqual(ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")));
+
+    // And the done ones are drawn with their briefs all the same.
+    expect(
+      sections
+        .filter((_, at) => ROADMAP.stages[at]!.done)
+        .every((section) => section.querySelector(`.${documents.document}`) !== null),
+    ).toBe(true);
+  });
+
+  /// The one thing a stage has no document for is a roadmap pointing at a brief
+  /// nobody wrote, which is the human's to fix and so is said in words.
+  it("says so where the roadmap names a brief that is not there", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const missing = await drawn(
+      container,
+      `.${shell.detailsPane} .${documents.missing}`,
+    );
+
+    expect(missing.textContent).toBe(
+      "The roadmap names a brief that is not there to read.",
+    );
+    expect(missing.closest(`.${documents.section}`)!.id).toBe("stage-04");
+  });
+
+  /// The set page's own table of contents, one line per stage.
+  it("offers a jump to each stage", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+    const lines = [...nav.querySelectorAll(`.${contents.sections} > li a`)];
+
+    expect(lines.map((line) => line.getAttribute("href"))).toEqual(
+      ROADMAP.stages.map((stage) => `#stage-${stage.number}`),
+    );
+    expect(lines.map((line) => line.textContent)).toEqual(
+      ROADMAP.stages.map((stage) => `${stage.number} ${stage.title}`),
+    );
+  });
+
+  /// One roadmap in two places, so opening either opens the one pane and both
+  /// read as selected while it is open — the backlog's own arrangement.
+  it("opens from the row on the record as well as from the pinned card", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const both = [...container.querySelectorAll(`.${timeline.stageList}`)];
+
+    expect(both).toHaveLength(2);
+    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
+  });
+
+  /// Titled for the card, and named for the roadmap under the header: which of
+  /// a repository's roadmaps this is, is what the pane has to say for itself.
+  it("is titled for the card, and walks back out to the record", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(head.querySelector("h1")!.textContent).toBe("Roadmap");
+    expect(head.textContent).not.toContain("Close");
+    expect(
+      (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
+    ).toBe(ROADMAP.title);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+  });
+
+  /// The server refuses cleanly where the worktree or the roadmap has gone, and
+  /// the pane says what it was told rather than spinning.
+  it("says what went wrong where there is no roadmap left to read", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({ error: "there is no roadmap of that name on that Conversation" }, 404),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
+
+    expect(line.textContent).toContain(
+      "there is no roadmap of that name on that Conversation",
+    );
   });
 });
 

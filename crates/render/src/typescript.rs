@@ -23,9 +23,9 @@ use crate::{
     ConversationUnarchived, ConversationView, GrillingStarted, Locked, NewAdoption,
     NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
     ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
-    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown,
-    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    Resumed, RoadmapPane, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -140,6 +140,12 @@ fn the_viewers_types_are_written_from_these() {
     // name are their own payload, read off the Worktree when somebody opens the
     // card.
     BacklogPane::export_all(&config).unwrap();
+
+    // And the roadmap opened, which is the same arrangement one level up: the
+    // stages ride on the Conversation as the pinned stage list, and the briefs
+    // they name are their own payload — named by the roadmap, a Worktree being
+    // allowed more than one of those.
+    RoadmapPane::export_all(&config).unwrap();
 
     // And what the finish step opened. The PR itself rides on the Conversation
     // as a pinned Event — a number, a title and a URL; what is *on* it is its

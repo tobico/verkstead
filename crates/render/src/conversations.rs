@@ -669,14 +669,90 @@ pub struct TaskSource {
     pub markdown: Option<String>,
 }
 
+/// The roadmap opened: every stage brief of it, rendered.
+///
+/// What the card cannot show, one level up from [`BacklogPane`] and built the
+/// same way. A stage list's card is the entries — a number, a title and a box —
+/// and each entry names a brief beside `ROADMAP.md` that says what the stage is
+/// for. That is what this is: the briefs themselves, in the roadmap's own order.
+///
+/// Its own request rather than a field on the Conversation, for the reason the
+/// backlog's is one: a Timeline is read every time an open page hears the world
+/// moved, and a roadmap is read whole when somebody opens it.
+///
+/// Named by the roadmap rather than by the Conversation, which is the one place
+/// this parts company with the backlog: a Worktree has one `.tasks/` and may
+/// hold any number of roadmaps, so the card says which of them it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoadmapPane {
+    /// The roadmap's directory under `docs/roadmaps/` — `mvp` — which is its
+    /// identity, and what the card named to open this.
+    pub name: String,
+
+    /// `ROADMAP.md`'s own heading. Empty where it wrote none, which is when the
+    /// pane falls back to the name, exactly as the card does.
+    pub title: String,
+
+    /// In the order the roadmap has them, which is the order they get worked in.
+    pub stages: Vec<StageDocument>,
+
+    /// Whether any of these briefs came out holding a Diagram, and so whether
+    /// the pane carries the client-side renderer at all — asked once of all of
+    /// them, as [`BacklogPane::diagrams`] is.
+    pub diagrams: bool,
+}
+
+/// One stage's brief as the pane draws it: the entry it belongs to, and the
+/// markdown of its file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageDocument {
+    /// As the roadmap writes it, zero-padding and all — `01`.
+    pub number: String,
+
+    pub title: String,
+
+    /// Whether the stage is finished, which here is the checkbox — see
+    /// [`StageEntry::done`]. Carried on the document because a finished stage
+    /// still has one: a brief stays where it is for ever, so the done state is
+    /// something the section says about itself rather than the reason it is
+    /// empty.
+    pub done: bool,
+
+    /// The brief rendered and sanitized, or `null` where there is nothing to
+    /// render. Unlike a task's, that is not the ordinary end of a stage's life
+    /// but a roadmap pointing at a file nobody wrote — which the pane says in
+    /// words rather than drawing a gap.
+    pub html: Option<String>,
+}
+
+/// What the caller of [`roadmap_pane`] hands over for one entry: what the
+/// roadmap says about it, and its brief as the file holds it.
+///
+/// Its own type rather than the server's for [`TaskSource`]'s reason: this crate
+/// reads no filesystem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageSource {
+    pub number: String,
+    pub title: String,
+    pub done: bool,
+
+    /// The markdown, or `None` where the brief the entry names is not there to
+    /// read.
+    pub markdown: Option<String>,
+}
+
 /// The roadmap as the Timeline shows it: what it is called, and every stage
 /// against whether it is checked.
 ///
 /// No id and no stamp of its own, for the reason the task list beside it has
 /// none: it is read out of `docs/roadmaps/` each time the Conversation is, so
 /// what it says is what the Worktree holds now. The moment the roadmap landed is
-/// stamped all the same — see [`StageListReached`]. Nothing opens it either —
-/// the whole of a stage list is the list.
+/// stamped all the same — see [`StageListReached`]. It opens, in both of the
+/// places it is drawn, and what a details pane shows of it is not the list again
+/// but the briefs its entries name — see [`RoadmapPane`], which is its own
+/// request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageListEvent {
@@ -1566,6 +1642,45 @@ pub fn task_list_reached(id: i64, at: String, list: Option<TaskListEvent>) -> Ti
 /// exactly as the backlog above is.
 pub fn stage_list(name: String, title: String, stages: Vec<StageEntry>) -> StageListEvent {
     StageListEvent {
+        name,
+        title,
+        stages,
+    }
+}
+
+/// That roadmap opened, rendered on the way.
+///
+/// Here rather than in the server for [`backlog_pane`]'s reason: this is the
+/// crate with the markdown parser and the sanitizer in it. A stage whose brief
+/// is not there to read comes back with nothing to draw, and the pane says so
+/// in words — a roadmap pointing at a file nobody wrote is a thing to say
+/// rather than a gap to leave, the same way `/next-stage` refuses to guess past
+/// one.
+///
+/// A brief of nothing but whitespace is the same as no brief at all, which is
+/// what an empty file would otherwise draw: a box with a gap in it.
+pub fn roadmap_pane(name: String, title: String, read: Vec<StageSource>) -> RoadmapPane {
+    let stages: Vec<StageDocument> = read
+        .into_iter()
+        .map(|stage| StageDocument {
+            number: stage.number,
+            title: stage.title,
+            done: stage.done,
+            html: stage
+                .markdown
+                .as_deref()
+                .map(crate::markdown::to_html)
+                .filter(|html| !html.trim().is_empty()),
+        })
+        .collect();
+
+    RoadmapPane {
+        // Asked of the rendered briefs rather than of the markdown they came
+        // from, for the reason the backlog's flag is.
+        diagrams: stages
+            .iter()
+            .filter_map(|stage| stage.html.as_deref())
+            .any(crate::markdown::holds_diagram),
         name,
         title,
         stages,

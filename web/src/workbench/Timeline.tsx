@@ -28,10 +28,11 @@
 //! pinned block alone.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
-//! details pane, which is why this takes a way of selecting one — and so does
-//! the backlog, whose card opens the documents its entries name and which is
-//! selected by a word rather than by an id, having no Event of its own. Three of
-//! them are documents — the frozen Brief, the handoff and the instruction a
+//! details pane, which is why this takes a way of selecting one — and so do the
+//! backlog and the roadmap, whose cards open the documents their entries name
+//! and which are selected by a word rather than by an id, having no Event of
+//! their own. Three of them are documents — the frozen Brief, the handoff and
+//! the instruction a
 //! steer carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
 //! Brief is also the one Event that is written here as well as read: while the
@@ -119,13 +120,29 @@ import { keeping } from "./settling";
 /// What the details pane is showing, as the card that opened it names itself.
 ///
 /// An event's id, for the kinds of event that have a full self to open. And a
-/// word for the backlog, which has none: it is read off the worktree every time
-/// the conversation is, so the row that says where it landed fixes a position
-/// rather than an identity, and there is one backlog per conversation to name.
+/// word for the two plan cards, which have none: each is read off the worktree
+/// every time the conversation is, so the row that says where it landed fixes a
+/// position rather than an identity. The backlog is the bare word, there being
+/// one per conversation; a roadmap carries its own name after it, a worktree
+/// being allowed any number of those.
 ///
-/// One channel for both, so that opening either closes the other — a details
-/// pane shows one thing.
-export type Opening = number | "backlog";
+/// One channel for all of them, so that opening any closes the rest — a details
+/// pane shows one thing. A string rather than an object for the same reason:
+/// what is open is compared against what a card would open, and two of the same
+/// selection have to be the same value.
+export type Opening = number | "backlog" | `roadmap:${string}`;
+
+/// What opens the named roadmap, by the directory name that is its identity.
+export function opensRoadmap(name: string): Opening {
+  return `roadmap:${name}`;
+}
+
+/// And which roadmap an opening names, or `null` where it names none.
+export function roadmapOpened(opening: Opening | null): string | null {
+  return typeof opening === "string" && opening.startsWith("roadmap:")
+    ? opening.slice("roadmap:".length)
+    : null;
+}
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -562,7 +579,14 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"StageList" in event && event.StageList}>
-                  {(reached) => <StageListRow reached={reached()} />}
+                  {(reached) => (
+                    <StageListRow
+                      reached={reached()}
+                      selected={props.selected}
+                      select={props.select}
+                      details={props.details}
+                    />
+                  )}
                 </Match>
               </Switch>
             </li>
@@ -1024,9 +1048,9 @@ function named(event: PinnedEvent): string {
 
 /// One pinned card, whichever of the three kinds it is.
 ///
-/// Two of them open. A pull request has a full self, which is what is on it
-/// right now; a task list opens the documents its entries name, which is the
-/// backlog read at a second depth. The roadmap beside them does not yet.
+/// All three open. A pull request has a full self, which is what is on it right
+/// now; a task list opens the documents its entries name and a roadmap the
+/// briefs its stages name, which is each list read at a second depth.
 ///
 /// Each of the three is on the record as well, at the moment it arrived there,
 /// and the card drawn there is this same card — see the module docs.
@@ -1051,7 +1075,16 @@ function Card(props: {
         )}
       </Match>
       <Match when={"StageList" in props.event && props.event.StageList}>
-        {(stages) => <StageList stages={stages()} />}
+        {(stages) => (
+          <StageList
+            stages={stages()}
+            selected={props.selected === opensRoadmap(stages().name)}
+            open={() => {
+              props.select(opensRoadmap(stages().name));
+              props.details();
+            }}
+          />
+        )}
       </Match>
       <Match when={"PullRequest" in props.event && props.event.PullRequest}>
         {(opened) => (
@@ -1132,11 +1165,27 @@ function TaskListRow(props: {
 /// And the roadmap on the record, at the row that says it landed.
 ///
 /// Every roadmap the branch wrote to rather than one, because the pinned block
-/// holds every one of them too — ordinarily that is exactly one.
-function StageListRow(props: { reached: StageListReached }): JSX.Element {
+/// holds every one of them too — ordinarily that is exactly one. Which is why
+/// the selection travels down here whole rather than as a yes or no: each card
+/// opens its own roadmap, and the one that is open is the one that is selected.
+function StageListRow(props: {
+  reached: StageListReached;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
+  details: () => void;
+}): JSX.Element {
   return (
     <For each={props.reached.roadmaps}>
-      {(stages) => <StageList stages={stages} />}
+      {(stages) => (
+        <StageList
+          stages={stages}
+          selected={props.selected === opensRoadmap(stages.name)}
+          open={() => {
+            props.select(opensRoadmap(stages.name));
+            props.details();
+          }}
+        />
+      )}
     </For>
   );
 }
@@ -1222,16 +1271,31 @@ function TaskList(props: {
 /// Beside the task list and drawn the same way, because it is the same kind of
 /// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
-/// without anybody pressing anything, in both of the places it is drawn. There
-/// is nothing to open here either.
+/// without anybody pressing anything, in both of the places it is drawn.
+///
+/// It opens the same way too, and what it opens is not the list again: each
+/// entry names a brief beside `ROADMAP.md` that says what that stage is for, and
+/// those are what the details pane holds — see `Roadmap.tsx`. The whole card is
+/// the press, as a document's card is, because there is nothing else on it to
+/// press.
 ///
 /// Which roadmap this is, is the one this branch has written to: a repository
 /// keeps its finished roadmaps, and a conversation is about the one it touched.
-function StageList(props: { stages: StageListEvent }): JSX.Element {
+/// It is also what the card opens *by* — a branch that touched two roadmaps has
+/// two cards, and each of them opens its own.
+function StageList(props: {
+  stages: StageListEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   const done = () => props.stages.stages.filter((stage) => stage.done).length;
 
   return (
-    <article class={styles.stageList}>
+    <Openable
+      kind={styles.stageList!}
+      selected={props.selected}
+      open={props.open}
+    >
       <div class={styles.eventHead}>
         <h2>Roadmap</h2>
         <span class={styles.feature}>
@@ -1259,7 +1323,7 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
           )}
         </For>
       </ol>
-    </article>
+    </Openable>
   );
 }
 

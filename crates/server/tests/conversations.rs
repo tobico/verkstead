@@ -23,7 +23,7 @@ use verkstead_render::{
     Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
-    ShowingArchived, Started, SteerOpened, TimelineEvent,
+    RoadmapPane, ShowingArchived, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -3158,6 +3158,172 @@ async fn refused_backlog(app: &Router, id: i64) -> StatusCode {
 
     assert!(
         body.contains("no backlog"),
+        "the refusal should say what is missing, got: {body}"
+    );
+
+    status
+}
+
+/// The roadmap a session wrote into the worktree, as the staging skill writes
+/// one: the index, and a stage brief per entry that has one.
+///
+/// Uncommitted, which is what a session part-way through leaves — and which the
+/// reading behind both the card and the pane takes as this branch's own.
+fn staged(worktree: &Path, name: &str, index: &str, briefs: &[(&str, &str)]) {
+    let directory = worktree.join("docs/roadmaps").join(name);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("ROADMAP.md"), index).unwrap();
+
+    for (file, markdown) in briefs {
+        std::fs::write(directory.join(file), markdown).unwrap();
+    }
+}
+
+/// The roadmap opened: what the details pane fetches when somebody presses the
+/// stage-list card.
+async fn roadmap_pane(app: &Router, id: i64, name: &str) -> RoadmapPane {
+    get(app, &format!("/api/ui/conversations/{id}/roadmap/{name}")).await
+}
+
+/// The card says which stages there are; the pane says what each of them is for.
+/// Both are one reading of `docs/roadmaps/`, so the entries line up.
+#[tokio::test]
+async fn the_stage_list_opens_as_every_stage_brief_it_names() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(
+        &worktree,
+        "mvp",
+        OPEN_AT_THREE,
+        &[
+            ("01-workbench.md", "# 1. Workbench\n\nThree panes.\n"),
+            (
+                "03-implementation.md",
+                "# 3. Implementation\n\n## What to build\n\nA `runner` that drives it.\n",
+            ),
+        ],
+    );
+
+    let pane = roadmap_pane(&app, id, "mvp").await;
+
+    assert_eq!(pane.name, "mvp");
+    assert_eq!(pane.title, "MVP roadmap");
+    assert_eq!(
+        pane.stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "Workbench", true),
+            ("02", "Grilling", true),
+            ("03", "Implementation", false),
+            ("04", "Wrap-up", false),
+        ],
+        "the roadmap's own order, which is the order they get worked in",
+    );
+
+    // A stage's brief stays where it is for ever, so a done stage has its
+    // document like any other — the other way round from a finished task.
+    assert!(
+        pane.stages[0]
+            .html
+            .as_deref()
+            .expect("the done stage's brief is still there")
+            .contains("<h1>1. Workbench</h1>"),
+    );
+
+    let html = pane.stages[2].html.as_deref().expect("that file is there");
+
+    assert!(
+        html.contains("<h1>3. Implementation</h1>"),
+        "rendered by the server, like every other document on this wire: {html}",
+    );
+    assert!(html.contains("<code>runner</code>"), "{html}");
+    assert!(!pane.diagrams, "and nothing in it draws");
+
+    // And the two the roadmap names briefs for that nobody wrote, which the pane
+    // says in words rather than drawing a gap.
+    assert_eq!(pane.stages[1].html, None);
+    assert_eq!(pane.stages[3].html, None);
+}
+
+/// The ways there is nothing to open, refused the same way: what the human would
+/// do about each of them is the same nothing.
+#[tokio::test]
+async fn a_conversation_with_no_such_roadmap_has_no_pane_to_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Before there is a worktree at all.
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    // And with one whose branch has written no roadmap.
+    grill(&app, id).await;
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(&worktree, "mvp", OPEN_AT_THREE, &[]);
+    assert!(!roadmap_pane(&app, id, "mvp").await.stages.is_empty());
+
+    // A name this branch has not written to is nothing to open, whether it is
+    // another roadmap of the repository's or a path somebody typed: the check is
+    // what keeps either from being joined onto anything.
+    assert_eq!(
+        refused_roadmap(&app, id, "public-release").await,
+        StatusCode::NOT_FOUND,
+    );
+    assert_eq!(
+        refused_roadmap(&app, id, "..%2F..%2Fetc").await,
+        StatusCode::NOT_FOUND,
+    );
+
+    // And once the whole directory has gone.
+    std::fs::remove_dir_all(worktree.join("docs/roadmaps")).unwrap();
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    // And a Conversation that is not there, or an id out of a URL somebody
+    // typed, which name no roadmap either.
+    assert_eq!(
+        refused_roadmap(&app, 404, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri("/api/ui/conversations/nonsense/roadmap/mvp")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// What the refusal came back as, for the cases where there is no pane.
+async fn refused_roadmap(app: &Router, id: i64, name: &str) -> StatusCode {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{id}/roadmap/{name}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert!(
+        body.contains("no roadmap"),
         "the refusal should say what is missing, got: {body}"
     );
 

@@ -297,8 +297,10 @@ dragged to the width of a window is still a pane a line can be read across.
 The details pane is the one selected thing and nothing else: with nothing
 selected it is blank, and a narrow layout offers no way to page into it
 (*settled 2026-08-24, building workbench-refit*). That is nearly always an
-Event; the backlog is the exception, being read off the worktree rather than
-recorded, so its card names it by a word where every other card names an id.
+Event; the backlog and the roadmap are the exceptions, being read off the
+worktree rather than recorded, so their cards name them by a word where every
+other card names an id — the roadmap carrying its own directory name, a worktree
+being allowed any number of roadmaps where it has one `.tasks/`.
 
 What a Conversation needs settling before it runs — branch, base commit, both
 Pairings, the readiness verdict — rides under the Brief on its timeline card
@@ -315,7 +317,7 @@ Timeline events:
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
 | Task list | inline, pinned *and* on the record where the backlog landed | every task document, each a boxed markdown section in backlog order |
-| Stage list | inline, pinned *and* on the record where the roadmap landed | — |
+| Stage list | inline, pinned *and* on the record where the roadmap landed | every stage brief, each a boxed markdown section in roadmap order, done state on the heading |
 | PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
 | Notice | inline, nothing to do about it | — |
 
