@@ -25,9 +25,10 @@
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
-//! Two of them live there — `Start grilling` under the Brief it will freeze,
-//! and, on a conversation Verkstead has finished with, the press that opens a
-//! second round with a Brief of its own.
+//! One lives there — `Start grilling` under the Brief it will freeze. What to
+//! do about a conversation Verkstead has finished with is not there: a Steer is
+//! the way back into one, and it hangs off the header with everything else done
+//! to the conversation as a whole.
 //! Stopping the work is in neither place and not in the list: none of the three
 //! ways of doing it — stop after this task, stop now, close the conversation —
 //! is a step in the work, so all three hang off the header behind a menu, where
@@ -577,9 +578,6 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The way to move a conversation by hand: an instruction, a pairing to run it
-/// under, and a submit.
-///
 /// The pinned events: what stays in view rather than scrolling past with the
 /// record.
 ///
