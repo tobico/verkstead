@@ -7,12 +7,13 @@
 //! saw one task and none of them saw the pull request; this one sees nothing else.
 //!
 //! **It proposes, and then it fixes what was agreed to.** What it produces first
-//! is one Question Set on the Timeline, a Question per finding, with Options that
-//! amount to *fix it* or *leave it* — which is what puts the human in the loop
-//! without putting them at a terminal. Then it stays where it is: the ask blocks
-//! until they answer, and when the answers come back the same session fixes each
-//! finding they accepted, commits, pushes and ends. A finding they declined is
-//! never raised again.
+//! is one Question Set on the Timeline, a Question per finding, offering each
+//! credible way of fixing that finding as an Option of its own with leaving it
+//! alone always among them — which is what puts the human in the loop without
+//! putting them at a terminal. Then it stays where it is: the ask blocks until
+//! they answer, and when the answers come back the same session fixes each
+//! finding they accepted, the way they chose, commits, pushes and ends. A
+//! finding they declined is never raised again.
 //!
 //! One session for the lot of it, because a handful of fixes is not a handful of
 //! pieces of work. The session that raised them is the one that read the branch,
