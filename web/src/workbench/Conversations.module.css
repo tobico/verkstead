@@ -182,21 +182,12 @@
   cursor: pointer;
 }
 
-/* Which one is open, said in the accent border alone: the border is the mark
-   everywhere something is selected, and a card that also carried a stripe down
-   its near edge read as heavier than the rest of the list rather than as the one
-   being looked at. A fill is no better — the row is read, and a wash behind it
-   would fight the words. */
-.conversationRow.selected .open {
-  border-color: var(--accent);
-}
-
 /* A draft: nothing about it has been settled, so the card is drawn as the
    outline of one rather than as one.
 
-   `border-style` alone, so a selected draft still takes the accent — a dotted
-   accent border is a draft that is open, which is both things at once and is
-   what it should look like. */
+   The dotted edge is the draft's alone, and being the open one takes it back:
+   see the selected rule below, which is written after this one so that it
+   does. */
 .conversationRow.draft .open {
   border-style: dotted;
 }
@@ -218,27 +209,29 @@
   color: var(--ink);
 }
 
-/* Something is waiting on the human, and the whole card says so: the accent all
-   the way round it, at the card's weight — one 1px border and one 1px inset
-   shadow being the same 2px this is. A border rather than the mark alone,
-   because what this has to survive is a glance down a list on a phone, and an
-   edge is legible where a 12px dot beside four names is not.
+/* Which one is open, said in the accent border alone: the border is the mark
+   everywhere something is selected, and a card that also carried a stripe down
+   its near edge read as heavier than the rest of the list rather than as the one
+   being looked at. A fill is no better — the row is read, and a wash behind it
+   would fight the words.
 
-   The accent rather than the `--stopped` red for the reason the mark inside it
-   is the accent: an ask left open, a run stopped on an Interruption and an
-   account out of window are none of them anything going wrong. */
-.conversationRow.waiting .open {
+   Last of the card's border rules, and written to outrank the two above it
+   rather than to sit beside them: being the open one is the strongest thing a
+   card's edge has to say, so the draft's dotted line goes back to solid under
+   it and the finished card's fade is lifted off it. Nothing is left for a
+   waiting card to fight over — the disc at the right edge is the whole of that
+   mark now, and `Mark.module.css` draws it. */
+.conversationRow.selected .open {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  border-style: solid;
+  opacity: 1;
 }
 
-/* Open *and* waiting: both marks on the one card, the near edge thickened and
-   the ring around it, rather than the later rule taking the earlier one's
-   shadow away. */
-.conversationRow.selected.waiting .open {
-  box-shadow:
-    inset 0.2rem 0 0 var(--accent),
-    inset 0 0 0 1px var(--accent);
+/* What a finished card that is also the open one dims: its contents, taken the
+   same distance down the whole card goes when it is not open. The children
+   rather than the card, so the accent border above reads at full strength. */
+.conversationRow.selected.ended .open > * {
+  opacity: 0.45;
 }
 
 /* The grip: the part of a row that is dragged rather than pressed, which is how

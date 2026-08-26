@@ -10,7 +10,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 
 ## Tasks
 
-- [ ] 01: Cards and marks — [details](01-cards-and-marks.md)
+- [x] 01: Cards and marks — [details](01-cards-and-marks.md)
 - [ ] 02: Whole-card dragging — [details](02-whole-card-dragging.md)
 - [ ] 03: Mobile reopen fix — [details](03-mobile-reopen.md)
 - [ ] 04: Badges and quiet rows — [details](04-badges-and-quiet-rows.md)

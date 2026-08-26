@@ -601,10 +601,13 @@ function spoken(entry: ConversationEntry): string {
 ///
 /// Where it has got to is drawn rather than written: a dotted card is a draft, a
 /// dimmed one is work that has stopped, and the mark at the right edge is a
-/// session running or an answer wanted. Every other state is the ordinary card —
-/// grilling, implementing and wrapping are not told apart here, because what the
-/// sidebar is for is finding the Conversation to look at and all three are *this
-/// one is under way*.
+/// session running or an answer wanted. The mark is the whole of what a waiting
+/// card says — the accent border and inset ring it used to carry as well are
+/// gone, because a card that was both waiting and open had two edge treatments
+/// arguing over one edge. Every other state is the ordinary card — grilling,
+/// implementing and wrapping are not told apart here, because what the sidebar
+/// is for is finding the Conversation to look at and all three are *this one is
+/// under way*.
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
@@ -628,7 +631,6 @@ function ConversationRow(props: {
         [styles.selected!]: props.selected,
         [styles.draft!]: props.entry.state === "Draft",
         [styles.ended!]: ended(),
-        [styles.waiting!]: mark(props.entry) === "waiting",
         [styles.held!]: props.held,
       }}
     >
@@ -650,12 +652,7 @@ function ConversationRow(props: {
             it means, so there is nothing here for a screen reader to find. */}
         <Show when={mark(props.entry)}>
           {(which) => (
-            <span
-              class={`${marks.mark} ${marks[which()]}`}
-              aria-hidden="true"
-            >
-              {which() === "waiting" ? WANTS_YOU : ""}
-            </span>
+            <span class={`${marks.mark} ${marks[which()]}`} aria-hidden="true" />
           )}
         </Show>
       </button>
@@ -714,16 +711,7 @@ function under(list: HTMLUListElement, y: number): number {
   return Number(over?.dataset.id ?? NaN);
 }
 
-/// What the mark on a Conversation waiting on the human says, inside the accent
-/// disc the stylesheet draws around it.
-///
-/// An icon rather than the dot this used to be, because what it has to survive
-/// is a glance down a list on a phone: a shape is read where a dot has to be
-/// looked for. Hidden from a screen reader, which is told the same thing in
-/// words by the card's own label — see [`spoken`].
-const WANTS_YOU = "!";
-
-/// And what the grip says: the dots everything draggable is gripped by, so that
+/// What the grip says: the dots everything draggable is gripped by, so that
 /// what it is for needs no explaining. Two columns of them, which is the shape
 /// the convention is, in characters rather than in a drawing — every other mark
 /// in this viewer is a character.

@@ -508,30 +508,29 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
   });
 
-  /// An icon and a border round the whole card, rather than the dot this used
-  /// to be: what it has to survive is a glance down a list on a phone.
-  it("marks a conversation waiting on the human, card and all", async () => {
+  /// The disc and nothing beside it: the glyph inside it and the accent border
+  /// round the whole card have both gone, because a waiting card that was also
+  /// the open one had two treatments arguing over the one edge.
+  it("marks a conversation waiting on the human with the disc alone", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
 
-    expect(card!.querySelector(`.${marks.mark}.${marks.waiting}`)?.textContent).toBe("!");
+    const disc = card!.querySelector(`.${marks.mark}.${marks.waiting}`);
+    expect(disc).toBeTruthy();
+    expect(disc!.textContent).toBe("");
     expect(card!.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
 
-    // The border is the card's own, so the row carries it and the stylesheet
-    // says what it looks like — jsdom lays nothing out.
-    expect(card!.classList.contains(sidebar.waiting!)).toBe(true);
-    expect(sidebarCss).toContain(
-      ".conversationRow.waiting .open {\n" +
-        "  border-color: var(--accent);\n" +
-        "  box-shadow: inset 0 0 0 1px var(--accent);\n" +
-        "}",
+    // Nothing on the row says it either: the card's border is the ordinary one.
+    expect(card!.className).toBe(sidebar.conversationRow);
+    expect(sidebarCss, "the waiting card's own border is retired").not.toContain(
+      ".conversationRow.waiting",
     );
   });
 
-  /// The mark is a character, and a character is something a screen reader
-  /// would otherwise read out beside the label that already said it.
+  /// The mark is a shape, and a shape is nothing to a screen reader beside the
+  /// label that already said it.
   it("keeps the mark out of what is read aloud", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
@@ -605,9 +604,6 @@ describe("how a card says where its conversation has got to", () => {
     const [card] = await cards(container);
 
     expect(card!.querySelector(`.${marks.mark}`)).toBeNull();
-
-    // Neither half of the waiting mark: no icon above, and no border here.
-    expect(card!.classList.contains("waiting")).toBe(false);
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
@@ -646,12 +642,32 @@ describe("how a card says where its conversation has got to", () => {
       ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
     expect(sidebarCss).toContain(
-      ".conversationRow.selected .open {\n  border-color: var(--accent);\n}",
+      ".conversationRow.selected .open {\n" +
+        "  border-color: var(--accent);\n" +
+        "  border-style: solid;\n" +
+        "  opacity: 1;\n" +
+        "}",
     );
     expect(
       sidebarCss,
       "the inset stripe is retired everywhere it was drawn",
     ).not.toContain("box-shadow: inset 0.2rem");
+  });
+
+  /// Being the open one is the strongest thing a card's edge has to say, so it
+  /// is written last of the border rules and takes back what the two above it
+  /// did: the draft's dotted line, and the finished card's fade. What is dimmed
+  /// on a finished card that is open is what is inside it.
+  it("lets the open card's border outrank every other treatment", () => {
+    expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
+      sidebarCss.indexOf(".conversationRow.draft .open"),
+    );
+    expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
+      sidebarCss.indexOf(".conversationRow.ended .open"),
+    );
+    expect(sidebarCss).toContain(
+      ".conversationRow.selected.ended .open > * {\n  opacity: 0.45;\n}",
+    );
   });
 
   /// Dimmed and still a row to press: a Done Conversation can be steered.
@@ -712,6 +728,14 @@ describe("how a card says where its conversation has got to", () => {
       "sitting, verkstead, Grilling, a session is running and has gone quiet",
       "over, verkstead, Done",
     ]);
+  });
+
+  /// A session that has gone quiet is one the human may have to do something
+  /// about, so its ring is drawn in the accent rather than in the edge grey it
+  /// used to take — which against a card border read as an edge come loose. The
+  /// accent is a themed variable, so it is right in both themes at once.
+  it("draws the ring of a quiet session in the accent", () => {
+    expect(marksCss).toContain(".mark.idle {\n  border: 1.5px solid var(--accent);\n}");
   });
 
   /// The spinner is motion, and motion is something to be able to turn off —

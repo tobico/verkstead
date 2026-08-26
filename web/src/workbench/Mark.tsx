@@ -10,9 +10,9 @@
 //! Three states from two flags. A session that is not running has no mark at
 //! all, because there is nothing happening for one to be about; a running one
 //! turns; and a running one that has gone quiet is the same ring held still,
-//! which is what an empty circle is. The empty circle is deliberately the
-//! *lesser* mark: what it means is that the session is sitting there, which is
-//! nothing to look at until the human decides otherwise.
+//! which is what an empty circle is. The empty circle is drawn in the accent
+//! where the turning one is drawn in the edge grey, because a session that has
+//! gone quiet is the one of the two the human may have to do something about.
 //!
 //! Drawn rather than written, so it carries its own label: everywhere else the
 //! mark is used it is a button's `aria-label` that says what it means, and a
