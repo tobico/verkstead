@@ -19,7 +19,10 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 import { loadPullRequest } from "../api/client";
 import type { ConversationView, PullRequestEvent } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
+import { PaneHead } from "./PaneHead";
+import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
 
 export function PullRequest(props: {
@@ -47,20 +50,16 @@ export function PullRequest(props: {
 
   return (
     <>
-      <div class="pane-head">
-        <button type="button" class="pane-back" onClick={props.back}>
-          ← Timeline
-        </button>
-        <h1>Pull request</h1>
-        <button type="button" class="close-event" onClick={props.close}>
-          Close
-        </button>
-      </div>
+      <PaneHead
+        back={{ to: "Timeline", go: props.back }}
+        title="Pull request"
+        close={props.close}
+      />
 
-      <div class="pull-request-summary">
-        <p class="title">{props.opened.title}</p>
-        <p class="where">
-          <span class="number">#{props.opened.number}</span>
+      <div class={styles.summary}>
+        <p class={styles.title}>{props.opened.title}</p>
+        <p class={styles.where}>
+          <span class={styles.number}>#{props.opened.number}</span>
           <a href={props.opened.url} target="_blank" rel="noreferrer">
             {props.opened.url}
           </a>
@@ -69,33 +68,33 @@ export function PullRequest(props: {
 
       <Switch>
         <Match when={carried.isPending}>
-          <p class="empty">Loading…</p>
+          <Empty>Loading…</Empty>
         </Match>
         {/* The server's own wording, which is the thing to act on: no `gh` on
             the machine, an account not logged in, and a GitHub that would not
             answer are three different afternoons. */}
         <Match when={carried.isError}>
-          <p class="error">
+          <ErrorLine>
             Could not read this pull request: {carried.error?.message}
-          </p>
+          </ErrorLine>
         </Match>
         <Match when={carried.data}>
           {(read) => (
             <>
-              <section class="pr-commits" aria-label="Commits">
+              <section class={styles.commits} aria-label="Commits">
                 <h2>Commits</h2>
                 <Show
                   when={read().commits.length > 0}
-                  fallback={<p class="empty">Nothing is on it yet.</p>}
+                  fallback={<Empty>Nothing is on it yet.</Empty>}
                 >
-                  <ol class="commits">
+                  <ol class={styles.carried}>
                     <For each={read().commits}>
                       {(commit) => (
                         <li>
-                          <span class="sha">
+                          <span class={styles.sha}>
                             {commit.sha.slice(0, ABBREVIATED)}
                           </span>
-                          <span class="subject">{commit.subject}</span>
+                          <span class={styles.subject}>{commit.subject}</span>
                         </li>
                       )}
                     </For>
@@ -103,18 +102,18 @@ export function PullRequest(props: {
                 </Show>
               </section>
 
-              <section class="pr-comments" aria-label="Comments">
+              <section class={styles.comments} aria-label="Comments">
                 <h2>Comments</h2>
                 <Show
                   when={read().comments.length > 0}
-                  fallback={<p class="empty">Nobody has said anything.</p>}
+                  fallback={<Empty>Nobody has said anything.</Empty>}
                 >
-                  <ol class="comments">
+                  <ol class={styles.said}>
                     <For each={read().comments}>
                       {(comment) => (
                         <li>
-                          <p class="said-by">
-                            <span class="author">
+                          <p class={styles.saidBy}>
+                            <span class={styles.author}>
                               {comment.author === ""
                                 ? "somebody since gone"
                                 : comment.author}
@@ -122,7 +121,7 @@ export function PullRequest(props: {
                             {/* The stamp GitHub gave it, said as the stamp on a
                                 settled set is: one clock, in UTC, wherever the
                                 comment was written. */}
-                            <span class="when">{utcStamp(comment.at)}</span>
+                            <span>{utcStamp(comment.at)}</span>
                           </p>
                           <div class="markdown" innerHTML={comment.html} />
                         </li>

@@ -17,6 +17,7 @@ import { Show } from "solid-js";
 
 import { updateNotice } from "../api/client";
 import { useReading } from "../freshness";
+import styles from "./UpdateNotice.module.css";
 
 /// Where the human is told how to update: the README's own section, which is
 /// the one place the instructions are kept current.
@@ -59,8 +60,8 @@ export function UpdateNotice(): JSX.Element {
   return (
     <Show when={version()}>
       {(version) => (
-        <aside class="update-notice">
-          <span class="release">Verkstead {version()} has been released.</span>
+        <aside class={styles.notice}>
+          <span>Verkstead {version()} has been released.</span>
           {/* Out to the README rather than over the page: the human is in the
               middle of settling what Verkstead may touch, and reading how to
               update should not be leaving it. */}

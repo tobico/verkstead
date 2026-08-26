@@ -17,7 +17,13 @@ import { createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 
 import { Modal } from "../src/Modal";
-import stylesheet from "../src/main.css?raw";
+// The one modal, both ways: the hashed names to query the page by, and the
+// source to read the rules off, jsdom laying nothing out to read them from.
+import modal from "../src/Modal.module.css";
+import stylesheet from "../src/Modal.module.css?raw";
+// The Set page's own vocabulary, where the two confirm sheets are, for the half
+// of this that is about what they no longer draw for themselves.
+import sheets from "../src/set/Sheet.module.css?raw";
 
 /// A modal that starts open, with the way it was closed recorded.
 function mount(): {
@@ -44,7 +50,7 @@ function mount(): {
 
 /// The dialog, or nothing where the modal is shut.
 function sheet(container: ParentNode): HTMLDialogElement | null {
-  return container.querySelector<HTMLDialogElement>("dialog.modal");
+  return container.querySelector<HTMLDialogElement>(`dialog.${modal.modal}`);
 }
 
 describe("a modal", () => {
@@ -67,7 +73,7 @@ describe("a modal", () => {
   it("puts the caller's contents in a card of its own", () => {
     const { container } = mount();
 
-    const card = sheet(container)!.querySelector(".modal-card")!;
+    const card = sheet(container)!.querySelector(`.${modal.card}`)!;
     expect(card.querySelector("#example-title")!.textContent).toBe(
       "Are you sure?",
     );
@@ -142,7 +148,7 @@ describe("what every modal is drawn with", () => {
   /// on the card's own margin read as a press away from the card.
   it("keeps the padding on the card and off the dialog", () => {
     expect(block(".modal")).toContain("padding: 0;");
-    expect(block(".modal-card")).toContain("padding: 1.25rem;");
+    expect(block(".card")).toContain("padding: 1.25rem;");
   });
 
   it("dims the page behind it", () => {
@@ -161,8 +167,8 @@ describe("what every modal is drawn with", () => {
   /// The point of one component: no sheet drawn over the page carries a backdrop
   /// or a box of its own to drift away from the shared one.
   it("leaves the confirm sheets nothing of their own to draw", () => {
-    expect(stylesheet).not.toContain(".confirm-backdrop");
-    expect(stylesheet).not.toContain("\n.confirm {\n");
+    expect(sheets).not.toContain(".confirm-backdrop");
+    expect(sheets).not.toContain("\n.confirm {\n");
   });
 });
 

@@ -103,6 +103,9 @@ import type {
   Watching,
 } from "../api/types";
 import { useReading } from "../freshness";
+import { Empty, ErrorLine, Note } from "../notices";
+import styles from "./Screen.module.css";
+import shell from "./Workbench.module.css";
 
 /// The events that say the human is at this pane's keyboard.
 ///
@@ -417,9 +420,9 @@ export function Screen(props: {
   return (
     <Switch>
       <Match when={screen.isError}>
-        <p class="error">
+        <ErrorLine>
           Could not read this screen: {screen.error?.message}
-        </p>
+        </ErrorLine>
       </Match>
       <Match when={live() || screen.data}>
         {/* Whether the session is still printing, said on the element as well as
@@ -427,8 +430,11 @@ export function Screen(props: {
             still running is redrawn at whatever size this pane is, so there is
             nothing to scroll to; the grid one left behind is fixed at the size
             it was printed for. */}
-        <div class="screen" classList={{ live: live() }}>
-          <div class="terminal-host" ref={host} />
+        <div
+          class={`${styles.screen} ${shell.paneScreen}`}
+          classList={{ [styles.live!]: live() }}
+        >
+          <div class={styles.terminalHost} ref={host} />
           {/* What the human may do with this Screen, said under it. A Hold
               outranks everything else there is to say: it is the one thing here
               that has stopped the work, and the way out of it is the press
@@ -439,30 +445,30 @@ export function Screen(props: {
               <Show
                 when={lost()}
                 fallback={
-                  <p class="note read-only">
+                  <Note class={styles.readOnly}>
                     {!shown()
                       ? "Waiting for this session's screen…"
                       : live()
                         ? "Watching. Type to take the keyboard — Verkstead stops until you hand it back."
                         : "Read-only: this is what the session's terminal is showing."}
-                  </p>
+                  </Note>
                 }
               >
-                <p class="error">
+                <ErrorLine>
                   The connection to this session's screen was lost.
-                </p>
+                </ErrorLine>
               </Show>
             }
           >
-            <div class="holding">
-              <p class="note">
+            <div class={styles.holding}>
+              <Note>
                 {live()
                   ? "You have the keyboard. Verkstead is recording and nothing else."
                   : "You have the keyboard, and the session has exited. Nothing is judged until you hand it back."}
-              </p>
+              </Note>
               <button
                 type="button"
-                class="hand-back"
+                class={styles.handBack}
                 disabled={handingBack.isPending}
                 onClick={() => handingBack.mutate()}
               >
@@ -473,7 +479,7 @@ export function Screen(props: {
         </div>
       </Match>
       <Match when={true}>
-        <p class="empty">Loading…</p>
+        <Empty>Loading…</Empty>
       </Match>
     </Switch>
   );

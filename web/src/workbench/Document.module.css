@@ -1,0 +1,12 @@
+/* A timeline document, opened: the brief, the handoff the grilling wrote, or the
+   instruction a manual task was set going with. See `Document.tsx`.
+
+   One rule, because that is the whole of what this pane is: the markdown the
+   server rendered, set at the width prose is read at everywhere else. The cards
+   these are opened from say the same thing of their own bodies — see
+   `Timeline.module.css` — and so does a commit's summary in `Commit.module.css`.
+   Three sheets saying one thing about three elements, rather than one class
+   spread across three components that never share anything else. */
+.document {
+  max-width: var(--measure);
+}

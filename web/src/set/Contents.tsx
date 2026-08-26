@@ -22,7 +22,10 @@
 import type { Accessor, JSX, Signal } from "solid-js";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 
+import app from "../App.module.css";
 import { Switch } from "../Switch";
+import shell from "../workbench/Workbench.module.css";
+import contents from "./Contents.module.css";
 import type { Entry, Section, Stands, Watched } from "./outline";
 import {
   face,
@@ -94,13 +97,13 @@ export function Contents(props: {
     <nav
       ref={element}
       classList={{
-        contents: true,
-        "contents-open": open(),
+        [contents.contents!]: true,
+        [contents.open!]: open(),
         // What the stylesheet keys the pane's own two shapes off, said only
         // where the nav is in a pane: on a page there is nothing to measure
         // and the window's own rules are the whole of the answer.
-        "contents-paned": props.paned === true,
-        "contents-roomy": props.paned === true && roomy(),
+        [contents.paned!]: props.paned === true,
+        [contents.roomy!]: props.paned === true && roomy(),
       }}
       aria-label="On this page"
     >
@@ -114,15 +117,15 @@ export function Contents(props: {
           own state instead. */}
       <Show when={open()}>
         <div
-          class="contents-backdrop"
+          class={contents.backdrop}
           aria-hidden="true"
           onClick={() => setOpen(false)}
         />
       </Show>
-      <ol class="contents-sections" id="contents-list">
+      <ol class={contents.sections} id="contents-list">
         <For each={props.sections}>
           {(section) => (
-            <li class="contents-section">
+            <li class={contents.section}>
               <Link
                 anchor={section.anchor}
                 label={null}
@@ -131,7 +134,7 @@ export function Contents(props: {
                 stands={standsFor(props.watched, section)}
               />
               <Show when={section.entries.length > 0}>
-                <ol class="contents-entries">
+                <ol class={contents.entries}>
                   <For each={section.entries}>
                     {(line) => (
                       <ContentsEntry
@@ -164,9 +167,10 @@ function ContentsEntry(props: {
   };
 
   return (
-    // Prefixed like every other class here: `question` on its own is the page's
-    // own Question card, and a nav line is not one.
-    <li class={`contents-entry ${face(props.entry.label)}`}>
+    // The face is the module's rather than the page's: `question` here is the
+    // type a nav line naming a Question is set in, and the page's own Question
+    // card is a class of another module entirely.
+    <li class={`${contents.entry} ${face(props.entry.label)}`}>
       <Link
         anchor={props.entry.anchor}
         label={props.entry.label}
@@ -200,7 +204,9 @@ function Link(props: {
 
   const classes = () => {
     const mark = marked();
-    return mark === null ? "contents-link" : `contents-link ${markClass(mark)}`;
+    return mark === null
+      ? contents.link!
+      : `${contents.link} ${markClass(mark)}`;
   };
 
   return (
@@ -237,7 +243,7 @@ function Link(props: {
       }}
     >
       <Show when={props.label}>
-        {(label) => <span class="contents-label">{label()}</span>}
+        {(label) => <span class={contents.label}>{label()}</span>}
       </Show>
       {props.text}
     </a>
@@ -265,7 +271,7 @@ function Bar(props: { watched: Watched[]; nav: Nav }): JSX.Element {
   return (
     <button
       type="button"
-      class="contents-bar"
+      class={contents.bar}
       // The bar's own words are its name — "Preface, button" — and the nav
       // around it says what a list of them is for.
       aria-expanded={open() ? "true" : "false"}
@@ -274,16 +280,16 @@ function Bar(props: { watched: Watched[]; nav: Nav }): JSX.Element {
     >
       <Show when={named()}>
         {(named) => (
-          <span class={`contents-bar-name ${named().kind}`}>
+          <span class={`${contents.barName} ${named().kind}`}>
             <Show when={named().label}>
-              {(label) => <span class="contents-label">{label()}</span>}
+              {(label) => <span class={contents.label}>{label()}</span>}
             </Show>
             {named().text}
           </span>
         )}
       </Show>
       {/* Which way the list will go, and no part of what the bar is called. */}
-      <span class="contents-bar-mark" aria-hidden="true">
+      <span class={contents.barMark} aria-hidden="true">
         ▾
       </span>
     </button>
@@ -341,24 +347,24 @@ export function PageHeader(props: {
     // The shell holds the pinned position and no height, so the header takes
     // no room out of the flow whether or not it is drawn: one that did would
     // shove the whole page down at the moment it appeared.
-    <div class="page-header">
+    <div class={contents.header}>
       <Show when={passed()}>
-        <div class="page-header-chrome">
-          <p class="page-header-where" aria-hidden="true">
+        <div class={contents.headerChrome}>
+          <p class={contents.headerWhere} aria-hidden="true">
             <Show when={named()}>
               {(named) => (
                 <>
                   <Show when={inside(named())}>
                     {(section) => (
                       <>
-                        <span class="page-header-section">{section()}</span>
-                        <span class="page-header-sep">›</span>
+                        <span class={contents.headerSection}>{section()}</span>
+                        <span class={contents.headerSep}>›</span>
                       </>
                     )}
                   </Show>
-                  <span class={`page-header-name ${named().kind}`}>
+                  <span class={`${contents.headerName} ${named().kind}`}>
                     <Show when={named().label}>
-                      {(label) => <span class="contents-label">{label()}</span>}
+                      {(label) => <span class={contents.label}>{label()}</span>}
                     </Show>
                     {named().text}
                   </span>
@@ -397,9 +403,9 @@ function headingPassed(watched: Accessor<Watched[]>): Accessor<boolean> {
     if (section === null) {
       return;
     }
-    const heading = section.classList.contains("section-heading")
+    const heading = section.matches(`.${app.sectionHeading}`)
       ? section
-      : (section.querySelector(".section-heading") ?? section);
+      : (section.querySelector(`.${app.sectionHeading}`) ?? section);
 
     // Out of view in either direction reads as passed. In practice the first
     // heading only ever leaves upward — it sits at the top of the page.
@@ -443,7 +449,7 @@ function roominess(nav: Accessor<HTMLElement | undefined>): Accessor<boolean> {
   const [roomy, setRoomy] = createSignal(false);
 
   createEffect(() => {
-    const pane = nav()?.closest(".details-pane");
+    const pane = nav()?.closest(`.${shell.detailsPane}`);
     if (pane === null || pane === undefined) {
       return;
     }

@@ -1,0 +1,511 @@
+/* The table of contents, and the reader's place in the page it describes — see
+   `Contents.tsx`. One nav in two shapes, and the floating header that reads the
+   same signal.
+
+   The names are short because the module is the prefix now: `contents.link` is
+   a line of this nav and nothing else, where the class used to have to say so
+   itself to keep out of the page's own way. */
+
+/* How far a jump lands clear of whatever is pinned across the top edge. Named
+   here because this is what does the pinning — the bar below one width, the
+   floating header above it — and read by the sections a jump can land on, each
+   from its own module: the Preface, a Question and the Questions' heading in
+   `Sheet.module.css`, the Postscript in `Postscript.module.css`, the Diff and
+   its files in `styles/diff.css`, those two names being the renderer's rather
+   than any component's.
+
+   Two complementary blocks about the 70rem the nav's own shapes meet at, so it
+   is always one of the two and never neither: an anchor with nowhere to land
+   clear of would land under the thing covering it. */
+@media (width < 70rem) {
+  :root {
+    --jump-clear: 3.5rem;
+  }
+}
+
+@media (min-width: 70rem) {
+  :root {
+    --jump-clear: 3.25rem;
+  }
+}
+
+/* The table of contents, in the two shapes the one nav takes: the sidebar, in
+   the margin, and — where the window has no room for one beside the full-width
+   column — a bar across the top with the list folded into it. The column's
+   width is never what is traded for the sidebar: below the breakpoint the nav
+   folds into the bar and the column keeps every rem it had.
+
+   The two blocks below are complements of one another about the same width, so
+   exactly one of them ever applies and the reader always has exactly one of the
+   two. `(width < 70rem)` and `(min-width: 70rem)` meet with no gap and no
+   overlap between them, which is the whole of why that is true: move the
+   breakpoint in one and it has to move in the other. 70rem is the first window
+   that holds the nav at its narrowest — 8rem, a margin at the window's edge
+   and a gap — beside the column at its widest. */
+
+/* What the bar is made of, wherever it is drawn. Only *whether* it is drawn is
+   a width's answer — the blocks below hide it where the sidebar stands — so the
+   look of it is said once, out here, and the pane's own shapes inherit it along
+   with the window's. */
+
+/* A full-width line of its own, with the name given whatever room the mark
+   beside it does not want. Tall enough to be a thumb's target, and above the
+   backdrop so that pressing it again is still how the list is put away. */
+.bar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.6rem 1rem;
+  font: inherit;
+  color: var(--ink);
+  background: var(--card);
+  border: 0;
+  border-bottom: 1px solid var(--edge);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* One line, whatever it is naming: a Question's words run to whatever the bar
+   has and are cut there, the same as they are in the sidebar. */
+.barName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* A path in the bar is set as the Diff sets it, so the two read as the same
+   name — the sidebar's own rule for the same reason. */
+.barName.path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+}
+
+.barMark {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+/* What a tap away from the open list lands on, so that it lands on nothing
+   else. Over the whole window and a wash darker, which is also what says the
+   list is in front of the page rather than part of it. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 20%);
+}
+
+/* The bar. It names the line the sidebar would have lit — the section, file or
+   Question the reader is in — and the list comes down under it when it is
+   pressed. */
+@media (width < 70rem) {
+  /* Sticky rather than fixed: the bar sits where it is read, under the title,
+     and pins itself to the top edge as the page goes up under it. Nothing is
+     covered on arrival that way, and there is no room to make for it.
+
+     Out past the column's padding on both sides, so that once it is pinned the
+     page passes behind the bar rather than beside it. */
+  .contents {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin: 0 -1rem 1.25rem;
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  /* Shut, the list is not drawn at all: the bar is the whole of the nav until it
+     is asked for. */
+  .sections {
+    display: none;
+  }
+
+  /* Open, it hangs off the bar over the page rather than pushing it down — a
+     list that moved the page under it would have taken the reader somewhere
+     before they chose anywhere. Long lists scroll inside it. */
+  .open .sections {
+    display: block;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    /* Over the backdrop it is being held in front of the page by. */
+    z-index: 1;
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 0.6rem 1rem 0.8rem;
+    background: var(--card);
+    border-bottom: 1px solid var(--edge);
+  }
+
+  /* Room to be hit with a thumb: the sidebar's lines are a pointer's target and
+     can sit as close together as they read well at, and these cannot.
+
+     Reached through the nav so that it outweighs the shared rule below rather
+     than racing it: the two would otherwise be of equal specificity, and the one
+     further down the file — that one — would win. */
+  .contents .link {
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+}
+
+/* The floating header, which exists only where the sidebar does: below that width
+   the nav's own bar is already pinned to the top saying the same thing, and two of
+   them would be two answers to one question. */
+
+.header {
+  display: none;
+}
+
+/* The sidebar: the page's sections, top to bottom, in the margin — so the column
+   stays exactly where it was and nothing below the nav has moved.
+
+   Out of the flow entirely, and fixed rather than sticky: there is nothing
+   above it in the margin to scroll past, so it is in the same place on arrival
+   as it is a page down. */
+
+@media (min-width: 70rem) {
+  /* There is no bar here: the list is in the margin already, and a bar naming
+     the line beside it would be saying the same thing twice. */
+  .bar {
+    display: none;
+  }
+
+  .contents {
+    position: fixed;
+    top: 1.25rem;
+    /* At the window's edge, at the narrowest a path still reads at: in this
+       band the window holds the nav or the column's centring, not both, and
+       it is the centring that goes — see `main` just below. From 80rem the
+       middle clears the nav on its own, and both move back out with it. */
+    left: 1rem;
+    width: 8rem;
+    /* A Set with forty questions scrolls its nav rather than running off the
+       bottom of the window. */
+    max-height: calc(100vh - 2.5rem);
+    overflow-y: auto;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+
+  /* The column gives up being centred before it gives up an inch of width: as
+     centred as still clears the nav, which in this band is pushed right by
+     exactly the nav's margin, width and gap. The right margin stays `auto`
+     from the base rule, so whatever the window has past the column is air on
+     the right — until 80rem, where the centred position clears the nav by
+     itself and the column returns to the middle.
+
+     Only a page with a nav in the margin: the lists have nothing there, and a
+     column pushed sideways to clear nothing would just be off-centre. */
+  main:has(> .contents) {
+    margin-left: 10rem;
+  }
+
+  /* The header, pinned across the reading column — but a shell of no height,
+     so it takes no room out of the flow whether or not it is drawn: it is not
+     drawn until the page's first heading has been scrolled away, and a header
+     that had a height would shove the whole page down at the moment it
+     appeared. Sticky rather than fixed all the same: the shell belongs to the
+     column, so what hangs from it spans the column at every band above,
+     wherever the column is standing.
+
+     Out past the column's padding on both sides, so the page passes behind
+     the chrome rather than beside it. */
+  .header {
+    display: block;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: 0;
+    margin: 0 -1rem;
+    overflow: visible;
+  }
+
+  .headerChrome {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    padding: 0.5rem 1rem;
+    min-height: 2.5rem;
+    background: var(--card);
+    border-bottom: 1px solid var(--edge);
+  }
+
+  /* Room for the wrap switch, whatever the name beside it is doing. The switch
+     is `Switch.tsx`'s label and its class is that module's, so it is reached by
+     the element it is: the chrome holds one. */
+  .headerChrome > label {
+    flex: none;
+  }
+
+  /* Where a jump lands is the same question at this width, answered by the
+     header instead of the bar — see `--jump-clear` at the top of this file. */
+}
+
+/* From 80rem the window holds the column centred with the nav beside it: the
+   middle's clearance is 10rem or more, which is what the nav asked for at its
+   narrowest. So the column returns to the middle, and the nav is positioned
+   from it again — elastic now, at 8rem of nav where the window is exactly
+   80rem and back to the full width it wants by 92rem. */
+@media (min-width: 80rem) {
+  main:has(> .contents) {
+    margin-left: auto;
+  }
+
+  .contents {
+    left: auto;
+    /* The column's edge is 30rem from the middle; the nav stops a gap short. */
+    right: calc(50% + 31rem);
+    /* Whatever the margin has spare, up to what a path wants — and a margin of
+       its own at the window's edge. */
+    width: min(14rem, calc(50vw - 32rem));
+  }
+}
+
+/* And the same nav in a details pane, where the width that decides its shape is
+   the pane's rather than the window's: a pane is a column the human drags, and
+   a window wide enough for a sidebar says nothing about whether they left room
+   for one. Which of the two the pane stands at is measured in script and said
+   as `roomy` — see `Contents.tsx` for why the stylesheet cannot ask this one on
+   its own.
+
+   Both blocks answer over whatever the window's own rules just said, which is
+   why every one of them is reached through `.paned`: at any width the window
+   has already picked a shape, and in here it is not the one being drawn. */
+
+/* The bar, which is what a pane narrower than the sidebar's margin gets. Pinned
+   to the top of the pane, since the pane is what scrolls. It spans the column
+   rather than bleeding past it: the pane's margins are the sidebar's room, and
+   there is nothing out there for the page to pass behind. */
+.contents.paned {
+  position: sticky;
+  top: 0;
+  right: auto;
+  left: auto;
+  z-index: 2;
+  width: auto;
+  height: auto;
+  max-height: none;
+  margin: 0 0 1.25rem;
+  overflow: visible;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.paned .bar {
+  display: flex;
+}
+
+/* Shut, the list is not drawn at all; open, it hangs off the bar over the pane
+   rather than pushing it down. The window's own pair of rules, said again for
+   the shape the window did not pick.
+
+   Exclusive with the sidebar rather than merely earlier in the file: a nav that
+   was tapped open and then widened into a margin would otherwise be a list
+   wearing half of each shape. */
+.paned:not(.open) .sections {
+  display: none;
+}
+
+.paned.open:not(.roomy) .sections {
+  display: block;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  /* Over the backdrop it is being held in front of the pane by. */
+  z-index: 1;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.6rem 1rem 0.8rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--edge);
+}
+
+.paned:not(.roomy) .link {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+/* The sidebar, which is what a pane wide enough for a margin gets: the pane caps
+   what it holds at 60rem and centres it, so from 80rem of pane there is 10rem
+   either side — the 8rem the nav wants, a gap, and a rem of paper at the edge.
+
+   Sticky rather than fixed, because the pane is the box that scrolls and a
+   fixed nav would be pinned to the window while the pane moved underneath it.
+   A shell of no height, so the list it holds takes nothing out of the column:
+   the nav sits under the pane's own heading on arrival, exactly as the bar
+   does, and pins itself a rem down from the top edge as the pane goes up. */
+.contents.paned.roomy {
+  position: sticky;
+  top: 1.25rem;
+  right: auto;
+  left: auto;
+  z-index: 2;
+  width: auto;
+  height: 0;
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* There is no bar here, and nothing for a backdrop to be in front of: the list
+   is in the margin already. */
+.paned.roomy .bar,
+.paned.roomy .backdrop {
+  display: none;
+}
+
+/* Out into the margin, hung off the column's own left edge rather than
+   positioned from the pane: the nav is a block of the column, so `right: 100%`
+   is exactly where the column begins and the gap is measured from there. Which
+   means it stays beside the column at every width past 80rem instead of
+   drifting away from it as the pane is dragged wider.
+
+   The pane's height, less the rem above it and one below, so a diff of forty
+   files scrolls its nav rather than running off the bottom. */
+.paned.roomy .sections {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 100%;
+  width: 8rem;
+  max-height: calc(100dvh - 2.5rem);
+  margin-right: 1rem;
+  overflow-y: auto;
+}
+
+/* One line, cut where it runs out of column — the sidebar's own rule, for the same
+   reason. The section it names is given whatever room the switch beside it does not
+   want. */
+.headerWhere {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.headerSection {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+.headerSep {
+  flex: none;
+  color: var(--ink-soft);
+}
+
+.headerName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+/* A path here is set as the Diff sets it, so the two read as the same name. */
+.headerName.path {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.contents ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.section + .section {
+  margin-top: 0.7rem;
+}
+
+/* Indented against a rule, so a file or a Question reads as part of the section
+   above it rather than as another section. */
+.entries {
+  margin-top: 0.2rem;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--edge);
+}
+
+/* One nested line of the nav, which the face on it draws rather than the entry
+   itself. */
+.entry {
+  /* Nothing. See `.path` and `.question`, which are what a line is set in. */
+}
+
+/* A Question's line, set in the page's own face — which is what the nav is set
+   in already, so there is nothing to change. Named all the same: the face is
+   chosen from the line's own data, and a face this module did not name would
+   reach the page as no class at all. */
+.question {
+  /* Nothing. The nav's own type is a Question's type. */
+}
+
+.link {
+  display: block;
+  padding: 0.15rem 0 0.15rem 0.4rem;
+  /* Where the mark goes on the line the reader has reached. Its room is kept on
+     every line whether or not there is one to draw, so a line lighting up moves
+     nothing beside it. */
+  border-left: 2px solid transparent;
+  color: var(--ink-soft);
+  text-decoration: none;
+  /* One line each: the nav is a way around the page, not the page. What runs
+     past the column is cut — a path has already been cut to its filename by the
+     time it gets here, so what is lost is the tail of a Question's words. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.section > .link {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.link:hover,
+.link:focus-visible {
+  color: var(--accent);
+}
+
+/* Where the reader is: the line they have reached, in the accent and marked down
+   its left edge. Marked as well as coloured because hover is the pointer doing
+   something and this is the page saying something, and the two should not read
+   as the same thing. */
+.link.here {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+/* And the section that line is inside, said far more quietly: the mark alone,
+   half there, with the words left exactly as they were. Which part of the page
+   the reader is in is worth saying, but it is not where they are — so it never
+   competes with the line that is. */
+.link.within {
+  border-left-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* The Question's label, in the face the page sets it in, so the eye can run
+   down the labels alone. */
+.label {
+  margin-right: 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 600;
+}
+
+/* A path, set as the Diff sets it, so the two read as the same name. */
+.path .link {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8rem;
+}

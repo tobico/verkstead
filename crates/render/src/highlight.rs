@@ -17,6 +17,13 @@ use syntect::parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet};
 
 /// Prefixed so a scope named after some language's keyword cannot collide with
 /// the page's own class names.
+///
+/// The one kebab-case family the project keeps, and deliberately: every class we
+/// write ourselves is camelCase, but only the `tok-` here is ours — the suffix
+/// is syntect's, generated from a scope name we never see. Renaming those would
+/// mean post-processing generated HTML, which is not worth doing to anybody's
+/// output, so the whole family stays as the library makes it. Mermaid's DOM and
+/// xterm's are the same exception for the same reason.
 const TOKENS: ClassStyle = ClassStyle::SpacedPrefixed { prefix: "tok-" };
 
 /// The class names the stylesheet actually colours, which are also the only ones
