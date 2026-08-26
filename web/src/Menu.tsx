@@ -18,8 +18,20 @@
 //! which is the one thing it cannot work out for itself — and which it needs
 //! wherever a press has done its work, be that in the row itself or in the
 //! answer that came back from it.
+//!
+//! There are two shapes of it and one set of chrome. [`Menu`] is the ordinary
+//! one: a button, and what it drops under itself. [`ContextMenu`] is the same
+//! card opened by a right-click and put where the pointer was — no trigger, no
+//! anchor, and nowhere to give the focus back to. Every other thing a menu is,
+//! the two of them share.
 
-import { Show, createSignal, createUniqueId, onCleanup } from "solid-js";
+import {
+  Show,
+  createSignal,
+  createUniqueId,
+  onCleanup,
+  onMount,
+} from "solid-js";
 import type { JSX } from "solid-js";
 
 import styles from "./Menu.module.css";
@@ -126,3 +138,139 @@ export function Menu(props: {
     </div>
   );
 }
+
+/// The same menu, opened by a right-click rather than by a button of its own.
+///
+/// A context menu is the one dropdown with nothing to hang from: what it is
+/// about is whatever the pointer is over, and where it belongs is where the
+/// pointer was. So the trigger goes, the anchor it hung from goes, and so does
+/// giving the focus back to a button there never was. What is left is
+/// everything else a menu is — the wash over the page, the card it comes down
+/// as, the way out that needs no aim — and none of it is written twice.
+///
+/// A pointer affordance and only that. A touch device has no right-click, and a
+/// long press there already means something else, so nothing here is reachable
+/// from one.
+///
+/// Whether it is open is the caller's, because *which* of its rows was
+/// right-clicked is the caller's: one of these per row would be a component
+/// held open by a page that only ever wants one of them.
+export function ContextMenu(props: {
+  /// Which menu this is, put on the anchor so the caller can size and paint
+  /// what it drops. As [`Menu`]'s, and by the same rules.
+  class: string;
+  /// What a screen reader calls the drop.
+  name?: string;
+  /// Where on the window the pointer was, or `null` while nothing is open.
+  at: { x: number; y: number } | null;
+  /// Said whenever the menu should go: Escape, a press away from it, or a row
+  /// of the caller's that has done its work.
+  close: () => void;
+  /// The rows, as a thunk — built when it opens and thrown away when it closes,
+  /// exactly as [`Menu`]'s are.
+  children: () => JSX.Element;
+}): JSX.Element {
+  // The keyboard's way out. The other one — a press on the page — is the
+  // backdrop's, as it is for every menu.
+  const escape = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape" && props.at) props.close();
+  };
+
+  document.addEventListener("keydown", escape);
+  onCleanup(() => document.removeEventListener("keydown", escape));
+
+  return (
+    <div class={`${styles.menu} ${props.class}`}>
+      {/* Keyed, so a menu opened somewhere else is a new menu: the rows are
+          built on the way open like every other menu's, and where it hangs is
+          settled once, as it is placed. */}
+      <Show when={props.at} keyed>
+        {(at) => (
+          <>
+            <div
+              class={styles.backdrop}
+              aria-hidden="true"
+              onClick={() => props.close()}
+              // A second right-click is a press away from this menu like any
+              // other, and the browser's own menu is not what it is asking for:
+              // the hand is aiming at another card, and what it gets is this
+              // one taken back.
+              onContextMenu={(event) => {
+                event.preventDefault();
+                props.close();
+              }}
+            />
+            <Pointed at={at} name={props.name}>
+              {props.children()}
+            </Pointed>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+/// The drop, put where the pointer was and kept inside the window.
+///
+/// Fixed to the window rather than positioned against anything on the page,
+/// because the coordinates a pointer event carries are the window's own.
+///
+/// Placed at the pointer on the first paint, there being nothing to measure
+/// yet, and inside the window's edges the moment there is — and again whenever
+/// what it is holding changes size, which is not a rare case: a menu whose rows
+/// are still being read is a line of text tall, and the rows that land in its
+/// place are not. A right-click low down the sidebar would otherwise drop a menu
+/// mostly below the fold, on a page that does not scroll to reach it.
+function Pointed(props: {
+  at: { x: number; y: number };
+  name?: string;
+  children: JSX.Element;
+}): JSX.Element {
+  let drop!: HTMLDivElement;
+
+  const [put, setPut] = createSignal(props.at);
+
+  onMount(() => {
+    const place = () => {
+      const box = drop.getBoundingClientRect();
+
+      setPut({
+        x: Math.max(
+          EDGE,
+          Math.min(props.at.x, window.innerWidth - box.width - EDGE),
+        ),
+        y: Math.max(
+          EDGE,
+          Math.min(props.at.y, window.innerHeight - box.height - EDGE),
+        ),
+      });
+    };
+
+    place();
+
+    // And again each time the card changes size. Guarded rather than assumed:
+    // the test environment lays nothing out and has no observer to give, and a
+    // menu placed once is what it had before this line anyway.
+    if (typeof ResizeObserver === "undefined") return;
+
+    const watching = new ResizeObserver(place);
+    watching.observe(drop);
+    onCleanup(() => watching.disconnect());
+  });
+
+  return (
+    <div
+      ref={drop}
+      class={`${styles.drop} ${styles.pointed}`}
+      role="menu"
+      aria-label={props.name}
+      style={{ left: `${put().x}px`, top: `${put().y}px` }}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/// How close to the window's edge a context menu may be put, in pixels. Enough
+/// that the card's shadow has somewhere to fall.
+const EDGE = 8;

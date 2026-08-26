@@ -24,6 +24,12 @@
 //! server on every read, which is what makes the order survive a reload, a
 //! restart and a second device without any of the three being a case.
 //!
+//! A card also answers a right-click with what there is to do about the
+//! Conversation it stands for — the same rows the ⋯ at the head of the
+//! Conversation pane would offer it, drawn by the same component and acting on
+//! the card that was pressed rather than on whatever is open. Both menus are
+//! `Actions.tsx`, which is where the rows and everything behind them live.
+//!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
 //! the head of the pane rather than a page of their own to find.
@@ -60,6 +66,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { CardActions } from "./Actions";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -94,6 +101,15 @@ export function Conversations(props: {
 
   // Which row is under the hand, or null when none is.
   const [held, setHeld] = createSignal<number | null>(null);
+
+  // Which card was right-clicked and where the pointer was, or null while no
+  // context menu is open. A signal because the menu is drawn from it, unlike
+  // the press below.
+  const [pointed, setPointed] = createSignal<{
+    id: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // The list to draw: the server's, in the order being dragged where there is
   // one. A Conversation that has appeared since the drag began is not in that
@@ -167,6 +183,12 @@ export function Conversations(props: {
   // the pointer is up, and a card dragged into place should not open as well.
   let reordered = false;
 
+  // And whether the press this gesture began with was a finger rather than a
+  // mouse. Kept past the press itself, because what it answers arrives late: a
+  // phone fires `contextmenu` from a long press, and telling that from a
+  // right-click is the one thing the event cannot say for itself.
+  let fromTouch = false;
+
   /// The card lifts: the order stops being the server's for as long as the hand
   /// is on it.
   const lift = (at: NonNullable<typeof press>) => {
@@ -191,6 +213,11 @@ export function Conversations(props: {
   /// A press begins somewhere on a card. Which of the three things it is — a
   /// click, a scroll or a drag — is settled by what the hand does next.
   const grab = (event: PointerEvent, id: number) => {
+    // Which hand this is, before anything is decided about the press: a
+    // right-click leaves at the next line, and the `contextmenu` behind it is
+    // the one thing that still needs to know.
+    fromTouch = event.pointerType !== "mouse";
+
     // The primary button, a finger or a pen. A right-click is not a drag.
     if (event.button !== 0) return;
 
@@ -284,6 +311,27 @@ export function Conversations(props: {
     props.open(id);
   };
 
+  /// A right-click asks what there is to do about the Conversation the card
+  /// stands for, which is the fourth thing a press on a card can be and the one
+  /// the hand can only make with a mouse. The browser's own menu is not what it
+  /// is asking for, so that goes.
+  ///
+  /// The card is not opened and the order is not touched: `grab` above takes
+  /// the primary button and nothing else, so a right-click never begins a drag,
+  /// and a right-click fires no click for `opened` to answer.
+  ///
+  /// A phone fires this from a long press, which is already how a card is picked
+  /// up to be dragged — so a press that began under a finger is left entirely
+  /// alone, the browser's own answer to it included. What tells the two apart is
+  /// the pointer that started the gesture rather than this event, which carries
+  /// nothing about the hand that made it.
+  const ask = (event: MouseEvent, id: number) => {
+    if (fromTouch) return;
+
+    event.preventDefault();
+    setPointed({ id, x: event.clientX, y: event.clientY });
+  };
+
   /// And the same move made from the keyboard, which is the whole of what a card
   /// has to offer somebody who is not dragging anything: one row up, one row
   /// down, and the list saved each time as a drag saves it.
@@ -350,6 +398,7 @@ export function Conversations(props: {
                   drag={drag}
                   drop={drop}
                   step={step}
+                  ask={ask}
                 />
               )}
             </For>
@@ -364,6 +413,13 @@ export function Conversations(props: {
           The order could not be saved: {place.error?.message}
         </ErrorLine>
       </Show>
+
+      {/* What a right-click on a card asks for. One for the whole list rather
+          than one per row: it is drawn where the pointer was rather than where
+          the card is, so there is nothing about it that belongs to a row — and
+          the steer it can open outlives the menu, which a row being dragged
+          about underneath it would not. */}
+      <CardActions pointed={pointed()} close={() => setPointed(null)} />
     </>
   );
 }
@@ -765,6 +821,11 @@ function spoken(entry: ConversationEntry): string {
 /// the gestures apart is now the hand rather than the place — see `grab`, `drag`
 /// and `drop` above — and the arrow keys do from the keyboard what the grip's
 /// did.
+///
+/// And it answers a right-click with what there is to do about the Conversation
+/// — see `ask` above. A mouse's gesture and only a mouse's: a finger has no
+/// right-click, and the long press it might have been is already how a card is
+/// picked up.
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
@@ -774,6 +835,7 @@ function ConversationRow(props: {
   drag: (event: PointerEvent) => void;
   drop: () => void;
   step: (id: number, by: number) => void;
+  ask: (event: MouseEvent, id: number) => void;
 }): JSX.Element {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Closed";
@@ -805,6 +867,7 @@ function ConversationRow(props: {
         onPointerMove={props.drag}
         onPointerUp={props.drop}
         onPointerCancel={props.drop}
+        onContextMenu={(event) => props.ask(event, props.entry.id)}
         onKeyDown={(event) => {
           if (event.key === "ArrowUp") {
             event.preventDefault();

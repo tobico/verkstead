@@ -53,6 +53,10 @@ import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
+// What can be done to a Conversation as a whole, both ways: the hashed names
+// the menu's rows are queried by, and the words its refusals are said in.
+import { STOP_REFUSAL } from "../src/workbench/Actions";
+import actions from "../src/workbench/Actions.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
@@ -92,12 +96,7 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
-import {
-  CLAMPED_LINES,
-  RESUME_REFUSAL,
-  STOP_REFUSAL,
-  SWIPE,
-} from "../src/workbench/Timeline";
+import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
@@ -231,8 +230,8 @@ function frame(container: ParentNode): HTMLElement {
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`));
-  return drawn(container, `.${timeline.conversationActions} > .${dropdown.drop}`);
+  fireEvent.click(await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`));
+  return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
 /// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
@@ -1168,6 +1167,231 @@ describe("the order the human puts the sidebar in", () => {
       screen.getByText(/The order could not be saved/, { exact: false }),
     );
     expect(await order(container)).toEqual(["first", "second", "third"]);
+  });
+});
+
+/// A right-click on a card, which is the fourth thing a press on one can be:
+/// what there is to do about the Conversation it stands for, in place, without
+/// opening it first.
+///
+/// The rows are the Conversation pane's own — see \`Actions.tsx\`, which is the
+/// one component both menus are drawn through — so what is asked here is that
+/// the sidebar reaches them at all, that they are about the card that was
+/// pressed rather than about whatever is open, and that a finger is left with
+/// the gesture it already had.
+describe("what a right-click on a card offers", () => {
+  /// The drafting conversation open, and the grilling one a row of the sidebar
+  /// — two different Conversations, which is the whole point of the menu.
+  function theSidebarOver(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, ready_to_stop: true, working: true }),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The card of a row, which is the one target a row has.
+  function card(row: HTMLElement): HTMLElement {
+    return row.querySelector<HTMLElement>(`.${sidebar.open}`)!;
+  }
+
+  /// The grilling conversation's row, which is the one this file's fixtures put
+  /// in the sidebar beside the open one.
+  async function grillingCard(container: ParentNode): Promise<HTMLElement> {
+    const rows = await cards(container);
+    const row = rows.find(
+      (card) => card.dataset.id === String(GRILLING.id),
+    );
+    expect(row, "the fixture sidebar should hold the grilling conversation")
+      .toBeTruthy();
+    return card(row!);
+  }
+
+  /// Right-click a card at a place on the window, and say whether the browser's
+  /// own menu was taken off the press.
+  function rightClick(on: HTMLElement, x = 120, y = 200): boolean {
+    return !fireEvent.contextMenu(on, { clientX: x, clientY: y });
+  }
+
+  /// What it drops, or nothing where nothing was right-clicked. Looked for in
+  /// the sidebar, the Conversation's own ⋯ being drawn through the same
+  /// component and painted by the same class.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+  }
+
+  /// The same, waited for.
+  async function opened(container: ParentNode): Promise<HTMLElement> {
+    return drawn(
+      container,
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+  }
+
+  it("drops nothing until a card is right-clicked", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await cards(container);
+
+    expect(drop(container)).toBeNull();
+  });
+
+  /// The rows the Conversation pane would offer that same Conversation, in the
+  /// same order — which is what having one component for both means.
+  it("offers exactly what the pane's own menu would", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+
+    // The card carries seven fields and the rows need a good deal more than
+    // seven, so the Conversation is read before there is anything to draw.
+    const menu = await opened(container);
+    await drawn(menu, `.${actions.close}`);
+
+    expect(
+      [...menu.querySelectorAll("button")].map((button) => button.className),
+    ).toEqual([actions.stop, actions.forceStop, actions.steer, actions.close]);
+  });
+
+  /// Which is the whole reason it is worth having: the list is where the human
+  /// is when they want to end something that is not what they are reading.
+  it("acts on the card that was pressed, not on the one that is open", async () => {
+    const fetching = theSidebarOver(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("Closed" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    fireEvent.click(await drawn(await opened(container), `.${actions.close}`));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/close`),
+      ).toEqual({}),
+    );
+    expect(
+      askedFor(fetching, `/api/ui/conversations/${OPEN.id}/close`),
+      "the conversation that is open was not the one pressed",
+    ).toBe(0);
+  });
+
+  /// Where the pointer was, because that is the whole of what a context menu
+  /// knows about where it belongs.
+  it("comes down where the pointer was", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container), 140, 260);
+
+    const menu = await opened(container);
+    expect(menu.style.left).toBe("140px");
+    expect(menu.style.top).toBe("260px");
+  });
+
+  /// The browser's own menu is not what the press is asking for.
+  it("takes the browser's menu off the press", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    expect(rightClick(await grillingCard(container))).toBe(true);
+  });
+
+  /// A right-click is not a click and not the start of a drag — see `grab` in
+  /// `Conversations.tsx`, which takes the primary button and nothing else — so
+  /// the Conversation under it is neither opened nor moved.
+  it("neither opens the conversation nor moves it", async () => {
+    const fetching = theSidebarOver();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    await opened(container);
+
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "nothing was dragged, so there is nothing to save",
+      ).toBe(0);
+  });
+
+  /// A finger has no right-click, and the long press it might have been is
+  /// already how a card is picked up to be dragged. So a phone is left exactly
+  /// where it was, and the ⋯ on the Conversation is the way to all of this.
+  it("leaves a finger the gesture it already had", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const held = await grillingCard(container);
+    fireEvent.pointerDown(held, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    // Longer than a card takes to lift — see `LIFT` in `Conversations.tsx`.
+    await new Promise((done) => setTimeout(done, 450));
+
+    expect(drop(container), "a held card, not a menu").toBeNull();
+    expect(
+      held.closest(`.${sidebar.conversationRow}`)!.classList.contains(sidebar.held!),
+    ).toBe(true);
+
+    fireEvent.pointerUp(held, { pointerId: 1 });
+  });
+
+  /// A phone fires `contextmenu` from that same long press, which is the one
+  /// way this could have reached a finger. The press that started the gesture
+  /// is what says which hand it was — the event itself says nothing — and a
+  /// finger's is left alone, the browser's own answer to it included.
+  it("opens nothing from a phone's long press", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const held = await grillingCard(container);
+    fireEvent.pointerDown(held, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    expect(
+      rightClick(held),
+      "the browser's own answer to a long press is the browser's",
+    ).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    fireEvent.pointerUp(held, { pointerId: 1 });
+  });
+
+  /// The way out that needs no aim, which every menu has because it is the one
+  /// component — see `tests/menus.test.tsx`, where the rest of that is asked.
+  it("goes on a press away from it", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    await opened(container);
+
+    fireEvent.click(
+      container.querySelector(
+        `.${shell.conversationsPane} .${actions.conversationActions} .${dropdown.backdrop}`,
+      )!,
+    );
+
+    await waitFor(() => expect(drop(container)).toBeNull());
   });
 });
 
@@ -4422,16 +4646,16 @@ describe("closing a conversation", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`);
+    await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.
-    expect(container.querySelector(`.${timeline.close}`)).toBeNull();
+    expect(container.querySelector(`.${actions.close}`)).toBeNull();
 
     const menu = await openActions(container);
-    expect(menu.querySelector(`.${timeline.close}`)).toBeTruthy();
-    expect(container.querySelector(`.${paneHead.head} .${timeline.close}`)).toBe(
-      menu.querySelector(`.${timeline.close}`),
+    expect(menu.querySelector(`.${actions.close}`)).toBeTruthy();
+    expect(container.querySelector(`.${paneHead.head} .${actions.close}`)).toBe(
+      menu.querySelector(`.${actions.close}`),
     );
   });
 
@@ -4446,7 +4670,7 @@ describe("closing a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     await waitFor(() =>
       expect(
@@ -4476,7 +4700,7 @@ describe("closing a conversation", () => {
     await openActions(container);
 
     await waitFor(() => screen.getByText("This conversation has been closed."));
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.close}`)).toBeNull();
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.close}`)).toBeNull();
   });
 
   it("says when the worktree could not be removed", async () => {
@@ -4490,7 +4714,7 @@ describe("closing a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     await waitFor(() => screen.getByText(/could not be removed/));
   });
@@ -4506,7 +4730,7 @@ describe("archiving a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const menu = await openActions(container);
-    expect(menu.querySelector(`.${timeline.archive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
   });
 
   it("stands where close was, on one that has been closed", async () => {
@@ -4514,8 +4738,8 @@ describe("archiving a conversation", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
-    await waitFor(() => expect(menu.querySelector(`.${timeline.archive}`)).toBeTruthy());
-    expect(menu.querySelector(`.${timeline.close}`)).toBeNull();
+    await waitFor(() => expect(menu.querySelector(`.${actions.archive}`)).toBeTruthy());
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
   });
 
   it("posts to the conversation's own archive route", async () => {
@@ -4530,7 +4754,7 @@ describe("archiving a conversation", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.archive}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/archive`)).toEqual({}),
@@ -4563,7 +4787,7 @@ describe("archiving a conversation", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.archive}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
 
     await waitFor(() => screen.getByText(/nothing to put away/));
   });
@@ -4585,9 +4809,9 @@ describe("unarchiving a conversation", () => {
 
     const menu = await openActions(container);
     await waitFor(() =>
-      expect(menu.querySelector(`.${timeline.unarchive}`)).toBeTruthy(),
+      expect(menu.querySelector(`.${actions.unarchive}`)).toBeTruthy(),
     );
-    expect(menu.querySelector(`.${timeline.archive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
   });
 
   it("posts to the conversation's own unarchive route", async () => {
@@ -4602,7 +4826,7 @@ describe("unarchiving a conversation", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.unarchive}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/unarchive`)).toEqual({}),
@@ -4640,7 +4864,7 @@ describe("unarchiving a conversation", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.unarchive}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
 
     await waitFor(() => screen.getByText("This conversation is gone."));
   });
@@ -4739,7 +4963,7 @@ describe("a second round", () => {
     expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
 
     await openActions(container);
-    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
+    await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
   });
 });
 
@@ -4777,10 +5001,10 @@ describe("stopping a conversation", () => {
     );
 
     expect(offered).toEqual([
-      timeline.stop,
-      timeline.forceStop,
-      timeline.steer,
-      timeline.close,
+      actions.stop,
+      actions.forceStop,
+      actions.steer,
+      actions.close,
     ]);
 
     expect(
@@ -4808,9 +5032,9 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`);
+    await drawn(container, `.${actions.conversationActions} .${actions.stop}`);
     expect(
-      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
+      container.querySelector(`.${actions.conversationActions} .${actions.forceStop}`),
     ).toBeNull();
   });
 
@@ -4822,10 +5046,10 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.close}`);
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
+    await drawn(container, `.${actions.conversationActions} .${actions.close}`);
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.stop}`)).toBeNull();
     expect(
-      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
+      container.querySelector(`.${actions.conversationActions} .${actions.forceStop}`),
     ).toBeNull();
   });
 
@@ -4843,7 +5067,7 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
     await waitFor(() => expect(sent(fetching, STOPPING)).toEqual({}));
   });
@@ -4857,7 +5081,7 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
     fireEvent.click(
-      await drawn(container, `.${timeline.conversationActions} .${timeline.forceStop}`),
+      await drawn(container, `.${actions.conversationActions} .${actions.forceStop}`),
     );
 
     await waitFor(() => expect(sent(fetching, AT_ONCE)).toEqual({}));
@@ -4879,9 +5103,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const waiting = await drawn(container, `.${timeline.conversationActions} .${timeline.waiting}`);
+    const waiting = await drawn(container, `.${actions.conversationActions} .${actions.waiting}`);
 
     expect(waiting.textContent).toContain("finishes its task first");
   });
@@ -4900,9 +5124,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const refused = await drawn(container, `.${timeline.conversationActions} .${notices.error}`);
+    const refused = await drawn(container, `.${actions.conversationActions} .${notices.error}`);
 
     expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(refused.textContent).toContain("Resume");
@@ -4925,7 +5149,7 @@ const OVER_NOTHING = json({ Opened: { working: false } } satisfies SteerOpened);
 /// not inside the page's own tree.
 async function openSteer(container: ParentNode): Promise<HTMLElement> {
   const menu = await openActions(container);
-  fireEvent.click(await drawn(menu, `.${timeline.steer}`));
+  fireEvent.click(await drawn(menu, `.${actions.steer}`));
   return drawn(document.body, `.${steerModal.steerConversation}`);
 }
 
@@ -4948,8 +5172,8 @@ describe("steering a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
+    await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.stop}`)).toBeNull();
   });
 
   /// The click is a press before it is a modal: it stops the drive, so nothing

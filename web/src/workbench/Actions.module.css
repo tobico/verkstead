@@ -1,0 +1,86 @@
+/* What can be done to a Conversation as a whole — see `Actions.tsx`, which
+   draws these rows in two menus: the ⋯ at the head of the Conversation pane,
+   and the right-click on a card in the sidebar.
+
+   One module for both, which is the point of there being one component: the
+   rows are the same rows wherever they are opened from, so the card they come
+   down as is one card rather than two painted alike. The chrome underneath —
+   the anchor, the wash, the shadow, the row's own treatment — is
+   `Menu.module.css`, and what is here is only this menu's own paint.
+
+   One block per action, so that a button and the line saying what it does read
+   as one thing and the next action is plainly a different one. */
+.action + .action {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--edge);
+}
+
+/* The only rows of a menu that keep an outline: each of these ends a run, and a
+   press that ends something should not read as the next line of prose. */
+.stop,
+.forceStop,
+.close {
+  display: inline-block;
+  width: auto;
+  padding: 0.4rem 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
+/* Steering is a menu row like the three above and is drawn like every other
+   one, from `.drop button` in `Menu.module.css`. It keeps no outline of its
+   own: the rule above is for the presses that end a run, and this one moves
+   the work rather than ending it. Named here so the row can be found. */
+.steer {
+}
+
+/* Archiving is a row like steering and drawn like every other one, from `.drop
+   button` in `Menu.module.css`. No outline of its own: it ends nothing — the
+   run it belonged to ended when the conversation was closed — and it is undone
+   by putting the conversation back on the list. Named here so the row can be
+   found. */
+.archive {
+}
+
+/* And the row that stands in its place on a conversation already put away,
+   drawn the same way for the same reason: it is the reversal of a press that
+   ended nothing. Named here so the row can be found. */
+.unarchive {
+}
+
+/* The one that cannot be undone, in the colour of what cannot be undone. Both
+   stops are reversed by a resume, and read as the ordinary buttons they are. */
+.close {
+  color: #b3382c;
+  border-color: #b3382c;
+}
+
+/* The ⋯ at the head of the pane is drawn by the menu itself — see `mark` in
+   `Menu.module.css` — so nothing of the button is here, and the right-click has
+   no button at all. What is left of this menu's own paint is the card it comes
+   down as, which is the same card either way it was opened.
+
+   Room under each action for the sentence saying what it does, which is more
+   than a row of a menu holds — so this one is padded as a card rather than as a
+   list. */
+.conversationActions > [role="menu"] {
+  width: 17rem;
+  padding: 0.75rem;
+}
+
+/* And a refusal inside the drop, a size down on the ones out on the page: the
+   menu is a card of its own and the sentence under each button sets the type
+   it is read at. */
+.conversationActions .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+}
+
+/* What a stop that is waiting for a task to finish says while it waits. */
+.conversationActions .waiting {
+  color: var(--ink);
+}

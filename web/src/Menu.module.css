@@ -10,7 +10,7 @@
    caller rather than here — it paints its trigger and its drop from its own
    module, reaching them by the elements they are: the trigger is the one button
    the menu holds directly, and the drop is the one thing in it with a menu's
-   role. `set/Standing`, `workbench/Conversations` and `workbench/Timeline` are
+   role. `set/Standing`, `workbench/Conversations` and `workbench/Actions` are
    the three that paint anything, and by now only their drops. */
 
 /* The anchor everything below hangs from. */
@@ -80,6 +80,18 @@
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
   box-shadow: var(--lift);
+}
+
+/* The same card, put where the pointer was rather than under a trigger: a menu
+   opened by a right-click has no button to hang from. Fixed to the window,
+   because the coordinates a pointer event carries are the window's own — and
+   with both of the edges the ordinary drop hangs by given up, since `left` and
+   `top` arrive from `Pointed` in `Menu.tsx` instead. Where the pointer was is
+   the one thing about a menu no stylesheet can know. */
+.drop.pointed {
+  position: fixed;
+  top: auto;
+  right: auto;
 }
 
 /* Every row of every menu: drawn as the text it is rather than as a control,
