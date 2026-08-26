@@ -234,7 +234,8 @@ pub(crate) async fn still_going(state: &AppState, conversation_id: i64) -> bool 
 ///
 /// A stop rather than a line of its own, because that is exactly what this is: a
 /// run that has stopped on something Verkstead cannot resolve itself. Resume
-/// once `gh` is logged in, or open the pull request by hand, or close the Conversation.
+/// once `gh` is logged in, or open the pull request by hand, or close the
+/// Conversation.
 ///
 /// [`store::Decision::Deliberate`]: the finish step ran and left no pull request, so
 /// what is wrong is out here rather than in a driver that went away, and a

@@ -41,10 +41,9 @@
 //! worktree holds one agent, so a target something runs in ends it by starting:
 //! the session this steer launches takes the worktree over, at once where it can
 //! and once the session in front of it has finished where it cannot — a review
-//! waiting on an ask. **Done** launches nothing, so there it
-//! runs to its own end and the box is the only thing that would stop it. The box
-//! is drawn only where the click found a session running — there is otherwise
-//! nothing to interrupt.
+//! waiting on an ask. **Done** launches nothing, so there it runs to its own end
+//! and the box is the only thing that would stop it. The box is drawn only where
+//! the click found a session running — there is otherwise nothing to interrupt.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";

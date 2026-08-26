@@ -819,8 +819,8 @@ async fn stopped(state: &AppState, conversation_id: i64, how: &str, writing: i64
 /// do about it is answerable without opening the Set again.
 ///
 /// [`store::Decision::Deliberate`]: what to do is Resume, which is the doing over
-/// again in one session, or the human doing it themselves, or closing the Conversation
-/// with the branch exactly as the session left it.
+/// again in one session, or the human doing it themselves, or closing the
+/// Conversation with the branch exactly as the session left it.
 ///
 /// `how` is how the session ended where it ended badly, and `writing` the Event
 /// it was printing into — both absent for a session that saw itself out and

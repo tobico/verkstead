@@ -134,10 +134,10 @@ fn the_viewers_types_are_written_from_these() {
     PullRequestDetails::export_all(&config).unwrap();
 
     // The press that gets a stopped Conversation going again, which takes no
-    // request shape at all: what to
-    // start again is recomputed from the lifecycle and the branch, so all there
-    // is to send is which Conversation. What comes back is the outcome — a
-    // start, or the named reason there was nothing to start.
+    // request shape at all: what to start again is recomputed from the
+    // lifecycle and the branch, so all there is to send is which Conversation.
+    // What comes back is the outcome — a start, or the named reason there was
+    // nothing to start.
     Resumed::export_all(&config).unwrap();
 
     // And the two presses that stop it, which take no request shape either and

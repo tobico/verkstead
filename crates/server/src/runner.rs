@@ -725,9 +725,10 @@ async fn follow_inline(
 ///
 /// **A driver rather than an errand beside the work.** The registration it is
 /// handed says the Conversation is being driven for as long as this runs, so
-/// nothing sweeps it as standing still; it is judged by the rules every other session here is
-/// judged by, so one that ends badly stops the Conversation with the ordinary
-/// Notice; and what follows a clean finish is [`onwards`] rather than nothing.
+/// nothing sweeps it as standing still; it is judged by the rules every other
+/// session here is judged by, so one that ends badly stops the Conversation
+/// with the ordinary Notice; and what follows a clean finish is [`onwards`]
+/// rather than nothing.
 ///
 /// **Ended on committed plus quiet**, which is a fix session's rule rather than
 /// a backlog step's, and for its reason: an instruction can ask for anything, so

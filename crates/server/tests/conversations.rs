@@ -1886,7 +1886,7 @@ async fn a_drafting_conversation_can_be_closed() {
     assert!(!view.ready_to_grill);
 }
 
-/// A worktree the human deleted by hand is still an close that works: what was
+/// A worktree the human deleted by hand is still a close that works: what was
 /// asked for is that the directory be gone, and it is.
 #[tokio::test]
 async fn closing_a_conversation_whose_worktree_has_already_gone_works() {

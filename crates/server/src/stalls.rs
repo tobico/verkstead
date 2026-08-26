@@ -22,11 +22,12 @@
 //! there was no session there at all.
 //!
 //! **When it looks.** At startup, and every [`crate::Pace::stalls`] while the
-//! server runs. Startup is the one that matters least, and deliberately: no driver survives the process, so a server
-//! coming back holds no registrations at all — and what puts that right is the
-//! restart's own resume, which runs first and takes up everything it can. See
-//! [`crate::resume::at_startup`] and [`sweeping`], which waits for it. What is
-//! left over when the sweep looks is what genuinely has nobody.
+//! server runs. Startup is the one that matters least, and deliberately: no
+//! driver survives the process, so a server coming back holds no registrations
+//! at all — and what puts that right is the restart's own resume, which runs
+//! first and takes up everything it can. See [`crate::resume::at_startup`] and
+//! [`sweeping`], which waits for it. What is left over when the sweep looks is
+//! what genuinely has nobody.
 //!
 //! And never, on a server that runs no sessions: there, nobody is what every
 //! Conversation mid-run has and always will have, so the sweep has nothing to

@@ -11,8 +11,8 @@
 //! Read now rather than off whatever stopped. A stop may be answered the next
 //! morning, and a Conversation moves on in the meantime — the human works the
 //! Worktree by hand, a session they steered lands a commit, the backlog it
-//! stopped in the middle of is finished with. The step that failed is not the question; what
-//! there is left to do is.
+//! stopped in the middle of is finished with. The step that failed is not the
+//! question; what there is left to do is.
 //!
 //! **It is never silent.** Either something starts — which needs no
 //! announcement, the session showing up on the Timeline — or it refuses by
