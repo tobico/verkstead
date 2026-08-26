@@ -438,6 +438,7 @@ export function Timeline(props: {
       <ol class={styles.timeline}>
         <For each={props.conversation.timeline}>
           {(event, index) => (
+            <Show when={drawable(event)}>
             <li class={styles.timelineEvent}>
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
@@ -590,6 +591,7 @@ export function Timeline(props: {
                 </Match>
               </Switch>
             </li>
+            </Show>
           )}
         </For>
       </ol>
@@ -1142,12 +1144,36 @@ function PullRequest(props: {
   );
 }
 
+/// Whether there is a card to draw at a row of the record.
+///
+/// True of every kind but the two lists, which are the only Events with no
+/// content of their own: what is drawn at one is the worktree read live, and a
+/// worktree that has been taken away — which is every closed conversation —
+/// leaves the moment on the record with nothing to show for it.
+///
+/// The row goes with the card rather than standing empty. The record is a
+/// column with a rem between its rows, so a row with nothing in it is not
+/// nothing: it is two rems of blank paper where the backlog landed, which reads
+/// as something missing rather than as something that never had a card.
+function drawable(event: TimelineEvent): boolean {
+  if ("TaskList" in event) {
+    return event.TaskList.list !== null;
+  }
+
+  if ("StageList" in event) {
+    return event.StageList.roadmaps.length > 0;
+  }
+
+  return true;
+}
+
 /// The backlog on the record, at the row that says it landed on the branch.
 ///
 /// The same card the pinned block holds, and the same reading behind both — the
 /// server hands the one it took over twice. Nothing at all where there is
 /// nothing left to read: a worktree that has been taken away leaves the moment
-/// on the record with no list to show for it.
+/// on the record with no list to show for it, and [`drawable`] above takes the
+/// row with it.
 function TaskListRow(props: {
   reached: TaskListReached;
   selected: boolean;

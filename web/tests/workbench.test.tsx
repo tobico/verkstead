@@ -7023,8 +7023,10 @@ describe("the pinned task list", () => {
   });
 
   /// The reading is the worktree's, and a worktree can be taken away. The row
-  /// stays — it is the record of a moment, and the moment happened — with no
-  /// card to draw at it.
+  /// on the record stays — it is a moment that happened — but nothing is drawn
+  /// at it, the entry included: the record is a column with a rem between its
+  /// entries, so an entry with nothing in it is two rems of blank paper where
+  /// the backlog landed rather than nothing at all.
   it("draws nothing at that row once there is no backlog left to read", async () => {
     theTasked({
       pinned: [],
@@ -7039,6 +7041,12 @@ describe("the pinned task list", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(container.querySelector(`.${timeline.taskList}`)).toBeNull();
+
+    // And no empty entry left behind where the card would have been: one entry
+    // per event with something to draw, which is every event but this one.
+    expect(
+      container.querySelectorAll(`.${timeline.timelineEvent}`),
+    ).toHaveLength(TASKED.timeline.length - 1);
   });
 
   /// Nothing pins or unpins one: the set is fixed, so there is no control for
@@ -7486,7 +7494,9 @@ describe("the pinned stage list", () => {
   });
 
   /// Read off the worktree like the backlog's, so a worktree that has gone
-  /// leaves the row with no card to draw at it.
+  /// leaves the row with no card to draw at it — and no entry on the record
+  /// either, for the backlog's reason: an empty one is a gap rather than
+  /// nothing.
   it("draws nothing at that row once there is no roadmap left to read", async () => {
     theStaged({
       pinned: [],
@@ -7501,6 +7511,10 @@ describe("the pinned stage list", () => {
     await drawn(container, `.${timeline.timeline}`);
 
     expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
+
+    expect(
+      container.querySelectorAll(`.${timeline.timelineEvent}`),
+    ).toHaveLength(STAGED.timeline.length - 1);
   });
 
   /// What Verkstead did on its own account while nobody was watching — here,
