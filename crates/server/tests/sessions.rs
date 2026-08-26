@@ -4199,6 +4199,14 @@ const REVIEW_THEN_VANISH: &str = "    SAYING='reading the branch'\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'that is what I would have fixed\\n'";
 
+/// One that waits for the answers and then falls over, which is a session that
+/// took what it was going to do about them with it.
+const REVIEW_THEN_DIE_ON_THE_ANSWERS: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'gh: the connection dropped\\n'\n    \
+     exit 1";
 /// One that finds nothing, says so as the last thing it prints, and stops.
 const REVIEW_AND_FIND_NOTHING: &str =
     "    printf 'I read the whole branch and found nothing worth raising\n'";
@@ -5081,16 +5089,19 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     );
 }
 
-/// And one that comes back up over a review whose findings *were* answered picks
-/// the doing up itself, without asking anybody anything.
+/// And one that comes back up over a review whose findings *were* answered stops
+/// the run just the same, rather than picking the doing up off what was picked.
 ///
-/// The decisions are made and on the record — the findings the human accepted are
-/// on the Set and their words are on the Response — so what the lost session took
-/// with it is only the carrying out. That is the same one-session-for-the-lot the
-/// review would have done and the same one a retried Interruption runs, and there
-/// is nothing here to stop the run over.
+/// The propose-then-fix shape has one session hold the whole of a review, and a
+/// session lives and dies with the process that started it however far through
+/// it was. What the answers say is what the human decided; how much of it the
+/// lost session had already carried out is beyond asking, and nothing reads a
+/// record of the findings to guess. So the run stops, nothing is dispatched, and
+/// the press is the branch read again by a session as fresh as the first — which
+/// raises whatever is still worth raising and nothing that has since been put
+/// right.
 #[tokio::test]
-async fn a_restart_over_an_answered_review_lands_the_fixes_without_asking_again() {
+async fn a_restart_over_an_answered_review_stops_the_run_rather_than_landing_anything() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
@@ -5120,62 +5131,51 @@ async fn a_restart_over_an_answered_review_lands_the_fixes_without_asking_again(
     // And the process that was going to read those answers goes away.
     let _restarted = fixture.restarted(&stub, PULL_REQUEST).await;
 
-    let told = until_written(&dispatched).await;
+    let stopped = fixture.stopped().await;
 
+    assert!(
+        stopped.html.contains("what the review found"),
+        "the stop is named as the half that failed: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("Resuming reads the branch again"),
+        "and says what going again means: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "a review nothing saw the end of settles nothing",
+    );
     assert_eq!(
-        prompts(&told).len(),
-        1,
-        "one session for the lot of them, rather than one per finding: {told}",
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human",
     );
     assert!(
-        told.contains("Reset the counter as the window rolls")
-            && told.contains("Keep the signature."),
-        "handed the accepted finding and what they said beside it: {told}",
-    );
-    assert!(
-        !told.contains("Collapse the two clocks"),
-        "and not the one they declined: {told}",
-    );
-
-    let deadline = Instant::now() + PATIENCE;
-    while !review_settled(&fixture).await {
-        assert!(
-            Instant::now() < deadline,
-            "the fixes landed and the review never settled",
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-
-    let view = fixture.view().await;
-
-    assert!(
-        notices(&view).is_empty(),
-        "nothing stopped over work the human had already decided: {:?}",
-        notices(&view),
+        !dispatched.exists(),
+        "with nothing dispatched off what they picked: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
     );
     assert_eq!(
         prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
         1,
-        "and nothing read the branch a second time: the deciding was over",
+        "and nothing read the branch behind the stop: going again is the human's \
+         press, which is what the test below watches",
     );
 }
 
-/// A review that was answered and never acted on does not settle: what the human
-/// approved cannot go quietly.
+/// A review session that ends having landed none of what the human accepted
+/// settles all the same: what it did with the answers is its own to report.
 ///
-/// The failure this closes is the one the whole propose-then-fix shape opens: the
-/// session that asked is the session that fixes, so a session that dies between
-/// the Response and its push takes the approved fixes with it — and a wrap-up
-/// that settled there would reach Done with them gone and nothing saying so. The
-/// record is what says otherwise: the findings they accepted are on the Set, and
-/// a branch with no commit since their answers is the doing never having
-/// happened.
-///
-/// The retry is that doing and nothing else — one session, handed every accepted
-/// finding at once with what the human said beside each. Nothing is asked again,
-/// because nothing is left to decide.
+/// The record could say otherwise — the findings they accepted are on the Set,
+/// and there is no commit on the branch since — and it is deliberately not
+/// asked. The session read the branch, put what it found, was answered and ran
+/// to the end of what it had to say; a Verkstead that audited the branch against
+/// the picks would be second-guessing the only participant that was there, and
+/// stopping the run over a fix the session decided against on second look.
 #[tokio::test]
-async fn approved_fixes_that_never_landed_stop_the_run_and_are_fixed_on_a_retry() {
+async fn a_review_that_landed_nothing_still_settles_on_its_session_ending() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
@@ -5190,8 +5190,90 @@ async fn approved_fixes_that_never_landed_stop_the_run_and_are_fixed_on_a_retry(
     worked_to_empty(&fixture).await;
     until_written(&reviews).await;
 
-    // The findings go up, the human decides, and the session goes without
-    // landing a thing.
+    // One accepted, one declined, and the session lands neither.
+    let set = fixture.ask(REVIEW).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 1, "free_text": "Keep the signature." },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the review session ended and the review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over what the record says was owed: {:?}",
+        notices(&view),
+    );
+    assert_eq!(fixes(&view), 0, "and nothing was committed");
+    assert!(
+        !dispatched.exists(),
+        "with nothing dispatched to land it afterwards: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        1,
+        "and nothing read the branch a second time",
+    );
+}
+
+/// But a review session that *dies* after the answers stops the run, and
+/// dispatches nothing to finish what it started.
+///
+/// The other half of the same rule: what the session did with the answers is its
+/// report to make, and one that fell over made none. There is nothing here that
+/// knows whether the fixes landed, so the run stops with the tail of what it said
+/// as the evidence — and the press is the branch read afresh rather than a
+/// session handed decisions off the record. What that fresh reading raises is
+/// whatever is still worth raising on the branch as it now stands.
+#[tokio::test]
+async fn a_review_that_dies_after_the_answers_stops_the_run_and_dispatches_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let mended = spill.path().join("mended");
+
+    // Falls over on the answers — and once whatever the human went off and did
+    // about it is done, reads the branch and finds nothing.
+    let review = format!(
+        "    if [ -e {mended} ]; then\n        \
+             printf 'I read the whole branch and found nothing worth raising\n'\n    \
+         else\n{die}\n    \
+         fi",
+        mended = quoted(&mended),
+        die = REVIEW_THEN_DIE_ON_THE_ANSWERS,
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, &review),
+        PULL_REQUEST,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&reviews).await;
+
     let set = fixture.ask(REVIEW).await;
 
     assert_eq!(
@@ -5212,143 +5294,60 @@ async fn approved_fixes_that_never_landed_stop_the_run_and_are_fixed_on_a_retry(
     let stopped = fixture.stopped().await;
 
     assert!(
-        stopped.html.contains("Landing the fixes"),
-        "the stop is named as the half that failed: {:?}",
-        stopped.html,
-    );
-    assert!(
         stopped
             .html
-            .contains("Reset the counter as the window rolls"),
-        "and what is owed is said in the words the review wrote: {:?}",
+            .contains("Reviewing the branch the pull request is on"),
+        "the step is named as what it was: {:?}",
         stopped.html,
     );
     assert!(
-        !stopped.html.contains("Collapse the two clocks"),
-        "the finding they declined is owed by nobody: {:?}",
+        stopped.html.contains("the connection dropped"),
+        "with the tail of what the session said, which is where it says why: {:?}",
         stopped.html,
     );
     assert!(
         !review_settled(&fixture).await,
-        "a review whose fixes never landed settles nothing",
+        "a review that did not finish settles nothing",
     );
     assert_eq!(
         fixture.view().await.blocked_on,
         Some(stopped.id),
         "what is waiting is the human",
     );
-
-    assert_eq!(fixture.resume().await, Resumed::Resumed);
-
-    let told = until_written(&dispatched).await;
-
-    assert_eq!(
-        prompts(&told).len(),
-        1,
-        "one session for the lot of them, rather than one per finding: {told}",
-    );
     assert!(
-        told.contains("addressing/SKILL.md"),
-        "inside the bundled addressing skill: {told}",
-    );
-    assert!(
-        told.contains("Reset the counter as the window rolls")
-            && told.contains("Keep the signature."),
-        "handed the accepted finding and what they said beside it: {told}",
-    );
-    assert!(
-        !told.contains("Collapse the two clocks"),
-        "and not the one they declined: {told}",
-    );
-
-    let deadline = Instant::now() + PATIENCE;
-    while !review_settled(&fixture).await {
-        assert!(
-            Instant::now() < deadline,
-            "the fixes landed and the review never settled",
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-
-    let view = fixture.view().await;
-
-    assert_eq!(
-        fixes(&view),
-        1,
-        "the fix the retry ran is the only one on the branch",
-    );
-    assert_eq!(
-        sets(&view).len(),
-        2,
-        "the grilling's proposal and the review, and nothing asked a second time",
+        !dispatched.exists(),
+        "and nothing was dispatched to carry out what it was answered: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
     );
     assert_eq!(
         prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
         1,
-        "and nothing read the branch again: the decisions were already made",
-    );
-}
-
-/// And a review nobody accepted anything from settles as the ordinary clean end
-/// it is.
-///
-/// The two look identical from outside — a session that asked, was answered and
-/// committed nothing — so the difference has to be read off the answers rather
-/// than off the branch. A wrap-up that stopped here would ask the human to retry
-/// the fixing of findings they had just declined.
-#[tokio::test]
-async fn a_review_whose_findings_were_all_declined_settles_by_ending() {
-    let spill = tempfile::tempdir().unwrap();
-    let reviews = spill.path().join("review-prompts");
-    let dispatched = spill.path().join("fix-prompts");
-
-    let fixture = grilling_spilling(
-        spill,
-        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_VANISH),
-        PULL_REQUEST,
-    )
-    .await;
-
-    worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
-
-    let set = fixture.ask(REVIEW).await;
-
-    assert_eq!(
-        fixture
-            .respond(
-                set,
-                serde_json::json!([
-                    { "label": "Q1", "selected": 2 },
-                    { "label": "Q2", "selected": 2 },
-                ]),
-            )
-            .await,
-        Submitted::Accepted,
+        "with nothing launched behind the stop either",
     );
 
-    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+    // And the press is the review over from the start: a session as fresh as the
+    // first, reading the branch rather than stopping over the Set again.
+    std::fs::write(&mended, "").unwrap();
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
 
     let deadline = Instant::now() + PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
             Instant::now() < deadline,
-            "the review was declined outright and never settled",
+            "the press never reviewed anything, so the wrap-up never settled",
         );
-        tokio::time::sleep(Duration::from_millis(25)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
-    let view = fixture.view().await;
-
-    assert!(
-        notices(&view).is_empty(),
-        "nothing stopped: {:?}",
-        notices(&view),
+    assert_eq!(
+        prompts(&std::fs::read_to_string(&reviews).unwrap()).len(),
+        2,
+        "the review that died on the answers, and the one the press ran",
     );
-    assert_eq!(fixes(&view), 0, "and there was nothing to commit");
     assert!(
         !dispatched.exists(),
-        "with nothing dispatched to fix what they declined: {:?}",
+        "and still nothing dispatched from the record: {:?}",
         std::fs::read_to_string(&dispatched).ok(),
     );
 }
@@ -5721,7 +5720,9 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
 ///
 /// The half of the rule that would be easy to get wrong — a wrap-up that only
 /// went back down the ladder where something had been fixed first would strand
-/// the split-out work of every review whose other findings were declined.
+/// the split-out work of every review whose other findings were declined. The
+/// list on the branch is the whole signal, and it does not need a commit beside
+/// it to count.
 #[tokio::test]
 async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     let spill = tempfile::tempdir().unwrap();
@@ -5783,14 +5784,16 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     );
 }
 
-/// And a session that landed neither stops the run, saying which half is which.
+/// And a split pick the session wrote no backlog for settles like any other
+/// review, because the branch is the whole of what says otherwise.
 ///
-/// *Nothing the human accepted goes quietly* reads a split pick the other way
-/// round: what a split is owed is the backlog rather than a commit, so a wrap-up
-/// that settled on the strength of a fix having landed would reach Done with
-/// agreed work nobody had even written down.
+/// The Option the human picked is not consulted and there is nothing else that
+/// could be: the session that offered it was the one answered and the one that
+/// would have written the list, and it committed a fix and no list. Which is a
+/// session that thought better of the spin-off between the ask and the doing,
+/// and that is its to think better of.
 #[tokio::test]
-async fn a_split_nobody_wrote_a_backlog_for_stops_the_run() {
+async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
@@ -5822,48 +5825,36 @@ async fn a_split_nobody_wrote_a_backlog_for_stops_the_run() {
 
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    let stopped = fixture.stopped().await;
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the review session ended and the review never settled",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
 
     assert!(
-        stopped.html.contains("Writing the backlog"),
-        "the stop is named as the half that failed — the fix landed and the \
-         backlog was never written: {:?}",
-        stopped.html,
-    );
-    assert!(
-        stopped.html.contains("never written into a backlog")
-            && stopped.html.contains("Collapse the three clocks"),
-        "and what is owed is said in the words the review wrote: {:?}",
-        stopped.html,
-    );
-    assert!(
-        !review_settled(&fixture).await,
-        "a review whose split-out work was never written settles nothing",
+        notices(&view).is_empty(),
+        "nothing stopped over a backlog the record said was owed: {:?}",
+        notices(&view),
     );
     assert_eq!(
-        fixture.view().await.state,
-        Lifecycle::Wrapping,
+        moves_into(&view, Lifecycle::Implementing),
+        1,
         "and nothing went back down the ladder: there is no backlog to build",
     );
-
-    // Retrying it is the doing over again, and the session is told both halves of
-    // it: fix what was accepted, and write down what was split out.
-    assert_eq!(fixture.resume().await, Resumed::Resumed);
-
-    let told = until_written(&dispatched).await;
-
     assert_eq!(
-        prompts(&told).len(),
-        1,
-        "one session for the lot of it, rather than one per finding: {told}",
+        view.state,
+        Lifecycle::Wrapping,
+        "the Conversation is where the wrap-up left it",
     );
     assert!(
-        told.contains("Collapse the three clocks") && told.contains(".tasks/"),
-        "handed the split-out finding as a backlog to write: {told}",
-    );
-    assert!(
-        told.contains("Do not build"),
-        "and told that writing it is the whole of the job: {told}",
+        !dispatched.exists(),
+        "with nothing dispatched to write the list instead: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
     );
 }
 

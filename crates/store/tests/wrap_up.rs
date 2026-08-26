@@ -13,8 +13,8 @@ use sqlx::SqlitePool;
 use verkstead_store::{
     Archiving, Ask, Event, Finished, Lifecycle, Settlements, Steer, Steering, Submission,
     WAITED_ON, WaitingOn, addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_fix_attempts, implement_again, last_proposal,
-    load_conversation, load_response, load_set, open_database, pick_direction,
+    forget_addressed_comments, forget_fix_attempts, implement_again, last_batch_proposal,
+    last_proposal, load_conversation, load_response, load_set, open_database, pick_direction,
     record_addressed_comments, record_commit, record_fix_attempt, record_pull_request,
     register_repo, review_asked, save_brief, settle_wrap_up, split_out, start_conversation,
     start_grilling, steer_conversation, submit_response, timeline, unlanded_batch_fixes,
@@ -971,15 +971,17 @@ review:
     .unwrap()
 }
 
-/// What a batch session was answered with and never landed is asked of the
-/// newest proposal, so that the review's own answers are not mistaken for it.
+/// What a batch session was answered with and never landed is asked of a batch's
+/// own proposal, and the review's settle is the line between the two.
 ///
 /// Two proposals stand on a wrap-up that has been commented on: the review's,
-/// which settled long before, and the batch's. Which one is owed anything is the
-/// question this decides, and asking the first would owe the review's findings
-/// for ever.
+/// which settled first, and the batch's, which is only ever asked afterwards.
+/// Which one is owed anything is the question this decides — and the review's is
+/// never it, whatever its own record says, because how a review ended is the
+/// report of the session that ran it rather than something to read back off its
+/// Set.
 #[tokio::test]
-async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_review() {
+async fn what_a_batch_owes_is_read_off_a_batchs_own_proposal_rather_than_the_reviews() {
     let (_dir, pool) = fresh_pool().await;
     let id = wrapping(&pool).await;
 
@@ -994,25 +996,39 @@ async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_revie
         "and owes nothing",
     );
 
-    // The review, answered and acted on, which is where every batch starts from.
+    // The review, answered and never acted on — which is a settled review all
+    // the same, and the state a batch may well start from.
     let reviewed = ask(&pool, id, &reviewing(), Ask::Blocking)
         .await
         .unwrap()
         .unwrap();
     answer_the_review(&pool, reviewed.id).await;
+
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    record_commit(&pool, id, &fixed("a1b2c3d")).await.unwrap();
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
 
     assert_eq!(
         last_proposal(&pool, id).await.unwrap(),
         Some(reviewed.id),
-        "the review's is the newest proposal until a batch asks",
+        "the review's is the newest proposal on the Timeline until a batch asks",
+    );
+    assert_eq!(
+        last_batch_proposal(&pool, id).await.unwrap(),
+        None,
+        "and none of it is a batch's, because no batch has asked anything",
     );
     assert_eq!(
         unlanded_batch_fixes(&pool, id).await.unwrap(),
         Vec::new(),
-        "and it owes nothing, because it settled by landing what it was told to",
+        "so nothing is owed here, however the review's own Set reads",
     );
+    assert_eq!(
+        unlanded_fixes(&pool, id).await.unwrap().len(),
+        1,
+        "which is not the record saying otherwise: the review's Set reads as owed",
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let batch = ask(&pool, id, &answering_the_comments(), Ask::Blocking)
         .await
@@ -1050,12 +1066,6 @@ async fn what_a_batch_owes_is_read_off_the_newest_proposal_rather_than_the_revie
         }],
         "what the batch was answered with is owed until something lands after it",
     );
-    assert_eq!(
-        unlanded_fixes(&pool, id).await.unwrap(),
-        Vec::new(),
-        "and the review, which landed its own, is owed nothing by the same record",
-    );
-
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     record_commit(&pool, id, &fixed("d4e5f60")).await.unwrap();
 

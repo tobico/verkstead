@@ -21,6 +21,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use sqlx::SqlitePool;
 use verkstead_schema::{Decided, Direction, QuestionSet, Response, Review, SetCreated};
 
+use super::wrap_up::{WaitingOn, settled_when};
+
 /// The word the `direction` column holds.
 ///
 /// The wire spelling, so the column reads as what an agent wrote and a database
@@ -1674,7 +1676,10 @@ pub async fn set_asked_from(pool: &SqlitePool, conversation_id: i64, set_id: i64
 /// wrap-up starts with, and the batch sessions that propose the same way about
 /// what was said on the pull request are all dispatched after it has settled.
 pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    Ok(proposals(pool, conversation_id).await?.first().copied())
+    Ok(proposals(pool, conversation_id)
+        .await?
+        .first()
+        .map(|proposal| proposal.set_id))
 }
 
 /// And the newest of them, which is whatever was last put to the human: the
@@ -1686,7 +1691,40 @@ pub async fn review_asked(pool: &SqlitePool, conversation_id: i64) -> Result<Opt
 /// nothing advances past a stop, so the proposal a batch session made is the
 /// last one there is for as long as anything is asking about it.
 pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    Ok(proposals(pool, conversation_id).await?.last().copied())
+    Ok(proposals(pool, conversation_id)
+        .await?
+        .last()
+        .map(|proposal| proposal.set_id))
+}
+/// And the newest one a *batch* session put up, where a batch has put one up at
+/// all.
+///
+/// The half of [`last_proposal`] that is nobody else's. A wrap-up's proposals
+/// come in one order and only one — the review is the session a wrap-up starts
+/// with, and no batch is dispatched until it has settled — so the moment the
+/// review settled is the line between them: put up before it and the Set is the
+/// review's own, after it and it is a batch's. See [`super::settled_when`].
+///
+/// Which matters because *the review's Set is the newest proposal until a batch
+/// asks anything*, and how a review ended is the report of the session that ran
+/// it rather than something to work out from its Set afterwards. A wrap-up whose
+/// review settled having landed nothing it was answered for leaves a Set that
+/// reads as owing work, and it is not the batch half's to carry out.
+///
+/// `None` where the review has not settled, which is every wrap-up that has not
+/// got as far as a batch: nothing is dispatched about what was said until the
+/// review is over.
+pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
+    let Some(settled) = settled_when(pool, conversation_id, WaitingOn::Review).await? else {
+        return Ok(None);
+    };
+
+    Ok(proposals(pool, conversation_id)
+        .await?
+        .into_iter()
+        .filter(|proposal| proposal.asked_at > settled)
+        .map(|proposal| proposal.set_id)
+        .next_back())
 }
 
 /// Every Set of this Conversation's carrying a `review` block, oldest first —
@@ -1711,9 +1749,9 @@ pub async fn last_proposal(pool: &SqlitePool, conversation_id: i64) -> Result<Op
 /// same mistake the other way about: the review it found asking is a question
 /// nothing is left to act on, so no fresh reading of the branch could ever be
 /// recognised as the review of this wrap.
-async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> {
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT q.id, q.body
+async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Proposal>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT q.id, q.created_at, q.body
          FROM question_sets q
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
@@ -1736,7 +1774,7 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> 
 
     let mut proposing = Vec::new();
 
-    for (set_id, body) in rows {
+    for (set_id, asked_at, body) in rows {
         // A Set this build cannot read is passed over rather than failing the
         // question: it carries no `review` block anybody here could act on, and
         // one unreadable body must not be able to tell a Conversation it has no
@@ -1748,11 +1786,24 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<i64>> 
         };
 
         if set.review.is_some() {
-            proposing.push(set_id);
+            proposing.push(Proposal { set_id, asked_at });
         }
     }
 
     Ok(proposing)
+}
+
+/// One proposal, as the reads above tell them apart: which Set it is, and when
+/// it was put to the human.
+///
+/// The moment is what says which half of a wrap-up put it up — see
+/// [`last_batch_proposal`] — and nothing on the Set itself does.
+struct Proposal {
+    /// The Set the proposal is on.
+    set_id: i64,
+
+    /// When it was asked, as the Set's own row records it.
+    asked_at: String,
 }
 
 /// One finding the human said to fix, as the session that will fix it is told
@@ -1796,16 +1847,20 @@ pub async fn unlanded_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<V
     unlanded_on(pool, conversation_id, set_id).await
 }
 
-/// The same question of the newest proposal instead: what a batch session was
-/// told to fix and nothing has landed.
+/// The same question of a batch's newest proposal instead: what a batch session
+/// was told to fix and nothing has landed.
 ///
-/// Which is the review's own Set until a batch has been answered, and that
-/// batch's from then on — see [`last_proposal`]. Asking it before any batch has
-/// asked anything is safe rather than wrong: the review settles only once
-/// nothing it was told to fix is owed, and no batch session is dispatched until
-/// it has.
+/// A batch's own and never the review's — see [`last_batch_proposal`]. How a
+/// review ended is the report of the session that ran it, so a review that
+/// settled having landed nothing it was answered for leaves a Set that reads as
+/// owing work, and reading that here would be the batch half starting a session
+/// over a decision somebody else already reported on.
+///
+/// Empty until a batch has asked anything, which is the ordinary answer: nothing
+/// is dispatched about what was said on the pull request until the review is
+/// over.
 pub async fn unlanded_batch_fixes(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Fixing>> {
-    let Some(set_id) = last_proposal(pool, conversation_id).await? else {
+    let Some(set_id) = last_batch_proposal(pool, conversation_id).await? else {
         return Ok(Vec::new());
     };
 

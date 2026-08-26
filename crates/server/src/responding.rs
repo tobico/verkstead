@@ -146,10 +146,12 @@ async fn over(
 /// nothing about anything new until this is dealt with. `false` is the ordinary
 /// answer and the cheap one — two reads of the record and no Worktree taken.
 ///
-/// Asked of the newest proposal, which is only a batch's once the review is over:
-/// until then it is the review's own Set and seeing to that is
-/// [`crate::review`]'s. The caller keeps that rule — see
-/// [`crate::comments::once`].
+/// Asked of a batch's own newest proposal and never of the review's — see
+/// [`proposed`]. Seeing to the review's is [`crate::review`]'s, and how one
+/// ended is the report of the session that ran it: a review that settled having
+/// landed nothing it was answered for leaves a Set that reads as owing work, and
+/// starting a session over that here would be this half acting on somebody
+/// else's decision.
 ///
 /// **The Worktree is what says the session is gone.** A batch session holds the
 /// Conversation's Turn across the whole of its own life, the wait on the human
@@ -207,14 +209,20 @@ pub(crate) async fn unattended(state: &AppState, conversation_id: i64) -> bool {
     true
 }
 
-/// Which Set the newest proposal on this Conversation's Timeline is, where there
-/// is one.
+/// Which Set the newest proposal a *batch* session put up is, where a batch has
+/// put one up at all.
+///
+/// A batch's own and never the review's, which the review's settle is the line
+/// between — see [`store::last_batch_proposal`]. It has to be: the review's Set
+/// is the newest proposal on the Timeline until a batch asks anything, and how a
+/// review ended is the report of the session that ran it rather than something
+/// for this half to read off its Set afterwards.
 ///
 /// A store that will not answer reads as *nothing has been proposed*, which is
 /// the right way round for what this decides: on the other side of it is a run
 /// being stopped and an agent being let loose in a Worktree.
 async fn proposed(state: &AppState, conversation_id: i64) -> Option<i64> {
-    match store::last_proposal(&state.pool, conversation_id).await {
+    match store::last_batch_proposal(&state.pool, conversation_id).await {
         Ok(proposed) => proposed,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading what was last put to the human failed");
