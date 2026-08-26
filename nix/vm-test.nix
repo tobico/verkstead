@@ -688,13 +688,17 @@ testers.runNixOSTest {
         repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
         repo_id = next(row["id"] for row in repos if row["path"] == "${grillingRepo}")
 
+        # The one model this account runs on, named once: it is saved with the
+        # Profile and picked again with it, and the two have to agree.
+        model = "claude-opus-5"
+
         saved = post(
             "/api/ui/profiles",
             {
                 "name": "vm",
                 "claude_dir": "${account}/.claude",
                 "config_file": "${account}/.claude.json",
-                "model": "claude-opus-5",
+                "models": [model],
             },
         )
         assert saved == '"Saved"', f"the Profile was answered {saved}"
@@ -713,15 +717,17 @@ testers.runNixOSTest {
         conversation = started["Started"]["id"]
 
         # Every precondition `start_grilling` checks, in the order it checks
-        # them — a Brief, and both Profiles chosen.
+        # them — a Brief, and both Pairings picked. A Pairing is a Profile and
+        # one of its models together: there is no default model anywhere, so
+        # neither half is left to be assumed.
         post(
             f"/api/ui/conversations/{conversation}/brief",
             {"markdown": "Whether the packaged unit can host a sandbox."},
         )
-        for which in ["grilling-profile", "implementation-profile"]:
+        for which in ["grilling-pairing", "implementation-pairing"]:
             chosen = post(
                 f"/api/ui/conversations/{conversation}/{which}",
-                {"profile_id": profile_id},
+                {"profile_id": profile_id, "model": model},
             )
             assert chosen == '"Chosen"', f"the {which} was answered {chosen}"
 
