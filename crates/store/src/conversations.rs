@@ -222,6 +222,15 @@ const QUESTION_SET: &str = "question-set";
 /// an Event to hand.
 const PULL_REQUEST: &str = "pull-request";
 
+/// And the words it holds for the two rows that fix where a list landed on the
+/// branch: the backlog, and the roadmap.
+///
+/// Constants for a third reason again — [`landed`] asks whether a Timeline
+/// already carries one, and that question is put to the `kind` column rather
+/// than to an Event.
+const TASK_LIST: &str = "task-list";
+const STAGE_LIST: &str = "stage-list";
+
 /// One entry in a Conversation's Timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineEvent {
@@ -359,6 +368,23 @@ pub enum Event {
     /// to write, and it reads back as the steer it was — ADR-0006's rule, and
     /// the reason the target goes above the document rather than under it.
     Steer(Lifecycle, Option<String>),
+
+    /// The backlog landed on the branch, and this is where that happened.
+    ///
+    /// No body, and nothing joined in beside it either. What the Timeline draws
+    /// at this row is `.tasks/` as the Worktree holds it *now* — the same live
+    /// reading the pinned block is drawn from — so what the row keeps is the
+    /// position alone: the moment the work stopped being a plan and became a
+    /// list to work through.
+    ///
+    /// One per Conversation. A backlog lands once, and everything the run does
+    /// to it afterwards moves the files it is read from rather than the record
+    /// — see [`landed`].
+    TaskList,
+
+    /// And the roadmap landed on the branch, which is the same thing one level
+    /// up: written once, and drawn from a live reading of `docs/roadmaps/`.
+    StageList,
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -405,6 +431,8 @@ impl Event {
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
             Self::Steer(..) => "steer",
+            Self::TaskList => TASK_LIST,
+            Self::StageList => STAGE_LIST,
         }
     }
 
@@ -440,6 +468,10 @@ impl Event {
             Self::Steer(target, Some(instruction)) => {
                 Cow::Owned(format!("{}\n{instruction}", target.stored()))
             }
+            // Nothing, and for neither of those reasons: there is no content
+            // here to hold anywhere. The row fixes a position, and the card
+            // drawn at it is read off the Worktree — see the variants.
+            Self::TaskList | Self::StageList => Cow::Borrowed(""),
         }
     }
 
@@ -496,6 +528,8 @@ impl Event {
                 }
                 None => Self::Steer(Lifecycle::read(&body)?, None),
             },
+            TASK_LIST => Self::TaskList,
+            STAGE_LIST => Self::StageList,
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -722,7 +756,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("indexing the Timeline by its Conversation")?;
 
     // The worktree hangs off a Conversation rather than being a column on it,
-    // as an archiving hangs off a Set: there is no migration machinery here and
+    // as a lock hangs off a Set: there is no migration machinery here and
     // `conversations` is STRICT and left alone. One worktree per Conversation,
     // by the primary key — and a Conversation that has none has no row, which is
     // both the state before grilling and the state after closing.
@@ -1025,7 +1059,7 @@ async fn started(
 ///
 /// The sources, in the order they appear below:
 ///
-/// - A **Question Set with no Response and no archiving** — an ask left open.
+/// - A **Question Set with no Response and no lock** — an ask left open.
 ///   Blocking and Deferred alike: what draws the human is that there is
 ///   something answerable, not whether the asking session is idling on it.
 /// - A **stop**, which is a Conversation nothing is driving any more and which
@@ -1040,6 +1074,17 @@ async fn started(
 /// A **Draft** is none of them, whatever else is true of it: it is waiting on
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
+///
+/// What the human has archived is not here at all, unless they have asked to be
+/// shown it — see [`super::archive_conversation`] and
+/// [`super::showing_archived`]. Archiving is the one thing that takes a
+/// Conversation off this list, and it takes it off nothing else: its Timeline,
+/// its branch and its own page are where they were.
+///
+/// The toggle is read inside the query rather than handed in, because it is a
+/// fact about this list and this is the one thing that draws it: a caller given
+/// the choice would be a second place to get it wrong, and there is no other way
+/// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
         "SELECT c.id, c.branch, r.name, c.state,
@@ -1060,6 +1105,10 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
+         WHERE EXISTS (SELECT 1 FROM shown_archives)
+            OR NOT EXISTS (
+                   SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
+               )
          ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
     )
     .fetch_all(pool)
@@ -1392,8 +1441,12 @@ pub(crate) async fn settle(
 /// A Question Set's whole body *is* joined in, which is the one place this pays
 /// for a deserialization per Event — see [`SetOnTimeline`] for why there is
 /// nothing cheaper to read instead. One query all the same: the Sets, their
-/// Responses and their archivings hang off the same Event rows, and asking per
+/// Responses and their locks hang off the same Event rows, and asking per
 /// Set would be a read for every Question the human has ever been put.
+///
+/// `archivings` is where a lock is stored: the name it went under before
+/// locking was called locking, kept because there is no migration machinery
+/// here to rename a table with.
 pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<TimelineEvent>> {
     /// The columns in the order the query below selects them: the Event, the
     /// Set with however it was settled that is there for one kind of Event, and
@@ -1417,7 +1470,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
     let rows: Vec<Row> = sqlx::query_as(
         "SELECT e.id, e.at, e.kind, e.body,
-                q.id, q.body, r.submitted_at, r.body, a.archived_at,
+                q.id, q.body, r.submitted_at, r.body, a.archived_at AS locked_at,
                 c.sha, c.subject, c.files, c.insertions, c.deletions
          FROM timeline_events e
          LEFT JOIN set_events s ON s.event_id = e.id
@@ -1477,7 +1530,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                 set_body,
                 answered_at,
                 answer,
-                archived_at,
+                locked_at,
                 sha,
                 subject,
                 files,
@@ -1514,7 +1567,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         // the Timeline is drawn around it — see
                         // [`super::Asked`].
                         set: super::Asked::read(body),
-                        settlement: settled(set_id, answered_at, answer, archived_at)?,
+                        settlement: settled(set_id, answered_at, answer, locked_at)?,
                         deferred: deferred.contains(&set_id),
                     })
                 })
@@ -1538,14 +1591,13 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 /// How a Set on the Timeline was settled, out of the two rows that can settle
 /// one, or `None` while it is still waiting on the human.
 ///
-/// The Response wins where both are somehow there, exactly as the Archive's own
-/// listing has it: the answering is the decision, and it is the one already
-/// filed.
+/// The Response wins where both are somehow there: the answering is the
+/// decision, and a decision is not something a lock can take back.
 fn settled(
     set_id: i64,
     answered_at: Option<String>,
     answer: Option<String>,
-    archived_at: Option<String>,
+    locked_at: Option<String>,
 ) -> Result<Option<super::Settlement>> {
     if let Some((submitted_at, body)) = answered_at.zip(answer) {
         let response = serde_json::from_str(&body).with_context(|| {
@@ -1559,11 +1611,8 @@ fn settled(
         })));
     }
 
-    Ok(archived_at.map(|archived_at| {
-        super::Settlement::ArchivedUnanswered(super::SetArchived {
-            set_id,
-            archived_at,
-        })
+    Ok(locked_at.map(|locked_at| {
+        super::Settlement::LockedUnanswered(super::SetLocked { set_id, locked_at })
     }))
 }
 
@@ -1750,9 +1799,9 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
 /// move into Wrapping — and where there has been no such move, at the start of
 /// the Timeline, which is every Conversation that has not got that far.
 ///
-/// **And only the ones still standing.** A Set archived unanswered is one nobody
+/// **And only the ones still standing.** A Set locked unanswered is one nobody
 /// is ever going to answer, which is what Verkstead closes a proposal whose
-/// session is gone as — see [`super::archive_set`]. Counting one would be the
+/// session is gone as — see [`super::lock_set`]. Counting one would be the
 /// same mistake the other way about: the review it found asking is a question
 /// nothing is left to act on, so no fresh reading of the branch could ever be
 /// recognised as the review of this wrap.
@@ -1803,7 +1852,7 @@ struct Proposal {
 /// A Question Set of this Conversation's that arrived after `event_id` and is
 /// still waiting to be answered, or `None` where none is.
 ///
-/// Unanswered *and* unarchived: a Set the human closed without answering is one
+/// Unanswered *and* unlocked: a Set the human closed without answering is one
 /// nothing is coming for, so it is settled as much as an answered one is.
 ///
 /// The Event id is what makes it *whose* Set. Nothing else on the record says
@@ -2620,6 +2669,101 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
     .rows_affected();
 
     Ok(written > 0)
+}
+
+/// What became of stamping the row that fixes where a list landed.
+///
+/// Three answers rather than a `bool`, because the middle one is not a failure
+/// and is not a write either: a run that is seen out twice, or one taken up
+/// again after a stop, reaches the same landing a second time and finds the row
+/// already on the record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landed {
+    /// The row is on the Timeline, written now.
+    Stamped,
+
+    /// It was already there, so nothing was written. A list lands once.
+    Already,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// Put the row that says a list landed on this Conversation's branch — the
+/// backlog, or the roadmap — on its Timeline.
+///
+/// The row carries nothing: what the Timeline draws at it is the list as the
+/// Worktree holds it now, read at the moment somebody looks. What it fixes is
+/// *where* — the moment the plan became something to work through, which the
+/// runner is watching for anyway in order to move the Conversation on.
+///
+/// One transaction, and the looking is inside it, which is what makes a second
+/// go safe: the state is read and acted on without a gap for another to write
+/// through — the pattern [`super::record_pull_request`] uses one Event along.
+///
+/// Nothing is backfilled. A Conversation whose backlog landed before there was a
+/// row to stamp has none, and draws its list in the pinned block alone.
+async fn landed(pool: &SqlitePool, id: i64, event: Event) -> Result<Landed> {
+    let kind = event.kind();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
+
+    let conversation: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading Conversation {id}"))?;
+
+    if conversation.is_none() {
+        return Ok(Landed::NoSuchConversation);
+    }
+
+    let stamped: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM timeline_events WHERE conversation_id = ? AND kind = ? LIMIT 1",
+    )
+    .bind(id)
+    .bind(kind)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("looking for the {kind} row of Conversation {id}"))?;
+
+    if stamped.is_some() {
+        return Ok(Landed::Already);
+    }
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, '')",
+    )
+    .bind(id)
+    .bind(kind)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting the {kind} row of Conversation {id} on its Timeline"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
+
+    Ok(Landed::Stamped)
+}
+
+/// The backlog landed: the breakdown committed `.tasks/`, and there is a list to
+/// work through from here.
+///
+/// Written where the runner sees that landing, which is the same moment it moves
+/// the Conversation on — see `crate::runner` in the server.
+pub async fn record_backlog(pool: &SqlitePool, id: i64) -> Result<Landed> {
+    landed(pool, id, Event::TaskList).await
+}
+
+/// And the roadmap landed: the staging session committed `docs/roadmaps/`, and
+/// the stages it names are what the effort is now against.
+pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
+    landed(pool, id, Event::StageList).await
 }
 
 /// Start a roadmap stage's Conversation working: its base commit, its worktree,

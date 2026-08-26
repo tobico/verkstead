@@ -5,9 +5,11 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Closing, Edited, Event, Grilling, Lifecycle, adopting, close_conversation, conversations,
-    load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
-    set_state, start_adoption, start_conversation, start_grilling, timeline,
+    Archiving, Closing, Edited, Event, Grilling, Lifecycle, Unarchiving, adopting,
+    archive_conversation, archived, close_conversation, conversations, load_conversation,
+    open_database, register_repo, rename_branch, save_brief, set_base_commit, set_state,
+    show_archived, showing_archived, start_adoption, start_conversation, start_grilling, timeline,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -553,6 +555,238 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
         close_conversation(&pool, 404).await.unwrap(),
         Closing::NoSuchConversation
     );
+}
+
+/// Archiving takes a Closed Conversation off the sidebar and leaves everything
+/// else about it where it was: nothing leaves a Timeline, and the branch is
+/// still the branch.
+#[tokio::test]
+async fn archiving_a_closed_conversation_takes_it_off_the_list() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::Archived
+    );
+
+    assert!(conversations(&pool).await.unwrap().is_empty());
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.state, Lifecycle::Closed);
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert_eq!(brief(&pool, id).await, "# Rate limiting\n");
+}
+
+/// And it survives the process, which is the whole point of writing it down: a
+/// list that forgot what had been put away would put it back on the next
+/// reload.
+#[tokio::test]
+async fn what_was_archived_is_still_archived_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let id = {
+        let pool = open_database(&path).await.unwrap();
+        let id = drafted(&pool).await;
+        close_conversation(&pool, id).await.unwrap();
+        archive_conversation(&pool, id).await.unwrap();
+        pool.close().await;
+        id
+    };
+
+    let pool = open_database(&path).await.unwrap();
+
+    assert!(conversations(&pool).await.unwrap().is_empty());
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::AlreadyArchived
+    );
+}
+
+/// Archiving twice is not an error — what the human asked for holds either way
+/// — and the second one writes nothing.
+#[tokio::test]
+async fn archiving_twice_is_not_an_error() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+
+    archive_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::AlreadyArchived
+    );
+}
+
+/// A Conversation still being worked on belongs on the list it is being worked
+/// from, so it is closed first and archived after.
+#[tokio::test]
+async fn a_conversation_that_is_not_closed_cannot_be_archived() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        archive_conversation(&pool, id).await.unwrap(),
+        Archiving::NotClosed
+    );
+
+    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn archiving_a_conversation_that_is_not_there_says_so() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert_eq!(
+        archive_conversation(&pool, 404).await.unwrap(),
+        Archiving::NoSuchConversation
+    );
+}
+
+/// The way back: unarchiving puts a Conversation on the list again, and the
+/// list is the only thing about it that moves.
+#[tokio::test]
+async fn unarchiving_puts_a_conversation_back_on_the_list() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    assert_eq!(
+        unarchive_conversation(&pool, id).await.unwrap(),
+        Unarchiving::Unarchived
+    );
+
+    assert!(!archived(&pool, id).await.unwrap());
+
+    let list = conversations(&pool).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].state, Lifecycle::Closed);
+}
+
+/// And it holds: what was taken back out stays out, so a reload does not put
+/// away something the human asked for back.
+#[tokio::test]
+async fn what_was_unarchived_is_still_unarchived_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    let id = {
+        let pool = open_database(&path).await.unwrap();
+        let id = drafted(&pool).await;
+        close_conversation(&pool, id).await.unwrap();
+        archive_conversation(&pool, id).await.unwrap();
+        unarchive_conversation(&pool, id).await.unwrap();
+        pool.close().await;
+        id
+    };
+
+    let pool = open_database(&path).await.unwrap();
+
+    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+    assert_eq!(
+        unarchive_conversation(&pool, id).await.unwrap(),
+        Unarchiving::NotArchived
+    );
+}
+
+/// Unarchiving one that was never put away is not an error — what the human
+/// asked for holds either way.
+#[tokio::test]
+async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        unarchive_conversation(&pool, id).await.unwrap(),
+        Unarchiving::NotArchived
+    );
+    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn unarchiving_a_conversation_that_is_not_there_says_so() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert_eq!(
+        unarchive_conversation(&pool, 404).await.unwrap(),
+        Unarchiving::NoSuchConversation
+    );
+}
+
+/// The human's standing choice to be shown what they have put away: with it
+/// on, an archived Conversation is on the list in its ordinary place.
+#[tokio::test]
+async fn showing_the_archived_puts_them_back_in_the_list() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    close_conversation(&pool, id).await.unwrap();
+    archive_conversation(&pool, id).await.unwrap();
+
+    assert!(!showing_archived(&pool).await.unwrap());
+    assert!(conversations(&pool).await.unwrap().is_empty());
+
+    show_archived(&pool, true).await.unwrap();
+
+    assert!(showing_archived(&pool).await.unwrap());
+    let list = conversations(&pool).await.unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].id, id);
+    assert!(archived(&pool, id).await.unwrap());
+
+    show_archived(&pool, false).await.unwrap();
+
+    assert!(!showing_archived(&pool).await.unwrap());
+    assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// A switch rather than a press: asking for the position it is already in is
+/// not something to refuse, in either direction.
+#[tokio::test]
+async fn saying_it_twice_says_the_same_thing() {
+    let (_dir, pool) = fresh_pool().await;
+
+    show_archived(&pool, true).await.unwrap();
+    show_archived(&pool, true).await.unwrap();
+    assert!(showing_archived(&pool).await.unwrap());
+
+    show_archived(&pool, false).await.unwrap();
+    show_archived(&pool, false).await.unwrap();
+    assert!(!showing_archived(&pool).await.unwrap());
+}
+
+/// And the choice outlives the process, which is the whole reason it is here
+/// rather than on the device that made it.
+#[tokio::test]
+async fn the_choice_to_show_them_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("verkstead.db");
+
+    {
+        let pool = open_database(&path).await.unwrap();
+        let id = drafted(&pool).await;
+        close_conversation(&pool, id).await.unwrap();
+        archive_conversation(&pool, id).await.unwrap();
+        show_archived(&pool, true).await.unwrap();
+        pool.close().await;
+    }
+
+    let pool = open_database(&path).await.unwrap();
+
+    assert!(showing_archived(&pool).await.unwrap());
+    assert_eq!(conversations(&pool).await.unwrap().len(), 1);
 }
 
 /// Where the worktree went outlives the process that made it — it is a directory

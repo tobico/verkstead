@@ -17,14 +17,15 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
-    BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, NewAdoption,
+    AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
+    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, GrillingStarted, Locked, NewAdoption,
     NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
     ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
-    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    Resumed, RoadmapPane, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -49,7 +50,7 @@ fn the_viewers_types_are_written_from_these() {
     // them is a Response, which the Set already brought along: it is what an
     // answered Set is read back with.
     Submitted::export_all(&config).unwrap();
-    Archived::export_all(&config).unwrap();
+    Locked::export_all(&config).unwrap();
 
     // The Repos Verkstead has been told about, and adding one by path.
     RepoEntry::export_all(&config).unwrap();
@@ -89,6 +90,11 @@ fn the_viewers_types_are_written_from_these() {
     GrillingStarted::export_all(&config).unwrap();
     ConversationClosed::export_all(&config).unwrap();
 
+    // And the press that puts a closed one away, which takes no request shape
+    // either: which Conversation it is is the whole of what it says.
+    ConversationArchived::export_all(&config).unwrap();
+    ConversationUnarchived::export_all(&config).unwrap();
+
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
     // named separately. It takes no request shape either.
@@ -121,12 +127,25 @@ fn the_viewers_types_are_written_from_these() {
     // down the socket — the repaint above, then what the session prints — and
     // what a watcher says back up it.
     Shown::export_all(&config).unwrap();
+    ShowingArchived::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
 
     // And what a session committed. The snippet rides on the Timeline too; the
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
     CommitPane::export_all(&config).unwrap();
+
+    // And the backlog opened, which is every task document of it: the entries
+    // ride on the Conversation as the pinned task list, and the documents they
+    // name are their own payload, read off the Worktree when somebody opens the
+    // card.
+    BacklogPane::export_all(&config).unwrap();
+
+    // And the roadmap opened, which is the same arrangement one level up: the
+    // stages ride on the Conversation as the pinned stage list, and the briefs
+    // they name are their own payload — named by the roadmap, a Worktree being
+    // allowed more than one of those.
+    RoadmapPane::export_all(&config).unwrap();
 
     // And what the finish step opened. The PR itself rides on the Conversation
     // as a pinned Event — a number, a title and a URL; what is *on* it is its

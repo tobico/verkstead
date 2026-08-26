@@ -474,7 +474,6 @@
   font-weight: 600;
 }
 
-.link:hover,
 .link:focus-visible {
   color: var(--accent);
 }
@@ -508,4 +507,22 @@
 .path .link {
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 0.8rem;
+}
+
+/* Under the pointer: the line the reader could jump to takes the accent, and
+   the bar the list comes down from is a surface and shifts one step of the
+   paper — it is a full-width row rather than a word, and reads as one.
+
+   The mark down a line's left edge is not part of this. Hover is the pointer
+   doing something and the mark is the page saying something, and the two should
+   not read as the same thing — which is what `.link.here` says the other way
+   round. */
+@media (hover: hover) {
+  .link:hover {
+    color: var(--accent);
+  }
+
+  .bar:hover {
+    background: var(--paper);
+  }
 }

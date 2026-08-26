@@ -9,7 +9,7 @@
 //!
 //! The rest of what the viewer is handed lives here for the same reason, even
 //! where no markdown is involved: a Timeline's Events and the outcomes of
-//! answering and archiving are named states the viewer says in words. Taken
+//! answering and locking are named states the viewer says in words. Taken
 //! together these types *are* the viewer's side of the wire, which is what makes
 //! this the one crate the TypeScript is generated from — see the `typescript`
 //! feature in the manifest.
@@ -29,20 +29,24 @@ mod transcript;
 mod update;
 mod view;
 
-pub use answering::{Archived, Submitted};
+pub use answering::{Locked, Submitted};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
-    BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefEvent, BriefSaved,
-    Capture, Comment, CommitEvent, CommitPane, CommitRecord, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, HandoffEvent,
+    BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
+    BriefEvent, BriefSaved, Capture, Comment, CommitEvent, CommitPane, CommitRecord,
+    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
+    ConversationStopped, ConversationUnarchived, ConversationView, GrillingStarted, HandoffEvent,
     Lifecycle, ManualTaskEvent, MovedEvent, NewAdoption, NewConversation, NewOrder, NoticeEvent,
     PinnedEvent, ProposalView, PullRequestComment, PullRequestCommit, PullRequestDetails,
-    PullRequestEvent, PullRequestSummary, QuestionSetEvent, Resumed, Screen, SetRow, Shown, Size,
-    StageEntry, StageListEvent, Started, SteerEvent, SteerOpened, SteerSubmission, SteerTarget,
-    TaskEntry, TaskListEvent, TimelineEvent, UnreadableSetEvent, Watching, Worktree,
-    agent_output_event, brief_event, commit_event, commit_pane, handoff_event, manual_task_event,
-    moved_event, notice_event, proposal_view, pull_request_details, pull_request_event,
-    question_set_event, stage_list_event, steer_event, task_list_event, unreadable_set_event,
+    PullRequestEvent, PullRequestSummary, QuestionSetEvent, Resumed, RoadmapPane, Screen, SetRow,
+    ShowingArchived, Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached,
+    StageSource, Started, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
+    TaskEntry, TaskListEvent, TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent,
+    Watching, Worktree, agent_output_event, backlog_pane, brief_event, commit_event, commit_pane,
+    handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
+    pull_request_details, pull_request_event, pull_request_reached, question_set_event,
+    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
+    task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,

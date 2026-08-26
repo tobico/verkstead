@@ -1,7 +1,7 @@
 //! Deferred Asks: which Sets were asked without idling a session, and which of
 //! their Answers a session has already been told about.
 //!
-//! A table of its own, for the reason archiving has one: `question_sets` is
+//! A table of its own, for the reason locking has one: `question_sets` is
 //! STRICT, there is no migration machinery here, and a fact learned about a Set
 //! after that table was written hangs off it rather than becoming a column on
 //! it.

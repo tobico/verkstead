@@ -19,20 +19,25 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  BacklogPane,
   BriefEvent,
   Capture,
   CommitPane,
+  ConversationArchived,
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
   ConversationStopped,
+  ConversationUnarchived,
   ConversationView,
   GrillingStarted,
   ProfileEntry,
   PullRequestDetails,
   Resumed,
+  RoadmapPane,
   Screen,
   Shown,
+  ShowingArchived,
   SteerOpened,
   Submitted,
   TimelineEvent,
@@ -50,6 +55,10 @@ import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
+// What can be done to a Conversation as a whole, both ways: the hashed names
+// the menu's rows are queried by, and the words its refusals are said in.
+import { STOP_REFUSAL } from "../src/workbench/Actions";
+import actions from "../src/workbench/Actions.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
@@ -63,6 +72,10 @@ import diffSection from "../src/set/Diff.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import sidebarCss from "../src/workbench/Conversations.module.css?raw";
 import documentPane from "../src/workbench/Document.module.css";
+// And the one module the two plan panes share: a backlog's task documents and
+// a roadmap's stage briefs are the same stack of boxed sections.
+import documents from "../src/workbench/Documents.module.css";
+import documentsCss from "../src/workbench/Documents.module.css?raw";
 // The ring a running session is marked by, wherever it is drawn.
 import marks from "../src/workbench/Mark.module.css";
 import marksCss from "../src/workbench/Mark.module.css?raw";
@@ -89,15 +102,11 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/workbench/Workbench.module.css";
 import shellCss from "../src/workbench/Workbench.module.css?raw";
-import {
-  CLAMPED_LINES,
-  RESUME_REFUSAL,
-  STOP_REFUSAL,
-  SWIPE,
-} from "../src/workbench/Timeline";
+import { CLAMPED_LINES, RESUME_REFUSAL, SWIPE } from "../src/workbench/Timeline";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
+  HIDING_ARCHIVED,
   OPEN,
   PROFILES,
   REPOS,
@@ -227,8 +236,8 @@ function frame(container: ParentNode): HTMLElement {
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`));
-  return drawn(container, `.${timeline.conversationActions} > .${dropdown.drop}`);
+  fireEvent.click(await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`));
+  return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
 /// Open the sidebar's ⋯, which is what the rest of Verkstead is behind: press
@@ -379,6 +388,7 @@ describe("the workbench", () => {
   it("says so plainly when nothing is being worked on", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
     );
     mount();
@@ -409,6 +419,79 @@ describe("the workbench", () => {
     await waitFor(() => expect(history.get()).toBe("/settings"));
   });
 
+  /// And the one row of that menu that is about this list rather than about the
+  /// rest of Verkstead: whether the conversations put away are drawn in it.
+  ///
+  /// The server's answer rather than this device's, which is what makes it the
+  /// same list on a phone opened afterwards.
+  it("draws the archived toggle where the server has it", async () => {
+    theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json({ showing: true } satisfies ShowingArchived),
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+
+    const toggle = await waitFor(() =>
+      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+    );
+    expect(toggle.checked).toBe(true);
+  });
+
+  /// A switch says where it stands rather than asking for a flip, so what goes
+  /// out is the position the human has just put it in.
+  it("sends the position the switch was put in", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json(undefined, 204),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+    const toggle = await waitFor(() =>
+      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+    );
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/archived")).toEqual({
+        showing: true,
+      }),
+    );
+  });
+
+  /// The list is drawn from the setting, so flipping it reads the list again —
+  /// which is where the archived conversations come from and go back to.
+  it("reads the list again once the setting has been saved", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json(undefined, 204),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+    const read = askedFor(fetching, "/api/ui/conversations");
+    fireEvent.click(
+      await waitFor(() => screen.getByLabelText("Show archived conversations")),
+    );
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/conversations")).toBeGreaterThan(read),
+    );
+  });
+
   /// Nothing of it until it is pressed, which is the point of putting it there:
   /// the head of the pane gives up a mark's worth of room and no more.
   it("keeps the way out of the workbench behind that menu", async () => {
@@ -430,6 +513,7 @@ describe("the workbench", () => {
   it("says where to go when there is no repo to start one against", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json([])),
     );
     const { container } = mount();
@@ -508,30 +592,29 @@ describe("how a card says where its conversation has got to", () => {
     expect(card!.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
   });
 
-  /// An icon and a border round the whole card, rather than the dot this used
-  /// to be: what it has to survive is a glance down a list on a phone.
-  it("marks a conversation waiting on the human, card and all", async () => {
+  /// The disc and nothing beside it: the glyph inside it and the accent border
+  /// round the whole card have both gone, because a waiting card that was also
+  /// the open one had two treatments arguing over the one edge.
+  it("marks a conversation waiting on the human with the disc alone", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
 
     const [card] = await cards(container);
 
-    expect(card!.querySelector(`.${marks.mark}.${marks.waiting}`)?.textContent).toBe("!");
+    const disc = card!.querySelector(`.${marks.mark}.${marks.waiting}`);
+    expect(disc).toBeTruthy();
+    expect(disc!.textContent).toBe("");
     expect(card!.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
 
-    // The border is the card's own, so the row carries it and the stylesheet
-    // says what it looks like — jsdom lays nothing out.
-    expect(card!.classList.contains(sidebar.waiting!)).toBe(true);
-    expect(sidebarCss).toContain(
-      ".conversationRow.waiting .open {\n" +
-        "  border-color: var(--accent);\n" +
-        "  box-shadow: inset 0 0 0 1px var(--accent);\n" +
-        "}",
+    // Nothing on the row says it either: the card's border is the ordinary one.
+    expect(card!.className).toBe(sidebar.conversationRow);
+    expect(sidebarCss, "the waiting card's own border is retired").not.toContain(
+      ".conversationRow.waiting",
     );
   });
 
-  /// The mark is a character, and a character is something a screen reader
-  /// would otherwise read out beside the label that already said it.
+  /// The mark is a shape, and a shape is nothing to a screen reader beside the
+  /// label that already said it.
   it("keeps the mark out of what is read aloud", async () => {
     theSidebar({ state: "Grilling", working: false, waiting: true });
     const { container } = mount();
@@ -605,9 +688,6 @@ describe("how a card says where its conversation has got to", () => {
     const [card] = await cards(container);
 
     expect(card!.querySelector(`.${marks.mark}`)).toBeNull();
-
-    // Neither half of the waiting mark: no icon above, and no border here.
-    expect(card!.classList.contains("waiting")).toBe(false);
   });
 
   it("draws a draft as a draft, and marks nothing on it", async () => {
@@ -646,12 +726,32 @@ describe("how a card says where its conversation has got to", () => {
       ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
     expect(sidebarCss).toContain(
-      ".conversationRow.selected .open {\n  border-color: var(--accent);\n}",
+      ".conversationRow.selected .open {\n" +
+        "  border-color: var(--accent);\n" +
+        "  border-style: solid;\n" +
+        "  opacity: 1;\n" +
+        "}",
     );
     expect(
       sidebarCss,
       "the inset stripe is retired everywhere it was drawn",
     ).not.toContain("box-shadow: inset 0.2rem");
+  });
+
+  /// Being the open one is the strongest thing a card's edge has to say, so it
+  /// is written last of the border rules and takes back what the two above it
+  /// did: the draft's dotted line, and the finished card's fade. What is dimmed
+  /// on a finished card that is open is what is inside it.
+  it("lets the open card's border outrank every other treatment", () => {
+    expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
+      sidebarCss.indexOf(".conversationRow.draft .open"),
+    );
+    expect(sidebarCss.indexOf(".conversationRow.selected .open")).toBeGreaterThan(
+      sidebarCss.indexOf(".conversationRow.ended .open"),
+    );
+    expect(sidebarCss).toContain(
+      ".conversationRow.selected.ended .open > * {\n  opacity: 0.45;\n}",
+    );
   });
 
   /// Dimmed and still a row to press: a Done Conversation can be steered.
@@ -714,6 +814,14 @@ describe("how a card says where its conversation has got to", () => {
     ]);
   });
 
+  /// A session that has gone quiet is one the human may have to do something
+  /// about, so its ring is drawn in the accent rather than in the edge grey it
+  /// used to take — which against a card border read as an edge come loose. The
+  /// accent is a themed variable, so it is right in both themes at once.
+  it("draws the ring of a quiet session in the accent", () => {
+    expect(marksCss).toContain(".mark.idle {\n  border: 1.5px solid var(--accent);\n}");
+  });
+
   /// The spinner is motion, and motion is something to be able to turn off —
   /// everywhere it is drawn, which is every mark on the page rather than the
   /// sidebar's alone.
@@ -728,9 +836,9 @@ describe("how a card says where its conversation has got to", () => {
   });
 });
 
-/// The order the sidebar is in, which is the human's own: they drag a row's grip
-/// and the whole list goes to the server, so it survives a reload, a restart and
-/// a second device without any of the three being a case this page knows about.
+/// The order the sidebar is in, which is the human's own: they drag a card and
+/// the whole list goes to the server, so it survives a reload, a restart and a
+/// second device without any of the three being a case this page knows about.
 ///
 /// What the server does with the order is asked over there — the tests in
 /// `crates/server/tests/conversations.rs` say where an unplaced Conversation
@@ -797,13 +905,46 @@ describe("the order the human puts the sidebar in", () => {
     }
   }
 
-  /// Drag one row's grip to a height on the pane, and let go.
-  function dragTo(card: HTMLElement, y: number) {
-    const grip = card.querySelector<HTMLElement>(`.${sidebar.grip}`)!;
+  /// The card of a row, which is the whole of what a row is a target for now:
+  /// the press that opens a Conversation and the press that moves one land on
+  /// the same button, and what tells them apart is what the hand does next.
+  function card(row: HTMLElement): HTMLElement {
+    return row.querySelector<HTMLElement>(`.${sidebar.open}`)!;
+  }
 
-    fireEvent.pointerDown(grip, { button: 0, pointerId: 1, clientY: 0 });
-    fireEvent.pointerMove(grip, { pointerId: 1, clientY: y });
-    fireEvent.pointerUp(grip, { pointerId: 1 });
+  /// Drag one card to a height on the pane with the mouse, and let go. Past the
+  /// grace on the way out, since a press that never travels is a click.
+  function dragTo(row: HTMLElement, y: number) {
+    const open = card(row);
+
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: y });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+  }
+
+  /// A finger put on a card, and the card given long enough to lift under it.
+  async function holdOn(row: HTMLElement): Promise<HTMLElement> {
+    const open = card(row);
+
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    // Longer than a card takes to lift, which is the whole of what the finger
+    // has to do — see `LIFT` in `Conversations.tsx`.
+    await new Promise((done) => setTimeout(done, 450));
+
+    return open;
   }
 
   it("moves the row under the hand and sends the whole list", async () => {
@@ -839,14 +980,14 @@ describe("the order the human puts the sidebar in", () => {
     expect(await order(container)).toEqual(["second", "third", "first"]);
   });
 
-  /// A grip that could only be dragged would be a control half the people using
+  /// A card that could only be dragged would be a control half the people using
   /// it could not reach.
   it("moves a row a step at a time from the keyboard", async () => {
     const fetching = three();
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "third", "second"]);
     await waitFor(() =>
@@ -861,7 +1002,7 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[0]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[0]!), { key: "ArrowUp" });
 
     expect(await order(container)).toEqual(["first", "second", "third"]);
     expect(
@@ -870,24 +1011,171 @@ describe("the order the human puts the sidebar in", () => {
     ).toBe(0);
   });
 
-  /// The grip is a second control on a row that already has one, and it does a
-  /// different thing: it says so itself rather than leaving the card's label to
-  /// cover both.
-  it("names what each grip moves", async () => {
+  /// There is no grip beside the card to be dragged, and none to be tabbed to
+  /// either: the card is the only control on the row.
+  it("carries no second control on the row", async () => {
+    three();
+    const { container } = mount();
+
+    expect((await cards(container)).map((row) => row.querySelectorAll("button").length))
+      .toEqual([1, 1, 1]);
+  });
+
+  /// The grip had a label of its own saying which row it moved. Nothing beside
+  /// the card carries one now, so the card says which keys move it instead.
+  it("says on the card which keys move it", async () => {
     three();
     const { container } = mount();
 
     expect(
-      (await cards(container)).map((card) =>
-        card.querySelector(`.${sidebar.grip}`)!.getAttribute("aria-label"),
-      ),
-    ).toEqual(["Move first", "Move second", "Move third"]);
+      (await cards(container)).map((row) => card(row).getAttribute("aria-keyshortcuts")),
+    ).toEqual(["ArrowUp ArrowDown", "ArrowUp ArrowDown", "ArrowUp ArrowDown"]);
   });
 
-  /// Most answering happens on a phone, and a touch that starts on the grip has
-  /// to drag the row rather than scroll the list out from under it.
-  it("takes the touch that starts on a grip", () => {
-    expect(sidebarCss).toContain("  cursor: grab;\n  touch-action: none;\n");
+  /// A press that let go about where it landed is a click, whatever the pixel
+  /// or two a hand moves between the two.
+  it("opens the conversation a press did not move", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = card(rows[2]!);
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 2, clientY: 2 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+    fireEvent.click(open);
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(history.get()).toBe("/conversations/3");
+  });
+
+  /// And one that moved a card does not also open it: the card is where they
+  /// put it, and opening the Conversation as well would answer one gesture
+  /// twice.
+  it("does not open the conversation a drag moved", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[2]!, 10);
+    fireEvent.click(card(rows[2]!));
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    expect(history.get(), "the drag was the whole of what they said").toBe("/");
+  });
+
+  /// And the card is a card again straight afterwards. What swallows the click
+  /// a drag ends on is spent by that one click: a keyboard press is a click
+  /// with no pointer behind it, so anything left standing would leave the card
+  /// the drag ended on deaf to Enter until the hand went back to it.
+  it("opens from the keyboard on the card a drag just moved", async () => {
+    three();
+    const { container, history } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    dragTo(rows[2]!, 10);
+    fireEvent.click(card(rows[2]!));
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    expect(history.get(), "the drag itself opened nothing").toBe("/");
+
+    // Enter on the card the hand let go of, which is a click and nothing else
+    // — there is no press in front of it to clear anything.
+    fireEvent.click(card((await cards(container))[0]!));
+
+    await waitFor(() => expect(history.get()).toBe("/conversations/3"));
+  });
+
+  /// A finger drags a card by holding it still first. No distance tells a drag
+  /// from a scroll on a phone, so what tells the two apart is the time before
+  /// the finger moves.
+  it("lifts a card under a finger that holds still", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = await holdOn(rows[2]!);
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 10 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+
+    expect(await order(container)).toEqual(["third", "first", "second"]);
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/order")).toEqual({
+        order: [3, 1, 2],
+      }),
+    );
+  });
+
+  /// A finger that travels before its card has lifted is scrolling the list,
+  /// and the list is the browser's to scroll.
+  it("leaves a swipe to the list", async () => {
+    const fetching = three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = card(rows[2]!);
+    fireEvent.pointerDown(open, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(open, { pointerId: 1, clientX: 0, clientY: 40 });
+    fireEvent.pointerUp(open, { pointerId: 1 });
+
+    expect(await order(container)).toEqual(["first", "second", "third"]);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "nothing was moved, so there is nothing to save",
+    ).toBe(0);
+  });
+
+  /// Once a card has lifted, though, the list must not scroll out from under
+  /// it — and the refusal is over the moment the hand is.
+  it("refuses the scroll only while a card is held", async () => {
+    three();
+    const { container } = mount();
+
+    const rows = await cards(container);
+    laidOut(rows);
+
+    const open = await holdOn(rows[2]!);
+    expect(scrolled(), "the held card, not the list").toBe(true);
+
+    fireEvent.pointerUp(open, { pointerId: 1 });
+    expect(scrolled(), "the list again, as on any other day").toBe(false);
+  });
+
+  /// Whether the page took the scroll away from the browser: a touch move at
+  /// the document, and whether anything refused it.
+  function scrolled(): boolean {
+    const swipe = new Event("touchmove", { bubbles: true, cancelable: true });
+    document.dispatchEvent(swipe);
+    return swipe.defaultPrevented;
+  }
+
+  /// A card that refused the scroll before the finger landed would refuse the
+  /// swipe that scrolls the list with it, which is why nothing here says
+  /// `touch-action` and the drag refuses it from the lift instead.
+  it("leaves the scroll to the browser until a card has lifted", () => {
+    expect(sidebarCss).not.toContain("touch-action:");
   });
 
   /// The order that was not saved is not the order to draw: what comes back is
@@ -903,12 +1191,237 @@ describe("the order the human puts the sidebar in", () => {
     const { container } = mount();
 
     const rows = await cards(container);
-    fireEvent.keyDown(rows[2]!.querySelector(`.${sidebar.grip}`)!, { key: "ArrowUp" });
+    fireEvent.keyDown(card(rows[2]!), { key: "ArrowUp" });
 
     await waitFor(() =>
       screen.getByText(/The order could not be saved/, { exact: false }),
     );
     expect(await order(container)).toEqual(["first", "second", "third"]);
+  });
+});
+
+/// A right-click on a card, which is the fourth thing a press on one can be:
+/// what there is to do about the Conversation it stands for, in place, without
+/// opening it first.
+///
+/// The rows are the Conversation pane's own — see \`Actions.tsx\`, which is the
+/// one component both menus are drawn through — so what is asked here is that
+/// the sidebar reaches them at all, that they are about the card that was
+/// pressed rather than about whatever is open, and that a finger is left with
+/// the gesture it already had.
+describe("what a right-click on a card offers", () => {
+  /// The drafting conversation open, and the grilling one a row of the sidebar
+  /// — two different Conversations, which is the whole point of the menu.
+  function theSidebarOver(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, ready_to_stop: true, working: true }),
+      ),
+      ...answers,
+    );
+  }
+
+  /// The card of a row, which is the one target a row has.
+  function card(row: HTMLElement): HTMLElement {
+    return row.querySelector<HTMLElement>(`.${sidebar.open}`)!;
+  }
+
+  /// The grilling conversation's row, which is the one this file's fixtures put
+  /// in the sidebar beside the open one.
+  async function grillingCard(container: ParentNode): Promise<HTMLElement> {
+    const rows = await cards(container);
+    const row = rows.find(
+      (card) => card.dataset.id === String(GRILLING.id),
+    );
+    expect(row, "the fixture sidebar should hold the grilling conversation")
+      .toBeTruthy();
+    return card(row!);
+  }
+
+  /// Right-click a card at a place on the window, and say whether the browser's
+  /// own menu was taken off the press.
+  function rightClick(on: HTMLElement, x = 120, y = 200): boolean {
+    return !fireEvent.contextMenu(on, { clientX: x, clientY: y });
+  }
+
+  /// What it drops, or nothing where nothing was right-clicked. Looked for in
+  /// the sidebar, the Conversation's own ⋯ being drawn through the same
+  /// component and painted by the same class.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+  }
+
+  /// The same, waited for.
+  async function opened(container: ParentNode): Promise<HTMLElement> {
+    return drawn(
+      container,
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+  }
+
+  it("drops nothing until a card is right-clicked", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await cards(container);
+
+    expect(drop(container)).toBeNull();
+  });
+
+  /// The rows the Conversation pane would offer that same Conversation, in the
+  /// same order — which is what having one component for both means.
+  it("offers exactly what the pane's own menu would", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+
+    // The card carries seven fields and the rows need a good deal more than
+    // seven, so the Conversation is read before there is anything to draw.
+    const menu = await opened(container);
+    await drawn(menu, `.${actions.close}`);
+
+    expect(
+      [...menu.querySelectorAll("button")].map((button) => button.className),
+    ).toEqual([actions.stop, actions.forceStop, actions.steer, actions.close]);
+  });
+
+  /// Which is the whole reason it is worth having: the list is where the human
+  /// is when they want to end something that is not what they are reading.
+  it("acts on the card that was pressed, not on the one that is open", async () => {
+    const fetching = theSidebarOver(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json("Closed" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    fireEvent.click(await drawn(await opened(container), `.${actions.close}`));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${GRILLING.id}/close`),
+      ).toEqual({}),
+    );
+    expect(
+      askedFor(fetching, `/api/ui/conversations/${OPEN.id}/close`),
+      "the conversation that is open was not the one pressed",
+    ).toBe(0);
+  });
+
+  /// Where the pointer was, because that is the whole of what a context menu
+  /// knows about where it belongs.
+  it("comes down where the pointer was", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container), 140, 260);
+
+    const menu = await opened(container);
+    expect(menu.style.left).toBe("140px");
+    expect(menu.style.top).toBe("260px");
+  });
+
+  /// The browser's own menu is not what the press is asking for.
+  it("takes the browser's menu off the press", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    expect(rightClick(await grillingCard(container))).toBe(true);
+  });
+
+  /// A right-click is not a click and not the start of a drag — see `grab` in
+  /// `Conversations.tsx`, which takes the primary button and nothing else — so
+  /// the Conversation under it is neither opened nor moved.
+  it("neither opens the conversation nor moves it", async () => {
+    const fetching = theSidebarOver();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    await opened(container);
+
+    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    expect(
+      askedFor(fetching, "/api/ui/conversations/order"),
+      "nothing was dragged, so there is nothing to save",
+      ).toBe(0);
+  });
+
+  /// A finger has no right-click, and the long press it might have been is
+  /// already how a card is picked up to be dragged. So a phone is left exactly
+  /// where it was, and the ⋯ on the Conversation is the way to all of this.
+  it("leaves a finger the gesture it already had", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const held = await grillingCard(container);
+    fireEvent.pointerDown(held, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    // Longer than a card takes to lift — see `LIFT` in `Conversations.tsx`.
+    await new Promise((done) => setTimeout(done, 450));
+
+    expect(drop(container), "a held card, not a menu").toBeNull();
+    expect(
+      held.closest(`.${sidebar.conversationRow}`)!.classList.contains(sidebar.held!),
+    ).toBe(true);
+
+    fireEvent.pointerUp(held, { pointerId: 1 });
+  });
+
+  /// A phone fires `contextmenu` from that same long press, which is the one
+  /// way this could have reached a finger. The press that started the gesture
+  /// is what says which hand it was — the event itself says nothing — and a
+  /// finger's is left alone, the browser's own answer to it included.
+  it("opens nothing from a phone's long press", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const held = await grillingCard(container);
+    fireEvent.pointerDown(held, {
+      button: 0,
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    expect(
+      rightClick(held),
+      "the browser's own answer to a long press is the browser's",
+    ).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    fireEvent.pointerUp(held, { pointerId: 1 });
+  });
+
+  /// The way out that needs no aim, which every menu has because it is the one
+  /// component — see `tests/menus.test.tsx`, where the rest of that is asked.
+  it("goes on a press away from it", async () => {
+    theSidebarOver();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    rightClick(await grillingCard(container));
+    await opened(container);
+
+    fireEvent.click(
+      container.querySelector(
+        `.${shell.conversationsPane} .${actions.conversationActions} .${dropdown.backdrop}`,
+      )!,
+    );
+
+    await waitFor(() => expect(drop(container)).toBeNull());
   });
 });
 
@@ -1402,6 +1915,7 @@ describe("a conversation's timeline", () => {
   it("shows the server's own wording when a conversation cannot be read", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
@@ -1609,6 +2123,7 @@ describe("writing the brief", () => {
     let standing = OPEN;
     const fetching = serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(READING, () => json(standing)()),
@@ -1656,6 +2171,12 @@ describe("a conversation's setup", () => {
     expect(card.querySelector(`.${setup.branchName}`)).toBeTruthy();
     expect(card.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
     expect(card.querySelector(`.${setup.conversationProfiles}`)).toBeTruthy();
+
+    // The two branch fields are one row's to lay out, the way the pairings
+    // below them are; the stylesheet is what wraps it where the pane is narrow.
+    const row = card.querySelector(`.${setup.branches}`)!;
+    expect(row.querySelector(`.${setup.branchName}`)).toBeTruthy();
+    expect(row.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
 
     // Under the words rather than over them: the brief is what the card is,
     // and while it is a draft the words are the field they are typed into.
@@ -1895,6 +2416,7 @@ describe("a conversation's setup", () => {
   it("still shows a pinned branch the list has lost", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(["main"])),
@@ -1913,10 +2435,14 @@ describe("a conversation's setup", () => {
     expect(picker.value).toBe(OPEN.base_commit);
   });
 
+  /// The rule entry is the whole of what names the branch an unpinned
+  /// conversation starts from: the hint that used to repeat it underneath is
+  /// gone, the dropdown having said it already.
   it("names the branch an unpinned conversation will start from", async () => {
     const rule: ConversationView = { ...OPEN, base_commit: null };
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
@@ -1924,14 +2450,29 @@ describe("a conversation's setup", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Base branch"),
+    )) as HTMLSelectElement;
+
+    expect(picker.value).toBe("");
+    expect(picker.options[0]!.textContent).toContain(OPEN.repo.default_branch);
+    expect(
+      container.querySelector(`.${setup.baseBranch} .${notices.note}`),
+    ).toBeNull();
+  });
+
+  /// Neither wording of the hint under the dropdown survives — the pinned one
+  /// either, which is what the fixture's own conversation would draw.
+  it("says nothing under the dropdown about when the base resolves", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
     await waitFor(() => screen.getByLabelText("Base branch"));
 
     expect(
-      (screen.getByLabelText("Base branch") as HTMLSelectElement).value,
-    ).toBe("");
-    expect(container.querySelector(`.${setup.baseBranch} .${notices.note}`)!.textContent).toContain(
-      OPEN.repo.default_branch,
-    );
+      container.querySelector(`.${setup.baseBranch} .${notices.note}`),
+    ).toBeNull();
+    expect(screen.queryByText(/branches from/)).toBeNull();
   });
 });
 
@@ -1957,6 +2498,7 @@ describe("a conversation's pairings", () => {
   ) {
     return serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(view)),
@@ -2077,21 +2619,25 @@ describe("a conversation's pairings", () => {
     );
   });
 
-  /// A conversation missing either profile is identifiably not ready, and the
-  /// answer is the server's rather than a count of the two fields. What is
-  /// missing is not said here, though: the button at the end of the record is
-  /// the one thing that explains itself, and a verdict up here as well would be
-  /// the same complaint twice.
-  it("says nothing about readiness until there is something to affirm", async () => {
+  /// Readiness is the business of the button at the end of the record, which is
+  /// enabled or else explains what is missing. Said up here as well it would be
+  /// the same verdict twice, so the setup says nothing about it either way.
+  it("says nothing about readiness, ready or not", async () => {
     withConversation(UNCHOSEN);
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
-    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
     expect(screen.queryByText(/Not ready to grill/)).toBeNull();
+    expect(screen.queryByText("Ready to grill.")).toBeNull();
+  });
 
-    // The fixture's own conversation has both, and the server says so.
-    expect(OPEN.ready_to_grill).toBe(true);
+  it("says nothing about readiness when the server says it is ready", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    expect(OPEN.ready_to_grill, "the fixture is the ready one").toBe(true);
+    expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
   /// One row where the pane is wide enough for two, which is the stylesheet's
@@ -2102,14 +2648,6 @@ describe("a conversation's pairings", () => {
 
     const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
     expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(2);
-  });
-
-  it("says it is ready when the server says so", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    await waitFor(() => screen.getByText("Ready to grill."));
-    expect(container.querySelector(`.${setup.readiness}`)!.classList).toContain(setup.ready);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -2128,10 +2666,9 @@ describe("a conversation's pairings", () => {
       ready_to_grill: false,
     };
     withConversation(broken);
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText("Its config file is gone."));
-    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
   });
 
   it("says why a choice was refused, in words", async () => {
@@ -2149,6 +2686,7 @@ describe("a conversation's pairings", () => {
   it("says where to go when there is no profile to choose", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json([])),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(UNCHOSEN)),
@@ -2179,8 +2717,41 @@ describe("the panes on a narrow window", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
     expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
 
+    // The way back out is a navigation — it takes the Conversation off the URL
+    // — so the level changes when the router has moved rather than when the
+    // button was pressed.
     fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
-    expect(frame(container).dataset.pane).toBe("conversations");
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+  });
+
+  /// Walking back out takes the Conversation off the URL as well as off the
+  /// frame, so that pressing the same card again is a change of selection
+  /// rather than a navigation to where the page already stands — which is what
+  /// pages a phone forward into it a second time.
+  it("walks back in to the conversation it just came out of", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("timeline"),
+    );
+    expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
+    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("conversations"),
+    );
+    expect(history.get()).toBe("/");
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("timeline"),
+    );
   });
 
   /// So walking in to the third level is opening something, and the way forward
@@ -2431,6 +3002,7 @@ const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
 function theGrilling(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
@@ -2446,6 +3018,7 @@ function theGrilling(...answers: Parameters<typeof serving>) {
 function theSpeaking(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
@@ -2472,6 +3045,7 @@ function theGrillingOutput(
 
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -2504,6 +3078,7 @@ function theWorkbenchWith(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...over })),
@@ -2536,6 +3111,7 @@ const SECOND: ConversationView = {
 function theThree(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/abandoned-roadmaps", json([])),
@@ -3505,22 +4081,19 @@ describe("a session's output on the timeline", () => {
   });
 
   /// The switch is the pane's own control, so it stands in the pane's header
-  /// beside the title — where every other pane's Close is, and where this one's
-  /// was. Two of them there would be one row with two ways off it, so the Close
-  /// goes: "← Timeline" is the way out of every pane on a narrow window, and a
-  /// wide one has the conversation's Timeline standing beside this anyway.
-  it("puts the switch in the header, and keeps no Close beside it", async () => {
+  /// beside the title, with "← Timeline" over the top of it — which is every
+  /// details pane's header now that none of them carries a Close.
+  it("puts the switch in the header, beside the way back", async () => {
     theSpeaking();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
 
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
     await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${outputPane.recordSwitch}`);
     await drawn(container, `.${shell.detailsPane} .${paneHead.head} .${paneHead.back}`);
 
-    expect(
-      container.querySelector(`.${shell.detailsPane} .${paneHead.close}`),
-    ).toBeNull();
+    expect(head.textContent).not.toContain("Close");
   });
 
   /// Sharing that row is what the switch's width is now about: as wide as its
@@ -3618,6 +4191,92 @@ describe("a session's output on the timeline", () => {
 
     await waitFor(() => expect(output.classList).toContain(timeline.selected));
     expect(output.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+/// And that same session again, held against the foot of the pane for as long
+/// as it is running.
+///
+/// A second appearance rather than a move: the card stays where it is on the
+/// record, and this is the way back to it from however far down the human has
+/// read. What holds it there is one rule of the frame's, which is what makes it
+/// right in both scrolling regimes — a narrow window scrolls the page, a wide
+/// one scrolls the pane, and sticky hugs the bottom edge in either.
+describe("the strip for the session running now", () => {
+  /// Where the strip is found, which is the pane rather than the record: it is
+  /// no part of the list of what has happened.
+  const strip = (container: HTMLElement) =>
+    container.querySelector(`.${shell.timelinePane} > .${timeline.session}`);
+
+  it("holds the running session against the foot of the pane", async () => {
+    theGrillingOutput({ running: true, idle: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.textContent).toContain("Agent output");
+    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeTruthy();
+
+    // Outside the record, and inside the pane: the strip is a second appearance
+    // of the session rather than an event of its own.
+    expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
+    expect(strip(container)).toBe(pinned);
+  });
+
+  /// jsdom lays nothing out, so what says it stays down there is the rule, as
+  /// it is for the block stuck to the pane's top edge. One rule for both ways a
+  /// pane scrolls, and beneath the chrome in stacking terms so that a menu
+  /// coming down from the header passes over it.
+  it("stays against the bottom edge while the record scrolls past it", async () => {
+    theGrillingOutput({ running: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.classList).toContain(shell.paneFoot);
+    expect(shellCss).toContain(
+      ".pane > .paneFoot {\n  position: sticky;\n  bottom: 0;\n  z-index: 0;",
+    );
+  });
+
+  /// The mark says what the card's says, live: the two are one session read at
+  /// two distances, and a strip disagreeing with the row would be two answers
+  /// to the one question.
+  it("empties the ring while the session is idle", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.querySelector(`.${marks.mark}.${marks.idle}`)).toBeTruthy();
+    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
+  });
+
+  /// And the press is the card's own press: the same session's output in the
+  /// details pane, and the card on the record marked as the one that is open.
+  it("opens the session's output", async () => {
+    theGrillingOutput({ running: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.session}`));
+
+    await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
+
+    const card = container.querySelector(`.${timeline.agentOutput}`)!;
+    expect(card.classList).toContain(timeline.selected);
+  });
+
+  /// And nothing at all where nothing is running, which is every conversation
+  /// between one step and the next: there is no session to be found, so there
+  /// is nothing to hold in view.
+  it("draws no strip when no session is running", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(OUTPUT.running).toBe(false);
+    expect(strip(container)).toBeNull();
   });
 });
 
@@ -3792,14 +4451,14 @@ describe("watching a live session's screen", () => {
     );
   });
 
-  /// And it renders what the session wrote in the case the session wrote it in.
-  /// The badge that says a row is live is styled by that word alone, and the
-  /// Screen marks itself with the same one. The two are hashed apart now that
-  /// each is in a module of its own, but neither sheet may ask for the word
-  /// bare inside itself — a rule that did would match every element of that
-  /// module carrying it, and `text-transform` inherits all the way down into
-  /// the rows xterm builds.
-  it("leaves a live terminal's text in its own case", async () => {
+  /// And it leaves the session's own type alone. The badge that says a row is
+  /// live is styled by that word alone, and the Screen marks itself with the
+  /// same one. The two are hashed apart now that each is in a module of its
+  /// own, but neither sheet may ask for the word bare inside itself — a rule
+  /// that did would match every element of that module carrying it, and the
+  /// inherited half of what a badge is set in would reach every row xterm
+  /// builds.
+  it("leaves a live terminal's text in its own type", async () => {
     watching();
     const { container, socket } = await watched();
 
@@ -3808,12 +4467,12 @@ describe("watching a live session's screen", () => {
     const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
     expect(screen.classList).toContain(screenPane.live!);
 
-    // The badge keeps its capitals, and asks for them where badges are.
+    // The badge asks for its type where badges are, and in sentence case:
+    // nothing in the viewer is set in capitals any more.
     expect(timelineCss).toContain(
       ".eventHead .live {\n" +
         "  font-size: 0.8rem;\n" +
-        "  font-weight: 600;\n" +
-        "  text-transform: uppercase;\n",
+        "  font-weight: 600;\n",
     );
 
     // And nothing asks for them by the word alone, here or anywhere else: a
@@ -4017,16 +4676,16 @@ describe("closing a conversation", () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await drawn(container, `.${timeline.conversationActions} > .${dropdown.trigger}`);
+    await drawn(container, `.${actions.conversationActions} > .${dropdown.trigger}`);
 
     // Closed, so nothing in it is on the page at all — which is the whole of
     // what standing a destructive action behind a menu means.
-    expect(container.querySelector(`.${timeline.close}`)).toBeNull();
+    expect(container.querySelector(`.${actions.close}`)).toBeNull();
 
     const menu = await openActions(container);
-    expect(menu.querySelector(`.${timeline.close}`)).toBeTruthy();
-    expect(container.querySelector(`.${paneHead.head} .${timeline.close}`)).toBe(
-      menu.querySelector(`.${timeline.close}`),
+    expect(menu.querySelector(`.${actions.close}`)).toBeTruthy();
+    expect(container.querySelector(`.${paneHead.head} .${actions.close}`)).toBe(
+      menu.querySelector(`.${actions.close}`),
     );
   });
 
@@ -4041,7 +4700,7 @@ describe("closing a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     await waitFor(() =>
       expect(
@@ -4071,7 +4730,7 @@ describe("closing a conversation", () => {
     await openActions(container);
 
     await waitFor(() => screen.getByText("This conversation has been closed."));
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.close}`)).toBeNull();
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.close}`)).toBeNull();
   });
 
   it("says when the worktree could not be removed", async () => {
@@ -4085,9 +4744,159 @@ describe("closing a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.close}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
     await waitFor(() => screen.getByText(/could not be removed/));
+  });
+});
+
+/// Archiving stands where Close does once Close has been pressed: the way to
+/// put a finished conversation out of the list without touching any of it.
+describe("archiving a conversation", () => {
+  /// A conversation still being worked on belongs on the list it is worked
+  /// from, so the row is not there to press.
+  it("is offered on a closed conversation and on no other", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  it("stands where close was, on one that has been closed", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+    await waitFor(() => expect(menu.querySelector(`.${actions.archive}`)).toBeTruthy());
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
+  });
+
+  it("posts to the conversation's own archive route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/archive`,
+        json("Archived" satisfies ConversationArchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/archive`)).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before a press that makes something disappear: that
+  /// it is the list it goes off, and that nothing of the record goes with it.
+  it("says the record stays where it is", async () => {
+    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+
+    await waitFor(() => screen.getByText(/Take it off the conversations list/));
+    expect(screen.getByText(/Its record stays where it is/)).toBeTruthy();
+  });
+
+  /// A page drawn against a conversation that has since been steered back into
+  /// the work: the press is refused, and the refusal is what says so.
+  it("says when it is not a conversation to put away", async () => {
+    theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/archive`,
+        json("NotClosed" satisfies ConversationArchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
+
+    await waitFor(() => screen.getByText(/nothing to put away/));
+  });
+});
+
+/// And the way back out of it, which stands in the same place on a conversation
+/// that has already been put away: archiving is reversible, and this is the
+/// reversal.
+describe("unarchiving a conversation", () => {
+  /// One row or the other, never both — the two say opposite things about the
+  /// same conversation.
+  it("stands where archive was, on one already put away", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+    await waitFor(() =>
+      expect(menu.querySelector(`.${actions.unarchive}`)).toBeTruthy(),
+    );
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  it("posts to the conversation's own unarchive route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false, archived: true },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/unarchive`,
+        json("Unarchived" satisfies ConversationUnarchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/unarchive`)).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before a press that puts something back: that it is
+  /// the list it returns to, and that it stays there.
+  it("says the conversation goes back on the list", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+
+    await waitFor(() =>
+      screen.getByText(/Put it back on the conversations list/),
+    );
+  });
+
+  /// The one thing left to refuse: a page drawn against a conversation that has
+  /// since gone.
+  it("says when the conversation is gone", async () => {
+    theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false, archived: true },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/unarchive`,
+        json("NoSuchConversation" satisfies ConversationUnarchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
+
+    await waitFor(() => screen.getByText("This conversation is gone."));
   });
 });
 
@@ -4184,7 +4993,7 @@ describe("a second round", () => {
     expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
 
     await openActions(container);
-    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
+    await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
   });
 });
 
@@ -4222,10 +5031,10 @@ describe("stopping a conversation", () => {
     );
 
     expect(offered).toEqual([
-      timeline.stop,
-      timeline.forceStop,
-      timeline.steer,
-      timeline.close,
+      actions.stop,
+      actions.forceStop,
+      actions.steer,
+      actions.close,
     ]);
 
     expect(
@@ -4253,9 +5062,9 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`);
+    await drawn(container, `.${actions.conversationActions} .${actions.stop}`);
     expect(
-      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
+      container.querySelector(`.${actions.conversationActions} .${actions.forceStop}`),
     ).toBeNull();
   });
 
@@ -4267,10 +5076,10 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.close}`);
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
+    await drawn(container, `.${actions.conversationActions} .${actions.close}`);
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.stop}`)).toBeNull();
     expect(
-      container.querySelector(`.${timeline.conversationActions} .${timeline.forceStop}`),
+      container.querySelector(`.${actions.conversationActions} .${actions.forceStop}`),
     ).toBeNull();
   });
 
@@ -4288,7 +5097,7 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
     await waitFor(() => expect(sent(fetching, STOPPING)).toEqual({}));
   });
@@ -4302,7 +5111,7 @@ describe("stopping a conversation", () => {
 
     await openActions(container);
     fireEvent.click(
-      await drawn(container, `.${timeline.conversationActions} .${timeline.forceStop}`),
+      await drawn(container, `.${actions.conversationActions} .${actions.forceStop}`),
     );
 
     await waitFor(() => expect(sent(fetching, AT_ONCE)).toEqual({}));
@@ -4324,9 +5133,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const waiting = await drawn(container, `.${timeline.conversationActions} .${timeline.waiting}`);
+    const waiting = await drawn(container, `.${actions.conversationActions} .${actions.waiting}`);
 
     expect(waiting.textContent).toContain("finishes its task first");
   });
@@ -4345,9 +5154,9 @@ describe("stopping a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
-    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.stop}`));
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.stop}`));
 
-    const refused = await drawn(container, `.${timeline.conversationActions} .${notices.error}`);
+    const refused = await drawn(container, `.${actions.conversationActions} .${notices.error}`);
 
     expect(refused.textContent).toBe(STOP_REFUSAL.AlreadyStopped);
     expect(refused.textContent).toContain("Resume");
@@ -4370,7 +5179,7 @@ const OVER_NOTHING = json({ Opened: { working: false } } satisfies SteerOpened);
 /// not inside the page's own tree.
 async function openSteer(container: ParentNode): Promise<HTMLElement> {
   const menu = await openActions(container);
-  fireEvent.click(await drawn(menu, `.${timeline.steer}`));
+  fireEvent.click(await drawn(menu, `.${actions.steer}`));
   return drawn(document.body, `.${steerModal.steerConversation}`);
 }
 
@@ -4393,8 +5202,8 @@ describe("steering a conversation", () => {
 
     await openActions(container);
 
-    await drawn(container, `.${timeline.conversationActions} .${timeline.steer}`);
-    expect(container.querySelector(`.${timeline.conversationActions} .${timeline.stop}`)).toBeNull();
+    await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
+    expect(container.querySelector(`.${actions.conversationActions} .${actions.stop}`)).toBeNull();
   });
 
   /// The click is a press before it is a modal: it stops the drive, so nothing
@@ -5314,6 +6123,7 @@ function theBuilding(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -5572,22 +6382,20 @@ describe("a commit on the timeline", () => {
     expect(row.textContent).not.toContain("Approve");
   });
 
-  /// The pane is the open Event and nothing else, so closing the diff leaves it
-  /// bare — and a narrow window walks back out to the record with it, there
-  /// being no level left to be on.
-  it("empties the pane and walks back out when it is closed", async () => {
+  /// "← Timeline" is the only way off the pane: there is no Close anywhere in
+  /// the details panel, and on a narrow window the way back is the way out.
+  it("walks back out to the record, and offers no Close", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
+    const pane = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
 
-    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.close}`));
+    expect(pane.textContent).not.toContain("Close");
 
-    await waitFor(() =>
-      expect(screen.getByLabelText("Details").textContent).toBe(""),
-    );
-    expect(frame(container).dataset.pane).toBe("timeline");
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
   });
 
   it("shows that commit's diff in the details pane, as the server rendered it", async () => {
@@ -5627,8 +6435,9 @@ describe("a commit on the timeline", () => {
 
   /// What the commit said about itself, between the header and the diff — the
   /// server rendered and sanitized it, so the pane only has to put it in the
-  /// page.
-  it("shows the commit's summary above the diff", async () => {
+  /// page. Headed and boxed the way a Set's Preface is, which is the same kind
+  /// of thing read the same way.
+  it("shows the commit's message above the diff, headed and boxed", async () => {
     theBuilding(
       {},
       whenever(
@@ -5643,49 +6452,56 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
-    expect(summary.innerHTML).toBe("<p>A bucket per account.</p>");
+    expect(body.innerHTML).toBe("<p>A bucket per account.</p>");
+
+    // In the box, under a heading of its own — the heading outside the box, as
+    // a Preface's is.
+    const message = body.closest(`.${commitPane.message}`)!;
+
+    expect(message.querySelector("h2")!.textContent).toBe("Message");
+    expect(message.querySelector("h2")!.nextElementSibling).toBe(body);
 
     // Read in the order it is written in: what the commit says about itself,
     // then what it changed.
     const diff = await drawn(container, `.${shell.detailsPane} .${diffSection.diff}`);
 
     expect(
-      summary.compareDocumentPosition(diff) &
+      message.compareDocumentPosition(diff) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  /// A Diagram in the summary is the one thing the pane draws for itself, and it
+  /// A Diagram in the message is the one thing the pane draws for itself, and it
   /// draws it the Set page's way: over the source block the server left, once the
-  /// summary is in the page. What it drew is `diagrams.test.ts`'s subject; what
+  /// message is in the page. What it drew is `diagrams.test.ts`'s subject; what
   /// is asked here is that it was reached for, and over this block alone — a Set
   /// page open behind the workbench draws its own.
-  it("draws the Diagram in a summary that holds one", async () => {
+  it("draws the Diagram in a message that holds one", async () => {
     theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
     // The source block the renderer draws over — and what the reader is left
     // with if it never draws.
-    expect(summary.querySelector("pre.mermaid")!.textContent).toContain(
+    expect(body.querySelector("pre.mermaid")!.textContent).toContain(
       "flowchart LR",
     );
 
     await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
-    expect(drawing.mock.calls[0]![0]).toEqual({ root: summary });
+    expect(drawing.mock.calls[0]![0]).toEqual({ root: body });
   });
 
   /// And draws it again for the next commit opened, which is not a second mount:
-  /// the pane is not rebuilt per commit, so the second summary's markup lands in
+  /// the pane is not rebuilt per commit, so the second message's markup lands in
   /// the block the first one was drawn in.
   ///
   /// Read three commits deep on purpose. The first switch is masked — the second
-  /// commit is still being fetched for a tick, and a pane with no summary yet
+  /// commit is still being fetched for a tick, and a pane with no message yet
   /// takes the block out of the page and puts a fresh one back — but a commit the
   /// cache already holds comes back with no such gap, and that is the one a
   /// drawing hung on the mount would never follow.
@@ -5706,12 +6522,12 @@ describe("a commit on the timeline", () => {
         (row) => row.querySelector(`.${timeline.subject}`)!.textContent === subject,
       )!;
 
-    /// The summary block once it is holding the commit that was clicked, rather
+    /// The message block once it is holding the commit that was clicked, rather
     /// than the one before it: which commit the pane is showing is exactly what
     /// this test is about, so waiting for the block alone would prove nothing.
     const showing = (words: string) =>
       waitFor(() => {
-        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`);
+        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`);
         if (!block?.textContent?.includes(words)) {
           throw new Error(`the pane is not showing ${words} yet`);
         }
@@ -5744,7 +6560,7 @@ describe("a commit on the timeline", () => {
 
   /// Which is every other commit: mermaid is megabytes, and a pane with nothing
   /// to draw pays none of them.
-  it("never reaches for the renderer where the summary holds no Diagram", async () => {
+  it("never reaches for the renderer where the message holds no Diagram", async () => {
     theBuilding(
       {},
       whenever(
@@ -5758,21 +6574,21 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
     expect(drawing).not.toHaveBeenCalled();
   });
 
   /// The ordinary commit, and every commit recorded before summaries were kept:
   /// the pane is the header and the diff, exactly as it always was.
-  it("draws nothing where the commit carried no summary", async () => {
+  it("draws nothing where the commit carried no message", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
     await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
-    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`)).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -5949,7 +6765,7 @@ describe("the contents of a details pane", () => {
 
   /// And above them, what the commit said about itself — one nav over the whole
   /// pane, in the order the pane is read in.
-  it("lists a commit's summary above its diff, and jumps to both", async () => {
+  it("lists a commit's message above its diff, and jumps to both", async () => {
     theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
@@ -5961,11 +6777,17 @@ describe("the contents of a details pane", () => {
       [...nav.querySelectorAll(`a.${contents.link}`)].map((line) =>
         line.getAttribute("href"),
       ),
-    ).toEqual(["#commit-summary", "#commit-diff", "#diff-1", "#diff-2"]);
+    ).toEqual(["#commit-message", "#commit-diff", "#diff-1", "#diff-2"]);
+
+    // And the line that jumps to it is named for the section it lands on, which
+    // is the heading the reader arrives at.
+    expect(
+      nav.querySelector(`a[href="#commit-message"]`)!.textContent,
+    ).toBe("Message");
 
     // And both lines land on something: the ids are the pane's own sections
     // rather than names the nav made up.
-    for (const anchor of ["commit-summary", "commit-diff"]) {
+    for (const anchor of ["commit-message", "commit-diff"]) {
       const section = container.querySelector(`.${shell.detailsPane} #${anchor}`);
       expect(section, `expected the pane to hold #${anchor}`).toBeTruthy();
 
@@ -6083,6 +6905,7 @@ function theTasked(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6181,19 +7004,79 @@ describe("the pinned task list", () => {
 
   /// Pinned is a thing an event *is*, decided by its kind: it is drawn outside
   /// the record, so it does not scroll away with it.
-  it("is drawn above the record rather than in it", async () => {
+  it("is drawn above the record as well as in it", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
     expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.tasks}`)).toBeNull();
+
+    // And a second copy on the record, at the row that says the backlog landed
+    // — one card in two places, so the record keeps the moment the work stopped
+    // being a plan.
+    expect(
+      container.querySelectorAll(`.${timeline.timeline} .${timeline.taskList}`),
+    ).toHaveLength(1);
+  });
+
+  /// The row fixes where the backlog landed and nothing else: the card at it is
+  /// the same live reading the pinned one is drawn from, so the two cannot come
+  /// to disagree about how far through the work is.
+  it("draws the same list at the row where the backlog landed", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.taskList}`,
+    );
+
+    expect(
+      [...listed.querySelectorAll(`.${timeline.tasks} li`)].map((row) => [
+        row.querySelector(`.${timeline.what}`)!.textContent,
+        row.querySelector(`.${timeline.state}`)!.textContent,
+      ]),
+    ).toEqual(
+      BACKLOG.tasks.map((task) => [task.title, task.done ? "done" : "to do"]),
+    );
+
+    expect(
+      listed.querySelector(`.${timeline.progress}`)!.textContent,
+    ).toBe("2 of 4 done");
+  });
+
+  /// The reading is the worktree's, and a worktree can be taken away. The row
+  /// on the record stays — it is a moment that happened — but nothing is drawn
+  /// at it, the entry included: the record is a column with a rem between its
+  /// entries, so an entry with nothing in it is two rems of blank paper where
+  /// the backlog landed rather than nothing at all.
+  it("draws nothing at that row once there is no backlog left to read", async () => {
+    theTasked({
+      pinned: [],
+      timeline: TASKED.timeline.map((event) =>
+        "TaskList" in event
+          ? { TaskList: { ...event.TaskList, list: null } }
+          : event,
+      ),
+    });
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.taskList}`)).toBeNull();
+
+    // And no empty entry left behind where the card would have been: one entry
+    // per event with something to draw, which is every event but this one.
+    expect(
+      container.querySelectorAll(`.${timeline.timelineEvent}`),
+    ).toHaveLength(TASKED.timeline.length - 1);
   });
 
   /// Nothing pins or unpins one: the set is fixed, so there is no control for
-  /// it and no details pane to open — the whole of a task list is the list.
-  it("asks the human for nothing", async () => {
+  /// it. What the card does have is the one press its whole surface is — the
+  /// documents its entries name, in the details pane.
+  it("is one press and offers nothing else", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
@@ -6201,6 +7084,55 @@ describe("the pinned task list", () => {
 
     expect(list.querySelectorAll("button")).toHaveLength(0);
     expect(list.textContent).not.toContain("Pin");
+    expect(list.getAttribute("role")).toBe("button");
+    expect(list.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And it *says* it is one, in the same three ways the copy on the record
+  /// does. The card is drawn twice, so a rule that reached only the record
+  /// would have the human press the card held above the pane and watch a
+  /// different one light up. jsdom lays nothing out, so the rules themselves
+  /// are what is read.
+  it("reads as pressable wherever it is drawn", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
+
+    // The classes are on both copies already — what had to change is that the
+    // stylesheet says something about them off the record too.
+    expect(list.classList.contains(timeline.openable!)).toBe(true);
+
+    for (const rule of [
+      ".openable {\n  cursor: pointer;\n}",
+      ".openable.selected {\n  border-color: var(--accent);\n}",
+      "  .openable:hover,",
+    ]) {
+      expect(timelineCss).toContain(rule);
+    }
+
+    expect(timelineCss).not.toContain(".timelineEvent > .openable");
+  });
+
+  /// Pressing it marks it — both copies of it, because the two are one backlog
+  /// and there is one details pane behind them.
+  it("marks both copies of itself while its pane is open", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
+
+    fireEvent.click(list);
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(
+          `.${timeline.taskList}.${timeline.selected}`,
+        ),
+      ).toHaveLength(2),
+    );
+
+    expect(list.getAttribute("aria-pressed")).toBe("true");
   });
 
   /// What holds it in view is the block it shares with the header, so that is
@@ -6255,6 +7187,185 @@ describe("the pinned task list", () => {
   });
 });
 
+/// The backlog opened, as the details pane fetches it: one document per entry,
+/// with the finished tasks' files gone.
+///
+/// Written by hand rather than taken from a fixture: the fixtures are of the
+/// conversation endpoint, and this is a pane's own payload — the same way a
+/// commit's is written above.
+const BACKLOG_PANE: BacklogPane = {
+  feature: BACKLOG.feature,
+  diagrams: true,
+  tasks: BACKLOG.tasks.map((task) => ({
+    number: task.number,
+    title: task.title,
+    html: task.done
+      ? null
+      : `<h1>${task.number}. ${task.title}</h1>\n<h2>What to build</h2>\n` +
+        `<p>The ${task.title.toLowerCase()} part of it.</p>\n` +
+        '<div class="wide"><pre class="mermaid">flowchart LR\n  in --&gt; out\n</pre></div>',
+  })),
+};
+
+/// Where the details pane fetches it from — the conversation alone, there being
+/// no event to name a backlog by.
+const THE_BACKLOG = `/api/ui/conversations/${TASKED.id}/backlog`;
+
+describe("the task list opened", () => {
+  /// What the card is pressed for: the documents its entries name, which is the
+  /// one thing about a backlog the card cannot show.
+  it("draws every task document as its own boxed section, in backlog order", async () => {
+    const fetching = theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(sections.map((section) => section.id)).toEqual(
+      BACKLOG.tasks.map((task) => `task-${task.number}`),
+    );
+    expect(
+      sections.map((section) => [
+        section.querySelector(`.${documents.n}`)!.textContent,
+        section.querySelector(`.${documents.what}`)!.textContent,
+      ]),
+    ).toEqual(BACKLOG.tasks.map((task) => [task.number, task.title]));
+
+    // The Preface's own treatment: the heading outside the box, the rendered
+    // markdown in it, put in the page as the server wrote it.
+    const outstanding = sections[BACKLOG.tasks.findIndex((task) => !task.done)]!;
+    const body = outstanding.querySelector(`.${documents.document}`)!;
+
+    expect(body.classList).toContain("markdown");
+    expect(body.querySelector("h2")!.textContent).toBe("What to build");
+    expect(outstanding.querySelector("h2")!.closest(`.${documents.document}`)).toBeNull();
+    expect(documentsCss).toContain(
+      ".document,\n.missing {\n  padding: 1rem;\n  background: var(--card);",
+    );
+
+    expect(askedFor(fetching, THE_BACKLOG)).toBeGreaterThan(0);
+  });
+
+  /// A done task's file is gone from `.tasks/` — which is what says it is done —
+  /// so its entry is drawn with the note rather than with a document.
+  it("says so where the document is finished and removed", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${documents.missing}`) !== null),
+    ).toEqual(BACKLOG.tasks.map((task) => task.done));
+
+    const done = sections[BACKLOG.tasks.findIndex((task) => task.done)]!;
+
+    expect(done.querySelector(`.${documents.missing}`)!.textContent).toBe(
+      "Finished, and the document removed.",
+    );
+    expect(done.querySelector(`.${documents.document}`)).toBeNull();
+  });
+
+  /// The set page's own table of contents, one line per task: a finished one is
+  /// listed too, because it is part of what the backlog is.
+  it("offers a jump to each task", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+    const lines = [...nav.querySelectorAll(`.${contents.sections} > li a`)];
+
+    expect(lines.map((line) => line.getAttribute("href"))).toEqual(
+      BACKLOG.tasks.map((task) => `#task-${task.number}`),
+    );
+    expect(lines.map((line) => line.textContent)).toEqual(
+      BACKLOG.tasks.map((task) => `${task.number} ${task.title}`),
+    );
+  });
+
+  /// One backlog in two places, so opening either opens the one pane and both
+  /// read as selected while it is open — the pull request's own arrangement.
+  it("opens from the row on the record as well as from the pinned card", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const both = [...container.querySelectorAll(`.${timeline.taskList}`)];
+
+    expect(both).toHaveLength(2);
+    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
+  });
+
+  /// "← Timeline" is the only way off it: there is no Close anywhere in the
+  /// details panel.
+  it("is titled for the card, and walks back out to the record", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(head.querySelector("h1")!.textContent).toBe("Task list");
+    expect(head.textContent).not.toContain("Close");
+    expect(
+      (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
+    ).toBe(BACKLOG.feature);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+  });
+
+  /// The server refuses cleanly where the worktree or the backlog has gone, and
+  /// the pane says what it was told rather than spinning.
+  it("says what went wrong where there is no backlog left to read", async () => {
+    theTasked(
+      {},
+      whenever(
+        THE_BACKLOG,
+        json({ error: "there is no backlog on that Conversation" }, 404),
+      ),
+    );
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
+
+    expect(line.textContent).toContain("there is no backlog on that Conversation");
+  });
+});
+
 /// The sixth shape the middle pane draws: a conversation whose direction was a
 /// staged roadmap, with `docs/roadmaps/` in its worktree read back as the
 /// pinned stage list.
@@ -6276,6 +7387,7 @@ function theStaged(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6363,24 +7475,79 @@ describe("the pinned stage list", () => {
   });
 
   /// Pinned beside the backlog and the pull request, and drawn the same way:
-  /// outside the record, with nothing to pin, unpin or open.
-  it("is drawn above the record and asks the human for nothing", async () => {
+  /// above the record and again on it, with nothing to pin or unpin. What it
+  /// does have is the one press its whole surface is — the briefs its stages
+  /// name, in the details pane.
+  it("is drawn above the record and is one press and nothing else", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(list.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.stages}`)).toBeNull();
     expect(list.querySelectorAll("button")).toHaveLength(0);
+    expect(list.textContent).not.toContain("Pin");
+    expect(list.getAttribute("role")).toBe("button");
+    expect(list.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And on the record at the row that says the roadmap landed, drawn from the
+  /// same reading the pinned copy is — a stage ticking moves both at once.
+  it("draws the same roadmap at the row where it landed", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.stageList}`,
+    );
+
+    expect(
+      [...listed.querySelectorAll(`.${timeline.stages} li`)].map((row) => [
+        row.querySelector(`.${timeline.what}`)!.textContent,
+        row.querySelector(`.${timeline.state}`)!.textContent,
+      ]),
+    ).toEqual(
+      ROADMAP.stages.map((stage) => [
+        stage.title,
+        stage.done ? "done" : "to do",
+      ]),
+    );
+
+    expect(listed.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  /// Read off the worktree like the backlog's, so a worktree that has gone
+  /// leaves the row with no card to draw at it — and no entry on the record
+  /// either, for the backlog's reason: an empty one is a gap rather than
+  /// nothing.
+  it("draws nothing at that row once there is no roadmap left to read", async () => {
+    theStaged({
+      pinned: [],
+      timeline: STAGED.timeline.map((event) =>
+        "StageList" in event
+          ? { StageList: { ...event.StageList, roadmaps: [] } }
+          : event,
+      ),
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
+
+    expect(
+      container.querySelectorAll(`.${timeline.timelineEvent}`),
+    ).toHaveLength(STAGED.timeline.length - 1);
   });
 
   /// What Verkstead did on its own account while nobody was watching — here,
   /// the stage it started when this roadmap's wrap-up settled.
   ///
-  /// A line in the record rather than a card above it, because it is a sentence
-  /// and not a document: there is nothing to open, and nothing to answer.
-  it("draws what verkstead did unasked as a line in the record", async () => {
+  /// In the record rather than pinned above it, because it is a moment and not
+  /// the standing state of anything — and a card there like every other moment,
+  /// with nothing to open and nothing to answer.
+  it("draws what verkstead did unasked as a card in the record", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
@@ -6390,6 +7557,15 @@ describe("the pinned stage list", () => {
     expect(notice.querySelector("code")?.textContent).toBe("mvp");
     expect(notice.closest(`.${timeline.timeline}`)).not.toBeNull();
     expect(notice.querySelectorAll("button")).toHaveLength(0);
+
+    // The card surface is the one every timeline event is given, so the notice
+    // asks for nothing that would take it back out of the run of them.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .notice {\n" +
+        "  font-size: 0.9rem;\n" +
+        "  color: var(--ink-soft);\n" +
+        "}",
+    );
   });
 
   it("draws nothing at all where the branch has written no roadmap", async () => {
@@ -6403,6 +7579,207 @@ describe("the pinned stage list", () => {
     await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
 
     expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
+  });
+});
+
+/// The roadmap opened, as the details pane fetches it: one brief per stage, done
+/// or not — a stage's brief stays where it is for ever.
+///
+/// Written by hand rather than taken from a fixture, as the backlog pane's is:
+/// the fixtures are of the conversation endpoint, and this is a pane's own
+/// payload.
+const ROADMAP_PANE: RoadmapPane = {
+  name: ROADMAP.name,
+  title: ROADMAP.title,
+  diagrams: false,
+  stages: ROADMAP.stages.map((stage) => ({
+    number: stage.number,
+    title: stage.title,
+    done: stage.done,
+    html:
+      stage.number === "04"
+        ? null
+        : `<h1>${stage.number}. ${stage.title}</h1>\n<h2>What to build</h2>\n` +
+          `<p>The ${stage.title.toLowerCase()} of it.</p>`,
+  })),
+};
+
+/// Where the details pane fetches it from — the conversation and the roadmap's
+/// own directory name, a worktree being allowed any number of roadmaps.
+const THE_ROADMAP = `/api/ui/conversations/${STAGED.id}/roadmap/${ROADMAP.name}`;
+
+describe("the stage list opened", () => {
+  /// What the card is pressed for: the briefs its stages name, which is the one
+  /// thing about a roadmap the card cannot show — the backlog pane one level up,
+  /// drawn by the same component into the same boxed sections.
+  it("draws every stage brief as its own boxed section, in the roadmap's order", async () => {
+    const fetching = theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(sections.map((section) => section.id)).toEqual(
+      ROADMAP.stages.map((stage) => `stage-${stage.number}`),
+    );
+    expect(
+      sections.map((section) => [
+        section.querySelector(`.${documents.n}`)!.textContent,
+        section.querySelector(`.${documents.what}`)!.textContent,
+      ]),
+    ).toEqual(ROADMAP.stages.map((stage) => [stage.number, stage.title]));
+
+    // The Preface's own treatment, as the backlog pane draws it: the heading
+    // outside the box, the rendered markdown in it.
+    const body = sections[0]!.querySelector(`.${documents.document}`)!;
+
+    expect(body.classList).toContain("markdown");
+    expect(body.querySelector("h2")!.textContent).toBe("What to build");
+    expect(sections[0]!.querySelector("h2")!.closest(`.${documents.document}`)).toBeNull();
+
+    expect(askedFor(fetching, THE_ROADMAP)).toBeGreaterThan(0);
+  });
+
+  /// A stage's brief stays where it is for ever, so a done stage has a document
+  /// like any other and the heading is where the done state goes — the other way
+  /// round from a task, whose file going is what says it is done.
+  it("marks the done stages on their own headings, briefs and all", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${documents.section}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${documents.mark}`)!.textContent),
+    ).toEqual(ROADMAP.stages.map((stage) => (stage.done ? "done" : "to do")));
+
+    // And the done ones are drawn with their briefs all the same.
+    expect(
+      sections
+        .filter((_, at) => ROADMAP.stages[at]!.done)
+        .every((section) => section.querySelector(`.${documents.document}`) !== null),
+    ).toBe(true);
+  });
+
+  /// The one thing a stage has no document for is a roadmap pointing at a brief
+  /// nobody wrote, which is the human's to fix and so is said in words.
+  it("says so where the roadmap names a brief that is not there", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const missing = await drawn(
+      container,
+      `.${shell.detailsPane} .${documents.missing}`,
+    );
+
+    expect(missing.textContent).toBe(
+      "The roadmap names a brief that is not there to read.",
+    );
+    expect(missing.closest(`.${documents.section}`)!.id).toBe("stage-04");
+  });
+
+  /// The set page's own table of contents, one line per stage.
+  it("offers a jump to each stage", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+    const lines = [...nav.querySelectorAll(`.${contents.sections} > li a`)];
+
+    expect(lines.map((line) => line.getAttribute("href"))).toEqual(
+      ROADMAP.stages.map((stage) => `#stage-${stage.number}`),
+    );
+    expect(lines.map((line) => line.textContent)).toEqual(
+      ROADMAP.stages.map((stage) => `${stage.number} ${stage.title}`),
+    );
+  });
+
+  /// One roadmap in two places, so opening either opens the one pane and both
+  /// read as selected while it is open — the backlog's own arrangement.
+  it("opens from the row on the record as well as from the pinned card", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.stageList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${documents.section}`);
+
+    const both = [...container.querySelectorAll(`.${timeline.stageList}`)];
+
+    expect(both).toHaveLength(2);
+    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
+  });
+
+  /// Titled for the card, and named for the roadmap under the header: which of
+  /// a repository's roadmaps this is, is what the pane has to say for itself.
+  it("is titled for the card, and walks back out to the record", async () => {
+    theStaged({}, whenever(THE_ROADMAP, json(ROADMAP_PANE)));
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(head.querySelector("h1")!.textContent).toBe("Roadmap");
+    expect(head.textContent).not.toContain("Close");
+    expect(
+      (await drawn(container, `.${shell.detailsPane} .${documents.feature}`)).textContent,
+    ).toBe(ROADMAP.title);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+  });
+
+  /// The server refuses cleanly where the worktree or the roadmap has gone, and
+  /// the pane says what it was told rather than spinning.
+  it("says what went wrong where there is no roadmap left to read", async () => {
+    theStaged(
+      {},
+      whenever(
+        THE_ROADMAP,
+        json({ error: "there is no roadmap of that name on that Conversation" }, 404),
+      ),
+    );
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.stageList}`),
+    );
+
+    const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
+
+    expect(line.textContent).toContain(
+      "there is no roadmap of that name on that Conversation",
+    );
   });
 });
 
@@ -6425,6 +7802,7 @@ function theStopped(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6493,6 +7871,7 @@ function thePaused(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6616,6 +7995,11 @@ describe("a run stopped because an account ran out of window", () => {
     expect(marked.textContent).toContain("Implementing the work");
     expect(frame(container).dataset.pane).toBe("timeline");
 
+    // Said by the card's own border, the way every other selected card says it
+    // — in the colour that means stopped, because that is what this one is.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .notice.selected {\n  border-color: var(--stopped);\n}",
+    );
   });
 });
 
@@ -6688,6 +8072,7 @@ function theWrapping(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6729,21 +8114,56 @@ describe("the pinned pull request", () => {
     expect(out.href).toBe(OPENED.url);
   });
 
-  /// Pinned is a thing an event is: it is drawn outside the record, and the
-  /// move into wrapping is what says on the record that it arrived.
-  it("is drawn above the record rather than in it", async () => {
+  /// Pinned and on the record both: the sticky block holds it in view for as
+  /// long as the work is on it, and the record has it where it happened.
+  it("is drawn in the pinned block and on the record", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
 
     expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.pullRequest}`)).toBeNull();
+
+    const listed = container.querySelector<HTMLElement>(
+      `.${timeline.timeline} .${timeline.pullRequest}`,
+    )!;
+    expect(listed.querySelector(`.${timeline.openPullRequest}`)!.textContent).toBe(
+      OPENED.title,
+    );
+
+    // Where it happened, which is the move into wrapping the same pull request
+    // wrote: the record reads on past it.
+    const record = [...container.querySelectorAll(`.${timeline.timeline} > li`)];
+    expect(record.findIndex((row) => row.contains(listed))).toBeLessThan(
+      record.length - 1,
+    );
 
     const moves = [...container.querySelectorAll(`.${timeline.timeline} .${timeline.moved}`)].map(
       (line) => line.textContent,
     );
     expect(moves.at(-1)).toBe("Implementing → Wrapping");
+  });
+
+  /// One card in two places, so opening either is opening the pull request:
+  /// the pane is the same pane, and both copies read as selected because there
+  /// is one selection and it is this event.
+  it("opens the same pane from either copy, and marks both", async () => {
+    theWrapping();
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.pullRequest}`,
+    );
+    fireEvent.click(listed.querySelector(`.${timeline.openPullRequest}`)!);
+
+    await drawn(container, `.${shell.detailsPane} .${prPane.commits}`);
+
+    expect(
+      [...container.querySelectorAll(`.${timeline.pullRequest}`)].map((card) =>
+        card.classList.contains(timeline.selected!),
+      ),
+    ).toEqual([true, true]);
   });
 
   it("shows what is on it in the details pane, fetched rather than remembered", async () => {
@@ -6861,12 +8281,20 @@ describe("the pinned carousel", () => {
   /// The dots are the whole of what the carousel says about itself: how many
   /// there are, and which one of them is being read. Each is named for the card
   /// it turns to, so a reader who cannot see them is told the same thing.
-  it("counts them beneath the card and marks the one showing", async () => {
+  ///
+  /// Above the card rather than beneath it: the cards are not the same height
+  /// as each other, so dots underneath would move every time the card changed.
+  it("counts them above the card and marks the one showing", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const dots = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`);
     const buttons = [...dots.querySelectorAll("button")];
+
+    // First of the carousel's own children, which is what puts them above the
+    // deck the cards are dealt into.
+    expect(dots.previousElementSibling).toBeNull();
+    expect(dots.nextElementSibling?.className).toContain(timeline.deck);
 
     expect(buttons.map((dot) => dot.getAttribute("aria-label"))).toEqual([
       "Task list",
@@ -6890,7 +8318,11 @@ describe("the pinned carousel", () => {
     await waitFor(() =>
       expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).not.toBeNull(),
     );
-    expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull();
+    // The card it turned off is held in the deck while the slide runs, and gone
+    // once it has.
+    await waitFor(() =>
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull(),
+    );
     expect(
       dots.querySelectorAll("button")[2]!.getAttribute("aria-current"),
     ).toBe("true");
@@ -6921,32 +8353,92 @@ describe("the pinned carousel", () => {
   /// swipe is what they are, and two buttons lying over the card would be two
   /// buttons in the way of it.
   it("keeps the arrows for pointer devices", async () => {
-    expect(timelineCss).toContain(".carousel > .step {\n  display: none;\n}");
+    expect(timelineCss).toContain(".deck > .step {\n  display: none;\n}");
     expect(timelineCss).toContain(
-      "@media (hover: hover) {\n  .carousel > .step {\n    display: grid;",
+      "@media (hover: hover) {\n  .deck > .step {\n    display: grid;",
     );
+  });
+
+  /// The arrows lie over the card's own edges, so the card stands back from
+  /// them — and only where there are arrows to stand back from.
+  it("gives the cards room for the arrows where there are arrows", async () => {
+    const [, hovering] = timelineCss.split("@media (hover: hover) {");
+
+    expect(hovering).toContain(
+      "  .deck .taskList,\n  .deck .stageList,\n  .deck .pullRequest {\n    padding-inline: 2.4rem;\n  }",
+    );
+  });
+
+  /// The slide is the stylesheet's, gated the way the record's tab indicator
+  /// is: where motion is not wanted the card being left is not drawn at all,
+  /// and the swap is the instant one this replaced.
+  it("slides between cards only where motion is welcome", async () => {
+    expect(timelineCss).toContain(".deck > .leaving {\n  display: none;\n}");
+
+    const [, moving] = timelineCss.split(
+      "@media (prefers-reduced-motion: no-preference) {",
+    );
+
+    expect(moving).toContain(".deck > .arriving.onward {\n    animation: arriveOnward");
+    expect(moving).toContain(".deck > .leaving.onward {\n    animation: leaveOnward");
+    expect(moving).toContain(".deck > .arriving.backward {\n    animation: arriveBackward");
+    expect(moving).toContain(".deck > .leaving.backward {\n    animation: leaveBackward");
+  });
+
+  /// Both cards are in the deck while a turn runs, each wearing the part it is
+  /// playing and the way the deck is travelling — which is all the stylesheet
+  /// needs to move the pair together.
+  it("holds both cards while a turn runs, and only that long", async () => {
+    theWrapping({ pinned: ALL_THREE });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const deck = await drawn(container, `.${timeline.pinned} .${timeline.deck}`);
+    fireEvent.click(deck.querySelector(`.${timeline.step}.${timeline.on}`)!);
+
+    // Read on the spot rather than waited for: the pair are there the moment the
+    // arrow is pressed, and one of them is gone again a fifth of a second later.
+    const leaving = deck.querySelector(`.${timeline.leaving}`);
+    expect(leaving?.className).toContain(timeline.onward);
+    expect(leaving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+
+    const arriving = deck.querySelector(`.${timeline.arriving}`);
+    expect(arriving?.className).toContain(timeline.onward);
+    expect(arriving?.querySelector(`.${timeline.stageList}`)).not.toBeNull();
+
+    // And back the other way, which the pair say too.
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    fireEvent.click(deck.querySelector(`.${timeline.step}.${timeline.back}`)!);
+
+    expect(deck.querySelector(`.${timeline.leaving}`)?.className).toContain(
+      timeline.backward,
+    );
+
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    expect(deck.querySelector(`.${timeline.arriving}`)).toBeNull();
+    expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull();
   });
 
   it("turns the card on a swipe across it", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const showing = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.showing}`);
+    const deck = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.deck}`);
 
     // Leftwards is onwards, the way a page turns.
-    swipe(showing, 200, 200 - SWIPE);
+    swipe(deck, 200, 200 - SWIPE);
     await waitFor(() =>
-      expect(showing.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
     );
 
-    swipe(showing, 200, 200 + SWIPE);
+    swipe(deck, 200, 200 + SWIPE);
     await waitFor(() =>
-      expect(showing.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     // A press that slid a little is still a press, and turns nothing.
-    swipe(showing, 200, 200 - (SWIPE - 1));
-    expect(showing.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
+    swipe(deck, 200, 200 - (SWIPE - 1));
+    expect(deck.querySelector(`.${timeline.stageList}`)).toBeNull();
   });
 
   /// Which card the reader is put in front of: the one the work has stopped on,
@@ -7036,9 +8528,9 @@ const ASKED_BY_HAND = (() => {
 })();
 
 describe("a manual task on an old record", () => {
-  /// A line in the record, like the notice beside it: nothing sets another
+  /// A card in the record, like the notice beside it: nothing sets another
   /// going, so there is nothing to press and nothing to open.
-  it("draws what was asked for as a line in the record", async () => {
+  it("draws what was asked for as a card in the record", async () => {
     theWrapping();
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
@@ -7048,6 +8540,12 @@ describe("a manual task on an old record", () => {
     expect(asked.querySelector(`.${timeline.eventHead}`)).toBeNull();
     expect(asked.classList.contains("openable")).toBe(false);
     expect(asked.getAttribute("role")).toBeNull();
+
+    // And it takes the card surface every timeline event is given, asking for
+    // nothing that would draw it back out of the run of them.
+    expect(timelineCss).toContain(
+      ".timelineEvent > .manualTask {\n  font-size: 0.9rem;\n}",
+    );
   });
 
   /// Put in the page as the server rendered it, like every other piece of

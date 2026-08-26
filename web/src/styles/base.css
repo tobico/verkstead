@@ -20,6 +20,14 @@
      5.5:1. Dark mode has the opposite problem and so gets the bright one. */
   --accent: #a34b12;
 
+  /* The accent one step deeper, which is what a filled control takes under the
+     pointer. Mixed towards the ink rather than named twice per scheme, so that
+     the step is the same step in both: on light paper the ink is nearly black
+     and a hovered button darkens, on dark paper it is nearly white and the
+     button lifts. Either way the `--paper` written across it gains contrast
+     rather than losing it, which is what a hover state must never cost. */
+  --accent-deep: color-mix(in srgb, var(--accent) 88%, var(--ink));
+
   /* Inline code gets a wash of its own rather than the fenced block's: a span of
      it is a few characters inside a line of prose, with no box and no margin to
      set it apart, so it has to be a shade more present than a block that has
@@ -201,4 +209,51 @@ textarea {
 textarea::placeholder {
   color: var(--ink-soft);
   opacity: 1;
+}
+
+/* Hover, everywhere in the viewer, and nowhere outside a query like this one.
+
+   A touch device reports `hover: none`, and what it does with a hover rule it
+   can reach is paint it on whatever was last tapped and leave it there: the
+   finger has gone and nothing tells the page so. Every module in the app keeps
+   its hover states inside a block of this shape, and `tests/hovering.test.ts`
+   is what says they all still do.
+
+   Three treatments, and everything that can be pressed takes one of them:
+
+   - a **surface** — a card, a list row, a menu entry, a filled button — shifts
+     its background one step. `--card` and `--paper` are the two shades the page
+     is drawn in and a surface swaps to the other; a filled one takes
+     `--accent-deep`, which is that same step taken in the accent.
+   - a **control** — a link, a button drawn as text, a small outline — takes the
+     accent, or deepens the accent it is already in.
+   - a **field** darkens its border, and takes an accent one while it holds the
+     focus.
+
+   That focus border is the one focus treatment the sweep had to add: a field
+   had none at all, and everything else here is a button or a link and wears the
+   browser's own ring. Nothing anywhere takes a ring away.
+
+   What is written here is what has no module to write it — a link anywhere in
+   the app, and the field this file already draws. */
+@media (hover: hover) {
+  /* Deepened, and underlined where a page took the underline off. The links
+     that kept theirs are already marked as links, so the colour is the whole of
+     what the pointer adds to them. */
+  a:hover {
+    color: var(--accent-deep);
+    text-decoration: underline;
+  }
+
+  textarea:hover {
+    border-color: var(--ink-soft);
+  }
+}
+
+/* And the field being typed in, which is not the pointer's doing and so is not
+   inside the query. The browser's ring stays where it is: this is the border
+   saying which field the words are going into, read at a glance rather than at
+   the edge of one. */
+textarea:focus-visible {
+  border-color: var(--accent);
 }

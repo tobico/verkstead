@@ -43,7 +43,7 @@ pub enum SetReading {
 /// should find it exactly as the agent sent it.
 ///
 /// No `standing` and no title. Answering is checked against Questions nobody
-/// here can read, so it is not offered, and neither is archiving; and what the
+/// here can read, so it is not offered, and neither is locking; and what the
 /// Set was called is in the body along with everything else, said once rather
 /// than half-recovered into a heading.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,9 +236,9 @@ pub enum Standing {
     /// Answered: what the human decided, and when.
     Answered(Answered),
 
-    /// Archived unanswered by the human, at this time. No Response was ever sent
+    /// Locked unanswered by the human, at this time. No Response was ever sent
     /// and none ever will be.
-    ArchivedUnanswered(String),
+    LockedUnanswered(String),
 }
 
 /// A Set's Response as the page needs it: the Answers, and when they were sent.

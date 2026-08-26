@@ -397,7 +397,7 @@ testers.runNixOSTest {
         Asked of the server rather than of the agent: a wait that goes to plan
         is silent, so the CLI says nothing between submitting a Set and printing
         the Response. The Timeline of the Conversation it was asked from is
-        where an arrival shows, and a Set that is neither answered nor archived
+        where an arrival shows, and a Set that is neither answered nor locked
         reads there as `Waiting` — so with one agent asking at a time, the Set
         waiting there is that agent's.
         """

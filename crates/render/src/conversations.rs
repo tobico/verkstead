@@ -345,6 +345,15 @@ pub struct ConversationView {
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 
+    /// Whether the human has put this Conversation away — see
+    /// [`ConversationArchived`].
+    ///
+    /// What the actions menu offers Unarchive by, in the place Archive stands
+    /// in on a Closed Conversation that is still on the list. Nothing else on
+    /// the page turns on it: an archived Conversation is drawn exactly as it
+    /// was, because being off the sidebar is the whole of what archiving does.
+    pub archived: bool,
+
     /// The Events that stay in view rather than scrolling past with the record.
     ///
     /// Apart from the Timeline rather than in it, because that is what pinning
@@ -465,6 +474,69 @@ pub enum TimelineEvent {
     /// difference between the pipeline arriving somewhere and a human deciding
     /// it should be there.
     Steer(SteerEvent),
+
+    /// The pull request the finish step opened, at the moment it reached the
+    /// Timeline.
+    ///
+    /// The one Event that is a [`PinnedEvent`] as well, and it is one card drawn
+    /// twice rather than two cards: the sticky block keeps the pull request in
+    /// view for as long as the work is on it, and this is where it happened. A
+    /// record that folded it out would be a record missing the moment the work
+    /// went up for review.
+    PullRequest(PullRequestEvent),
+
+    /// The backlog, at the moment it landed on the branch.
+    ///
+    /// A [`PinnedEvent`] as well, as the pull request above is, and drawn twice
+    /// for the same reason: the sticky block keeps the list in view wherever the
+    /// record is being read, and this is where the work stopped being a plan.
+    ///
+    /// What differs from the pull request is where the content comes from. A PR
+    /// is three facts on the record; a backlog is `.tasks/` in the Worktree, read
+    /// live — so this row carries the reading of the moment somebody looked, and
+    /// carries none where there is no Worktree left to read.
+    TaskList(TaskListReached),
+
+    /// And the roadmap, at the moment it landed. The same arrangement one level
+    /// up, read live off `docs/roadmaps/`.
+    StageList(StageListReached),
+}
+
+/// The backlog on the record: where it landed, and what it says now.
+///
+/// The two halves come from different places on purpose. `id` and `at` are the
+/// row's, stamped once when the branch first carried a backlog; `list` is the
+/// Worktree's, read afresh every time the Conversation is — so the card ticks
+/// along with the work while the row it sits at stays where it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskListReached {
+    pub id: i64,
+
+    /// When the backlog landed, RFC 3339.
+    pub at: String,
+
+    /// The backlog as it stands, or nothing where there is none to read: a
+    /// Worktree that has been taken away, or a `.tasks/` the branch has since
+    /// finished with. The row stays either way — it is the record of a moment,
+    /// and the moment happened.
+    pub list: Option<TaskListEvent>,
+}
+
+/// The roadmap on the record: where it landed, and what it says now.
+///
+/// The stage lists rather than one, because a branch may have written to more
+/// than one roadmap and the pinned block draws each of them. Empty where there
+/// is nothing left to read, exactly as the backlog's is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageListReached {
+    pub id: i64,
+
+    /// When the roadmap landed, RFC 3339.
+    pub at: String,
+
+    pub roadmaps: Vec<StageListEvent>,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -473,6 +545,9 @@ pub enum TimelineEvent {
 /// unpin: what is pinned is decided by what kind of thing it is, so there is no
 /// state here to flip and no route to flip it with. A tagged kind for the reason
 /// [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+///
+/// All three are on the record as well, each at the moment it arrived there, and
+/// each is one card drawn twice rather than two cards.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PinnedEvent {
@@ -492,12 +567,19 @@ pub enum PinnedEvent {
 /// The backlog as the Timeline shows it: what the work is called, and every
 /// task against whether it is done.
 ///
-/// No id and no stamp, unlike every Event in the record. It is read out of
-/// `.tasks/` each time the Conversation is — the repository owns the files, and
-/// Verkstead never does — so what it says is what the Worktree holds now rather
-/// than what it held at a moment worth stamping. Nothing opens it either: the
-/// whole of a task list is the list, which is why the design gives it no details
-/// pane.
+/// No id and no stamp of its own. It is read out of `.tasks/` each time the
+/// Conversation is — the repository owns the files, and Verkstead never does —
+/// so what it says is what the Worktree holds now rather than what it held at
+/// any one moment.
+///
+/// Which does not keep it off the record. The moment a backlog *landed* is worth
+/// stamping and is stamped — see [`TaskListReached`], which carries this reading
+/// at that row — so the identity is on the row and the content is here, and the
+/// card is the same card in both places.
+///
+/// It opens all the same, in both of the places it is drawn: what a details
+/// pane shows of it is not the list again but the documents the entries name —
+/// see [`BacklogPane`], which is its own request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TaskListEvent {
@@ -527,13 +609,150 @@ pub struct TaskEntry {
     pub done: bool,
 }
 
+/// The backlog opened: every task document of it, rendered.
+///
+/// What the card cannot show. A task list's card is the entries — a number, a
+/// title and a box — and each entry details a document in `.tasks/` that says
+/// what the task is and what *done* means for it. That is what this is: the
+/// documents themselves, in the order the backlog works them.
+///
+/// Its own request rather than a field on the Conversation, for the reason a
+/// commit's diff is one: a Timeline is read every time an open page hears the
+/// world moved, and a backlog is read whole when somebody opens it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct BacklogPane {
+    /// What the backlog is called: `TODO.md`'s heading, which is what the card
+    /// says too. Empty where the list wrote none.
+    pub feature: String,
+
+    /// In the order the list has them, which is the order they get worked in.
+    pub tasks: Vec<TaskDocument>,
+
+    /// Whether any of these documents came out holding a Diagram, and so
+    /// whether the pane carries the client-side renderer at all.
+    ///
+    /// Asked once of all of them, off the HTML above, exactly as a Set's own
+    /// flag is — see [`crate::SetView::diagrams`]. mermaid is megabytes, and the
+    /// pane that asks for the bundle is the one with something to draw with it.
+    pub diagrams: bool,
+}
+
+/// One task's document as the pane draws it: the entry it belongs to, and the
+/// markdown of its file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskDocument {
+    /// As the list writes it, zero-padding and all — `01`, the same string the
+    /// card's entry carries.
+    pub number: String,
+
+    pub title: String,
+
+    /// The document rendered and sanitized, or `null` where there is no file to
+    /// render — which is a task that is done, the file going being what says so.
+    /// The pane says as much in words rather than drawing a gap.
+    pub html: Option<String>,
+}
+
+/// What the caller of [`backlog_pane`] hands over for one entry: what the list
+/// says about it, and its document as the file still holds it.
+///
+/// Its own type rather than the server's, because this crate reads no
+/// filesystem — and rather than three parameters, two of which are strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSource {
+    pub number: String,
+    pub title: String,
+
+    /// The markdown, or `None` where the task's file has gone from `.tasks/`.
+    pub markdown: Option<String>,
+}
+
+/// The roadmap opened: every stage brief of it, rendered.
+///
+/// What the card cannot show, one level up from [`BacklogPane`] and built the
+/// same way. A stage list's card is the entries — a number, a title and a box —
+/// and each entry names a brief beside `ROADMAP.md` that says what the stage is
+/// for. That is what this is: the briefs themselves, in the roadmap's own order.
+///
+/// Its own request rather than a field on the Conversation, for the reason the
+/// backlog's is one: a Timeline is read every time an open page hears the world
+/// moved, and a roadmap is read whole when somebody opens it.
+///
+/// Named by the roadmap rather than by the Conversation, which is the one place
+/// this parts company with the backlog: a Worktree has one `.tasks/` and may
+/// hold any number of roadmaps, so the card says which of them it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RoadmapPane {
+    /// The roadmap's directory under `docs/roadmaps/` — `mvp` — which is its
+    /// identity, and what the card named to open this.
+    pub name: String,
+
+    /// `ROADMAP.md`'s own heading. Empty where it wrote none, which is when the
+    /// pane falls back to the name, exactly as the card does.
+    pub title: String,
+
+    /// In the order the roadmap has them, which is the order they get worked in.
+    pub stages: Vec<StageDocument>,
+
+    /// Whether any of these briefs came out holding a Diagram, and so whether
+    /// the pane carries the client-side renderer at all — asked once of all of
+    /// them, as [`BacklogPane::diagrams`] is.
+    pub diagrams: bool,
+}
+
+/// One stage's brief as the pane draws it: the entry it belongs to, and the
+/// markdown of its file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageDocument {
+    /// As the roadmap writes it, zero-padding and all — `01`.
+    pub number: String,
+
+    pub title: String,
+
+    /// Whether the stage is finished, which here is the checkbox — see
+    /// [`StageEntry::done`]. Carried on the document because a finished stage
+    /// still has one: a brief stays where it is for ever, so the done state is
+    /// something the section says about itself rather than the reason it is
+    /// empty.
+    pub done: bool,
+
+    /// The brief rendered and sanitized, or `null` where there is nothing to
+    /// render. Unlike a task's, that is not the ordinary end of a stage's life
+    /// but a roadmap pointing at a file nobody wrote — which the pane says in
+    /// words rather than drawing a gap.
+    pub html: Option<String>,
+}
+
+/// What the caller of [`roadmap_pane`] hands over for one entry: what the
+/// roadmap says about it, and its brief as the file holds it.
+///
+/// Its own type rather than the server's for [`TaskSource`]'s reason: this crate
+/// reads no filesystem.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageSource {
+    pub number: String,
+    pub title: String,
+    pub done: bool,
+
+    /// The markdown, or `None` where the brief the entry names is not there to
+    /// read.
+    pub markdown: Option<String>,
+}
+
 /// The roadmap as the Timeline shows it: what it is called, and every stage
 /// against whether it is checked.
 ///
-/// No id and no stamp, for the reason the task list beside it has none: it is
-/// read out of `docs/roadmaps/` each time the Conversation is, so what it says
-/// is what the Worktree holds now rather than what it held at a moment worth
-/// stamping. Nothing opens it either — the whole of a stage list is the list.
+/// No id and no stamp of its own, for the reason the task list beside it has
+/// none: it is read out of `docs/roadmaps/` each time the Conversation is, so
+/// what it says is what the Worktree holds now. The moment the roadmap landed is
+/// stamped all the same — see [`StageListReached`]. It opens, in both of the
+/// places it is drawn, and what a details pane shows of it is not the list again
+/// but the briefs its entries name — see [`RoadmapPane`], which is its own
+/// request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageListEvent {
@@ -570,11 +789,13 @@ pub struct StageEntry {
 /// The pull request as the Timeline shows it: what it is called and what number
 /// it answers to, with a way out to GitHub itself.
 ///
-/// An id and a stamp, unlike the task list beside it, because this one *is* on
-/// the record: the finish step opened a pull request at a moment worth keeping,
-/// and the Conversation moved into Wrapping on the strength of it. What is not
-/// on the record is what the PR holds — see [`PullRequestDetails`], which the
-/// details pane fetches when somebody opens this.
+/// An id and a stamp of its own, unlike the task list beside it, because a pull
+/// request is the whole of what it says: the finish step opened one at a moment
+/// worth keeping, and the Conversation moved into Wrapping on the strength of
+/// it. What is not on the record is what the PR holds — see
+/// [`PullRequestDetails`], which the details pane fetches when somebody opens
+/// this.
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PullRequestEvent {
@@ -1151,7 +1372,7 @@ pub fn agent_output_event(
 /// A Question Set as an Event, summarised on the way.
 ///
 /// The Answers come out of `standing` rather than beside it: a Set that has not
-/// settled has none, one that was archived unanswered never will have, and one
+/// settled has none, one that was locked unanswered never will have, and one
 /// that was answered carries them — so the one field decides both what the table
 /// says and how it reads.
 pub fn question_set_event(
@@ -1163,7 +1384,7 @@ pub fn question_set_event(
 ) -> TimelineEvent {
     let response = match &standing {
         Standing::Answered(answered) => Some(&answered.response),
-        Standing::Waiting(_) | Standing::ArchivedUnanswered(_) => None,
+        Standing::Waiting(_) | Standing::LockedUnanswered(_) => None,
     };
 
     TimelineEvent::QuestionSet(QuestionSetEvent {
@@ -1351,34 +1572,160 @@ pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
     }
 }
 
-/// A backlog as the Event that gets pinned. Nothing to render — a task is a
-/// number, a title and whether its file is still there — and here beside the
-/// rest for the reason a move is: one place knows how a Timeline is made.
-pub fn task_list_event(feature: String, tasks: Vec<TaskEntry>) -> PinnedEvent {
-    PinnedEvent::TaskList(TaskListEvent { feature, tasks })
+/// A backlog as the Timeline shows it. Nothing to render — a task is a number, a
+/// title and whether its file is still there — and here beside the rest for the
+/// reason a move is: one place knows how a Timeline is made.
+///
+/// The card itself rather than either placement of it, because there are two:
+/// [`task_list_event`] pins it above the record and [`task_list_reached`] puts
+/// it on the record where it landed, and both are handed this one reading.
+pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
+    TaskListEvent { feature, tasks }
 }
 
-/// A roadmap as the Event that gets pinned. Nothing to render either — a stage
-/// is a number, a title and a ticked box.
-pub fn stage_list_event(name: String, title: String, stages: Vec<StageEntry>) -> PinnedEvent {
-    PinnedEvent::StageList(StageListEvent {
+/// That backlog opened, rendered on the way.
+///
+/// Here rather than in the server for the reason the commit pane's rendering is:
+/// this is the crate with the markdown parser and the sanitizer in it. A task
+/// whose file has gone comes back with nothing to draw rather than with an empty
+/// document — the file going is what says the task is done, and the pane says so
+/// in words.
+///
+/// A document of nothing but whitespace is the same as no document at all, which
+/// is what an empty file left behind would otherwise draw: a box with a gap in
+/// it.
+pub fn backlog_pane(feature: String, read: Vec<TaskSource>) -> BacklogPane {
+    let tasks: Vec<TaskDocument> = read
+        .into_iter()
+        .map(|task| TaskDocument {
+            number: task.number,
+            title: task.title,
+            html: task
+                .markdown
+                .as_deref()
+                .map(crate::markdown::to_html)
+                .filter(|html| !html.trim().is_empty()),
+        })
+        .collect();
+
+    BacklogPane {
+        // Asked of the rendered documents rather than of the markdown they came
+        // from, for the reason a Set's own flag is: the rendering is where a
+        // fence either became a Diagram or did not, and the renderer in the page
+        // reads that same answer out of that same markup.
+        diagrams: tasks
+            .iter()
+            .filter_map(|task| task.html.as_deref())
+            .any(crate::markdown::holds_diagram),
+        feature,
+        tasks,
+    }
+}
+
+/// That backlog as the Event that gets pinned, which is where it is held in
+/// view for as long as there is one.
+pub fn task_list_event(list: TaskListEvent) -> PinnedEvent {
+    PinnedEvent::TaskList(list)
+}
+
+/// And as the Event on the record, which is where it landed.
+///
+/// The stamp is the row's and the content is the Worktree's, which is the whole
+/// arrangement: the row says when the branch stopped being a plan, and what is
+/// drawn at it is `.tasks/` as it stands when somebody looks.
+pub fn task_list_reached(id: i64, at: String, list: Option<TaskListEvent>) -> TimelineEvent {
+    TimelineEvent::TaskList(TaskListReached { id, at, list })
+}
+
+/// A roadmap as the Timeline shows it. Nothing to render either — a stage is a
+/// number, a title and a ticked box — and one reading behind two placements,
+/// exactly as the backlog above is.
+pub fn stage_list(name: String, title: String, stages: Vec<StageEntry>) -> StageListEvent {
+    StageListEvent {
         name,
         title,
         stages,
-    })
+    }
+}
+
+/// That roadmap opened, rendered on the way.
+///
+/// Here rather than in the server for [`backlog_pane`]'s reason: this is the
+/// crate with the markdown parser and the sanitizer in it. A stage whose brief
+/// is not there to read comes back with nothing to draw, and the pane says so
+/// in words — a roadmap pointing at a file nobody wrote is a thing to say
+/// rather than a gap to leave, the same way `/next-stage` refuses to guess past
+/// one.
+///
+/// A brief of nothing but whitespace is the same as no brief at all, which is
+/// what an empty file would otherwise draw: a box with a gap in it.
+pub fn roadmap_pane(name: String, title: String, read: Vec<StageSource>) -> RoadmapPane {
+    let stages: Vec<StageDocument> = read
+        .into_iter()
+        .map(|stage| StageDocument {
+            number: stage.number,
+            title: stage.title,
+            done: stage.done,
+            html: stage
+                .markdown
+                .as_deref()
+                .map(crate::markdown::to_html)
+                .filter(|html| !html.trim().is_empty()),
+        })
+        .collect();
+
+    RoadmapPane {
+        // Asked of the rendered briefs rather than of the markdown they came
+        // from, for the reason the backlog's flag is.
+        diagrams: stages
+            .iter()
+            .filter_map(|stage| stage.html.as_deref())
+            .any(crate::markdown::holds_diagram),
+        name,
+        title,
+        stages,
+    }
+}
+
+/// That roadmap as the Event that gets pinned.
+pub fn stage_list_event(list: StageListEvent) -> PinnedEvent {
+    PinnedEvent::StageList(list)
+}
+
+/// And as the Event on the record, which is where the roadmap landed.
+///
+/// Every roadmap this branch has written to rather than one, because the pinned
+/// block holds every one of them too: a branch that touched two has two cards,
+/// and the record row is the same cards in their place.
+pub fn stage_list_reached(id: i64, at: String, roadmaps: Vec<StageListEvent>) -> TimelineEvent {
+    TimelineEvent::StageList(StageListReached { id, at, roadmaps })
 }
 
 /// A pull request as the Event that gets pinned. Nothing to render — a PR is a
 /// number, a title and a URL — and here beside the rest for the reason a move
 /// is: one place knows how a Timeline is made.
 pub fn pull_request_event(id: i64, at: String, opened: PullRequestSummary) -> PinnedEvent {
-    PinnedEvent::PullRequest(PullRequestEvent {
+    PinnedEvent::PullRequest(pull_request(id, at, opened))
+}
+
+/// The same pull request as the Event on the record, which is where it happened.
+///
+/// Made by the same call as the pinned one above, because the two are one card
+/// in two places: a Timeline that built them separately could come to hand over
+/// two pull requests that disagreed.
+pub fn pull_request_reached(id: i64, at: String, opened: PullRequestSummary) -> TimelineEvent {
+    TimelineEvent::PullRequest(pull_request(id, at, opened))
+}
+
+/// The pull request itself, which each of the two above wraps in its own kind.
+fn pull_request(id: i64, at: String, opened: PullRequestSummary) -> PullRequestEvent {
+    PullRequestEvent {
         id,
         at,
         number: opened.number,
         title: opened.title,
         url: opened.url,
-    })
+    }
 }
 
 /// What the caller of [`pull_request_event`] hands over: the pull request as the
@@ -2089,4 +2436,59 @@ pub enum ConversationClosed {
     /// that said it had stopped while its directory was still there would be one
     /// nothing would ever clean up.
     WorktreeStuck,
+}
+
+/// And what became of archiving one: putting a Closed Conversation away, so the
+/// sidebar stops drawing it.
+///
+/// Reversible, which is why nothing here is confirmed and why the refusals are
+/// so mild: the worst of them says the human asked for something that is already
+/// true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationArchived {
+    /// Archived: it is off the list, and everything else about it is where it
+    /// was.
+    Archived,
+
+    /// It was archived already, which is not an error — what was asked for holds
+    /// either way.
+    AlreadyArchived,
+
+    /// It has not been closed, so there is nothing to put away. A Conversation
+    /// still being worked on belongs on the list it is being worked from.
+    NotClosed,
+
+    NoSuchConversation,
+}
+
+/// And what became of taking one back out, which is the way back from it.
+///
+/// One refusal fewer than archiving has: there is no state a Conversation can
+/// be in that is the wrong one to put back on the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationUnarchived {
+    /// Unarchived: it is on the list again, for good.
+    Unarchived,
+
+    /// It was not archived, which is not an error — what was asked for holds
+    /// either way.
+    NotArchived,
+
+    NoSuchConversation,
+}
+
+/// Whether the sidebar is drawing what the human has archived.
+///
+/// Their standing choice rather than this device's: it is read back off the
+/// server on every load, and what is sent when the toggle is flipped is the
+/// position it has been put in rather than the flip itself — a switch says
+/// where it stands, and saying it twice says the same thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ShowingArchived {
+    /// On: the archived Conversations are on the list, in their ordinary
+    /// places. Off: they are not drawn at all.
+    pub showing: bool,
 }

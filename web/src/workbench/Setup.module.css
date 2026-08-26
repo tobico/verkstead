@@ -19,9 +19,25 @@
   margin-bottom: 0;
 }
 
-/* The two fields the setup opens with: the branch, which keeps itself the way
-   the brief above it does, and the base commit with the button that records
-   it. */
+/* The two fields the setup opens with — the branch the work is done on and the
+   branch it comes off — across one row where the pane is wide enough for two,
+   and down the page where it is not. The same row the pairings below use, and
+   the wrap does the same work: each field asks for about half of a wide pane
+   and refuses to go under a readable width, so a narrow pane puts the second on
+   its own line. No breakpoint, the width that matters being the pane's rather
+   than the window's. */
+.branches {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 1rem;
+}
+
+.branches > .branchName,
+.branches > .baseBranch {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
 .branchName,
 .baseBranch {
   margin-bottom: 1.5rem;
@@ -51,14 +67,6 @@
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
-}
-
-/* The branch named in the words under the dropdown, in the type a branch name
-   is written in. There are words there at all because the dropdown's first
-   entry is a rule rather than a branch: what it resolves to is not known until
-   grilling starts, so it is said underneath instead. */
-.baseBranch .defaultBranch {
-  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
 /* The same control the pairings are picked with, because it is the same kind of
@@ -144,8 +152,21 @@
   color: var(--ink-soft);
 }
 
-/* Whether this conversation will grill. The server's rule rather than a count of
-   the two fields above, so it is stated rather than inferred. */
-.readiness.ready {
-  color: var(--added);
+/* The field being typed in or picked from, which is no pointer's doing: the
+   border says which of the four the branch, the base or a pairing is going
+   into. */
+.fieldLine input:focus-visible,
+.baseBranch select:focus-visible,
+.profileChoice select:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And the same four under the pointer, one border darker. There is nothing else
+   in this block to hover: the setup is fields alone. */
+@media (hover: hover) {
+  .fieldLine input:hover,
+  .baseBranch select:hover,
+  .profileChoice select:hover {
+    border-color: var(--ink-soft);
+  }
 }

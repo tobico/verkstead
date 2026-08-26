@@ -8,7 +8,7 @@
 
 /// How many days a settling stays relative before it is said as a date: a week,
 /// past which counting days stops meaning anything to a reader. The same week
-/// `crates/render/src/when.rs` draws the line at, because the Archive's rows
+/// `crates/render/src/when.rs` draws the line at, because the Timeline's rows
 /// and this page word the same settlings.
 const FRESH_DAYS = 7;
 

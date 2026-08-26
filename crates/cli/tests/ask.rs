@@ -218,11 +218,11 @@ impl Server {
         assert_eq!(reply.status().as_u16(), 201);
     }
 
-    /// Archive a Set unanswered the way the human's browser does. It lives in the
+    /// Lock a Set unanswered the way the human's browser does. It lives in the
     /// viewer's namespace and nowhere else: the agent API has no route for it,
     /// because only a human may close a Set nobody is going to answer.
-    fn archive(&self, id: i64) {
-        let reply = ureq::post(format!("{}/api/ui/sets/{id}/archive", self.base()))
+    fn lock(&self, id: i64) {
+        let reply = ureq::post(format!("{}/api/ui/sets/{id}/lock", self.base()))
             .header("Content-Type", "application/json")
             .send("{}")
             .unwrap();
@@ -413,7 +413,7 @@ fn the_cli_reconnects_when_the_server_restarts_mid_wait() {
 }
 
 #[test]
-fn a_set_archived_unanswered_ends_the_wait_for_good() {
+fn a_set_locked_unanswered_ends_the_wait_for_good() {
     let tmp = tempfile::tempdir().unwrap();
     let server = Server::start(tmp.path().join("verkstead.db"));
 
@@ -422,7 +422,7 @@ fn a_set_archived_unanswered_ends_the_wait_for_good() {
 
     // The human closes the Set instead of answering it — the CLI is holding a
     // wait at this moment, and that is the wait that has to end.
-    server.archive(1);
+    server.lock(1);
 
     let output = finished(waiting);
     assert!(
@@ -431,13 +431,13 @@ fn a_set_archived_unanswered_ends_the_wait_for_good() {
         output.status
     );
     assert!(
-        stderr(&output).contains("archived unanswered"),
+        stderr(&output).contains("locked unanswered"),
         "the agent has to be told why it is not getting an answer, got:\n{}",
         stderr(&output)
     );
     assert!(
         !stderr(&output).contains("retrying"),
-        "an archived Set is not a transient failure to reconnect through, got:\n{}",
+        "a locked Set is not a transient failure to reconnect through, got:\n{}",
         stderr(&output)
     );
     assert!(

@@ -31,3 +31,13 @@
   text-decoration: none;
   white-space: nowrap;
 }
+
+/* Under the pointer, the underline this line took off it. Said here rather than
+   left to the rule every link in the app takes from `styles/base.css`, because
+   the rule above is what took the underline away and the two carry the same
+   weight: which of them won would be whichever sheet the bundler wrote last. */
+@media (hover: hover) {
+  .notice a:hover {
+    text-decoration: underline;
+  }
+}

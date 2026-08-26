@@ -31,10 +31,12 @@ import type {
 // The one menu, which is what the sidebar offers its repositories through.
 import menu from "../src/Menu.module.css";
 // The sidebar's own rows, and the ring one of them turns while a session runs.
+// What the ⋯ at the head of the Conversation offers, which is a module of its
+// own: the same rows are drawn by the sidebar's right-click.
+import actions from "../src/workbench/Actions.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import marks from "../src/workbench/Mark.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
-import timeline from "../src/workbench/Timeline.module.css";
 import { Picker } from "../src/picking";
 import {
   OPEN,
@@ -211,10 +213,10 @@ describe("what a Nudge leaves standing", () => {
     const { container, client } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(
-      await drawn(container, `.${timeline.conversationActions} > .${menu.trigger}`),
+      await drawn(container, `.${actions.conversationActions} > .${menu.trigger}`),
     );
-    const opened = await drawn(container, `.${timeline.conversationActions} > .${menu.drop}`);
-    fireEvent.click(await drawn(opened, `.${timeline.steer}`));
+    const opened = await drawn(container, `.${actions.conversationActions} > .${menu.drop}`);
+    fireEvent.click(await drawn(opened, `.${actions.steer}`));
     await drawn(document.body, `.${steerModal.steerConversation}`);
 
     await drawn(document.body, "#steer-pairing option");

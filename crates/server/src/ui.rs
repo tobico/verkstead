@@ -28,11 +28,12 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, Lifecycle, Locked,
+    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
@@ -48,7 +49,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/api/ui/sets/{id}", get(set))
         .route("/api/ui/sets/{id}/response", post(submit_response))
-        .route("/api/ui/sets/{id}/archive", post(archive_set))
+        .route("/api/ui/sets/{id}/lock", post(lock_set))
         .route("/api/ui/repos", get(repos).post(register_repo))
         // What one Repo's branches are, which is what a drafting Conversation
         // picks the one it comes off out of. Under the Repo rather than under
@@ -64,6 +65,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the sidebar rather than about any one Conversation, and the whole
         // order is what a drag produces.
         .route("/api/ui/conversations/order", post(place_conversations))
+        // And whether that list is drawing what has been archived, which is
+        // about the sidebar in exactly the same way — the human's standing
+        // choice rather than this device's, so it is read back here on every
+        // load rather than kept where the toggle was flipped.
+        .route(
+            "/api/ui/conversations/archived",
+            get(showing_archived).post(show_archived),
+        )
         // The roadmaps in the registered Repos that nothing is driving, drawn
         // as a notice under the new-conversation box. Beside the Conversations
         // rather than under a Repo, because that is where it is read: what it
@@ -102,6 +111,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/commit/{event}",
             get(commit_pane),
         )
+        // And the backlog opened, which is every task document `.tasks/` holds.
+        // Named by the Conversation alone: a backlog is read off the Worktree
+        // rather than remembered, so there is no Event id to reach it by — see
+        // [`backlog`].
+        .route("/api/ui/conversations/{id}/backlog", get(backlog))
+        // And the roadmap opened, which is every stage brief one of them holds.
+        // Named by the roadmap rather than by the Conversation, which is the one
+        // place this parts company with the backlog above: a Worktree holds one
+        // `.tasks/` and may hold any number of roadmaps — see [`roadmap`].
+        .route("/api/ui/conversations/{id}/roadmap/{name}", get(roadmap))
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
         // remembered, and the reason is stronger here than for either of the two
@@ -124,6 +143,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // Conversation, there being no Brief to write and no grilling to run.
         .route("/api/ui/conversations/{id}/adopt", post(adopt))
         .route("/api/ui/conversations/{id}/close", post(close))
+        // And the one that puts a closed Conversation away, which is the row
+        // beside Close in the same menu. Named in the path like everything
+        // around it, and with no body for the same reason: which Conversation
+        // it is is the whole of what it says.
+        .route("/api/ui/conversations/{id}/archive", post(archive))
+        // And the way back out of it, which is the same row saying the other
+        // word: archiving is reversible, and this is what reverses it.
+        .route("/api/ui/conversations/{id}/unarchive", post(unarchive))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -314,8 +341,8 @@ fn standing(
                 response: answered.response,
             })
         }
-        Some(store::Settlement::ArchivedUnanswered(archived)) => {
-            Standing::ArchivedUnanswered(archived.archived_at)
+        Some(store::Settlement::LockedUnanswered(locked)) => {
+            Standing::LockedUnanswered(locked.locked_at)
         }
         None if deferred => Standing::Waiting(verkstead_schema::Liveness::Deferred),
         None => Standing::Waiting(state.waits.liveness(set_id, created_at, now)),
@@ -352,7 +379,7 @@ async fn submit_response(
         }
         store::Submission::AlreadyAnswered => Submitted::AlreadyAnswered,
         store::Submission::NoSuchSet => Submitted::NoSuchSet,
-        store::Submission::Archived => Submitted::Archived,
+        store::Submission::Locked => Submitted::Locked,
         store::Submission::Invalid(invalid) => {
             Submitted::Rejected(invalid.violations.iter().map(ToString::to_string).collect())
         }
@@ -360,30 +387,30 @@ async fn submit_response(
     .into_response()
 }
 
-/// `POST /api/ui/sets/{id}/archive` — close a Set unanswered.
+/// `POST /api/ui/sets/{id}/lock` — close a Set unanswered.
 ///
 /// The human declaring that nobody is ever going to answer it, so it stops being
 /// something that is waiting on them. Only ever reached from a browser
 /// (ADR-0001) — the agent API has no route for it, because a disconnected agent
 /// is not evidence: the CLI reconnects through transient drops.
-async fn archive_set(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+async fn lock_set(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
-        return Json(Archived::NoSuchSet).into_response();
+        return Json(Locked::NoSuchSet).into_response();
     };
 
-    let archiving = match store::archive_set(&state.pool, &state.settlements, id).await {
-        Ok(archiving) => archiving,
+    let locking = match store::lock_set(&state.pool, &state.settlements, id).await {
+        Ok(locking) => locking,
         Err(error) => {
-            tracing::error!(error = ?error, set_id = id, "archiving a Set failed");
-            return unavailable("the Question Set could not be archived");
+            tracing::error!(error = ?error, set_id = id, "locking a Set failed");
+            return unavailable("the Question Set could not be locked");
         }
     };
 
-    Json(match archiving {
-        store::Archiving::Archived(_) => Archived::Closed,
-        store::Archiving::AlreadyAnswered => Archived::AlreadyAnswered,
-        store::Archiving::AlreadyArchived => Archived::AlreadyArchived,
-        store::Archiving::NoSuchSet => Archived::NoSuchSet,
+    Json(match locking {
+        store::Locking::Locked(_) => Locked::Closed,
+        store::Locking::AlreadyAnswered => Locked::AlreadyAnswered,
+        store::Locking::AlreadyLocked => Locked::AlreadyLocked,
+        store::Locking::NoSuchSet => Locked::NoSuchSet,
     })
     .into_response()
 }
@@ -672,23 +699,40 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // What the worktree holds that is not a moment in the record: the backlog,
-    // as `.tasks/` stands right now. Read off the filesystem for the reason the
-    // worktree's own missing-ness is — the repository owns those files, and a
-    // row remembering what they said would be one more thing to be wrong.
-    let mut pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
+    // What the worktree holds rather than what the record remembers: the
+    // backlog, as `.tasks/` stands right now. Read off the filesystem for the
+    // reason the worktree's own missing-ness is — the repository owns those
+    // files, and a row remembering what they said would be one more thing to be
+    // wrong.
+    let backlog = crate::tasks::showing(conversation.worktree.clone()).await;
 
     // And the roadmap this branch is about, read the same way and for the same
     // reason — `docs/roadmaps/` is the repository's too. Which of a repository's
     // roadmaps is this one's is asked of git against the base commit: a
     // repository keeps its finished roadmaps, and a Conversation is about the
     // one its branch has written to. See [`crate::stages`].
+    let roadmaps = crate::stages::showing(
+        conversation.worktree.clone(),
+        conversation.base_commit.clone(),
+    )
+    .await;
+
+    // Each of those goes in two places — pinned above the record, and on the
+    // record at the row that says it landed — and this is the one reading behind
+    // both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
+        .clone()
+        .map(verkstead_render::task_list_event)
+        .into_iter()
+        .collect();
+
     pinned.extend(
-        crate::stages::pinned(
-            conversation.worktree.clone(),
-            conversation.base_commit.clone(),
-        )
-        .await,
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
     );
 
     // And the pull request the work ended up on, which is pinned beside it. This
@@ -832,6 +876,18 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
 
+    // And whether the human has put this Conversation away, which is what the
+    // actions menu offers Unarchive by. Read here rather than carried by the
+    // Conversation the store loaded: it is a fact about the sidebar, and the
+    // page is the one other place that has anything to say about it.
+    let archived = match store::archived(&state.pool, id).await {
+        Ok(archived) => archived,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was archived failed");
+            false
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -862,6 +918,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         pinned,
         blocked_on,
         resets,
+        archived,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -870,12 +927,12 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         working: writing.is_some(),
         timeline: timeline
             .into_iter()
-            // `filter_map` rather than `map`, for the one Event that is on the
-            // record and not in the list: the pull request is drawn pinned above
-            // the Timeline — see `pinned` above — and what says on the record
-            // that it arrived is the move into Wrapping right beside it.
-            .filter_map(|event| {
-                Some(match event.event {
+            // Every kind in, none held back: the record is the whole of what
+            // happened, and the one Event that is pinned as well — the pull
+            // request, see `pinned` above — is handed over twice rather than
+            // moved out of here.
+            .map(|event| {
+                match event.event {
                     // Rendered on the way out where there is markdown to render —
                     // see [`verkstead_render`]. A move has none: it is one state.
                     store::Event::Brief(markdown) => verkstead_render::brief_event(
@@ -1005,12 +1062,33 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                         lifecycle(target),
                         instruction.as_deref(),
                     ),
-                    // The one kind that is not in the list: it is drawn pinned
-                    // above the Timeline instead. Dropped by name rather than by
-                    // a catch-all, so a kind added later has to be decided about
-                    // rather than silently disappearing.
-                    store::Event::PullRequest(_) => return None,
-                })
+                    // The one kind that is pinned as well as listed, handed
+                    // over twice for the page to draw twice: the sticky block
+                    // above the record keeps it in view, and here is the moment
+                    // it happened. Both copies are the same card made the same
+                    // way — see [`verkstead_render::pull_request_reached`].
+                    store::Event::PullRequest(opened) => verkstead_render::pull_request_reached(
+                        event.id,
+                        event.at,
+                        verkstead_render::PullRequestSummary {
+                            number: opened.number,
+                            title: opened.title,
+                            url: opened.url,
+                        },
+                    ),
+                    // And the two rows that carry nothing of their own: what is
+                    // drawn at them is the live reading above, handed over a
+                    // second time. The row says when the branch first carried a
+                    // backlog — or a roadmap — and the card at it says what that
+                    // list holds now, which is the same card the pinned block is
+                    // showing.
+                    store::Event::TaskList => {
+                        verkstead_render::task_list_reached(event.id, event.at, backlog.clone())
+                    }
+                    store::Event::StageList => {
+                        verkstead_render::stage_list_reached(event.id, event.at, roadmaps.clone())
+                    }
+                }
             })
             .collect(),
     };
@@ -1239,6 +1317,82 @@ async fn commit_pane(
     };
 
     Json(rendered).into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/backlog` — every task document the
+/// Conversation's Worktree holds, rendered.
+///
+/// Its own request rather than a field on the Conversation, exactly as a
+/// commit's diff is: a Timeline is read every time an open page hears the world
+/// moved, and what the entries *say* is worth reading when somebody opens the
+/// card.
+///
+/// No Event id in the path, unlike the three panes around it. The backlog is a
+/// reading of the Worktree rather than a record, so the row that says where it
+/// landed fixes a position and names nothing: there is one backlog per
+/// Conversation, and this is it.
+///
+/// A Conversation with no Worktree, no `.tasks/` or nothing readable in it is
+/// one there is no pane to draw about, which is a 404 for the reason a commit
+/// the repository has lost is one.
+async fn backlog(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as every other id here: one that names no number
+    // names no Conversation.
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_backlog();
+    };
+
+    let worktree = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation.worktree,
+        Ok(None) => return no_such_backlog(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the backlog could not be read");
+        }
+    };
+
+    match crate::tasks::documents(worktree).await {
+        Some(pane) => Json(pane).into_response(),
+        None => no_such_backlog(),
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/roadmap/{name}` — every stage brief the named
+/// roadmap holds, rendered.
+///
+/// Its own request for the backlog's reason, and read off the Worktree the same
+/// way. What is different is the name in the path: a Worktree holds one
+/// `.tasks/` and may hold any number of roadmaps, so the card that opens this
+/// says which of them it is.
+///
+/// The name is a directory name off a card the server itself drew, and it is
+/// checked against the roadmaps this branch has written to before anything is
+/// joined onto a path — see [`crate::stages::documents`].
+///
+/// A Conversation with no Worktree, no roadmap of that name, or nothing readable
+/// in it is one there is no pane to draw about, which is a 404 for the reason
+/// the backlog's is.
+async fn roadmap(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_roadmap();
+    };
+
+    let (worktree, base) = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => (conversation.worktree, conversation.base_commit),
+        Ok(None) => return no_such_roadmap(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the roadmap could not be read");
+        }
+    };
+
+    match crate::stages::documents(worktree, base, name).await {
+        Some(pane) => Json(pane).into_response(),
+        None => no_such_roadmap(),
+    }
 }
 
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
@@ -1536,6 +1690,104 @@ async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "closing a Conversation failed");
             unavailable("the conversation could not be closed")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/archive` — take a closed one off the list.
+///
+/// Straight to the store rather than through [`crate::conversations`], as the
+/// sidebar's order is: there is no worktree to remove and no session to end.
+/// Archiving is a fact about the list, and writing it down is the whole of it.
+async fn archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationArchived::NoSuchConversation).into_response();
+    };
+
+    match store::archive_conversation(&state.pool, id).await {
+        Ok(outcome) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(archived(outcome)).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "archiving a Conversation failed");
+            unavailable("the conversation could not be archived")
+        }
+    }
+}
+
+/// The store's word for what became of it, as the wire says it.
+fn archived(outcome: store::Archiving) -> ConversationArchived {
+    match outcome {
+        store::Archiving::Archived => ConversationArchived::Archived,
+        store::Archiving::AlreadyArchived => ConversationArchived::AlreadyArchived,
+        store::Archiving::NotClosed => ConversationArchived::NotClosed,
+        store::Archiving::NoSuchConversation => ConversationArchived::NoSuchConversation,
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/unarchive` — put it back on the list.
+///
+/// Archiving's mirror in every way, the store included: one row taken away,
+/// and no state to be in the wrong one of. The Nudge is what carries it to the
+/// other devices, a Conversation arriving on the list being the one thing every
+/// open sidebar has to read again.
+async fn unarchive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationUnarchived::NoSuchConversation).into_response();
+    };
+
+    match store::unarchive_conversation(&state.pool, id).await {
+        Ok(outcome) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(unarchived(outcome)).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "unarchiving a Conversation failed");
+            unavailable("the conversation could not be unarchived")
+        }
+    }
+}
+
+/// And its word for what became of that.
+fn unarchived(outcome: store::Unarchiving) -> ConversationUnarchived {
+    match outcome {
+        store::Unarchiving::Unarchived => ConversationUnarchived::Unarchived,
+        store::Unarchiving::NotArchived => ConversationUnarchived::NotArchived,
+        store::Unarchiving::NoSuchConversation => ConversationUnarchived::NoSuchConversation,
+    }
+}
+
+/// `GET /api/ui/conversations/archived` — whether the sidebar is drawing what
+/// has been put away.
+async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
+    match store::showing_archived(&state.pool).await {
+        Ok(showing) => Json(ShowingArchived { showing }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
+            unavailable("the setting could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/archived` — and saying that it is, or is not.
+///
+/// The position the switch has been put in rather than a flip, so two devices
+/// pressing at once land on a state one of them asked for rather than on
+/// whichever order they arrived in. Refused for nothing, and there is nothing
+/// to answer with beyond that it was taken.
+async fn show_archived(
+    State(state): State<AppState>,
+    Json(showing): Json<ShowingArchived>,
+) -> HttpResponse {
+    match store::show_archived(&state.pool, showing.showing).await {
+        Ok(()) => {
+            state.nudges.announce(Nudge::Conversations);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "saying whether the archived Conversations are shown failed");
+            unavailable("the setting could not be saved")
         }
     }
 }
@@ -1927,6 +2179,27 @@ fn no_such_commit() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such commit on that Conversation"),
+    )
+}
+
+/// And no backlog to open — no Conversation of that id, no Worktree left, or
+/// nothing in it this can read as a list. Worded without telling them apart for
+/// the commit's reason: there is nothing different for the human to do about
+/// any of them.
+fn no_such_backlog() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no backlog on that Conversation"),
+    )
+}
+
+/// And no roadmap of that name to open — no Conversation, no Worktree left, or
+/// nothing this branch wrote under that name that reads as a roadmap. Worded
+/// without telling them apart for the backlog's reason.
+fn no_such_roadmap() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no roadmap of that name on that Conversation"),
     )
 }
 

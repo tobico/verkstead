@@ -35,7 +35,7 @@
   border-radius: 999px;
 }
 
-/* Waiting on the archive rather than refusing the press, which is the one
+/* Waiting on the lock rather than refusing the press, which is the one
    disabled trigger in the app that is not a *no*. */
 .standing > button:disabled {
   cursor: progress;
@@ -70,10 +70,10 @@
   color: var(--ink-soft);
 }
 
-/* Quiet, and quieter than accept-all: archiving is almost never the right thing
+/* Quiet, and quieter than accept-all: locking is almost never the right thing
    to do to a Set, and the one time it is, the human came here for it. It is not
    a danger button either — nothing is destroyed, the Set is filed. */
-.standing .archive {
+.standing .lock {
   padding: 0.4rem 0.7rem;
   font-size: 0.85rem;
   white-space: nowrap;
@@ -86,4 +86,15 @@
 .failure {
   flex-basis: 100%;
   margin: 0;
+}
+
+/* Under the pointer, the badge as the small outline it is: the words and the
+   box both take the accent. A Liveness that says something in a colour of its
+   own keeps it — a disconnected agent is still disconnected while the pointer
+   is on the badge saying so. */
+@media (hover: hover) {
+  .standing > button:not(:disabled):hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
 }

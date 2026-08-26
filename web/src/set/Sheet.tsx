@@ -9,7 +9,7 @@
 //! the two is drawn is decided from the Set as the server loads it, so an
 //! answered Set never flashes a form.
 //!
-//! A Set that was archived reads like an answered one — permanently, and with
+//! A Set that was locked reads like an answered one — permanently, and with
 //! nothing to press — except that there is no Response to show, because there
 //! never was one.
 //!
@@ -155,18 +155,18 @@ export function Sheet(props: {
     if ("Answered" in how) {
       return {
         // A class of its own for each: the two sit in the same place and are
-        // styled together, but nothing about an archived Set was answered.
+        // styled together, but nothing about a locked Set was answered.
         mark: styles.answeredAt!,
         said: `Answered ${settledAge(how.Answered.submitted_at, now())}`,
         stamp: utcStamp(how.Answered.submitted_at),
       };
     }
 
-    if ("ArchivedUnanswered" in how) {
+    if ("LockedUnanswered" in how) {
       return {
-        mark: styles.archivedAt!,
-        said: `Archived unanswered ${settledAge(how.ArchivedUnanswered, now())}`,
-        stamp: utcStamp(how.ArchivedUnanswered),
+        mark: styles.lockedAt!,
+        said: `Locked unanswered ${settledAge(how.LockedUnanswered, now())}`,
+        stamp: utcStamp(how.LockedUnanswered),
       };
     }
 
@@ -230,7 +230,7 @@ export function Sheet(props: {
         </Show>
         {/* Whether anyone is still on the other end, and the one thing to do
             about it if nobody is. Up here because both are about the ask rather
-            than about answering it — and because archiving is decided with the
+            than about answering it — and because locking is decided with the
             badge and the Questions in view, not from a list row. */}
         <Show when={waiting()}>
           {(liveness) => <Standing id={props.set.id} liveness={liveness()} />}
@@ -315,9 +315,9 @@ function Questions(props: {
           Questions. */}
       <Show when={orphaned()}>
         <p class={styles.counterQuestion}>
-          This Set was archived unanswered: nobody answered these questions, and
+          This Set was locked unanswered: nobody answered these questions, and
           no Response was ever sent. The agent was told the Set had been
-          archived.
+          locked.
         </p>
       </Show>
       <Show when={nothing()}>
@@ -486,7 +486,7 @@ function Question(props: {
 ///
 /// Given the whole Response rather than this question's entry, because the absence
 /// of a Response is itself something to draw: with none at all the Set was
-/// archived unanswered, and there was nobody to tell that these questions were
+/// locked unanswered, and there was nobody to tell that these questions were
 /// still open.
 function Ask(props: {
   ask: AskView;
@@ -506,7 +506,7 @@ function Ask(props: {
 
   // No Option and no words is the Unanswered marker, whether or not the flag is
   // set: either way nothing was answered here. Only a Response can leave a
-  // question open, though — an archived Set says so once, at the head of the
+  // question open, though — a locked Set says so once, at the head of the
   // page, rather than claiming the agent was told anything.
   const open = () =>
     props.response !== null && selected() === null && said() === null;
@@ -566,8 +566,8 @@ function Ask(props: {
 ///
 /// "chosen" is still written, and the stylesheet takes it out of the layout rather
 /// than out of the page — the outline says which one to a reader looking at it and
-/// nothing at all to one who is not, and an archive that cannot say what was
-/// decided is not much of an archive. See `.ask.decided .chose`.
+/// nothing at all to one who is not, and a record that cannot say what was
+/// decided is not much of a record. See `.ask.decided .chose`.
 function Offered(props: {
   option: OptionView;
   selected: number | null;

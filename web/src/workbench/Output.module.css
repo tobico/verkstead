@@ -273,3 +273,29 @@
   font-size: 0.75rem;
   color: var(--ink-soft);
 }
+
+/* Under the pointer: the switch's labels and every fold's summary are text
+   rather than boxes, so all of them take the accent.
+
+   Except the two that are saying something in a colour already — the label that
+   is pressed, whose words are the paper over the mark behind them, and a fold
+   over an answer that failed, which deepens its own red the way a filled button
+   deepens its accent. */
+@media (hover: hover) {
+  .recordSwitch .transcriptTab:not([aria-pressed="true"]):hover,
+  .recordSwitch .screenTab:not([aria-pressed="true"]):hover {
+    color: var(--accent);
+  }
+
+  .reasoning > details > summary:hover,
+  .toolCall > details > summary:hover,
+  .toolResult:not(.failed) > details > summary:hover,
+  .unread > details > summary:hover,
+  .bookkeeping > summary:hover {
+    color: var(--accent);
+  }
+
+  .toolResult.failed > details > summary:hover {
+    color: color-mix(in srgb, var(--stopped) 88%, var(--ink));
+  }
+}

@@ -12,7 +12,7 @@ use ts_rs::TS;
 ///
 /// Display state only (ADR-0001). A disconnected Set is still answerable and is
 /// never withdrawn on its own — the CLI reconnects through transient drops, and
-/// only a human may archive a Set whose agent is really gone.
+/// only a human may lock a Set whose agent is really gone.
 ///
 /// It is a verdict rather than a timestamp because the server has the clock and
 /// the registry of held waits; the browser only draws what it is told.
@@ -36,7 +36,7 @@ pub enum Liveness {
     /// the badge answers — is anyone still on the other end? — has three
     /// answers rather than two, and *disconnected* would be this build reporting
     /// an agent that had gone where none was ever waiting. It is answerable and
-    /// archivable exactly as the other two are: what differs is who is waiting,
+    /// lockable exactly as the other two are: what differs is who is waiting,
     /// which is nobody.
     Deferred,
 }

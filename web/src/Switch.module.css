@@ -81,3 +81,17 @@
   cursor: default;
 }
 
+/* The track under the pointer, on whichever side of itself it is: an off switch
+   darkens the border it is drawn as, and an on one deepens the accent it is
+   filled with. Never while it is waiting on something — a dimmed switch is one
+   that will not be flipped again until it gets where it is going. */
+@media (hover: hover) {
+  .switch:not(:has(input:disabled)):hover input {
+    border-color: var(--ink-soft);
+  }
+
+  .switch:not(:has(input:disabled)):hover input:checked {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

@@ -128,10 +128,11 @@ flowchart LR
   Work blocks **only** on questions whose answers affect upcoming work.
 - **No commit gates.** The agent commits on its own; review happens later.
   What the gate's summary did survives without it (*settled 2026-08-24,
-  building commit-summaries*): a code commit carries an agent-written summary
-  as its message body — delta diagram first, per the convention the retired
-  gates topic taught — and the sweep keeps the body (trailers stripped) so the
-  commit's pane shows it above the diff and its card a clamped prose snippet.
+  building commit-summaries; refined 2026-08-26, building design-fixes*): a
+  code commit carries an agent-written summary as its message body — prose
+  first, then the delta diagram the retired gates topic taught — and the sweep
+  keeps the body (trailers stripped) so the commit's pane shows it as a headed
+  Message above the diff and its card a clamped prose snippet.
   Bookkeeping commits (plans, roadmaps, the finish, ADRs) stay subject-only,
   and a commit without a summary draws as it always did.
   Auto-advance runs the whole pipeline unattended: fresh session per task,
@@ -307,14 +308,19 @@ remembered is read. The details pane caps its content at the 60rem the Set and
 Settings pages are read at and centres it when the pane is wider, so a pane
 dragged to the width of a window is still a pane a line can be read across.
 
-The details pane is the selected Event and nothing else: with nothing selected
-it is blank, and a narrow layout offers no way to page into it (*settled
-2026-08-24, building workbench-refit*). What a Conversation needs settling
-before it runs — branch, base commit, both Pairings, the readiness verdict —
-rides under the Brief on its timeline card instead, disappearing entirely once
-grilling starts, since the server freezes all of it at that moment. The repo
-name, the worktree path and the conversation state are drawn nowhere: the
-record tells that story.
+The details pane is the one selected thing and nothing else: with nothing
+selected it is blank, and a narrow layout offers no way to page into it
+(*settled 2026-08-24, building workbench-refit*). That is nearly always an
+Event; the backlog and the roadmap are the exceptions, being read off the
+worktree rather than recorded, so their cards name them by a word where every
+other card names an id — the roadmap carrying its own directory name, a worktree
+being allowed any number of roadmaps where it has one `.tasks/`.
+
+What a Conversation needs settling before it runs — branch, base commit, both
+Pairings, the readiness verdict — rides under the Brief on its timeline card
+instead, disappearing entirely once grilling starts, since the server freezes
+all of it at that moment. The repo name, the worktree path and the conversation
+state are drawn nowhere: the record tells that story.
 
 Timeline events:
 
@@ -323,10 +329,10 @@ Timeline events:
 | Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
-| Commit | +/− and changed-line counts, clamped summary snippet | summary (diagram drawn) above the server-rendered diff viewer |
-| Task list | inline, pinned | — |
-| Stage list | inline, pinned | — |
-| PR | name + id, pinned | fetched commit list and comments |
+| Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
+| Task list | inline, pinned *and* on the record where the backlog landed | every task document, each a boxed markdown section in backlog order |
+| Stage list | inline, pinned *and* on the record where the roadmap landed | every stage brief, each a boxed markdown section in roadmap order, done state on the heading |
+| PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
 | Notice | inline, nothing to do about it | — |
 
 - **A stop is a notice and nothing to answer** (*settled 2026-08-24, building
@@ -345,7 +351,17 @@ Timeline events:
   a pointer, and a swipe across it does where there is not. What fronts on
   opening is the card the conversation is blocked on — a PR with feedback
   waiting — and otherwise the first of the fixed order; nothing is remembered
-  between visits, and a single pinned card gets none of the furniture.
+  between visits, and a single pinned card gets none of the furniture. A pinned
+  card that is also a moment on the record is drawn in both places — one card,
+  the same behaviour either way, and the same selection behind both — because a
+  record with the moment folded out of it would be a record missing it. All
+  three are: the PR at the moment the finish step opened it, and the two lists
+  at the moment they landed on the branch (*settled 2026-08-26, building
+  design-fixes*). The lists differ in where their content comes from — the row
+  carries a stamp and nothing else, and the card at it is `.tasks/` or
+  `docs/roadmaps/` read live at the moment somebody looks, exactly as the pinned
+  copy is. Conversations from before the rows existed are not backfilled: they
+  keep their pinned cards alone.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

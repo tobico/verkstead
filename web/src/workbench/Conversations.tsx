@@ -19,10 +19,16 @@
 //!
 //! The order the rows are in is the human's own. This is one person's working
 //! set, so which piece of work sits at the top is theirs to say rather than a
-//! sort's — they say it by dragging a row's grip, and what they said is the
-//! server's to keep. So a drag sends the whole list and the list comes back from
-//! the server on every read, which is what makes the order survive a reload, a
+//! sort's — they say it by dragging a card, and what they said is the server's
+//! to keep. So a drag sends the whole list and the list comes back from the
+//! server on every read, which is what makes the order survive a reload, a
 //! restart and a second device without any of the three being a case.
+//!
+//! A card also answers a right-click with what there is to do about the
+//! Conversation it stands for — the same rows the ⋯ at the head of the
+//! Conversation pane would offer it, drawn by the same component and acting on
+//! the card that was pressed rather than on whatever is open. Both menus are
+//! `Actions.tsx`, which is where the rows and everything behind them live.
 //!
 //! The sidebar is also where the rest of Verkstead is reached from, because the
 //! workbench has the root: the Repos and the Agent Profiles are behind the ⋯ at
@@ -37,15 +43,19 @@ import {
   Switch,
   createEffect,
   createSignal,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
 import { Menu } from "../Menu";
+import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
   listConversations,
   listRepos,
   placeConversations,
+  showArchived,
+  showingArchived,
   startAdoption,
   startConversation,
 } from "../api/client";
@@ -56,6 +66,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+import { CardActions } from "./Actions";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
 // The rings and the badge a card carries at its right edge. Drawn here rather
@@ -90,6 +101,15 @@ export function Conversations(props: {
 
   // Which row is under the hand, or null when none is.
   const [held, setHeld] = createSignal<number | null>(null);
+
+  // Which card was right-clicked and where the pointer was, or null while no
+  // context menu is open. A signal because the menu is drawn from it, unlike
+  // the press below.
+  const [pointed, setPointed] = createSignal<{
+    id: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   // The list to draw: the server's, in the order being dragged where there is
   // one. A Conversation that has appeared since the drag began is not in that
@@ -143,52 +163,190 @@ export function Conversations(props: {
   // about pixels, and pixels are something only the DOM knows.
   let list: HTMLUListElement | undefined;
 
-  /// Take hold of a row: the order stops being the server's for as long as the
-  /// hand is on it.
-  const grab = (event: PointerEvent, id: number) => {
-    // The primary button, a finger or a pen. A right-click is not a drag.
-    if (event.button !== 0) return;
+  // The press in flight: which card it is on, where on the screen it started,
+  // whether it is a finger, and whether the card has lifted under it yet. Null
+  // every moment nothing is pressed, which is nearly all of them.
+  //
+  // Not a signal, because nothing is drawn from it: what a lifted card is drawn
+  // from is `held` above, and the rest of this is bookkeeping between one
+  // pointer event and the next.
+  let press: {
+    id: number;
+    x: number;
+    y: number;
+    touch: boolean;
+    lifted: boolean;
+    waiting?: ReturnType<typeof setTimeout>;
+  } | null = null;
 
-    // So a touch drags the row instead of selecting the text under it.
-    event.preventDefault();
+  // Whether the press that has just ended moved a card. The click arrives after
+  // the pointer is up, and a card dragged into place should not open as well.
+  //
+  // Spent by the one click it is for, rather than standing until the next
+  // press. A keyboard press is a click with no pointer behind it, so a flag
+  // left set would leave the card the drag ended on deaf to Enter and Space
+  // until the hand went back to it — which is the one way in for somebody who
+  // is not dragging anything.
+  let reordered = false;
 
-    // Every move from here reaches this grip, whatever the pointer ends up
-    // over — including the gap between two rows and the world outside the
-    // sidebar.
-    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  // And whether the press this gesture began with was a finger rather than a
+  // mouse. Kept past the press itself, because what it answers arrives late: a
+  // phone fires `contextmenu` from a long press, and telling that from a
+  // right-click is the one thing the event cannot say for itself.
+  let fromTouch = false;
+
+  /// The card lifts: the order stops being the server's for as long as the hand
+  /// is on it.
+  const lift = (at: NonNullable<typeof press>) => {
+    at.lifted = true;
 
     // Held first and ordered second, in that order: the two are read together
     // by the effect above, and an order taken hold of by nobody is one it is
     // entitled to throw away.
-    setHeld(id);
+    setHeld(at.id);
     setDragged(shown().map((row) => row.id));
+
+    // The list must not scroll out from under a card being moved. A
+    // `touch-action` on the card would have said so before the finger landed
+    // and taken the swipe that scrolls the list with it, so the scroll is
+    // refused here instead: from the lift until the hand lets go, and never
+    // while a finger is merely passing through.
+    if (at.touch) {
+      document.addEventListener("touchmove", refuse, { passive: false });
+    }
   };
 
-  /// The hand moved: put the held row where the pointer is.
+  /// A press begins somewhere on a card. Which of the three things it is — a
+  /// click, a scroll or a drag — is settled by what the hand does next.
+  const grab = (event: PointerEvent, id: number) => {
+    // Which hand this is, before anything is decided about the press: a
+    // right-click leaves at the next line, and the `contextmenu` behind it is
+    // the one thing that still needs to know.
+    fromTouch = event.pointerType !== "mouse";
+
+    // The primary button, a finger or a pen. A right-click is not a drag.
+    if (event.button !== 0) return;
+
+    // Every move from here reaches this card, whatever the pointer ends up
+    // over — including the gap between two rows and the world outside the
+    // sidebar.
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+    const began: NonNullable<typeof press> = {
+      id,
+      x: event.clientX,
+      y: event.clientY,
+      touch: event.pointerType !== "mouse",
+      lifted: false,
+    };
+    press = began;
+    reordered = false;
+
+    // A finger lifts a card by holding still. No distance tells a drag from a
+    // scroll on a phone — both of them are the finger moving — so what tells
+    // the two apart is the time before it does.
+    if (began.touch) {
+      began.waiting = setTimeout(() => {
+        if (press === began) lift(began);
+      }, LIFT);
+    }
+  };
+
+  /// The hand moved: past the grace it is a drag, and a drag puts the lifted
+  /// card where the pointer is.
   const drag = (event: PointerEvent) => {
-    const id = held();
+    const at = press;
+    if (!at) return;
+
+    if (!at.lifted) {
+      // Inside the grace the hand has not said anything yet: this is the wobble
+      // between pressing a card and letting go of it, and a card that started
+      // moving here is a card that could not be clicked at all.
+      if (Math.hypot(event.clientX - at.x, event.clientY - at.y) <= GRACE) {
+        return;
+      }
+
+      // A finger that travels before its card has lifted is scrolling the list,
+      // so the press is over and the browser has it.
+      if (at.touch) {
+        clearTimeout(at.waiting);
+        press = null;
+        return;
+      }
+
+      lift(at);
+    }
+
     const order = dragged();
-    if (id === null || !order || !list) return;
+    if (!order || !list) return;
 
     const to = order.indexOf(under(list, event.clientY));
-    if (to < 0 || to === order.indexOf(id)) return;
+    if (to < 0 || to === order.indexOf(at.id)) return;
 
-    setDragged(moved(order, id, to));
+    setDragged(moved(order, at.id, to));
   };
 
   /// The hand let go: what is on the screen is what the human meant, so that is
   /// what is sent.
   const drop = () => {
-    const order = dragged();
-    if (held() === null) return;
+    const at = press;
+    if (!at) return;
 
+    clearTimeout(at.waiting);
+    press = null;
+    if (!at.lifted) return;
+
+    document.removeEventListener("touchmove", refuse);
+    reordered = true;
     setHeld(null);
+
+    const order = dragged();
     if (order) place.mutate(order);
   };
 
-  /// And the same move made from the keyboard, which is the whole of what a
-  /// grip has to offer somebody who is not dragging anything: one row up, one
-  /// row down, and the list saved each time as a drag saves it.
+  // A sidebar that goes away mid-drag takes its refusal of the scroll with it.
+  // Nothing else would ever take it off the document again: the drop that would
+  // have is on an element that is no longer there.
+  onCleanup(() => document.removeEventListener("touchmove", refuse));
+
+  /// A press that let go about where it landed is a click, and a click opens the
+  /// Conversation. One that moved a card is not: the card is where they put it,
+  /// and opening it as well would be answering one gesture twice.
+  ///
+  /// The flag is read once and spent, so the drag it belongs to swallows the
+  /// click that follows it and nothing after that.
+  const opened = (id: number) => {
+    const dragged = reordered;
+    reordered = false;
+
+    if (dragged) return;
+    props.open(id);
+  };
+
+  /// A right-click asks what there is to do about the Conversation the card
+  /// stands for, which is the fourth thing a press on a card can be and the one
+  /// the hand can only make with a mouse. The browser's own menu is not what it
+  /// is asking for, so that goes.
+  ///
+  /// The card is not opened and the order is not touched: `grab` above takes
+  /// the primary button and nothing else, so a right-click never begins a drag,
+  /// and a right-click fires no click for `opened` to answer.
+  ///
+  /// A phone fires this from a long press, which is already how a card is picked
+  /// up to be dragged — so a press that began under a finger is left entirely
+  /// alone, the browser's own answer to it included. What tells the two apart is
+  /// the pointer that started the gesture rather than this event, which carries
+  /// nothing about the hand that made it.
+  const ask = (event: MouseEvent, id: number) => {
+    if (fromTouch) return;
+
+    event.preventDefault();
+    setPointed({ id, x: event.clientX, y: event.clientY });
+  };
+
+  /// And the same move made from the keyboard, which is the whole of what a card
+  /// has to offer somebody who is not dragging anything: one row up, one row
+  /// down, and the list saved each time as a drag saves it.
   const step = (id: number, by: number) => {
     const order = shown().map((row) => row.id);
     const from = order.indexOf(id);
@@ -247,11 +405,12 @@ export function Conversations(props: {
                   entry={entry}
                   selected={String(entry.id) === props.selected}
                   held={held() === entry.id}
-                  open={props.open}
+                  open={opened}
                   grab={grab}
                   drag={drag}
                   drop={drop}
                   step={step}
+                  ask={ask}
                 />
               )}
             </For>
@@ -266,6 +425,13 @@ export function Conversations(props: {
           The order could not be saved: {place.error?.message}
         </ErrorLine>
       </Show>
+
+      {/* What a right-click on a card asks for. One for the whole list rather
+          than one per row: it is drawn where the pointer was rather than where
+          the card is, so there is nothing about it that belongs to a row — and
+          the steer it can open outlives the menu, which a row being dragged
+          about underneath it would not. */}
+      <CardActions pointed={pointed()} close={() => setPointed(null)} />
     </>
   );
 }
@@ -291,18 +457,70 @@ export function Conversations(props: {
 /// settings are a page of their own, so this is going somewhere in the way that
 /// opening a Conversation is not. Nothing here has to shut the menu — the
 /// navigation takes the whole sidebar with it.
+///
+/// Beside it, the one thing that is about this list rather than about the rest
+/// of Verkstead: whether the conversations the human has archived are drawn in
+/// it. A switch rather than a row that presses, because it is a state the list
+/// is in rather than something to do to it — and it stays where it is put, so
+/// the menu does not shut under a hand that may want it back.
 function WorkbenchActions(): JSX.Element {
+  const queries = useQueryClient();
+
+  /// The server's answer rather than this device's: the choice is the human's,
+  /// so a phone opened afterwards is looking at the same list.
+  const showing = useReading(() => ({
+    queryKey: ["conversations", "archived"],
+    queryFn: showingArchived,
+
+    // One boolean, so there is nothing in it to hold on to and nothing to
+    // match up: what a re-read lands on is the whole payload either way.
+    freshness: { reconcile: "id" } as const,
+  }));
+
+  const flip = useMutation(() => ({
+    mutationFn: (on: boolean) => showArchived(on),
+    onSuccess: () => {
+      // The list itself and the switch over it: what is drawn changes with the
+      // setting, which is the entire point of it. The other devices hear the
+      // same news as a Nudge.
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  /// Where the switch stands: the position asked for while that is in flight,
+  /// and the server's the rest of the time. A switch that snapped back to the
+  /// old position for the length of a round trip would read as a press that
+  /// failed.
+  const on = (): boolean =>
+    flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
+
   return (
     <Menu
       class={styles.workbenchActions!}
       label="Workbench actions"
       name="Workbench actions"
-      trigger="⋯"
+      mark
     >
       {() => (
-        <A role="menuitem" href="/settings">
-          Settings
-        </A>
+        <>
+          <div class={styles.showArchived}>
+            <Toggle
+              label="Show archived conversations"
+              on={on()}
+              disabled={showing.isPending || flip.isPending}
+              flip={(wanted) => flip.mutate(wanted)}
+            />
+            <Show when={flip.isError}>
+              <ErrorLine>
+                The setting could not be saved: {flip.error?.message}
+              </ErrorLine>
+            </Show>
+          </div>
+
+          <A role="menuitem" href="/settings">
+            Settings
+          </A>
+        </>
       )}
     </Menu>
   );
@@ -601,10 +819,25 @@ function spoken(entry: ConversationEntry): string {
 ///
 /// Where it has got to is drawn rather than written: a dotted card is a draft, a
 /// dimmed one is work that has stopped, and the mark at the right edge is a
-/// session running or an answer wanted. Every other state is the ordinary card —
-/// grilling, implementing and wrapping are not told apart here, because what the
-/// sidebar is for is finding the Conversation to look at and all three are *this
-/// one is under way*.
+/// session running or an answer wanted. The mark is the whole of what a waiting
+/// card says — the accent border and inset ring it used to carry as well are
+/// gone, because a card that was both waiting and open had two edge treatments
+/// arguing over one edge. Every other state is the ordinary card — grilling,
+/// implementing and wrapping are not told apart here, because what the sidebar
+/// is for is finding the Conversation to look at and all three are *this one is
+/// under way*.
+///
+/// The card is also what is dragged to move the Conversation up the list. There
+/// was a grip beside it until there was not: a second target to aim at, and one
+/// that had to be aimed at, for something the card can carry itself. What tells
+/// the gestures apart is now the hand rather than the place — see `grab`, `drag`
+/// and `drop` above — and the arrow keys do from the keyboard what the grip's
+/// did.
+///
+/// And it answers a right-click with what there is to do about the Conversation
+/// — see `ask` above. A mouse's gesture and only a mouse's: a finger has no
+/// right-click, and the long press it might have been is already how a card is
+/// picked up.
 function ConversationRow(props: {
   entry: ConversationEntry;
   selected: boolean;
@@ -614,6 +847,7 @@ function ConversationRow(props: {
   drag: (event: PointerEvent) => void;
   drop: () => void;
   step: (id: number, by: number) => void;
+  ask: (event: MouseEvent, id: number) => void;
 }): JSX.Element {
   const ended = (): boolean =>
     props.entry.state === "Done" || props.entry.state === "Closed";
@@ -628,7 +862,6 @@ function ConversationRow(props: {
         [styles.selected!]: props.selected,
         [styles.draft!]: props.entry.state === "Draft",
         [styles.ended!]: ended(),
-        [styles.waiting!]: mark(props.entry) === "waiting",
         [styles.held!]: props.held,
       }}
     >
@@ -637,7 +870,25 @@ function ConversationRow(props: {
         class={styles.open}
         aria-current={props.selected ? "true" : undefined}
         aria-label={spoken(props.entry)}
+        // What the grip's own label used to say, now that there is no second
+        // control to say it in: this card can be moved, and these are the keys
+        // that move it.
+        aria-keyshortcuts="ArrowUp ArrowDown"
         onClick={() => props.open(props.entry.id)}
+        onPointerDown={(event) => props.grab(event, props.entry.id)}
+        onPointerMove={props.drag}
+        onPointerUp={props.drop}
+        onPointerCancel={props.drop}
+        onContextMenu={(event) => props.ask(event, props.entry.id)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowUp") {
+            event.preventDefault();
+            props.step(props.entry.id, -1);
+          } else if (event.key === "ArrowDown") {
+            event.preventDefault();
+            props.step(props.entry.id, 1);
+          }
+        }}
       >
         <span class={styles.what}>
           <span class={styles.title}>{props.entry.branch}</span>
@@ -650,40 +901,9 @@ function ConversationRow(props: {
             it means, so there is nothing here for a screen reader to find. */}
         <Show when={mark(props.entry)}>
           {(which) => (
-            <span
-              class={`${marks.mark} ${marks[which()]}`}
-              aria-hidden="true"
-            >
-              {which() === "waiting" ? WANTS_YOU : ""}
-            </span>
+            <span class={`${marks.mark} ${marks[which()]}`} aria-hidden="true" />
           )}
         </Show>
-      </button>
-
-      {/* The grip: what is dragged, and the one control on this row that is
-          about the list rather than about the Conversation. Its own label,
-          because what it does is not what the card beside it does — and its own
-          keys, because a control that could only be dragged would be a control
-          half the people using it could not reach. */}
-      <button
-        type="button"
-        class={styles.grip}
-        aria-label={`Move ${props.entry.branch}`}
-        onPointerDown={(event) => props.grab(event, props.entry.id)}
-        onPointerMove={props.drag}
-        onPointerUp={props.drop}
-        onPointerCancel={props.drop}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowUp") {
-            event.preventDefault();
-            props.step(props.entry.id, -1);
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            props.step(props.entry.id, 1);
-          }
-        }}
-      >
-        {GRIP}
       </button>
     </li>
   );
@@ -714,17 +934,21 @@ function under(list: HTMLUListElement, y: number): number {
   return Number(over?.dataset.id ?? NaN);
 }
 
-/// What the mark on a Conversation waiting on the human says, inside the accent
-/// disc the stylesheet draws around it.
-///
-/// An icon rather than the dot this used to be, because what it has to survive
-/// is a glance down a list on a phone: a shape is read where a dot has to be
-/// looked for. Hidden from a screen reader, which is told the same thing in
-/// words by the card's own label — see [`spoken`].
-const WANTS_YOU = "!";
+/// How far a pointer may travel and still have been a click, in pixels. A press
+/// is not a steady thing — a mouse moves a pixel or two between going down and
+/// coming up — so a card that began moving at the first move would be a card
+/// that could not be clicked at all.
+const GRACE = 5;
 
-/// And what the grip says: the dots everything draggable is gripped by, so that
-/// what it is for needs no explaining. Two columns of them, which is the shape
-/// the convention is, in characters rather than in a drawing — every other mark
-/// in this viewer is a character.
-const GRIP = "⋮⋮";
+/// How long a finger holds a card still before it lifts, in milliseconds. Long
+/// enough that a swipe down the list is never taken for it, short enough that
+/// holding a card is not waiting for it.
+const LIFT = 400;
+
+/// What a card being dragged does to the scroll under it: refuses it. Hung on
+/// the document at the lift and taken off again at the drop, so a finger scrolls
+/// the sidebar every other moment of the day.
+///
+/// A function of its own rather than one made per drag, because removing a
+/// listener means handing back the very same function.
+const refuse = (event: Event): void => event.preventDefault();

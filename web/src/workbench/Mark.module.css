@@ -22,28 +22,21 @@
 }
 
 /* Something is waiting on the human: an ask left open, driving that has halted,
-   a run waiting an account's window out, or a direction to choose. An icon
-   rather than the dot it used to be — a shape reads at a glance where a dot has
-   to be looked at, and this is a list that is glanced down, so it is a size up
-   on the session marks beside it. The border around the whole card is the other
-   half of the same mark; see `.conversationRow.waiting` in
-   `Conversations.module.css`. The accent rather than
-   the `--stopped` red, because not one of the four is anything going wrong.
+   a run waiting an account's window out, or a direction to choose. A filled disc
+   and nothing else — the whole of the mark, where it used to be one of three
+   things a waiting card said at once. It is a size up on the session marks
+   beside it because this is a list that is glanced down rather than read, and
+   the accent rather than the `--stopped` red because not one of the four is
+   anything going wrong.
 
    The sidebar's alone, and it needs no card named in front of it to say so:
    `waiting` is a state no running session has, so the only mark that ever
    carries it is the one `Conversations.tsx` draws. */
 .mark.waiting {
-  display: grid;
-  place-items: center;
   width: 1rem;
   height: 1rem;
   background: var(--accent);
   border-radius: 50%;
-  color: var(--card);
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1;
 }
 
 /* And a session getting on with it: a ring with one lit arc, turning slowly.
@@ -58,11 +51,13 @@
 }
 
 /* And one that is running and has stopped talking: the same ring with no lit
-   arc at all, which is an empty circle. Quieter than the turning one on purpose
-   — a session sitting on an ask is not doing anything, and the mark that says
-   so should not be the one that catches an eye. */
+   arc at all, which is an empty circle. In the accent rather than the edge grey
+   the turning ring is drawn in, because a session that has gone quiet is one the
+   human may have to do something about, and grey on grey read as a card border
+   that had come loose. Still the quieter of the two marks: it is an outline
+   where the waiting disc is filled, and it holds still. */
 .mark.idle {
-  border: 1.5px solid var(--edge);
+  border: 1.5px solid var(--accent);
 }
 
 @keyframes turning {

@@ -1,5 +1,5 @@
-//! The bar across the top of a workbench pane: what the pane is called, the way
-//! back out to the pane it was entered from, and the way out of an open Event.
+//! The bar across the top of a workbench pane: what the pane is called, and the
+//! way back out to the pane it was entered from.
 //!
 //! Seven panes wrote this out by hand — the same `div`, the same button drawn
 //! twice under two class names, the same "← Timeline" spelled six times — and
@@ -10,8 +10,10 @@
 //! puts whatever else it needs in the header inside the tags.
 //!
 //! The order is the one every pane already drew and the one the header reads
-//! in: the way back over the top, the title, the pane's own controls after it,
-//! and Close at the end.
+//! in: the way back over the top, the title, and the pane's own controls after
+//! it. There is no Close: a details pane is left by opening something else or by
+//! the "← Timeline" a narrow window draws, and a header carrying both read as
+//! one row asking the same question twice.
 
 import { Show, type JSX } from "solid-js";
 
@@ -32,10 +34,6 @@ export function PaneHead(props: {
   heading?: string;
   /// The pane's own controls, standing in the header row after the title.
   children?: JSX.Element;
-  /// The way out of the open Event, back to what the conversation is. Absent
-  /// where the pane has no Event to close or has given the slot to a control of
-  /// its own.
-  close?: () => void;
 }): JSX.Element {
   return (
     <div class={`${styles.head} ${shell.paneChrome}`}>
@@ -56,16 +54,6 @@ export function PaneHead(props: {
       </Show>
 
       {props.children}
-
-      <Show when={props.close}>
-        <button
-          type="button"
-          class={styles.close}
-          onClick={() => props.close?.()}
-        >
-          Close
-        </button>
-      </Show>
     </div>
   );
 }

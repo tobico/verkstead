@@ -1,4 +1,4 @@
-//! SQLite persistence for Question Sets, their Responses, and the archiving of
+//! SQLite persistence for Question Sets, their Responses, and the locking of
 //! the ones nobody will ever answer.
 //!
 //! A Set and a Response are each kept as one JSON body — JSON rather than YAML
@@ -28,6 +28,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
+mod archives;
 mod captures;
 mod commits;
 mod conversations;
@@ -46,17 +47,21 @@ mod transcripts;
 mod waits;
 mod wrap_up;
 
+pub use archives::{
+    Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
+    unarchive_conversation,
+};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Grilling,
-    Implementing, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer, Steering,
-    TimelineEvent, adopting, ask, asked_from, close_conversation, conversations, implement_again,
-    last_batch_proposal, last_proposal, load_conversation, note, pick_direction, record_handoff,
-    rename_branch, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_state, stacks_on, start_adoption, start_conversation,
-    start_grilling, start_implementing, start_stage, steer_conversation, timeline,
-    unanswered_set_since,
+    Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
+    Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
+    implement_again, last_batch_proposal, last_proposal, load_conversation, note, pick_direction,
+    record_backlog, record_handoff, record_roadmap, rename_branch, save_brief, set_asked_from,
+    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, stacks_on,
+    start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
+    steer_conversation, timeline, unanswered_set_since,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};
@@ -197,17 +202,17 @@ pub enum Settlement {
     /// Answered: this is the Response, and the wait is over.
     Answered(StoredResponse),
 
-    /// Archived unanswered by the human. Nothing is coming.
-    ArchivedUnanswered(SetArchived),
+    /// Locked unanswered by the human. Nothing is coming.
+    LockedUnanswered(SetLocked),
 }
 
 /// A Set the human closed unanswered: which Set, and when they closed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SetArchived {
+pub struct SetLocked {
     pub set_id: i64,
 
-    /// When the server took the archiving, RFC 3339.
-    pub archived_at: String,
+    /// When the server took the lock, RFC 3339.
+    pub locked_at: String,
 }
 
 /// A Set that has just been settled: which Set, and the Conversation it was
@@ -225,11 +230,11 @@ pub struct SettledSet {
     pub conversation_id: Option<i64>,
 }
 
-/// Word that a Set has just been settled — answered, or archived unanswered —
+/// Word that a Set has just been settled — answered, or locked unanswered —
 /// so a wait held on it can end without going back to the store to look.
 ///
 /// It lives beside the store for the same reason the store is its own crate:
-/// the agent API's long-poll, the web UI's submit and the web UI's archiving are
+/// the agent API's long-poll, the web UI's submit and the web UI's locking are
 /// in different crates, and they have to meet at the same channel or a browser
 /// would leave a waiting agent hanging until its hold window closed.
 #[derive(Debug, Clone)]
@@ -317,9 +322,9 @@ pub enum Submission {
     /// once, and the first Response stands.
     AlreadyAnswered,
 
-    /// The Set was archived unanswered, which closed it for good: an archived
+    /// The Set was locked unanswered, which closed it for good: a locked
     /// Set cannot also become an answered one.
-    Archived,
+    Locked,
 }
 
 /// Answer a Set: check the Response resolves it, store it, and wake whoever is
@@ -327,7 +332,7 @@ pub enum Submission {
 ///
 /// This is the one path a Response takes, whether it came from the human's
 /// browser or from `curl`, so a wait ends the same way either way — and so an
-/// archived Set is refused the same way either way.
+/// locked Set is refused the same way either way.
 ///
 /// It is also where a direction is settled. A Set carrying a `proposal` is the
 /// grilling agent's closing move, and a Response that picks a direction on one
@@ -359,8 +364,8 @@ pub async fn submit_response(
     let Some(accepted) = insert_response(pool, set_id, response).await? else {
         // The insert refuses both ways a Set can already be settled, so which of
         // the two it was is read back rather than assumed.
-        return Ok(match load_archiving(pool, set_id).await? {
-            Some(_) => Submission::Archived,
+        return Ok(match load_lock(pool, set_id).await? {
+            Some(_) => Submission::Locked,
             None => Submission::AlreadyAnswered,
         });
     };
@@ -418,24 +423,24 @@ async fn accept_proposal(
     pick_direction(pool, conversation_id, direction).await
 }
 
-/// What became of archiving a Set unanswered.
+/// What became of locking a Set unanswered.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Archiving {
+pub enum Locking {
     /// Closed: the Set has stopped waiting on the human, and anyone holding a
     /// wait on it has been told.
-    Archived(SetArchived),
+    Locked(SetLocked),
 
-    /// There is no Set with that id to archive.
+    /// There is no Set with that id to lock.
     NoSuchSet,
 
-    /// The Set has a Response, so it is a decision already. Archiving
+    /// The Set has a Response, so it is a decision already. Locking
     /// unanswered is for a Set nobody will ever answer, and it does not touch
     /// what was decided.
     AlreadyAnswered,
 
-    /// The Set was archived before this arrived — from another device, or
+    /// The Set was locked before this arrived — from another device, or
     /// another tab.
-    AlreadyArchived,
+    AlreadyLocked,
 }
 
 /// Close a Set the human is never going to be able to answer: settle it
@@ -445,25 +450,25 @@ pub enum Archiving {
 /// because the CLI reconnects through transient drops. Nothing here consults
 /// Liveness — the decision is the human's, taken with the badge in front of
 /// them.
-pub async fn archive_set(
+pub async fn lock_set(
     pool: &SqlitePool,
     settlements: &Settlements,
     set_id: i64,
-) -> Result<Archiving> {
+) -> Result<Locking> {
     if !set_exists(pool, set_id).await? {
-        return Ok(Archiving::NoSuchSet);
+        return Ok(Locking::NoSuchSet);
     }
 
-    let Some(archived) = insert_archiving(pool, set_id).await? else {
+    let Some(locked) = insert_lock(pool, set_id).await? else {
         return Ok(match load_response(pool, set_id).await? {
-            Some(_) => Archiving::AlreadyAnswered,
-            None => Archiving::AlreadyArchived,
+            Some(_) => Locking::AlreadyAnswered,
+            None => Locking::AlreadyLocked,
         });
     };
 
     settlements.announce(settled_set(pool, set_id).await?);
 
-    Ok(Archiving::Archived(archived))
+    Ok(Locking::Locked(locked))
 }
 
 /// What to announce about a Set that has just settled: the Set, and where it was
@@ -471,7 +476,7 @@ pub async fn archive_set(
 ///
 /// The Conversation is looked up rather than carried down from the caller
 /// because both settling paths are reached with a Set id and nothing else — the
-/// browser's archiving has only the id in its route, and the agent's Response
+/// browser's locking has only the id in its route, and the agent's Response
 /// only the id it was told to answer.
 async fn settled_set(pool: &SqlitePool, set_id: i64) -> Result<SettledSet> {
     Ok(SettledSet {
@@ -531,10 +536,15 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the responses table")?;
 
-    // Archiving hangs off a Set exactly as its Response does, rather than being
-    // a column on it: there is no migration machinery here, and
-    // `question_sets` is STRICT and left alone. One archiving per Set, by the
-    // same primary key, for the same reason.
+    // A lock hangs off a Set exactly as its Response does, rather than being a
+    // column on it: there is no migration machinery here, and `question_sets`
+    // is STRICT and left alone. One lock per Set, by the same primary key, for
+    // the same reason.
+    //
+    // `archivings` is the name a lock was stored under when locking was called
+    // archiving, and it stays that for the missing migration machinery: a
+    // database written before the rename keeps its locks in it, and a renamed
+    // table would leave them behind.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS archivings (
              set_id      INTEGER PRIMARY KEY REFERENCES question_sets(id),
@@ -543,10 +553,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     )
     .execute(pool)
     .await
-    .context("creating the archivings table")?;
+    .context("creating the locks table")?;
 
     // Which Sets were asked deferred, and which of those have been folded into a
-    // prompt. It hangs off a Set for the archivings' reason, said again there.
+    // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
 
     // The push identity and the devices subscribed to it, which also generates
@@ -614,6 +624,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // list rather than a thing that happened to the work.
     placements::apply_schema(pool).await?;
 
+    // And which of them the human has put away, which the sidebar reads the
+    // same way and for the same reason: what a list draws is not a fact about
+    // the work either.
+    archives::apply_schema(pool).await?;
+
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite
     // moves rows into is one of them — see [`migrations`], where each rewrite
@@ -668,11 +683,11 @@ pub async fn set_exists(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// Store the Response to a Set, stamping it with a submission time.
 ///
 /// `None` means the Set is settled already: it has a Response — a Set is
-/// answered once, and the first one stands — or it was archived unanswered,
+/// answered once, and the first one stands — or it was locked unanswered,
 /// which closed it for good.
 ///
 /// Both are refused inside the one statement rather than checked first, so two
-/// devices cannot leave the same Set both answered and archived by racing.
+/// devices cannot leave the same Set both answered and locked by racing.
 ///
 /// The Response is expected to have been validated against its Set already.
 pub async fn insert_response(
@@ -702,13 +717,13 @@ pub async fn insert_response(
     }))
 }
 
-/// Record that a Set was archived unanswered, stamping it with the time.
+/// Record that a Set was locked unanswered, stamping it with the time.
 ///
-/// `None` means it was not archived: the Set has a Response, or it had already
-/// been archived. Guarded inside the statement for the reason
-/// [`insert_response`] is — an answered Set must not also become an archived
+/// `None` means it was not locked: the Set has a Response, or it had already
+/// been locked. Guarded inside the statement for the reason
+/// [`insert_response`] is — an answered Set must not also become a locked
 /// one.
-async fn insert_archiving(pool: &SqlitePool, set_id: i64) -> Result<Option<SetArchived>> {
+async fn insert_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>> {
     let row: Option<(String,)> = sqlx::query_as(
         "INSERT INTO archivings (set_id, archived_at)
          SELECT ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -720,27 +735,21 @@ async fn insert_archiving(pool: &SqlitePool, set_id: i64) -> Result<Option<SetAr
     .bind(set_id)
     .fetch_optional(pool)
     .await
-    .with_context(|| format!("archiving Question Set {set_id}"))?;
+    .with_context(|| format!("locking Question Set {set_id}"))?;
 
-    Ok(row.map(|(archived_at,)| SetArchived {
-        set_id,
-        archived_at,
-    }))
+    Ok(row.map(|(locked_at,)| SetLocked { set_id, locked_at }))
 }
 
-/// When a Set was archived unanswered, or `None` if it was not.
-async fn load_archiving(pool: &SqlitePool, set_id: i64) -> Result<Option<SetArchived>> {
+/// When a Set was locked unanswered, or `None` if it was not.
+async fn load_lock(pool: &SqlitePool, set_id: i64) -> Result<Option<SetLocked>> {
     let row: Option<(String,)> =
         sqlx::query_as("SELECT archived_at FROM archivings WHERE set_id = ?")
             .bind(set_id)
             .fetch_optional(pool)
             .await
-            .with_context(|| format!("looking for the archiving of Question Set {set_id}"))?;
+            .with_context(|| format!("looking for the lock on Question Set {set_id}"))?;
 
-    Ok(row.map(|(archived_at,)| SetArchived {
-        set_id,
-        archived_at,
-    }))
+    Ok(row.map(|(locked_at,)| SetLocked { set_id, locked_at }))
 }
 
 /// How a Set was settled, or `None` while it is still waiting on the human.
@@ -753,9 +762,9 @@ pub async fn settlement(pool: &SqlitePool, set_id: i64) -> Result<Option<Settlem
         return Ok(Some(Settlement::Answered(stored)));
     }
 
-    Ok(load_archiving(pool, set_id)
+    Ok(load_lock(pool, set_id)
         .await?
-        .map(Settlement::ArchivedUnanswered))
+        .map(Settlement::LockedUnanswered))
 }
 
 /// Read a Set's Response back, or `None` if it has not been answered yet.

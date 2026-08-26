@@ -49,3 +49,12 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* Under the pointer, the accent it is filled with taken one step deeper — the
+   same step every filled button in the app takes. */
+@media (hover: hover) {
+  .adopt:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

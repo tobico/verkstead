@@ -16,6 +16,7 @@ import type {
   ConversationView,
   ProfileEntry,
   RepoEntry,
+  ShowingArchived,
 } from "../src/api/types";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
@@ -40,6 +41,12 @@ export const PROFILES = profiles as ProfileEntry[];
 /// strings: there is no shape for a golden file to hold true, and the endpoint
 /// reads it out of a real git repository, which the fixtures have none of.
 export const BRANCHES = ["main", "release-1.4", "origin/main"];
+
+/// And the sidebar's one setting, off — which is where a workbench nobody has
+/// archived anything in stands. Written here rather than read out of a fixture
+/// for the reason the branches are: one boolean is not a shape a golden file
+/// could hold true.
+export const HIDING_ARCHIVED: ShowingArchived = { showing: false };
 
 /// The workbench on its own routes, so the Conversation it reads is the one the
 /// URL names — and so that opening one is a navigation, which is what it is in
@@ -77,6 +84,7 @@ export function mount(at = "/") {
 export function theWorkbench(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),

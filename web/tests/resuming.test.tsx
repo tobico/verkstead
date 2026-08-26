@@ -52,6 +52,7 @@ const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 /// something any of them is about.
 const BESIDE = [
   whenever("/api/ui/conversations", json(conversations as ConversationEntry[])),
+  whenever("/api/ui/conversations/archived", json({ showing: false })),
   whenever("/api/ui/repos", json(repos as RepoEntry[])),
   whenever("/api/ui/profiles", json(profiles as ProfileEntry[])),
   whenever("/api/ui/update", json("Current")),

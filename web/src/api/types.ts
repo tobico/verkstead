@@ -234,11 +234,6 @@ error: string,
 violations?: Array<Violation>, };
 
 /**
- * What became of the human closing a Set unanswered.
- */
-export type Archived = "Closed" | "AlreadyAnswered" | "AlreadyArchived" | "NoSuchSet";
-
-/**
  * A Question or a Sub-question as the page draws it: the name it answers to,
  * its text already rendered, and the Options it offers.
  *
@@ -277,6 +272,38 @@ columns: Array<string>, options: Array<OptionView>, };
  * with no address is what git complains about by name.
  */
 export type Author = { name: string, email: string, };
+
+/**
+ * The backlog opened: every task document of it, rendered.
+ *
+ * What the card cannot show. A task list's card is the entries — a number, a
+ * title and a box — and each entry details a document in `.tasks/` that says
+ * what the task is and what *done* means for it. That is what this is: the
+ * documents themselves, in the order the backlog works them.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * commit's diff is one: a Timeline is read every time an open page hears the
+ * world moved, and a backlog is read whole when somebody opens it.
+ */
+export type BacklogPane = { 
+/**
+ * What the backlog is called: `TODO.md`'s heading, which is what the card
+ * says too. Empty where the list wrote none.
+ */
+feature: string, 
+/**
+ * In the order the list has them, which is the order they get worked in.
+ */
+tasks: Array<TaskDocument>, 
+/**
+ * Whether any of these documents came out holding a Diagram, and so
+ * whether the pane carries the client-side renderer at all.
+ *
+ * Asked once of all of them, off the HTML above, exactly as a Set's own
+ * flag is — see [`crate::SetView::diagrams`]. mermaid is megabytes, and the
+ * pane that asks for the bundle is the one with something to draw with it.
+ */
+diagrams: boolean, };
 
 /**
  * The branch to come off, or `null` to go back to the default-branch rule.
@@ -477,6 +504,16 @@ diagrams: boolean,
 diff: DiffView | null, };
 
 /**
+ * And what became of archiving one: putting a Closed Conversation away, so the
+ * sidebar stops drawing it.
+ *
+ * Reversible, which is why nothing here is confirmed and why the refusals are
+ * so mild: the worst of them says the human asked for something that is already
+ * true.
+ */
+export type ConversationArchived = "Archived" | "AlreadyArchived" | "NotClosed" | "NoSuchConversation";
+
+/**
  * What became of closing one.
  */
 export type ConversationClosed = "Closed" | "AlreadyClosed" | "NoSuchConversation" | "WorktreeStuck";
@@ -555,6 +592,14 @@ export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequ
  * [`Stopping`]: ConversationStopped::Stopping
  */
 export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyStopped" | "NotDriven" | "NoSuchConversation";
+
+/**
+ * And what became of taking one back out, which is the way back from it.
+ *
+ * One refusal fewer than archiving has: there is no state a Conversation can
+ * be in that is the wrong one to put back on the list.
+ */
+export type ConversationUnarchived = "Unarchived" | "NotArchived" | "NoSuchConversation";
 
 /**
  * One Conversation, whole: what it is attached to, what the human has settled
@@ -726,6 +771,16 @@ working: boolean,
  */
 timeline: Array<TimelineEvent>, 
 /**
+ * Whether the human has put this Conversation away — see
+ * [`ConversationArchived`].
+ *
+ * What the actions menu offers Unarchive by, in the place Archive stands
+ * in on a Closed Conversation that is still on the list. Nothing else on
+ * the page turns on it: an archived Conversation is drawn exactly as it
+ * was, because being off the sidebar is the whole of what archiving does.
+ */
+archived: boolean, 
+/**
  * The Events that stay in view rather than scrolling past with the record.
  *
  * Apart from the Timeline rather than in it, because that is what pinning
@@ -802,12 +857,17 @@ export type Lifecycle = "Draft" | "Grilling" | "Implementing" | "Wrapping" | "Do
  *
  * Display state only (ADR-0001). A disconnected Set is still answerable and is
  * never withdrawn on its own — the CLI reconnects through transient drops, and
- * only a human may archive a Set whose agent is really gone.
+ * only a human may lock a Set whose agent is really gone.
  *
  * It is a verdict rather than a timestamp because the server has the clock and
  * the registry of held waits; the browser only draws what it is told.
  */
 export type Liveness = "waiting" | "disconnected" | "deferred";
+
+/**
+ * What became of the human closing a Set unanswered.
+ */
+export type Locked = "Closed" | "AlreadyAnswered" | "AlreadyLocked" | "NoSuchSet";
 
 /**
  * A Manual Task as the page receives it: what was asked for, and when.
@@ -952,6 +1012,9 @@ model: string | null, };
  * unpin: what is pinned is decided by what kind of thing it is, so there is no
  * state here to flip and no route to flip it with. A tagged kind for the reason
  * [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+ *
+ * All three are on the record as well, each at the moment it arrived there, and
+ * each is one card drawn twice rather than two cards.
  */
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
@@ -1115,11 +1178,12 @@ commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
  * The pull request as the Timeline shows it: what it is called and what number
  * it answers to, with a way out to GitHub itself.
  *
- * An id and a stamp, unlike the task list beside it, because this one *is* on
- * the record: the finish step opened a pull request at a moment worth keeping,
- * and the Conversation moved into Wrapping on the strength of it. What is not
- * on the record is what the PR holds — see [`PullRequestDetails`], which the
- * details pane fetches when somebody opens this.
+ * An id and a stamp of its own, unlike the task list beside it, because a pull
+ * request is the whole of what it says: the finish step opened one at a moment
+ * worth keeping, and the Conversation moved into Wrapping on the strength of
+ * it. What is not on the record is what the PR holds — see
+ * [`PullRequestDetails`], which the details pane fetches when somebody opens
+ * this.
  */
 export type PullRequestEvent = { id: number, 
 /**
@@ -1308,6 +1372,44 @@ direction?: Direction | null, };
 export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing";
 
 /**
+ * The roadmap opened: every stage brief of it, rendered.
+ *
+ * What the card cannot show, one level up from [`BacklogPane`] and built the
+ * same way. A stage list's card is the entries — a number, a title and a box —
+ * and each entry names a brief beside `ROADMAP.md` that says what the stage is
+ * for. That is what this is: the briefs themselves, in the roadmap's own order.
+ *
+ * Its own request rather than a field on the Conversation, for the reason the
+ * backlog's is one: a Timeline is read every time an open page hears the world
+ * moved, and a roadmap is read whole when somebody opens it.
+ *
+ * Named by the roadmap rather than by the Conversation, which is the one place
+ * this parts company with the backlog: a Worktree has one `.tasks/` and may
+ * hold any number of roadmaps, so the card says which of them it is.
+ */
+export type RoadmapPane = { 
+/**
+ * The roadmap's directory under `docs/roadmaps/` — `mvp` — which is its
+ * identity, and what the card named to open this.
+ */
+name: string, 
+/**
+ * `ROADMAP.md`'s own heading. Empty where it wrote none, which is when the
+ * pane falls back to the name, exactly as the card does.
+ */
+title: string, 
+/**
+ * In the order the roadmap has them, which is the order they get worked in.
+ */
+stages: Array<StageDocument>, 
+/**
+ * Whether any of these briefs came out holding a Diagram, and so whether
+ * the pane carries the client-side renderer at all — asked once of all of
+ * them, as [`BacklogPane::diagrams`] is.
+ */
+diagrams: boolean, };
+
+/**
  * One session's Screen: the grid its Capture leaves on a terminal.
  *
  * Not the bytes and not a picture of them — the escape sequences that would
@@ -1463,6 +1565,21 @@ export type SettingsView = { git_author: Author,
 github_token: TokenSaved | null, };
 
 /**
+ * Whether the sidebar is drawing what the human has archived.
+ *
+ * Their standing choice rather than this device's: it is read back off the
+ * server on every load, and what is sent when the toggle is flipped is the
+ * position it has been put in rather than the flip itself — a switch says
+ * where it stands, and saying it twice says the same thing.
+ */
+export type ShowingArchived = { 
+/**
+ * On: the archived Conversations are on the list, in their ordinary
+ * places. Off: they are not drawn at all.
+ */
+showing: boolean, };
+
+/**
  * What the server says down a live Screen's socket.
  *
  * Watching a running session is the one place the viewer is sent something
@@ -1481,6 +1598,31 @@ export type Shown = { "Painted": Screen } | { "Printed": string };
  * the latest one is the size the Screen and the session's own terminal are.
  */
 export type Size = { columns: number, rows: number, };
+
+/**
+ * One stage's brief as the pane draws it: the entry it belongs to, and the
+ * markdown of its file.
+ */
+export type StageDocument = { 
+/**
+ * As the roadmap writes it, zero-padding and all — `01`.
+ */
+number: string, title: string, 
+/**
+ * Whether the stage is finished, which here is the checkbox — see
+ * [`StageEntry::done`]. Carried on the document because a finished stage
+ * still has one: a brief stays where it is for ever, so the done state is
+ * something the section says about itself rather than the reason it is
+ * empty.
+ */
+done: boolean, 
+/**
+ * The brief rendered and sanitized, or `null` where there is nothing to
+ * render. Unlike a task's, that is not the ordinary end of a stage's life
+ * but a roadmap pointing at a file nobody wrote — which the pane says in
+ * words rather than drawing a gap.
+ */
+html: string | null, };
 
 /**
  * One stage of a roadmap: the number it answers to, what it is called, and
@@ -1503,10 +1645,13 @@ done: boolean, };
  * The roadmap as the Timeline shows it: what it is called, and every stage
  * against whether it is checked.
  *
- * No id and no stamp, for the reason the task list beside it has none: it is
- * read out of `docs/roadmaps/` each time the Conversation is, so what it says
- * is what the Worktree holds now rather than what it held at a moment worth
- * stamping. Nothing opens it either — the whole of a stage list is the list.
+ * No id and no stamp of its own, for the reason the task list beside it has
+ * none: it is read out of `docs/roadmaps/` each time the Conversation is, so
+ * what it says is what the Worktree holds now. The moment the roadmap landed is
+ * stamped all the same — see [`StageListReached`]. It opens, in both of the
+ * places it is drawn, and what a details pane shows of it is not the list again
+ * but the briefs its entries name — see [`RoadmapPane`], which is its own
+ * request.
  */
 export type StageListEvent = { 
 /**
@@ -1526,9 +1671,22 @@ title: string,
 stages: Array<StageEntry>, };
 
 /**
+ * The roadmap on the record: where it landed, and what it says now.
+ *
+ * The stage lists rather than one, because a branch may have written to more
+ * than one roadmap and the pinned block draws each of them. Empty where there
+ * is nothing left to read, exactly as the backlog's is.
+ */
+export type StageListReached = { id: number, 
+/**
+ * When the roadmap landed, RFC 3339.
+ */
+at: string, roadmaps: Array<StageListEvent>, };
+
+/**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
  */
-export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "ArchivedUnanswered": string };
+export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "LockedUnanswered": string };
 
 /**
  * What became of starting one.
@@ -1684,7 +1842,7 @@ export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "Done";
 /**
  * What became of the human's Response.
  */
-export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Archived" | { "Rejected": Array<string> };
+export type Submitted = "Accepted" | "AlreadyAnswered" | "NoSuchSet" | "Locked" | { "Rejected": Array<string> };
 
 /**
  * What became of a device asking to be notified.
@@ -1701,6 +1859,23 @@ export type Subscribed = "Stored" | "Incomplete";
  * something the server has any reason to learn.
  */
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
+
+/**
+ * One task's document as the pane draws it: the entry it belongs to, and the
+ * markdown of its file.
+ */
+export type TaskDocument = { 
+/**
+ * As the list writes it, zero-padding and all — `01`, the same string the
+ * card's entry carries.
+ */
+number: string, title: string, 
+/**
+ * The document rendered and sanitized, or `null` where there is no file to
+ * render — which is a task that is done, the file going being what says so.
+ * The pane says as much in words rather than drawing a gap.
+ */
+html: string | null, };
 
 /**
  * One task of a backlog: the number it answers to, what it is called, and
@@ -1724,12 +1899,19 @@ done: boolean, };
  * The backlog as the Timeline shows it: what the work is called, and every
  * task against whether it is done.
  *
- * No id and no stamp, unlike every Event in the record. It is read out of
- * `.tasks/` each time the Conversation is — the repository owns the files, and
- * Verkstead never does — so what it says is what the Worktree holds now rather
- * than what it held at a moment worth stamping. Nothing opens it either: the
- * whole of a task list is the list, which is why the design gives it no details
- * pane.
+ * No id and no stamp of its own. It is read out of `.tasks/` each time the
+ * Conversation is — the repository owns the files, and Verkstead never does —
+ * so what it says is what the Worktree holds now rather than what it held at
+ * any one moment.
+ *
+ * Which does not keep it off the record. The moment a backlog *landed* is worth
+ * stamping and is stamped — see [`TaskListReached`], which carries this reading
+ * at that row — so the identity is on the row and the content is here, and the
+ * card is the same card in both places.
+ *
+ * It opens all the same, in both of the places it is drawn: what a details
+ * pane shows of it is not the list again but the documents the entries name —
+ * see [`BacklogPane`], which is its own request.
  */
 export type TaskListEvent = { 
 /**
@@ -1743,13 +1925,34 @@ feature: string,
 tasks: Array<TaskEntry>, };
 
 /**
+ * The backlog on the record: where it landed, and what it says now.
+ *
+ * The two halves come from different places on purpose. `id` and `at` are the
+ * row's, stamped once when the branch first carried a backlog; `list` is the
+ * Worktree's, read afresh every time the Conversation is — so the card ticks
+ * along with the work while the row it sits at stays where it was.
+ */
+export type TaskListReached = { id: number, 
+/**
+ * When the backlog landed, RFC 3339.
+ */
+at: string, 
+/**
+ * The backlog as it stands, or nothing where there is none to read: a
+ * Worktree that has been taken away, or a `.tasks/` the branch has since
+ * finished with. The row stays either way — it is the record of a moment,
+ * and the moment happened.
+ */
+list: TaskListEvent | null, };
+
+/**
  * One entry in a Timeline.
  *
  * A tagged kind rather than a struct with a nullable field per kind: what the
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.
@@ -1882,7 +2085,7 @@ id: number, line: string, };
  * should find it exactly as the agent sent it.
  *
  * No `standing` and no title. Answering is checked against Questions nobody
- * here can read, so it is not offered, and neither is archiving; and what the
+ * here can read, so it is not offered, and neither is locking; and what the
  * Set was called is in the body along with everything else, said once rather
  * than half-recovered into a heading.
  */

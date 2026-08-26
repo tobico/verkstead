@@ -625,11 +625,11 @@ describe("a submit that did not land", () => {
     );
   });
 
-  it("says the Set was archived, which closed it for good", async () => {
-    const page = await refused("Archived");
+  it("says the Set was locked, which closed it for good", async () => {
+    const page = await refused("Locked");
 
     expect(page.querySelector(`.${submitting.submit} .${notices.error}`)!.textContent).toContain(
-      "archived unanswered",
+      "locked unanswered",
     );
   });
 

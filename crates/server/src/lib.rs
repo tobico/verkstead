@@ -459,7 +459,7 @@ fn routed(
             post(responses::submit_response).get(responses::wait_for_response),
         )
         // The viewer's half. It shares this state rather than holding its own:
-        // a submit or an archiving from the browser has to reach an agent
+        // a submit or a locking from the browser has to reach an agent
         // waiting on the endpoint above, and both halves have to agree about
         // which Sets a wait is being held on.
         .merge(ui::routes())

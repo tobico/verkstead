@@ -120,3 +120,28 @@
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
+
+/* The field being typed in, which is no pointer's doing: the border says the
+   path is going in here. */
+.form input:focus-visible {
+  border-color: var(--accent);
+}
+
+/* And under the pointer: the field darkens its border, the add deepens the
+   accent it is filled with, and the cancel's outline takes the accent its words
+   are already in. */
+@media (hover: hover) {
+  .form input:hover {
+    border-color: var(--ink-soft);
+  }
+
+  .buttons button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .buttons .cancel:not(:disabled):hover {
+    background: none;
+    border-color: var(--accent);
+  }
+}

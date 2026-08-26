@@ -36,7 +36,7 @@ import {
 import { json, readable, reads, serving, unreadable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
-import archived from "./fixtures/set-archived.json" with { type: "json" };
+import locked from "./fixtures/set-locked.json" with { type: "json" };
 import diagram from "./fixtures/set-diagram.json" with { type: "json" };
 import unreadableSet from "./fixtures/set-unreadable.json" with { type: "json" };
 
@@ -48,7 +48,7 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
 
 const WAITING = readable(answering);
 const ANSWERED = readable(answered);
-const ARCHIVED = readable(archived);
+const LOCKED = readable(locked);
 const DIAGRAMMED = readable(diagram);
 
 /// And the one no standing at all: a stored body this build cannot read, which
@@ -392,11 +392,11 @@ describe("the record of a settled Set", () => {
   });
 
   it("closes a Set the human said nothing about with it just the same", async () => {
-    // Archived unanswered: there is no Response behind it, so there is no
+    // Locked unanswered: there is no Response behind it, so there is no
     // comment either — and the Postscript belongs above where one would have
     // been, because it is the agent's own closing word rather than part of the
     // answer.
-    const page = await reading(withPostscript(ARCHIVED));
+    const page = await reading(withPostscript(LOCKED));
 
     const postscript = page.querySelector(`section.${closing.postscript}`)!;
     expect(postscript, "expected the Postscript drawn").toBeTruthy();
@@ -405,9 +405,9 @@ describe("the record of a settled Set", () => {
   });
 
   it("draws no card at all for a settled Set with nothing to close it", async () => {
-    // Archived unanswered and without a Postscript: no closing word from either
+    // Locked unanswered and without a Postscript: no closing word from either
     // side, so there is nothing for a card to hold and none is drawn.
-    const page = await reading(ARCHIVED);
+    const page = await reading(LOCKED);
 
     expect(page.querySelector(`.${closing.postscript}`)).toBeNull();
     expect(page.querySelector(`.${sheet.setComment}`)).toBeNull();
@@ -437,7 +437,7 @@ describe("the record of a settled Set", () => {
   });
 
   it("is read for what was asked as well as for what was decided", async () => {
-    for (const settled of [ANSWERED, ARCHIVED]) {
+    for (const settled of [ANSWERED, LOCKED]) {
       const page = await reading(settled);
 
       expect(page.innerHTML).toContain("<li>in-process, per instance</li>");
@@ -474,7 +474,7 @@ describe("the record of a settled Set", () => {
   /// The one variant of this notice that says nothing worth reading: every
   /// question already reads Unanswered and there is no comment for the line to
   /// account for, so it only repeats the page back at whoever is on it. Its two
-  /// siblings stay — the counter-question above, and the archived-unanswered
+  /// siblings stay — the counter-question above, and the locked-unanswered
   /// line below — because each of those says something the rows do not.
   it("says nothing at the head of a Set answered in silence", async () => {
     const silent: Decided = {
@@ -498,14 +498,14 @@ describe("the record of a settled Set", () => {
   });
 
   it("reads a Set closed unanswered as a record with no Response behind it", async () => {
-    const page = await reading(ARCHIVED);
+    const page = await reading(LOCKED);
 
-    expect(page.querySelector(`.${sheet.archivedAt}`)!.textContent).toBe(
-      `Archived unanswered ${SETTLED}`,
+    expect(page.querySelector(`.${sheet.lockedAt}`)!.textContent).toBe(
+      `Locked unanswered ${SETTLED}`,
     );
     expect(page.querySelector(`.${sheet.answeredAt}`)).toBeNull();
     expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
-      "This Set was archived unanswered",
+      "This Set was locked unanswered",
     );
 
     // Nothing was decided, and only a Response can leave a question open — so
@@ -519,7 +519,7 @@ describe("the record of a settled Set", () => {
   it("leads back to the Conversation the Set was asked from", async () => {
     // The same way out however the Set stands: settled or waiting, it is an
     // Event on one Timeline and there is nowhere else for reading it to lead.
-    for (const set of [WAITING, ANSWERED, ARCHIVED]) {
+    for (const set of [WAITING, ANSWERED, LOCKED]) {
       const page = await reading(set);
       const out = page.querySelector(`a.${setPage.back}`)!;
       expect(out.getAttribute("href")).toBe(`/conversations/${set.conversation}`);
@@ -528,7 +528,7 @@ describe("the record of a settled Set", () => {
   });
 
   it("names the Preface and the Questions by headings on every standing", async () => {
-    for (const set of [WAITING, ANSWERED, ARCHIVED]) {
+    for (const set of [WAITING, ANSWERED, LOCKED]) {
       const page = await reading(set);
 
       // Named so a jump from the table of contents lands somewhere the reader can
@@ -538,7 +538,7 @@ describe("the record of a settled Set", () => {
       // The section closing the page is named for what it holds: none of these
       // fixtures has a Postscript, so it is the box, and it is there on the Set
       // still waiting to be filled in and on the one that came back with a
-      // comment. The Set archived unanswered has neither and so ends at the
+      // comment. The Set locked unanswered has neither and so ends at the
       // Questions.
       const closes =
         "Waiting" in set.standing ||
@@ -666,8 +666,8 @@ describe("the record of a question whose Options were declared as a table", () =
     );
   });
 
-  it("marks no row on a Set archived unanswered, under the same account", async () => {
-    const page = await reading(withTable(ARCHIVED));
+  it("marks no row on a Set locked unanswered, under the same account", async () => {
+    const page = await reading(withTable(LOCKED));
 
     // The table is drawn, because what was asked is still worth reading — and
     // nothing on it is marked chosen, because nobody chose.
@@ -678,7 +678,7 @@ describe("the record of a question whose Options were declared as a table", () =
 
     // The head-of-page account is the one it has always been.
     expect(page.querySelector(`.${sheet.counterQuestion}`)!.textContent).toContain(
-      "This Set was archived unanswered",
+      "This Set was locked unanswered",
     );
     // The Recommendation is still the agent's, and still marked on its row.
     expect(row(page, "Q1", 2).querySelector(`.${sheet.star}`)).toBeTruthy();
@@ -740,7 +740,7 @@ describe("a Set this build cannot read", () => {
     const page = await unreadably(UNREADABLE);
 
     // No sheet, because a Response is checked against Questions nobody here can
-    // read; and no standing menu, so there is no archiving behind it either.
+    // read; and no standing menu, so there is no locking behind it either.
     expect(page.querySelector(`.${sheet.questions}`)).toBeNull();
     expect(page.querySelector(`.${standing.standing}`)).toBeNull();
     expect(page.querySelectorAll("button")).toHaveLength(0);

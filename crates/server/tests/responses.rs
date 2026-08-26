@@ -487,7 +487,7 @@ async fn a_wait_opened_on_a_set_that_was_closed_unanswered_is_told_straight_away
         "there is nothing to hold a connection open for",
     );
     assert!(
-        body_text(waited).await.contains("archived unanswered"),
+        body_text(waited).await.contains("locked unanswered"),
         "the reply has to say why there is nothing coming",
     );
 }
@@ -505,16 +505,16 @@ async fn a_response_to_a_set_that_was_closed_unanswered_is_refused() {
     assert_eq!(
         refused.status(),
         StatusCode::GONE,
-        "an archived Set cannot also become an answered one",
+        "a locked Set cannot also become an answered one",
     );
     assert_eq!(stored_response_count(&pool).await, 0);
 }
 
-/// Archive a Set unanswered, through the store rather than through the viewer's
+/// Lock a Set unanswered, through the store rather than through the viewer's
 /// endpoint: only a human may close a Set, and how they did it is not what these
 /// two are about. Its own channel, because no wait is being held over one here.
 async fn close_unanswered(pool: &SqlitePool, id: i64) {
-    store::archive_set(pool, &store::Settlements::new(1), id)
+    store::lock_set(pool, &store::Settlements::new(1), id)
         .await
         .unwrap();
 }

@@ -11,13 +11,13 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Ask, Event, Finished, Lifecycle, Settlements, Steer, Steering, Submission,
-    WAITED_ON, WaitingOn, addressed_comments, archive_set, ask, finish_wrap_up, fix_attempts,
-    forget_addressed_comments, forget_fix_attempts, implement_again, last_batch_proposal,
-    last_proposal, load_conversation, load_response, open_database, pick_direction,
-    record_addressed_comments, record_fix_attempt, record_pull_request, register_repo, save_brief,
-    settle_wrap_up, start_conversation, start_grilling, steer_conversation, submit_response,
-    timeline, unsettle_wrap_up, wrap_up_settled,
+    Ask, Event, Finished, Lifecycle, Locking, Settlements, Steer, Steering, Submission, WAITED_ON,
+    WaitingOn, addressed_comments, ask, finish_wrap_up, fix_attempts, forget_addressed_comments,
+    forget_fix_attempts, implement_again, last_batch_proposal, last_proposal, load_conversation,
+    load_response, lock_set, open_database, pick_direction, record_addressed_comments,
+    record_fix_attempt, record_pull_request, register_repo, save_brief, settle_wrap_up,
+    start_conversation, start_grilling, steer_conversation, submit_response, timeline,
+    unsettle_wrap_up, wrap_up_settled,
 };
 
 /// A Conversation whose work is on a pull request, which is the only state any
@@ -551,10 +551,8 @@ async fn a_proposal_closed_unanswered_stops_being_the_review() {
 
     assert!(
         matches!(
-            archive_set(&pool, &settlements, abandoned.id)
-                .await
-                .unwrap(),
-            Archiving::Archived(_),
+            lock_set(&pool, &settlements, abandoned.id).await.unwrap(),
+            Locking::Locked(_),
         ),
         "the Set nobody is behind is closed unanswered",
     );

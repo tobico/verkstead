@@ -9,7 +9,7 @@ title: Storage layout for the pending list
 preface: |
   We need to settle how Sets are stored before the UI lands.
 
-  The candidates differ mainly in how much SQL the Archive view needs.
+  The candidates differ mainly in how much SQL the pending list needs.
 project: verkstead
 branch: api-core-and-cli
 diff: |
@@ -38,7 +38,7 @@ questions:
       - letter: b
         text: Should the id appear in URLs?
 postscript: |
-  Whichever way this goes, the Archive view is the part I'd want a second
+  Whichever way this goes, the pending list is the part I'd want a second
   opinion on.
 
   Anything else about the store is worth saying here.
@@ -56,13 +56,13 @@ fn a_full_set_parses_into_its_parts() {
         set.preface.as_deref(),
         Some(
             "We need to settle how Sets are stored before the UI lands.\n\n\
-             The candidates differ mainly in how much SQL the Archive view needs.\n"
+             The candidates differ mainly in how much SQL the pending list needs.\n"
         )
     );
     assert_eq!(
         set.postscript.as_deref(),
         Some(
-            "Whichever way this goes, the Archive view is the part I'd want a second\n\
+            "Whichever way this goes, the pending list is the part I'd want a second\n\
              opinion on.\n\n\
              Anything else about the store is worth saying here.\n"
         )

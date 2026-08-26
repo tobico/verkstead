@@ -47,7 +47,8 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationClosed,
     ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
     NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
-    Started, SteerOpened, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn, Watching,
+    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1330,6 +1331,27 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
 fn backlog(view: &ConversationView) -> Option<&TaskListEvent> {
     view.pinned.iter().find_map(|pinned| match pinned {
         PinnedEvent::TaskList(list) => Some(list),
+        _ => None,
+    })
+}
+
+/// And the same backlog on the record, at the row that says it landed on the
+/// branch.
+///
+/// The other of the two places a task list is drawn. Its content is the same
+/// live reading the pinned copy is drawn from — the server takes it once and
+/// hands it over twice — so what this adds is where it landed.
+fn backlog_row(view: &ConversationView) -> Option<&TaskListReached> {
+    view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::TaskList(reached) => Some(reached),
+        _ => None,
+    })
+}
+
+/// And the roadmap on the record, at the row that says it landed.
+fn roadmap_row(view: &ConversationView) -> Option<&StageListReached> {
+    view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::StageList(reached) => Some(reached),
         _ => None,
     })
 }
@@ -3228,6 +3250,33 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         ],
         "the roadmap's own order, numbers and titles, and the boxes as it wrote them",
     );
+
+    // And the same roadmap on the record, at the row the landing stamped —
+    // before the pull request the same session went on to open, which is the
+    // order the two happened in.
+    let view = fixture.view().await;
+    let reached = roadmap_row(&view).expect("the roadmap landing is on the record");
+
+    assert_eq!(
+        reached.roadmaps,
+        [stages],
+        "the record draws the pinned card itself",
+    );
+
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::StageList(_)));
+    let opened = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::PullRequest(_)));
+
+    assert!(
+        at < opened,
+        "the roadmap landed before the branch went up for review: {:?}",
+        view.timeline,
+    );
 }
 
 /// The backlog working itself: once `.tasks/` is committed, Verkstead launches
@@ -3458,6 +3507,35 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
         "the task whose file has gone is done, and the one still to do is not",
     );
 
+    // And the same list is on the record, at the row the backlog landing
+    // stamped. One card in two places: the row fixes where it landed and the
+    // card at it is the pinned card's own reading, so it has ticked along with
+    // the work exactly as the pinned one has.
+    let view = fixture.view().await;
+    let reached = backlog_row(&view).expect("the backlog landing is on the record");
+
+    assert_eq!(
+        reached.list.as_ref(),
+        backlog(&view),
+        "the record draws the pinned card itself",
+    );
+
+    // Where it landed, which is before the move it was made on the strength of:
+    // the plan commit is the end of the planning and the start of the run.
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::TaskList(_)));
+    let moved = view.timeline.iter().position(
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Implementing),
+    );
+
+    assert!(
+        at < moved,
+        "the backlog is on the record before the move it wrote: {:?}",
+        view.timeline,
+    );
+
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
@@ -3556,6 +3634,39 @@ async fn a_backlog_worked_to_empty_leaves_a_pull_request_pinned_and_the_work_wra
     assert_eq!(opened.number, 41);
     assert_eq!(opened.title, "Rate limiting");
     assert_eq!(opened.url, "https://github.com/tobico/verkstead/pull/41");
+
+    // And the same pull request is on the record where it happened: pinned is
+    // something an Event is *as well as* being listed, so the sticky block
+    // holds it in view and the record keeps the moment the work went up for
+    // review. One card in two places, so both are the same Event.
+    let listed = view
+        .timeline
+        .iter()
+        .filter_map(|event| match event {
+            TimelineEvent::PullRequest(opened) => Some(opened),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        listed,
+        [opened],
+        "the record carries the pinned card itself"
+    );
+
+    // Where it happened, which is before the move it wrote.
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::PullRequest(_)));
+    let moved = view.timeline.iter().rposition(
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Wrapping),
+    );
+
+    assert!(
+        at < moved,
+        "the PR is on the record before the move it wrote"
+    );
 
     // The move is on the record like every other, and it is the last thing to
     // have happened.
@@ -5081,7 +5192,7 @@ async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_br
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
     assert_eq!(
@@ -5181,7 +5292,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
 }
@@ -5874,6 +5985,135 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     );
 }
 
+/// An inline run whose review splits work out: the backlog that arrives is the
+/// first this Conversation has ever carried, and the record says where it
+/// landed.
+///
+/// The landing a Conversation built from a backlog cannot show. There, the row
+/// was stamped by the breakdown long before the review, so a split-out backlog
+/// that stamped nothing would look exactly right. An inline run has no backlog
+/// at all until the review writes one, which is what makes this the case that
+/// tells the two apart.
+fn an_inline_run_then_splits(reviews: &Path, review: &str) -> String {
+    format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{review}
+    ;;
+*implementing/SKILL.md*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    printf 'pushed, and the pull request is open\n'
+    ;;
+*next-task/SKILL.md*)
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'one clock\n' >> clocks.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m 'feat: collapse the clocks'
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish the clocks'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+    )
+}
+
+#[tokio::test]
+async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let once = spill.path().join("split-written");
+
+    let stub = an_inline_run_then_splits(&reviews, &review_then_split(&once, ""));
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    until_written(&reviews).await;
+
+    // Nothing has been broken down and nothing ever will be by this run, so
+    // there is no landing to have stamped yet.
+    let view = fixture.view().await;
+
+    assert!(
+        backlog(&view).is_none(),
+        "an inline run carries no backlog: {:?}",
+        view.pinned,
+    );
+    assert!(
+        backlog_row(&view).is_none(),
+        "and nothing has landed one on the record: {:?}",
+        view.timeline,
+    );
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The one move down the ladder, which is the review's backlog being picked
+    // up — and the landing that goes on the record with it.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+
+    let reached = fixture.until(|view| backlog_row(view).cloned()).await;
+
+    assert_eq!(
+        reached.list.map(|list| list.feature),
+        Some("Rebuilding the clock".to_owned()),
+        "the row draws the backlog the review wrote",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.timeline
+            .iter()
+            .filter(|event| matches!(event, TimelineEvent::TaskList(_)))
+            .count(),
+        1,
+        "one row, a list landing once: {:?}",
+        view.timeline,
+    );
+}
+
 /// And a split pick the session wrote no backlog for settles like any other
 /// review, because the branch is the whole of what says otherwise.
 ///
@@ -6473,7 +6713,7 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
         .clone();
 
     assert!(
-        matches!(standing, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(standing, verkstead_render::Standing::LockedUnanswered(_)),
         "with nothing left for the human to answer into: {standing:?}",
     );
     assert!(
@@ -8947,6 +9187,14 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         "and the backlog it wrote is pinned beside it, as a feature's is",
     );
 
+    // And on the record where it landed, as a feature's is: a stage's first step
+    // is the one that writes its backlog, and landing that is the same moment.
+    assert_eq!(
+        backlog_row(&stage).map(|reached| reached.list.as_ref()),
+        Some(backlog(&stage)),
+        "the stage's backlog is on the record too, drawn from the pinned reading",
+    );
+
     // The annotation itself, which is what says the stage is in flight and on
     // what — and what stops the stage after it being read as this one again.
     let index = std::fs::read_to_string(worktree.join("docs/roadmaps/rate-limiting/ROADMAP.md"))
@@ -11347,7 +11595,7 @@ async fn resuming_an_inline_run_github_cannot_be_asked_about_halts_unspent() {
 /// every Set that came back, and does not open by asking again what was settled
 /// yesterday.
 ///
-/// And the Set the dead session left open is archived on the way past. Nothing
+/// And the Set the dead session left open is locked on the way past. Nothing
 /// is waiting on that Answer any more, so leaving it open would be the human
 /// answering into nothing.
 #[tokio::test]
@@ -11445,7 +11693,7 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
         .clone();
 
     assert!(
-        matches!(hanging, verkstead_render::Standing::ArchivedUnanswered(_)),
+        matches!(hanging, verkstead_render::Standing::LockedUnanswered(_)),
         "and nothing is left for the human to answer into: {hanging:?}",
     );
     assert_eq!(
@@ -11455,12 +11703,12 @@ async fn resuming_a_stalled_grilling_starts_a_fresh_one_told_what_was_already_se
     );
 }
 
-/// And the Deferred Ask the dead session left behind is *not* archived, which is
+/// And the Deferred Ask the dead session left behind is *not* locked, which is
 /// the same rule read the other way.
 ///
 /// Nothing was ever waiting on one, so a session dying takes nothing away from
 /// it: the human answers it in their own time and the Answers are folded into
-/// whichever session builds next. Archiving it here would close a question they
+/// whichever session builds next. Locking it here would close a question they
 /// were meant to answer, on the grounds that nobody would read the answer — the
 /// one thing that is not true of a Deferred Ask.
 #[tokio::test]
@@ -11495,13 +11743,13 @@ async fn resuming_a_stalled_grilling_leaves_its_deferred_asks_open() {
             .clone()
     };
 
-    // Waited for on the blocking one, because that is the archiving the relaunch
+    // Waited for on the blocking one, because that is the locking the relaunch
     // does: once it has happened, the deferred one has been walked past too.
     let view = fixture
         .until(|view| {
             matches!(
                 standing(view, blocking),
-                verkstead_render::Standing::ArchivedUnanswered(_)
+                verkstead_render::Standing::LockedUnanswered(_)
             )
             .then(|| view.clone())
         })

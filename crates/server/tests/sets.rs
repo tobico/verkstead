@@ -17,7 +17,7 @@ title: Storage layout for the pending list
 preface: |
   We need to settle how Sets are stored before the UI lands.
 
-  The candidates differ mainly in how much SQL the Archive view needs.
+  The candidates differ mainly in how much SQL the pending list needs.
 project: verkstead
 branch: api-core-and-cli
 questions:

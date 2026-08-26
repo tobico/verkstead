@@ -3,15 +3,15 @@
    they are dismissed the same way, and they stand off the page by the same
    shadow, which is what says a menu is in front of what it covers.
 
-   What is *not* the chrome is each menu's own paint: the trigger it drops from
-   and the width of what it drops. Those rules are written against a class of the
-   caller's and a class of this component's at once, and a caller's class is
-   hashed, so they belong to the caller rather than here — it paints its trigger
-   and its drop from its own module, reaching them by the elements they are: the
-   trigger is the one button the menu holds directly, and the drop is the one
-   thing in it with a menu's role. Every caller does that now; `set/Standing`,
-   `workbench/Conversations` and `workbench/Timeline` are the three that paint
-   anything. */
+   What is *not* the chrome is each menu's own paint: the trigger it drops from,
+   where the trigger is the caller's own, and the width of what it drops. Those
+   rules are written against a class of the caller's and a class of this
+   component's at once, and a caller's class is hashed, so they belong to the
+   caller rather than here — it paints its trigger and its drop from its own
+   module, reaching them by the elements they are: the trigger is the one button
+   the menu holds directly, and the drop is the one thing in it with a menu's
+   role. `set/Standing`, `workbench/Conversations` and `workbench/Actions` are
+   the three that paint anything, and by now only their drops. */
 
 /* The anchor everything below hangs from. */
 .menu {
@@ -31,14 +31,41 @@
   opacity: 0.65;
 }
 
+/* The ⋯ at the head of a workbench pane: what there is beyond what the pane
+   names — beyond the conversations in the sidebar, beyond the Conversation in
+   the timeline. Both sit at the right edge of their header beside the thing that
+   header names, and a mark is what fits there.
+
+   Here rather than in the two panes, which is the whole of what this rule is
+   for: they held a copy each, written apart and drawn alike until they weren't,
+   and the two marks read as two sizes across the divider between them. */
+.trigger.mark {
+  padding: 0 0.4rem;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+}
+
+/* Darkened while the menu is down, so the mark says which header the drop under
+   it belongs to. */
+.trigger.mark[aria-expanded="true"] {
+  color: var(--ink);
+}
+
 /* What a press away from the open menu lands on, so that it lands on nothing
    else: a stray press that opened a conversation, or answered a question, is
-   not a small thing on either page. Invisible, unlike a dialog's wash — a menu
-   is not in front of the page the way a dialog is, it is only on top of it. */
+   not a small thing on either page. A wash over the window with it, the same
+   20% the answer-set navigation's list comes down over — that one reads as
+   plainly in front of the page, and there is no reason a menu should read as
+   less. Lighter than a dialog's 45%: a menu is on top of what the human was
+   reading rather than in place of it. */
 .backdrop {
   position: fixed;
   inset: 0;
   z-index: 2;
+  background: rgb(0 0 0 / 20%);
 }
 
 /* The menu itself, hung under the trigger's far end. Over the page rather than
@@ -53,6 +80,18 @@
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
   box-shadow: var(--lift);
+}
+
+/* The same card, put where the pointer was rather than under a trigger: a menu
+   opened by a right-click has no button to hang from. Fixed to the window,
+   because the coordinates a pointer event carries are the window's own — and
+   with both of the edges the ordinary drop hangs by given up, since `left` and
+   `top` arrive from `Pointed` in `Menu.tsx` instead. Where the pointer was is
+   the one thing about a menu no stylesheet can know. */
+.drop.pointed {
+  position: fixed;
+  top: auto;
+  right: auto;
 }
 
 /* Every row of every menu: drawn as the text it is rather than as a control,
@@ -75,9 +114,9 @@
   cursor: pointer;
 }
 
-.drop button:hover,
+/* The row the keyboard has walked to, which is no pointer's doing and so is
+   not inside the query at the foot of this file. */
 .drop button:focus-visible,
-.drop a[role="menuitem"]:hover,
 .drop a[role="menuitem"]:focus-visible {
   background: var(--paper);
 }
@@ -87,3 +126,28 @@
   opacity: 0.65;
 }
 
+/* Under the pointer: a row is a surface and shifts one step of the paper the
+   app is drawn in, and the ⋯ is a control and takes the accent — a step past
+   the `--ink` it darkens to while its own menu is down, so a mark under the
+   pointer and a mark with a drop under it never read as the same thing. */
+@media (hover: hover) {
+  .drop button:not(:disabled):hover,
+  .drop a[role="menuitem"]:hover {
+    background: var(--paper);
+  }
+
+  /* The one row of a menu that is a link keeps the row's treatment and takes
+     none of a link's: it is drawn as the buttons beside it and reads as one of
+     them, and the colour and underline every other link in the app takes would
+     be one row of this menu behaving differently. Said rather than left to the
+     cascade, because the rule in `styles/base.css` carries the same weight as
+     the one above that took the underline off. */
+  .drop a[role="menuitem"]:hover {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .trigger.mark:not(:disabled):hover {
+    color: var(--accent);
+  }
+}

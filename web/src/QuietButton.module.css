@@ -19,3 +19,13 @@
   border-radius: 0.4rem;
   cursor: pointer;
 }
+
+/* Under the pointer, the box rather than the words: they are already the accent
+   — that is what this button is — so what is left to say is that the outline
+   around them is a target. A caller that painted its own words another colour
+   paints its own outline to match; the remove on a profile row is the one. */
+@media (hover: hover) {
+  .quiet:not(:disabled):hover {
+    border-color: var(--accent);
+  }
+}

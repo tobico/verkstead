@@ -706,8 +706,8 @@ function refused(outcome: Submitted | undefined, error: Error | null): string | 
   if (outcome === "NoSuchSet") {
     return "This Set is no longer here.";
   }
-  if (outcome === "Archived") {
-    return "This Set was archived unanswered, which closed it for good, so your Response was not stored.";
+  if (outcome === "Locked") {
+    return "This Set was locked unanswered, which closed it for good, so your Response was not stored.";
   }
 
   return `This Response does not resolve the Set: ${outcome.Rejected.join("; ")}`;

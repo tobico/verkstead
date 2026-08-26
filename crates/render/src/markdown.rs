@@ -254,11 +254,11 @@ pub fn to_plain(markdown: &str) -> String {
 /// Render `markdown` as the prose alone: [`to_plain`]'s one line, with every
 /// Diagram left out of it.
 ///
-/// For the snippet a commit's Timeline card clamps. A Commit Summary leads with
-/// its Diagram — that is what the skills ask for — so a card handed the words of
-/// the source would be full of `flowchart LR` before it reached a sentence. The
-/// glance a Diagram gives belongs to the pane that draws it; the card gets what
-/// the summary *says*.
+/// For the snippet a commit's Timeline card clamps. A Commit Summary draws its
+/// delta as a Diagram — that is what the skills ask for — so a card handed the
+/// words of the source would run into `flowchart LR` wherever the fence sits.
+/// The glance a Diagram gives belongs to the pane that draws it; the card gets
+/// what the summary *says*.
 ///
 /// Only a Diagram goes. A fence naming a language is code the prose is talking
 /// about, and reads on the card as it reads in the message.
@@ -769,9 +769,10 @@ mod tests {
         );
     }
 
-    /// Which is the Commit Summary the skills ask for: the Diagram first, the
-    /// prose after. A card given the fence's source would be `flowchart LR`
-    /// down to the fifth line.
+    /// A summary that opens with its Diagram — which is how the skills asked
+    /// for one until the ordering was flipped, and how every summary written
+    /// before that still reads. A card given the fence's source would be
+    /// `flowchart LR` down to the fifth line.
     #[test]
     fn prose_leaves_out_a_diagram_the_summary_leads_with() {
         let prose = to_prose(
@@ -782,8 +783,9 @@ mod tests {
         assert_eq!(prose, "The relay reads the limit error off stderr.");
     }
 
-    /// Wherever it sits: a summary that says its piece and draws the delta
-    /// underneath is one the same rule has to hold for.
+    /// Wherever it sits — and under the prose is where the skills ask for it:
+    /// a summary that says its piece and draws the delta underneath is the
+    /// shape the rule mostly meets.
     #[test]
     fn prose_leaves_out_a_diagram_wherever_it_sits() {
         let prose = to_prose(

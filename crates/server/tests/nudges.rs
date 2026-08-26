@@ -292,14 +292,14 @@ async fn a_response_from_the_agents_half_nudges_the_open_pages_too() {
 }
 
 #[tokio::test]
-async fn a_set_archived_unanswered_nudges_the_open_pages() {
+async fn a_set_locked_unanswered_nudges_the_open_pages() {
     let (_dir, app) = fresh_app().await;
     let id = post_set(&app).await;
     let mut page = Listening::open(&app).await;
 
     post(
         &app,
-        &format!("/api/ui/sets/{id}/archive"),
+        &format!("/api/ui/sets/{id}/lock"),
         serde_json::json!({}),
     )
     .await;

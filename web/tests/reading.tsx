@@ -77,7 +77,7 @@ export async function unreadably(set: UnreadableSet): Promise<HTMLElement> {
 
 /// The same page, kept hold of for the tests that fill it in: every read of the
 /// Set is answered with the Set, and the answers given are what the submit or
-/// the archive the page goes on to make comes back with.
+/// the lock the page goes on to make comes back with.
 ///
 /// The reads are held to their own path rather than left in the order the
 /// answers are handed out, because settling a Set does not take the page
@@ -191,7 +191,7 @@ export function withTable(set: SetView): SetView {
   };
 }
 
-/// Everything the page has *sent* — the submits and the archives, and never the
+/// Everything the page has *sent* — the submits and the locks, and never the
 /// reads it makes around them.
 ///
 /// The two are counted apart because a settled Set is read back where it stands:

@@ -7,11 +7,16 @@
 //! the only place any of it is written. What the pages' own suites still carry
 //! is the half that is theirs: that the rows do what they say, and that each of
 //! the three menus is drawn through this component at all.
+//!
+//! The one opened by a right-click is the same component's other shape, and
+//! what is asked of it here is what is different: it has no trigger, it comes
+//! down where the pointer was, and it stays inside the window.
 
 import { fireEvent, render, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { describe, expect, it } from "vitest";
 
-import { Menu } from "../src/Menu";
+import { ContextMenu, Menu } from "../src/Menu";
 // The one menu, both ways: the hashed names to query the page by, and the
 // source to read the rules off, jsdom laying nothing out to read them from.
 import menu from "../src/Menu.module.css";
@@ -21,9 +26,10 @@ import tokens from "../src/styles/base.css?raw";
 // The callers' paint, each in the module of the component that passes the
 // class: a caller's class is hashed, so it reaches this component's parts by
 // the elements they are rather than by a name it cannot spell.
+import contents from "../src/set/Contents.module.css?raw";
 import standing from "../src/set/Standing.module.css?raw";
+import actions from "../src/workbench/Actions.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css?raw";
-import timeline from "../src/workbench/Timeline.module.css?raw";
 
 /// A menu with one row in it, which is enough of one to press.
 function mount(): { container: HTMLElement; opened: () => number } {
@@ -148,7 +154,7 @@ describe("a dropdown menu", () => {
     expect(opened()).toBe(2);
   });
 
-  /// A disabled trigger still says what it says — a badge mid-archive is the
+  /// A disabled trigger still says what it says — a badge mid-lock is the
   /// case this is for — and drops nothing.
   it("does not open while its trigger is disabled", () => {
     const { container } = render(() => (
@@ -165,34 +171,180 @@ describe("a dropdown menu", () => {
 
 /// The two ⋯ triggers — the sidebar's and the Conversation's — sit in the same
 /// place in their two pane headers and mean the same thing there, so they are
-/// painted alike. Each in its own caller's module, because the class the rule
-/// hangs off is that caller's and a caller's class is hashed; what used to be
-/// one rule is two that have to go on saying the same thing, and this is what
-/// says so.
+/// one button rather than two painted alike. They were two: a rule each, hashed
+/// off a class each, written apart and drifted into two sizes across the
+/// divider between the panes. The mark and the paint under it are the menu's
+/// now, and neither pane says anything about a trigger at all.
 describe("the ⋯ at the head of a pane", () => {
-  it("is painted the same in the two places there is one", () => {
-    expect(paint(".workbenchActions > button", sidebar)).toEqual(
-      paint(".conversationActions > button", timeline),
+  it("is the menu's own mark, not the caller's", () => {
+    const { container } = render(() => (
+      <Menu class="example" label="Example actions" mark>
+        {() => <button type="button" role="menuitem" class="row" />}
+      </Menu>
+    ));
+
+    const button = trigger(container);
+    expect(button.textContent).toBe("⋯");
+    expect(button.classList).toContain(menu.mark);
+  });
+
+  it("is painted here, where there is one of it", () => {
+    expect(block(".trigger.mark")).toContain("font-size: 1.1rem;");
+    expect(block('.trigger.mark[aria-expanded="true"]')).toContain(
+      "color: var(--ink);",
     );
   });
 
-  /// And what it says when the menu under it is down, which is the other half
-  /// of the same paint.
-  it("darkens the same while its menu is open", () => {
-    expect(
-      paint('.workbenchActions > button[aria-expanded="true"]', sidebar),
-    ).toEqual(
-      paint('.conversationActions > button[aria-expanded="true"]', timeline),
-    );
+  /// The point of moving it: neither pane keeps a trigger of its own to drift
+  /// away from the other.
+  it("leaves neither pane a button to paint", () => {
+    expect(sidebar).not.toContain(".workbenchActions > button");
+    expect(actions).not.toContain(".conversationActions > button");
   });
 });
 
-/// What one rule declares and nothing about which selector carries it, so that
-/// two rules written against two callers' classes can be held to saying the
-/// same thing.
-function paint(selector: string, sheet: string): string {
-  return block(selector, sheet).replace(`\n${selector} {`, "");
-}
+/// The same menu opened by a right-click: no trigger, no anchor, and the card
+/// put where the pointer was rather than under a button.
+describe("a context menu", () => {
+  /// One with a row in it, and the way to put the pointer somewhere.
+  function mountAt(): {
+    container: HTMLElement;
+    open: (x: number, y: number) => void;
+    close: () => void;
+    closings: () => number;
+  } {
+    const [at, setAt] = createSignal<{ x: number; y: number } | null>(null);
+    let closings = 0;
+
+    const { container } = render(() => (
+      <ContextMenu
+        class="example"
+        name="Example actions"
+        at={at()}
+        close={() => {
+          closings += 1;
+          setAt(null);
+        }}
+      >
+        {() => (
+          <button type="button" role="menuitem" class="row">
+            Do the thing
+          </button>
+        )}
+      </ContextMenu>
+    ));
+
+    return {
+      container,
+      open: (x, y) => setAt({ x, y }),
+      close: () => setAt(null),
+      closings: () => closings,
+    };
+  }
+
+  it("drops nothing while nothing has been right-clicked", () => {
+    const { container } = mountAt();
+
+    expect(drop(container)).toBeNull();
+    expect(container.querySelector(`.${menu.trigger}`), "and nothing to press").toBeNull();
+  });
+
+  it("drops its rows where the pointer was", () => {
+    const { container, open } = mountAt();
+
+    open(140, 260);
+
+    const dropped = drop(container)!;
+    expect(dropped.textContent).toBe("Do the thing");
+    expect(dropped.style.left).toBe("140px");
+    expect(dropped.style.top).toBe("260px");
+    expect(dropped.classList).toContain(menu.pointed);
+  });
+
+  /// Fixed to the window, because the coordinates a pointer event carries are
+  /// the window's own.
+  it("is fixed to the window rather than hung off the page", () => {
+    expect(block(".drop.pointed")).toContain("position: fixed;");
+    expect(block(".drop.pointed")).toContain("right: auto;");
+  });
+
+  /// A right-click near the bottom edge would otherwise drop a menu mostly
+  /// below it, on a page that does not scroll to reach it.
+  it("keeps the card inside the window", () => {
+    const { container, open } = mountAt();
+
+    // jsdom lays nothing out, so the card is told how big it is.
+    const measured = 300;
+    Object.defineProperty(HTMLDivElement.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value(this: HTMLElement) {
+        return this.classList.contains(menu.drop!)
+          ? ({ width: measured, height: measured } as DOMRect)
+          : ({ width: 0, height: 0 } as DOMRect);
+      },
+    });
+
+    try {
+      open(window.innerWidth - 10, window.innerHeight - 10);
+    } finally {
+      delete (HTMLDivElement.prototype as Partial<HTMLDivElement>)
+        .getBoundingClientRect;
+    }
+
+    const dropped = drop(container)!;
+    expect(Number.parseInt(dropped.style.left, 10)).toBe(
+      window.innerWidth - measured - 8,
+    );
+    expect(Number.parseInt(dropped.style.top, 10)).toBe(
+      window.innerHeight - measured - 8,
+    );
+  });
+
+  it("says close on escape", async () => {
+    const { container, open, closings } = mountAt();
+    open(10, 10);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+    expect(closings()).toBe(1);
+  });
+
+  it("says close on a press away from it", async () => {
+    const { container, open, closings } = mountAt();
+    open(10, 10);
+
+    fireEvent.click(container.querySelector(`.${menu.backdrop}`)!);
+
+    await waitFor(() => expect(drop(container)).toBeNull());
+    expect(closings()).toBe(1);
+  });
+
+  /// A second right-click is a press away from this menu like any other, and
+  /// the browser's own menu is not what the hand is asking for.
+  it("takes itself back on a right-click away from it, and the browser's menu with it", async () => {
+    const { container, open } = mountAt();
+    open(10, 10);
+
+    const away = fireEvent.contextMenu(container.querySelector(`.${menu.backdrop}`)!);
+
+    expect(away, "the browser's own menu was taken off the press").toBe(false);
+    await waitFor(() => expect(drop(container)).toBeNull());
+  });
+
+  /// As every menu's are: built on the way open and thrown away on the way
+  /// shut.
+  it("builds its rows afresh on every opening", () => {
+    const { container, open, close } = mountAt();
+
+    open(10, 10);
+    const first = container.querySelector(".row");
+    close();
+    open(20, 20);
+
+    expect(container.querySelector(".row")).not.toBe(first);
+  });
+});
 
 /// What one rule declares, read off a stylesheet by the selector that carries
 /// it. Enough to say what a menu is painted with, and no more.
@@ -218,13 +370,23 @@ describe("what every menu is drawn with", () => {
     expect(tokens.match(/--lift:/g)).toHaveLength(2);
   });
 
+  /// And a wash under it, so the page behind an open menu is dimmed the way the
+  /// page behind the answer-set navigation's list is. The same wash, because
+  /// they are the same kind of thing coming down over the same page.
+  it("washes the page behind it, as the navigation's list does", () => {
+    expect(block(".backdrop")).toContain("background: rgb(0 0 0 / 20%);");
+    expect(block(".backdrop", contents)).toContain(
+      "background: rgb(0 0 0 / 20%);",
+    );
+  });
+
   /// The point of the unification: no menu carries a shadow of its own to drift
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
     const callers: [string, string][] = [
       ['.newConversation > [role="menu"]', sidebar],
       ['.workbenchActions > [role="menu"]', sidebar],
-      ['.conversationActions > [role="menu"]', timeline],
+      ['.conversationActions > [role="menu"]', actions],
       ['.standing > [role="menu"]', standing],
     ];
 

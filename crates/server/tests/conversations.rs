@@ -20,9 +20,10 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved,
-    Registered, Started, SteerOpened, TimelineEvent,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
+    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
+    RoadmapPane, ShowingArchived, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -734,6 +735,53 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
         &serde_json::json!({}),
     )
     .await
+}
+
+/// And put a closed one away, which is Close's neighbour in the same menu and
+/// says as little for itself.
+async fn archive(app: &Router, id: i64) -> ConversationArchived {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/archive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And take it back out again, which is the same row saying the other word.
+async fn unarchive(app: &Router, id: i64) -> ConversationUnarchived {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/unarchive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Whether the sidebar is drawing what has been put away.
+async fn showing_archived(app: &Router) -> bool {
+    get::<ShowingArchived>(app, "/api/ui/conversations/archived")
+        .await
+        .showing
+}
+
+/// And putting that switch where the human has put it. Answered with nothing,
+/// as the order is, because there is nothing to answer.
+async fn show_archived(app: &Router, showing: bool) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/ui/conversations/archived")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "showing": showing })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "the toggle failed: {body}");
 }
 
 /// Click Steer, which is the press that stops the drive and opens the modal.
@@ -2068,6 +2116,160 @@ async fn closing_a_conversation_that_is_not_there_says_so() {
     );
 }
 
+/// Archiving is what a Closed Conversation is for: it comes off the sidebar,
+/// and everything else about it — its state, its Timeline, its branch — is
+/// where it was. Nothing leaves a Timeline.
+#[tokio::test]
+async fn archiving_a_closed_conversation_takes_it_off_the_sidebar() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::Archived);
+
+    assert!(sidebar(&app).await.is_empty());
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert_eq!(
+        brief(&view).markdown,
+        "# Rate limiting\n\nThe API has none.\n"
+    );
+}
+
+/// Archiving twice is not an error — what the human asked for holds either way.
+#[tokio::test]
+async fn archiving_twice_is_not_an_error() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::Archived);
+    assert_eq!(
+        archive(&app, id).await,
+        ConversationArchived::AlreadyArchived
+    );
+    assert!(sidebar(&app).await.is_empty());
+}
+
+/// A Conversation still being worked on belongs on the list it is being worked
+/// from: it is closed first and archived after.
+#[tokio::test]
+async fn a_conversation_that_is_not_closed_cannot_be_archived() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
+
+    grill(&app, id).await;
+
+    assert_eq!(archive(&app, id).await, ConversationArchived::NotClosed);
+    assert_eq!(sidebar(&app).await.len(), 1);
+}
+
+#[tokio::test]
+async fn archiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        archive(&app, 404).await,
+        ConversationArchived::NoSuchConversation
+    );
+}
+
+/// The toggle is the way to see what has been put away without taking it back:
+/// on, the archived Conversations are on the list in their ordinary places; off,
+/// they are not drawn at all.
+#[tokio::test]
+async fn the_toggle_shows_and_hides_what_has_been_archived() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let kept = started(&app, repo_id).await;
+    let put_away = started(&app, repo_id).await;
+    close(&app, put_away).await;
+    archive(&app, put_away).await;
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![kept]);
+
+    show_archived(&app, true).await;
+
+    assert!(showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![put_away, kept]);
+
+    show_archived(&app, false).await;
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![kept]);
+}
+
+/// It is the human's standing choice rather than one device's, so it is read
+/// back off the server — which is what a second viewer opening the sidebar is.
+#[tokio::test]
+async fn the_toggle_is_read_back_off_the_server() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    show_archived(&app, true).await;
+
+    // Said twice, because a switch says where it stands rather than asking for
+    // a flip: the position asked for is the position it ends in.
+    show_archived(&app, true).await;
+
+    assert!(showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![id]);
+}
+
+/// Unarchiving is the other way back, and the lasting one: the Conversation is
+/// on the list again with the toggle off.
+#[tokio::test]
+async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    assert!(sidebar(&app).await.is_empty());
+    assert!(opened(&app, id).await.archived);
+
+    assert_eq!(
+        unarchive(&app, id).await,
+        ConversationUnarchived::Unarchived
+    );
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![id]);
+
+    let view = opened(&app, id).await;
+    assert!(!view.archived);
+    assert_eq!(view.state, Lifecycle::Closed);
+}
+
+/// Unarchiving one that was never put away is not an error — what the human
+/// asked for holds either way.
+#[tokio::test]
+async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        unarchive(&app, id).await,
+        ConversationUnarchived::NotArchived
+    );
+    assert_eq!(order(&app).await, vec![id]);
+}
+
+#[tokio::test]
+async fn unarchiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        unarchive(&app, 404).await,
+        ConversationUnarchived::NoSuchConversation
+    );
+}
+
 /// A worktree removed from under Verkstead is a thing to say, not a thing to
 /// fail on later.
 #[tokio::test]
@@ -2361,11 +2563,11 @@ async fn only_row(app: &Router) -> ConversationEntry {
     sidebar[0].clone()
 }
 
-/// Archive a Set the way the human does with one nobody is waiting on.
-async fn archive(app: &Router, set_id: i64) -> verkstead_render::Archived {
+/// Lock a Set the way the human does with one nobody is waiting on.
+async fn lock(app: &Router, set_id: i64) -> verkstead_render::Locked {
     post(
         app,
-        &format!("/api/ui/sets/{set_id}/archive"),
+        &format!("/api/ui/sets/{set_id}/lock"),
         &serde_json::json!({}),
     )
     .await
@@ -2396,14 +2598,14 @@ async fn a_conversation_with_an_unanswered_set_is_waiting_on_the_human() {
 }
 
 #[tokio::test]
-async fn a_set_that_was_archived_unanswered_stops_drawing_the_human_too() {
+async fn a_set_that_was_locked_unanswered_stops_drawing_the_human_too() {
     let (watched, _dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, watched.path(), repo_id).await;
 
     let set = ask(&app, id, ORDINARY).await;
     assert!(only_row(&app).await.waiting);
 
-    archive(&app, set).await;
+    lock(&app, set).await;
     assert!(!only_row(&app).await.waiting);
 }
 
@@ -2849,6 +3051,283 @@ async fn a_conversation_with_no_backlog_has_nothing_pinned() {
     grill(&app, id).await;
 
     assert!(opened(&app, id).await.pinned.is_empty());
+}
+
+/// The backlog opened: what the details pane fetches when somebody presses the
+/// task-list card.
+async fn backlog_pane(app: &Router, id: i64) -> BacklogPane {
+    get(app, &format!("/api/ui/conversations/{id}/backlog")).await
+}
+
+/// The card says which tasks there are; the pane says what each of them is. Both
+/// are one reading of `.tasks/`, so the entries line up.
+#[tokio::test]
+async fn the_task_list_opens_as_every_task_document_it_names() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &[]);
+    std::fs::write(
+        worktree.join(".tasks/02-refusal.md"),
+        "# 2. What a refused request is told\n\n\
+         ## What to build\n\n\
+         A `429` with the window in `Retry-After`.\n",
+    )
+    .unwrap();
+
+    let pane = backlog_pane(&app, id).await;
+
+    assert_eq!(pane.feature, "Rate limiting");
+    assert_eq!(
+        pane.tasks
+            .iter()
+            .map(|task| (task.number.as_str(), task.title.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "The counter"),
+            ("02", "What a refused request is told"),
+        ],
+        "the list's own order, which is the order they get worked in",
+    );
+
+    assert_eq!(
+        pane.tasks[0].html, None,
+        "the finished task's file has gone, so there is nothing to render",
+    );
+
+    let html = pane.tasks[1].html.as_deref().expect("that file is there");
+
+    assert!(
+        html.contains("<h1>2. What a refused request is told</h1>"),
+        "rendered by the server, like every other document on this wire: {html}",
+    );
+    assert!(html.contains("<code>429</code>"), "{html}");
+    assert!(!pane.diagrams, "and nothing in it draws");
+}
+
+/// The three ways there is nothing to open, refused the same way: what the human
+/// would do about each of them is the same nothing.
+#[tokio::test]
+async fn a_conversation_with_no_backlog_has_no_pane_to_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Before there is a worktree at all.
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And with one that holds no `.tasks/`.
+    grill(&app, id).await;
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And once the finished feature's list has been taken away, which is what
+    // the last commit of a backlog does.
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &["02-refusal.md"]);
+    assert!(!backlog_pane(&app, id).await.tasks.is_empty());
+
+    std::fs::remove_dir_all(worktree.join(".tasks")).unwrap();
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And a Conversation that is not there, or an id out of a URL somebody
+    // typed, which name no backlog either.
+    assert_eq!(refused_backlog(&app, 404).await, StatusCode::NOT_FOUND);
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri("/api/ui/conversations/nonsense/backlog")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// What the refusal came back as, for the cases where there is no pane.
+async fn refused_backlog(app: &Router, id: i64) -> StatusCode {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{id}/backlog"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert!(
+        body.contains("no backlog"),
+        "the refusal should say what is missing, got: {body}"
+    );
+
+    status
+}
+
+/// The roadmap a session wrote into the worktree, as the staging skill writes
+/// one: the index, and a stage brief per entry that has one.
+///
+/// Uncommitted, which is what a session part-way through leaves — and which the
+/// reading behind both the card and the pane takes as this branch's own.
+fn staged(worktree: &Path, name: &str, index: &str, briefs: &[(&str, &str)]) {
+    let directory = worktree.join("docs/roadmaps").join(name);
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("ROADMAP.md"), index).unwrap();
+
+    for (file, markdown) in briefs {
+        std::fs::write(directory.join(file), markdown).unwrap();
+    }
+}
+
+/// The roadmap opened: what the details pane fetches when somebody presses the
+/// stage-list card.
+async fn roadmap_pane(app: &Router, id: i64, name: &str) -> RoadmapPane {
+    get(app, &format!("/api/ui/conversations/{id}/roadmap/{name}")).await
+}
+
+/// The card says which stages there are; the pane says what each of them is for.
+/// Both are one reading of `docs/roadmaps/`, so the entries line up.
+#[tokio::test]
+async fn the_stage_list_opens_as_every_stage_brief_it_names() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(
+        &worktree,
+        "mvp",
+        OPEN_AT_THREE,
+        &[
+            ("01-workbench.md", "# 1. Workbench\n\nThree panes.\n"),
+            (
+                "03-implementation.md",
+                "# 3. Implementation\n\n## What to build\n\nA `runner` that drives it.\n",
+            ),
+        ],
+    );
+
+    let pane = roadmap_pane(&app, id, "mvp").await;
+
+    assert_eq!(pane.name, "mvp");
+    assert_eq!(pane.title, "MVP roadmap");
+    assert_eq!(
+        pane.stages
+            .iter()
+            .map(|stage| (stage.number.as_str(), stage.title.as_str(), stage.done))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "Workbench", true),
+            ("02", "Grilling", true),
+            ("03", "Implementation", false),
+            ("04", "Wrap-up", false),
+        ],
+        "the roadmap's own order, which is the order they get worked in",
+    );
+
+    // A stage's brief stays where it is for ever, so a done stage has its
+    // document like any other — the other way round from a finished task.
+    assert!(
+        pane.stages[0]
+            .html
+            .as_deref()
+            .expect("the done stage's brief is still there")
+            .contains("<h1>1. Workbench</h1>"),
+    );
+
+    let html = pane.stages[2].html.as_deref().expect("that file is there");
+
+    assert!(
+        html.contains("<h1>3. Implementation</h1>"),
+        "rendered by the server, like every other document on this wire: {html}",
+    );
+    assert!(html.contains("<code>runner</code>"), "{html}");
+    assert!(!pane.diagrams, "and nothing in it draws");
+
+    // And the two the roadmap names briefs for that nobody wrote, which the pane
+    // says in words rather than drawing a gap.
+    assert_eq!(pane.stages[1].html, None);
+    assert_eq!(pane.stages[3].html, None);
+}
+
+/// The ways there is nothing to open, refused the same way: what the human would
+/// do about each of them is the same nothing.
+#[tokio::test]
+async fn a_conversation_with_no_such_roadmap_has_no_pane_to_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Before there is a worktree at all.
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    // And with one whose branch has written no roadmap.
+    grill(&app, id).await;
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    staged(&worktree, "mvp", OPEN_AT_THREE, &[]);
+    assert!(!roadmap_pane(&app, id, "mvp").await.stages.is_empty());
+
+    // A name this branch has not written to is nothing to open, whether it is
+    // another roadmap of the repository's or a path somebody typed: the check is
+    // what keeps either from being joined onto anything.
+    assert_eq!(
+        refused_roadmap(&app, id, "public-release").await,
+        StatusCode::NOT_FOUND,
+    );
+    assert_eq!(
+        refused_roadmap(&app, id, "..%2F..%2Fetc").await,
+        StatusCode::NOT_FOUND,
+    );
+
+    // And once the whole directory has gone.
+    std::fs::remove_dir_all(worktree.join("docs/roadmaps")).unwrap();
+    assert_eq!(
+        refused_roadmap(&app, id, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    // And a Conversation that is not there, or an id out of a URL somebody
+    // typed, which name no roadmap either.
+    assert_eq!(
+        refused_roadmap(&app, 404, "mvp").await,
+        StatusCode::NOT_FOUND
+    );
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri("/api/ui/conversations/nonsense/roadmap/mvp")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// What the refusal came back as, for the cases where there is no pane.
+async fn refused_roadmap(app: &Router, id: i64, name: &str) -> StatusCode {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{id}/roadmap/{name}"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert!(
+        body.contains("no roadmap"),
+        "the refusal should say what is missing, got: {body}"
+    );
+
+    status
 }
 
 /// A roadmap committed on a repository's default branch, as the old tools or a

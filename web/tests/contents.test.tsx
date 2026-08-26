@@ -25,7 +25,7 @@ import { reading, texts } from "./reading";
 import { readable } from "./serving";
 import answered from "./fixtures/set-answered.json" with { type: "json" };
 import answering from "./fixtures/set-answering.json" with { type: "json" };
-import archived from "./fixtures/set-archived.json" with { type: "json" };
+import locked from "./fixtures/set-locked.json" with { type: "json" };
 
 const WAITING = readable(answering);
 
@@ -33,7 +33,7 @@ const WAITING = readable(answering);
 /// a Set is read for what it asked about however it stands, so the nav has the
 /// same work to do on all three.
 const ANSWERED: SetView = { ...readable(answered), diff: WAITING.diff };
-const ARCHIVED: SetView = { ...readable(archived), diff: WAITING.diff };
+const LOCKED: SetView = { ...readable(locked), diff: WAITING.diff };
 
 /// A Set with neither of the two sections a Set can be without.
 const BARE: SetView = { ...WAITING, preface_html: null, diff: null };
@@ -261,7 +261,7 @@ describe("the table of contents", () => {
   });
 
   it("is one nav, one bar and one list on every standing", async () => {
-    for (const set of [WAITING, ANSWERED, ARCHIVED]) {
+    for (const set of [WAITING, ANSWERED, LOCKED]) {
       const page = await reading(set);
 
       // Which of the bar and the sidebar the reader gets is the stylesheet's

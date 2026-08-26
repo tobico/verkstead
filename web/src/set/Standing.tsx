@@ -2,9 +2,9 @@
 //! offer to close it if none ever will be again.
 //!
 //! The two sit together because one is why the other exists — the badge is the
-//! title of a small menu, and archiving is the one thing in it. A menu rather
+//! title of a small menu, and locking is the one thing in it. A menu rather
 //! than a bare button so the offer is out of the way until it is asked for:
-//! archiving is almost never the right thing to do to a Set, and it was a
+//! locking is almost never the right thing to do to a Set, and it was a
 //! thumb's width from the questions. It is confirmed besides: it is the only
 //! thing on this page that cannot be taken back.
 
@@ -14,8 +14,8 @@ import { Show, createMemo, createSignal } from "solid-js";
 
 import { Menu } from "../Menu";
 import { Modal } from "../Modal";
-import { archiveSet } from "../api/client";
-import type { Archived, Liveness } from "../api/types";
+import { lockSet } from "../api/client";
+import type { Locked, Liveness } from "../api/types";
 import { ErrorLine, Note } from "../notices";
 import page from "./Sheet.module.css";
 import styles from "./Standing.module.css";
@@ -37,19 +37,19 @@ export const BADGE: Record<Liveness, string> = {
 /// What the human is asked before a Set is closed unanswered.
 ///
 /// Named rather than written into the dialog so that the one thing it must not
-/// stop saying — that this cannot be taken back — can be held to. Archiving is
+/// stop saying — that this cannot be taken back — can be held to. Locking is
 /// the only irreversible act in the whole UI.
-export const ARCHIVE_WARNING =
+export const LOCK_WARNING =
   "It stops waiting on you for good and stands on its Conversation's timeline " +
   "with no Response. An agent still waiting on it is told the Set was " +
-  "archived. This cannot be undone.";
+  "locked. This cannot be undone.";
 
 /// The badge, and the one thing to do about a Set nobody is coming back for,
 /// folded behind it as a menu. Drawn on the provenance line, which the
 /// stylesheet puts it at the far end of.
 ///
 /// The menu itself is the [`Menu`](../Menu.tsx) every dropdown here is: the
-/// badge is what it drops from, and archiving is the whole of what it drops. The
+/// badge is what it drops from, and locking is the whole of what it drops. The
 /// confirmation is the [`Modal`](../Modal.tsx) every sheet drawn over the page
 /// is, which is what gives it Escape and a press away from it as ways of saying
 /// no.
@@ -57,7 +57,7 @@ export function Standing(props: {
   id: number;
   liveness: Liveness;
 }): JSX.Element {
-  // `true` while the human is being asked to confirm. Nothing is archived until
+  // `true` while the human is being asked to confirm. Nothing is locked until
   // they answer it.
   const [confirming, setConfirming] = createSignal(false);
 
@@ -67,9 +67,9 @@ export function Standing(props: {
 
   const queries = useQueryClient();
 
-  const archive = useMutation(() => ({
-    mutationFn: () => archiveSet(props.id),
-    onSuccess: (outcome: Archived) => {
+  const lock = useMutation(() => ({
+    mutationFn: () => lockSet(props.id),
+    onSuccess: (outcome: Locked) => {
       if (outcome !== "Closed") {
         return;
       }
@@ -89,11 +89,11 @@ export function Standing(props: {
 
   const close = () => {
     setConfirming(false);
-    archive.mutate();
+    lock.mutate();
   };
 
   const failed = createMemo(() =>
-    unarchived(archive.data, archive.error as Error | null),
+    unlocked(lock.data, lock.error as Error | null),
   );
 
   return (
@@ -101,12 +101,12 @@ export function Standing(props: {
       <Menu
         class={styles.standing!}
         name="How this Set stands"
-        disabled={archive.isPending}
+        disabled={lock.isPending}
         closer={(close) => (shut = close)}
         trigger={
           <>
             <span class={`${styles.liveness} ${styles[props.liveness]}`}>
-              {archive.isPending ? "Archiving…" : BADGE[props.liveness]}
+              {lock.isPending ? "Locking…" : BADGE[props.liveness]}
             </span>
             {/* Which way the menu will go, and no part of what the badge
                 says. */}
@@ -120,13 +120,13 @@ export function Standing(props: {
           <button
             type="button"
             role="menuitem"
-            class={styles.archive}
+            class={styles.lock}
             onClick={() => {
               shut();
               setConfirming(true);
             }}
           >
-            Archive unanswered
+            Lock unanswered
           </button>
         )}
       </Menu>
@@ -146,12 +146,12 @@ export function Standing(props: {
         class={page.confirm!}
         open={confirming()}
         close={() => setConfirming(false)}
-        labelledBy="archive-title"
+        labelledBy="lock-title"
       >
-        <p id="archive-title" class={page.confirmTitle}>
-          Archive this Set unanswered?
+        <p id="lock-title" class={page.confirmTitle}>
+          Lock this Set unanswered?
         </p>
-        <Note class={page.caveat}>{ARCHIVE_WARNING}</Note>
+        <Note class={page.caveat}>{LOCK_WARNING}</Note>
         <div class={page.confirmActions}>
           <button
             type="button"
@@ -161,7 +161,7 @@ export function Standing(props: {
             Keep it pending
           </button>
           <button type="button" onClick={close}>
-            Archive unanswered
+            Lock unanswered
           </button>
         </div>
       </Modal>
@@ -169,15 +169,15 @@ export function Standing(props: {
   );
 }
 
-/// Why the Set was not archived, when it was not. A Set that was says nothing
+/// Why the Set was not locked, when it was not. A Set that was says nothing
 /// here — the page is redrawing as the record of a Set nobody answered, and
 /// that is the whole of what there is to say about it.
-function unarchived(
-  outcome: Archived | undefined,
+function unlocked(
+  outcome: Locked | undefined,
   error: Error | null,
 ): string | null {
   if (error !== null) {
-    return `The Set was not archived: ${error.message}`;
+    return `The Set was not locked: ${error.message}`;
   }
 
   switch (outcome) {
@@ -185,9 +185,9 @@ function unarchived(
     case "Closed":
       return null;
     case "AlreadyAnswered":
-      return "This Set was answered while this page was open, so it was not archived: it stands as the decision that was made.";
-    case "AlreadyArchived":
-      return "This Set has already been archived.";
+      return "This Set was answered while this page was open, so it was not locked: it stands as the decision that was made.";
+    case "AlreadyLocked":
+      return "This Set has already been locked.";
     case "NoSuchSet":
       return "This Set is no longer here.";
   }

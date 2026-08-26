@@ -52,8 +52,6 @@
   font: inherit;
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--paper);
   background: var(--stopped);
   border: 0;
@@ -82,27 +80,32 @@
    pinned card is worth having in view rather than worth having all of at once.
    One pinned card is not one of these at all, and is drawn exactly as it was.
 
-   Positioned, because the arrows are over the card's own edges. */
-.carousel {
-  position: relative;
-}
+   Two things in it, in the order they are read in: the dots that say how many
+   cards there are, and the deck the cards themselves are dealt into. It needs
+   no rule of its own for that — what each of the two is is below.
 
-/* The card that is showing. A sideways drag across it is the carousel's to read
-   as a swipe; an up-and-down one is still the pane's to scroll with, which is
-   what `pan-y` leaves the browser holding. */
-.carousel > .showing {
+   The deck the cards are dealt into: the one showing, and — while a turn is
+   running — the one it is leaving behind, laid over it. A sideways drag across
+   it is the carousel's to read as a swipe; an up-and-down one is still the
+   pane's to scroll with, which is what `pan-y` leaves the browser holding.
+
+   Positioned, because everything the carousel lays over a card — the card it is
+   leaving and both arrows — is positioned against this rather than against the
+   block the dots are also in. */
+.carousel > .deck {
+  position: relative;
   touch-action: pan-y;
 }
 
 /* The way between cards where there is a pointer to reach it with. Nothing at
    all where there is not: a touch device swipes the card, and two buttons lying
    over it would be two buttons in the way of the thing they are about. */
-.carousel > .step {
+.deck > .step {
   display: none;
 }
 
 @media (hover: hover) {
-  .carousel > .step {
+  .deck > .step {
     display: grid;
     position: absolute;
     top: 50%;
@@ -126,30 +129,143 @@
     visibility: hidden;
   }
 
-  .carousel:hover > .step,
-  .carousel:focus-within > .step {
+  .carousel:hover .step,
+  .carousel:focus-within .step {
     visibility: visible;
   }
 
-  .carousel > .back {
+  /* And one of them under the pointer, which is the whole of what an arrow has
+     to say about itself: the small outline takes the accent, words and box
+     together. */
+  .deck > .step:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .deck > .back {
     left: 0.35rem;
   }
 
-  .carousel > .on {
+  .deck > .on {
     right: 0.35rem;
+  }
+
+  /* And the room the arrows need, which is the card's to give: they lie over
+     its own edges, so a card that did not stand back from them would have them
+     lying over its words. Only here — where there is no pointer there are no
+     arrows to clear, and a card in a phone-width pane has no width to spare. */
+  .deck .taskList,
+  .deck .stageList,
+  .deck .pullRequest {
+    padding-inline: 2.4rem;
   }
 }
 
-/* And the dots beneath: how many cards there are, and which one is showing.
+/* The turn itself: the card arriving and the card being left both slide the way
+   the deck is travelling, and the deck holds the pair for as long as it takes.
+   `SLIDE` in `Timeline.tsx` is this same fifth of a second written the other
+   side, because what takes the leaving card away again is the script.
+
+   Given only where motion is welcome, as the record's tab indicator is. Under
+   `prefers-reduced-motion` the card being left is not drawn at all, and what is
+   left is the instant swap this replaced. */
+.deck > .leaving {
+  display: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The card arriving is what the deck stands as tall as, so the one being left
+     is laid over it rather than kept in the flow beside it — and given no
+     bottom edge, so it keeps its own height instead of being stretched to the
+     other's. */
+  .deck > .leaving {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+  }
+
+  /* And neither of them is drawn outside the width they are travelling across. */
+  .deck:has(> .leaving) {
+    overflow: hidden;
+  }
+
+  .deck > .arriving.onward {
+    animation: arriveOnward 0.2s ease-in-out;
+  }
+
+  .deck > .leaving.onward {
+    animation: leaveOnward 0.2s ease-in-out;
+  }
+
+  .deck > .arriving.backward {
+    animation: arriveBackward 0.2s ease-in-out;
+  }
+
+  .deck > .leaving.backward {
+    animation: leaveBackward 0.2s ease-in-out;
+  }
+}
+
+/* Onwards is leftwards, the way a page turns: what arrives comes in from the
+   right, and what it replaces goes off to the left. Backwards is the same
+   journey the other way. */
+@keyframes arriveOnward {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes leaveOnward {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes arriveBackward {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes leaveBackward {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* And the dots above: how many cards there are, and which one is showing.
    Always drawn, pointer or none — they are the whole of what the carousel says
    about itself, and a swipe with nothing counting it is a card that came from
-   nowhere. */
+   nowhere.
+
+   Above the card rather than beneath it, because the cards are not the same
+   height as each other: dots underneath would move every time the card changed,
+   and they are the one part of the carousel that has to hold still to be aimed
+   at. */
 .carousel > .dots {
   list-style: none;
   display: flex;
   justify-content: center;
   gap: 0.25rem;
-  margin: 0.4rem 0 0;
+  margin: 0 0 0.4rem;
   padding: 0;
 }
 
@@ -377,18 +493,16 @@
 
 /* A liveness said in words, which is the unanswered Set's badge alone: a
    session's own is the mark at the row's edge, because a Timeline of rows
-   shouting `RUNNING` is a Timeline nobody reads. The colour the accent already
-   is, because what a badge like this says is that something is waiting on the
-   human here rather than that something is wrong.
+   each saying `running` is a Timeline nobody reads. The colour the accent
+   already is, because what a badge like this says is that something is waiting
+   on the human here rather than that something is wrong.
 
    Said inside the head it is a badge in, rather than by the word alone: a live
-   Screen marks itself `live` too, and a bare rule would put the capitals
-   through xterm's whole grid. */
+   Screen marks itself `live` too, and a bare rule would put this badge's type
+   through the whole of xterm's grid. */
 .eventHead .live {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--accent);
 }
 
@@ -433,14 +547,22 @@
 }
 
 /* And what says the card can be pressed. The events that are buttons carry this
-   for nothing; these three are articles, because rendered markdown cannot live
-   inside a button, so the same two things a pressable card has — a pointer and a
-   border in the accent while it is the one open — are said here instead. */
-.timelineEvent > .openable {
+   for nothing; the documents and the two lists are articles, because rendered
+   markdown cannot live inside a button, so the same two things a pressable card
+   has — a pointer and a border in the accent while it is the one open — are
+   said here instead.
+
+   Wherever the card is drawn rather than only on the record, which is what the
+   two lists made matter: a task list and a roadmap are drawn twice, pinned and
+   listed, and a rule that reached one copy would have the human press the card
+   held above the pane and watch a different one light up. Said the way
+   `.pullRequest.selected` above says it, and true of both copies for the same
+   reason. */
+.openable {
   cursor: pointer;
 }
 
-.timelineEvent > .openable.selected {
+.openable.selected {
   border-color: var(--accent);
 }
 
@@ -522,14 +644,12 @@
 
 /* And a manual task a Verkstead of before was set going by hand, which reads
    as the same kind of thing once more: something that was asked for, on a
-   record nothing writes another of. The same rule at its left and for the same
-   reason — there is nothing to open and nothing to do about it — in the ink the
-   prose around it is set in, because the words are somebody's own. */
+   record nothing writes another of. A card like the events around it, in the
+   ink the prose around it is set in, because the words are somebody's own —
+   there is still nothing to open and nothing to do about it, so it carries
+   neither a pointer nor a control. */
 .timelineEvent > .manualTask {
-  margin: 0;
-  padding: 0.15rem 0 0.15rem 0.6rem;
   font-size: 0.9rem;
-  border-left: 2px solid var(--edge);
 }
 
 .timelineEvent > .manualTask > :first-child {
@@ -542,14 +662,12 @@
 
 /* And something Verkstead did on its own account, which reads as the same kind
    of thing again — a fact about the work, said by the one voice on a Timeline
-   that is neither the human's nor an agent's. Marked off by a rule at its left
-   rather than by a card: there is nothing to open, and nothing to do about it. */
+   that is neither the human's nor an agent's. A card like everything else in
+   the record, because it is one of the things that happened; the dim ink is
+   what keeps it quiet among them, rather than a rule at its left. */
 .timelineEvent > .notice {
-  margin: 0;
-  padding: 0.15rem 0 0.15rem 0.6rem;
   font-size: 0.9rem;
   color: var(--ink-soft);
-  border-left: 2px solid var(--edge);
 }
 
 .timelineEvent > .notice > :first-child {
@@ -561,11 +679,12 @@
 }
 
 /* And the one of them a conversation is blocked on, which the badge in the
-   header marks: the rule at its left takes the colour that means stopped, so a
-   long record says where the stop is at a glance. The one thing that ever
-   selects a notice — there is no pane behind it to open. */
+   header marks: its border takes the colour that means stopped, so a long
+   record says where the stop is at a glance — the card's own border, the way
+   every other selected card says it is the one being pointed at. The one thing
+   that ever selects a notice; there is no pane behind it to open. */
 .timelineEvent > .notice.selected {
-  border-left-color: var(--stopped);
+  border-color: var(--stopped);
 }
 
 /* What a session has printed, summarised. A button, because the whole of it is
@@ -619,6 +738,31 @@
   color: var(--ink-soft);
 }
 
+/* And that same session again, held against the foot of the pane for as long as
+   it is running: the title and the mark on one line, pressed to open what the
+   card on the record opens. A line over it to say where the record ends.
+
+   What holds it down there is the pane's rather than this card's, as what holds
+   the header up there is: the strip wears `paneFoot` out of
+   `Workbench.module.css` and the frame says what a pane does about something
+   stuck to its bottom edge. Here is the paint alone. */
+.session {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 0;
+  border-top: 1px solid var(--edge);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session .what {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
 /* A Question Set the session put to the human, read as the interview it was: a
    question line and its answer under it, pair after pair. A button, as a
    session's output is, and for the same reason — the whole document is in the
@@ -665,8 +809,6 @@
 .questionSet .deferred {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-soft);
 }
 
@@ -675,8 +817,6 @@
 .questionSet .closed {
   font-size: 0.8rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   color: var(--ink-soft);
 }
 
@@ -933,84 +1073,64 @@
   font-size: 0.9rem;
 }
 
-/* What can be done to the conversation as a whole. A menu rather than three
-   buttons, because the last of them throws a worktree away and the header is
-   somewhere the cursor passes on the way to everything else. Its trigger is the
-   ⋯ painted up with the sidebar's, and its wider drop is the one thing it has
-   of its own — both in `Menu.module.css`, with the rest of the menu, which is
-   why the anchor is still named there and read here through `:global`.
+/* Under the pointer, everything on this pane that can be pressed. Together at
+   the foot of the file rather than each beside its own card: a hover state has
+   to be inside a query like this one — see `styles/base.css`, where the scheme
+   is set out — and one block is one place to read the whole pane's answer to
+   it.
 
-   One block per action, so that a button and the line saying what it does read
-   as one thing and the next action is plainly a different one. */
-.action + .action {
-  margin-top: 0.9rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--edge);
-}
+   The cards are surfaces and shift one step of the paper the record passes
+   behind, whichever mark they are already carrying: a Set waiting on the human,
+   a document that is the open one, a commit. None of those marks is a
+   background, so none of them is what moves.
 
-/* The only rows of a menu that keep an outline: each of these ends a run, and a
-   press that ends something should not read as the next line of prose. */
-.stop,
-.forceStop,
-.close {
-  display: inline-block;
-  width: auto;
-  padding: 0.4rem 0.8rem;
-  font-weight: 600;
-  color: var(--ink);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
+   The way on into the details pane is drawn as a link and is already in the
+   accent, so it takes a link's underline — the way back out does the same from
+   `PaneHead.module.css`. The title of a pull request and the arrows of the
+   carousel are text and a small outline, and take the accent. The dots are
+   neither: what is drawn is a mark rather than a control, so the one under the
+   pointer darkens by a step of ink — the accent is what says which card is
+   showing, and a dot that took it under the pointer would be saying that.
 
-/* Steering is a menu row like the three above and is drawn like every other
-   one, from `.drop button` in `Menu.module.css`. It keeps no outline of its
-   own: the rule above is for the presses that end a run, and this one moves
-   the work rather than ending it. Named here so the row can be found. */
-.steer {
-}
+   The filled buttons deepen their accent, and the badge saying where the work
+   stopped deepens its red the same way. Neither while it is refusing the press:
+   the start has two ways of doing that and this excludes both. */
+@media (hover: hover) {
+  .paneForward:hover {
+    text-decoration: underline;
+  }
 
-/* The one that cannot be undone, in the colour of what cannot be undone. Both
-   stops are reversed by a resume, and read as the ordinary buttons they are. */
-.close {
-  color: #b3382c;
-  border-color: #b3382c;
-}
+  .blocked:hover {
+    background: color-mix(in srgb, var(--stopped) 88%, var(--ink));
+  }
 
-/* The ⋯ at the head of the pane: what can be done to the Conversation being
-   read. It sits at the right edge of the header beside the thing that header
-   names, and a mark is what fits there. The sidebar's ⋯ is the same mark in the
-   same slot and is painted the same way, in `Conversations.module.css`. */
-.conversationActions > button {
-  padding: 0 0.4rem;
-  font-size: 1.1rem;
-  line-height: 1;
-  color: var(--ink-soft);
-  background: none;
-  border: 0;
-}
+  .dots button:not([aria-current]):hover::before {
+    background: var(--ink-soft);
+  }
 
-.conversationActions > button[aria-expanded="true"] {
-  color: var(--ink);
-}
+  .openPullRequest:hover {
+    color: var(--accent);
+  }
 
-/* What can be done to the conversation as a whole: room under each action for
-   the sentence saying what it does, which is more than a row of a menu holds —
-   so this one is padded as a card rather than as a list. */
-.conversationActions > [role="menu"] {
-  width: 17rem;
-  padding: 0.75rem;
-}
+  /* The pressable card, wherever it is drawn — the pinned copies of the two
+     lists included, for the reason `.openable` itself is unscoped. */
+  .openable:hover,
+  .timelineEvent > .agentOutput:hover,
+  .timelineEvent > .questionSet:hover,
+  .timelineEvent > .commit:hover {
+    background: var(--paper);
+  }
 
-/* And a refusal inside the drop, a size down on the ones out on the page: the
-   menu is a card of its own and the sentence under each button sets the type
-   it is read at. */
-.conversationActions .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.85rem;
-}
+  /* The running session held against the foot of the pane, which is the one card
+     here drawn on the paper rather than on the card colour — so its step is the
+     other way round. */
+  .session:hover {
+    background: var(--card);
+  }
 
-/* What a stop that is waiting for a task to finish says while it waits. */
-.conversationActions .waiting {
-  color: var(--ink);
+  .startGrilling .start:not(:disabled):not(.inert):hover,
+  .resume .resumeConversation:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }

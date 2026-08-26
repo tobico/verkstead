@@ -137,9 +137,10 @@ are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
 **Commit Summary**:
-The agent-written account a code commit carries as its message body — a delta
-Diagram first, prose after — kept by the sweep with its trailers stripped,
-rendered above the diff in the commit's details pane, and clamped to a prose
+The agent-written account a code commit carries as its message body — prose
+first, a delta Diagram after it — kept by the sweep with its trailers stripped,
+rendered as the **Message** above the diff in the commit's details pane —
+headed and boxed there the way a Set's Preface is — and clamped to a prose
 snippet on its Timeline card. Written for commits that deliver work; pure
 bookkeeping commits carry none, and a commit without one draws as it always
 did.
@@ -518,6 +519,28 @@ Done and Closed are never stalled, nothing being supposed to drive them.
 _Avoid_: blocked on you (the badge a stall is precisely without), stopped (what
 a stall becomes, not what it is), state, stuck, hung, idle
 
+**Archived**:
+A Closed Conversation the human has taken off the sidebar, there being nothing
+left to read on it. A fact about the list and nothing else: the Timeline, the
+branch and the Conversation's own page are exactly where they were, and opening
+it by its URL shows all of it. Offered on a Closed Conversation alone — a
+Conversation still being worked on belongs on the list it is being worked from,
+so it is closed first and archived after.
+
+Reversible, which is what tells it from **Locked**: nothing is confirmed,
+because nothing is lost. The two words are not each other's — one is a Question
+Set settling for good, this is a Conversation leaving a list.
+
+Two ways back, and they are different things. **Unarchive** takes it out for
+good, and the Conversation is on the sidebar again as it was. **Show archived
+conversations** is a way of looking rather than a change to anything: with it
+on, what has been archived is drawn in its ordinary place; with it off, it is
+not. That is the human's standing choice rather than a device's, so it is kept
+beside the archivings and read back on every load.
+_Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
+being archived, not the archiving), done, restore or unhide (the word is
+unarchive)
+
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles
 the session until the Response arrives, as every ask does in askance. A
@@ -545,7 +568,7 @@ _Avoid_: sync/async ask, hard/soft question, urgent question
 **Question Set**:
 A batch of Questions submitted together by one agent, with a Preface and a
 title. The unit that lands on a Conversation's Timeline, gets answered, and is
-archived. Reached through the Conversation it was asked from and nowhere else:
+locked. Reached through the Conversation it was asked from and nowhere else:
 a second way in would be a second thing to keep true.
 _Avoid_: request, batch, ticket
 
@@ -553,7 +576,7 @@ _Avoid_: request, batch, ticket
 What a stored Question Set is when the build looking at it cannot deserialize
 the body it was written as — ordinary schema movement, a field having left. It
 is drawn as a row saying so, on the Timeline it has always been on, with the
-stored body reachable and nothing offered to answer or archive it by. The rule
+stored body reachable and nothing offered to answer or lock it by. The rule
 is ADR-0006's, applied to the Sets themselves: keep what was written and defer
 rendering it, so that one record the schema has outrun costs its own row and
 never the Timeline around it. Nothing rewrites a body to make it readable —
@@ -668,12 +691,15 @@ never optional. There are none at present: the gates Topic was the only one,
 and it went when the last gate did.
 _Avoid_: section, chapter
 
-**Archive**:
-What Question Sets become once their Response is delivered (or once an orphaned
-Set is manually archived). Permanent decision history, and no longer a place of
-its own to browse: a settled Set stays on the Timeline it was asked from,
-saying what became of it. Nothing leaves a Timeline.
-_Avoid_: history, log
+**Locked**:
+What a Question Set becomes once it is settled — its Response delivered, or an
+orphaned Set put away unanswered by hand. Permanent decision history, and no
+place of its own to browse: a locked Set stays on the Timeline it was asked
+from, saying what became of it, and takes no Response ever again. Locking one
+by hand is the single irreversible act in the workbench, which is why it is the
+single one confirmed in as many words. Nothing leaves a Timeline.
+_Avoid_: archived (**Archived** is a Conversation coming off the sidebar, which
+is reversible and about a list rather than about a Set), filed, history, log
 
 **Liveness**:
 Whether an agent is currently connected and waiting on a Question Set

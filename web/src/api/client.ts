@@ -9,16 +9,19 @@ import type {
   AbandonedRepo,
   Adopted,
   ApiError,
-  Archived,
+  BacklogPane,
+  Locked,
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
   Capture,
   CommitPane,
+  ConversationArchived,
   ConversationClosed,
   ConversationEntry,
   ConversationSteered,
   ConversationStopped,
+  ConversationUnarchived,
   ConversationView,
   GrillingStarted,
   ProfileChoice,
@@ -33,11 +36,13 @@ import type {
   RepoEntry,
   Response as Decided,
   Resumed,
+  RoadmapPane,
   Screen,
   SetReading,
   SettingsEdit,
   SettingsSaved,
   SettingsView,
+  ShowingArchived,
   Started,
   SteerOpened,
   SteerSubmission,
@@ -78,7 +83,7 @@ export function loadSet(id: string): Promise<SetReading> {
 /// Answer a Set, which ends the wait the agent is holding on it.
 ///
 /// The outcome is the answer's body rather than its status: every one of them —
-/// taken, already answered, archived, refused by the grammar — is something the
+/// taken, already answered, locked, refused by the grammar — is something the
 /// page has to say in words, and only a server that could not answer at all
 /// throws.
 export function submitResponse(
@@ -91,8 +96,8 @@ export function submitResponse(
 /// Close a Set unanswered: the human declaring that nobody is ever going to
 /// answer it. There is nothing to send but the Set's own id, which is in the
 /// path.
-export function archiveSet(id: number): Promise<Archived> {
-  return post<Archived>(`/api/ui/sets/${id}/archive`);
+export function lockSet(id: number): Promise<Locked> {
+  return post<Locked>(`/api/ui/sets/${id}/lock`);
 }
 
 /// The Repos Verkstead has been told about, by name.
@@ -161,6 +166,23 @@ export function listConversations(): Promise<ConversationEntry[]> {
 /// list drawn a moment ago is allowed to carry.
 export async function placeConversations(order: number[]): Promise<void> {
   await refused(await sent("/api/ui/conversations/order", { order }));
+}
+
+/// Whether the sidebar is drawing what has been archived.
+///
+/// The server's answer rather than this device's, because the choice is the
+/// human's rather than the browser's: a toggle kept here would be one they had
+/// to find again on their phone.
+export async function showingArchived(): Promise<boolean> {
+  return (await get<ShowingArchived>("/api/ui/conversations/archived")).showing;
+}
+
+/// And put that switch where they have just put it.
+///
+/// The position rather than a flip, so what is sent is what the human is
+/// looking at. Answered with nothing at all, as the order is.
+export async function showArchived(showing: boolean): Promise<void> {
+  await refused(await sent("/api/ui/conversations/archived", { showing }));
 }
 
 /// One Conversation with its Timeline.
@@ -253,6 +275,30 @@ export function loadCommitPane(
   return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
 }
 
+/// The backlog opened: every task document `.tasks/` holds, rendered.
+///
+/// Named by the conversation alone, unlike the three panes around it. A backlog
+/// is read off the worktree rather than remembered, so there is no event to
+/// reach it by: there is one backlog per conversation, and this is it.
+export function loadBacklogPane(id: number): Promise<BacklogPane> {
+  return get<BacklogPane>(`/api/ui/conversations/${id}/backlog`);
+}
+
+/// The roadmap opened: every stage brief one of them holds, rendered.
+///
+/// Named by the roadmap rather than by the conversation, which is where this
+/// parts company with the backlog above: a worktree holds one `.tasks/` and may
+/// hold any number of roadmaps, so the card that opens this says which of them
+/// it is. Encoded, because that name is a directory name out of a repository.
+export function loadRoadmapPane(
+  id: number,
+  name: string,
+): Promise<RoadmapPane> {
+  return get<RoadmapPane>(
+    `/api/ui/conversations/${id}/roadmap/${encodeURIComponent(name)}`,
+  );
+}
+
 /// What is on the pull request the finish step opened: its commit list and its
 /// comments.
 ///
@@ -329,6 +375,30 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
+}
+
+/// Put a closed Conversation away: it comes off the sidebar, and nothing else
+/// about it moves.
+///
+/// Nothing is sent with it either — which Conversation it is is the whole of
+/// what the press says, and whether it is one to put away is the server's to
+/// answer.
+export function archiveConversation(
+  id: number,
+): Promise<ConversationArchived> {
+  return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
+}
+
+/// And take it back out: it is on the sidebar again, for good.
+///
+/// Archiving's mirror, sending as little as archiving does.
+export function unarchiveConversation(
+  id: number,
+): Promise<ConversationUnarchived> {
+  return post<ConversationUnarchived>(
+    `/api/ui/conversations/${id}/unarchive`,
+    {},
+  );
 }
 
 /// Start driving a conversation again, from wherever the work now stands.

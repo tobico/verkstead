@@ -6,21 +6,46 @@
 //! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
-//! now, the stage list and the PR as those stages arrive. They are not on the
-//! record and do not scroll with it: each is the current state of something the
-//! work is against rather than a moment in it. More than one of them is a
-//! carousel rather than a stack, because everything pinned is held above the
-//! record and a stack of them is what the record is pushed down by.
+//! now, the stage list and the PR as those stages arrive. They do not scroll
+//! with the record: each is the current state of something the work is against,
+//! and is worth having on screen whichever part of the record is being read.
+//! More than one of them is a carousel rather than a stack, because everything
+//! pinned is held above the record and a stack of them is what the record is
+//! pushed down by.
+//!
+//! Each of them is a moment as well — the pull request the finish step opened,
+//! and the backlog and the roadmap at the moment they landed on the branch — so
+//! each is drawn in both places: the same card in the pinned block and on the
+//! record where it happened. A second appearance rather than a move, for the
+//! reason the running session's strip below is one: what the record says
+//! happened should stay on it.
+//!
+//! The two lists differ from the pull request in where the card's content comes
+//! from. A PR is three facts the record holds; a backlog and a roadmap are read
+//! off the worktree every time the conversation is, so what the record row fixes
+//! is the position and the card at it says what the list holds now. Nothing is
+//! backfilled: a conversation from before the rows existed has its cards in the
+//! pinned block alone.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
-//! details pane, which is why this takes a way of selecting one. Three of them
-//! are documents — the frozen Brief, the handoff and the instruction a steer
-//! carried — and a document's summary is its own opening: the card shows
+//! details pane, which is why this takes a way of selecting one — and so do the
+//! backlog and the roadmap, whose cards open the documents their entries name
+//! and which are selected by a word rather than by an id, having no Event of
+//! their own. Three of them are documents — the frozen Brief, the handoff and
+//! the instruction a
+//! steer carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
 //! Brief is also the one Event that is written here as well as read: while the
 //! Conversation is drafting it is a field that saves itself rather than a card
 //! to open, and it carries a Conversation's setup under it for as long as there
 //! is a draft to set up.
+//!
+//! Held against the foot of the pane, for as long as a session is running, is
+//! that session again: a strip carrying its title and its liveness mark, which
+//! opens the same details pane its card does. A second appearance rather than a
+//! move — the card keeps its place on the record — because a record grows past
+//! a screenful within the hour and the one thing on it that is moving should
+//! never have to be scrolled back to.
 //!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
@@ -45,28 +70,19 @@ import {
   Match,
   Show,
   Switch,
+  createMemo,
   createSignal,
   onCleanup,
   onMount,
   type JSX,
 } from "solid-js";
 
-import {
-  closeConversation,
-  forceStopConversation,
-  resume,
-  saveBrief,
-  startGrilling,
-  steerConversation,
-  stopConversation,
-} from "../api/client";
+import { resume, saveBrief, startGrilling } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
   BriefSaved,
   CommitEvent,
-  ConversationClosed,
-  ConversationStopped,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -79,27 +95,54 @@ import type {
   QuestionSetEvent,
   Resumed,
   StageListEvent,
+  StageListReached,
   SteerEvent,
-  SteerOpened,
   TaskListEvent,
+  TaskListReached,
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
 import app from "../App.module.css";
-import { Menu } from "../Menu";
 import { Empty, ErrorLine, Note } from "../notices";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
 import unreadable from "../set/Unreadable.module.css";
+import { Actions } from "./Actions";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { PaneHead } from "./PaneHead";
 import { Setup } from "./Setup";
-import { Steer } from "./Steer";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { keeping } from "./settling";
+
+/// What the details pane is showing, as the card that opened it names itself.
+///
+/// An event's id, for the kinds of event that have a full self to open. And a
+/// word for the two plan cards, which have none: each is read off the worktree
+/// every time the conversation is, so the row that says where it landed fixes a
+/// position rather than an identity. The backlog is the bare word, there being
+/// one per conversation; a roadmap carries its own name after it, a worktree
+/// being allowed any number of those.
+///
+/// One channel for all of them, so that opening any closes the rest — a details
+/// pane shows one thing. A string rather than an object for the same reason:
+/// what is open is compared against what a card would open, and two of the same
+/// selection have to be the same value.
+export type Opening = number | "backlog" | `roadmap:${string}`;
+
+/// What opens the named roadmap, by the directory name that is its identity.
+export function opensRoadmap(name: string): Opening {
+  return `roadmap:${name}`;
+}
+
+/// And which roadmap an opening names, or `null` where it names none.
+export function roadmapOpened(opening: Opening | null): string | null {
+  return typeof opening === "string" && opening.startsWith("roadmap:")
+    ? opening.slice("roadmap:".length)
+    : null;
+}
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -140,31 +183,6 @@ export const GRILL_REFUSAL: Record<GrillingStarted, string> = {
   NoBaseCommit: "The repo has nothing to branch from any more.",
   BranchExists: "That branch already exists, and Verkstead did not make it.",
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
-};
-
-/// And each way of being refused a stop, whichever of the two was pressed.
-///
-/// The two that are not refusals map to nothing: a conversation that has
-/// stopped says so by the badge and the notice the read after the press brings
-/// back, and one that is still finishing its task says so in its own words
-/// beside the button rather than as an error.
-export const STOP_REFUSAL: Record<ConversationStopped, string> = {
-  Stopped: "",
-  Stopping: "",
-  AlreadyStopped:
-    "This conversation has already stopped. Resume is what gets it going again.",
-  NotDriven:
-    "Nothing is supposed to be driving this conversation, so there is nothing to stop.",
-  NoSuchConversation: "This conversation is gone.",
-};
-
-/// And each way of being refused a close.
-export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
-  Closed: "",
-  AlreadyClosed: "",
-  NoSuchConversation: "This conversation is gone.",
-  WorktreeStuck:
-    "The worktree could not be removed, so nothing was changed. The server log says why.",
 };
 
 /// And each way of being refused a resume.
@@ -331,9 +349,23 @@ export function Timeline(props: {
   details: () => void;
 
   /// Which Event the details pane is showing, and how to change it.
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
 }): JSX.Element {
+  /// The session running now, where there is one: the last output on the record
+  /// that is still being written to. The last, because a Conversation runs one
+  /// session at a time — a record is a column of finished sessions with at most
+  /// one live one at the end of it.
+  const live = createMemo(() =>
+    props.conversation.timeline
+      .flatMap((event) =>
+        "AgentOutput" in event && event.AgentOutput.running
+          ? [event.AgentOutput]
+          : [],
+      )
+      .at(-1),
+  );
+
   return (
     <>
       {/* The header and the pinned block as one block, because that is how they
@@ -406,6 +438,7 @@ export function Timeline(props: {
       <ol class={styles.timeline}>
         <For each={props.conversation.timeline}>
           {(event, index) => (
+            <Show when={drawable(event)}>
             <li class={styles.timelineEvent}>
               <Switch>
                 <Match when={"Brief" in event && event.Brief}>
@@ -512,8 +545,53 @@ export function Timeline(props: {
                     />
                   )}
                 </Match>
+                {/* The pull request where it happened, which is the same card
+                    the pinned block above holds still: one event drawn twice.
+                    Selecting from either marks both, because both are the one
+                    pull request and there is one details pane behind it. */}
+                <Match when={"PullRequest" in event && event.PullRequest}>
+                  {(opened) => (
+                    <PullRequest
+                      opened={opened()}
+                      selected={props.selected === opened().id}
+                      open={() => {
+                        props.select(opened().id);
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                {/* And the two lists where they landed, drawn the same way and
+                    from the same reading the pinned block is drawn from — so
+                    the copy on the record ticks along with the work exactly as
+                    the pinned one does. Nothing where the worktree has gone:
+                    the row is a moment that happened, and what it showed is
+                    read off a branch that is no longer there. */}
+                <Match when={"TaskList" in event && event.TaskList}>
+                  {(reached) => (
+                    <TaskListRow
+                      reached={reached()}
+                      selected={props.selected === "backlog"}
+                      open={() => {
+                        props.select("backlog");
+                        props.details();
+                      }}
+                    />
+                  )}
+                </Match>
+                <Match when={"StageList" in event && event.StageList}>
+                  {(reached) => (
+                    <StageListRow
+                      reached={reached()}
+                      selected={props.selected}
+                      select={props.select}
+                      details={props.details}
+                    />
+                  )}
+                </Match>
               </Switch>
             </li>
+            </Show>
           )}
         </For>
       </ol>
@@ -541,7 +619,50 @@ export function Timeline(props: {
           What Verkstead was never going to do is not here: a steer is what says
           that, and it is in the menu on the header. */}
       <Resume conversation={props.conversation} />
+
+      {/* And the session running now, held against the foot of the pane so that
+          it can be reached from however far down the record the human has read.
+          A second appearance rather than a move: the session keeps its card in
+          its own place on the record, and this is the way back to it. */}
+      <Show when={live()}>
+        {(output) => (
+          <Session
+            output={output()}
+            open={() => {
+              props.select(output().id);
+              props.details();
+            }}
+          />
+        )}
+      </Show>
     </>
+  );
+}
+
+/// The session running now, held against the foot of the pane.
+///
+/// One line of what the record's own card says — the title and the mark — and
+/// the same press: it opens the session's output in the details pane. It shows
+/// only while something is running, because what it is for is finding the thing
+/// that is moving; a session that has ended is a card on the record like any
+/// other.
+function Session(props: {
+  output: AgentOutputEvent;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      class={`${styles.session} ${shell.paneFoot}`}
+      onClick={props.open}
+    >
+      <span class={styles.what}>Agent output</span>
+      <Mark
+        running={props.output.running}
+        idle={props.output.idle}
+        class={styles.rowMark}
+      />
+    </button>
   );
 }
 
@@ -644,8 +765,8 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// is furniture around a card nothing can be turned to.
 function Pinned(props: {
   conversation: ConversationView;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   return (
@@ -682,15 +803,41 @@ function Pinned(props: {
 /// flick across a card in a phone-width pane counts.
 export const SWIPE = 40;
 
+/// How long a turn between cards takes, in milliseconds.
+///
+/// The stylesheet is what runs the slide and this is what clears up after it, so
+/// the two are the same number written twice — see `.arriving` in
+/// `Timeline.module.css`.
+export const SLIDE = 200;
+
+/// One card in the deck: which of the pinned cards it is, and what it is doing
+/// there. `showing` is the ordinary state and the only one with nothing in
+/// flight; the other two are the pair a turn holds side by side while it runs.
+type Pane = {
+  index: number;
+  part: "showing" | "leaving" | "arriving";
+  onward: boolean;
+};
+
 /// The carousel: one pinned card showing, and the ways to the others.
 ///
-/// Dots beneath saying how many there are and which is showing, arrows over the
+/// Dots above saying how many there are and which is showing, arrows over the
 /// card's edges where there is a pointer to reach them with, and a swipe across
 /// the card where there is not. All three are the same move, which is why they
 /// are one function between them.
 ///
+/// Above rather than beneath, because the cards are not the same height as each
+/// other: dots under them would move every time the card changed, and they are
+/// the one part of the carousel that has to hold still to be aimed at.
+///
 /// It wraps: with two or three cards, an arrow that stopped at the end would be
 /// a dead control most of the time.
+///
+/// A turn slides. For as long as one runs the deck holds both cards — the one
+/// leaving and the one arriving — and the stylesheet moves the pair the way the
+/// deck is travelling. Whether they move at all is the stylesheet's to say too:
+/// under `prefers-reduced-motion` the leaving card is not drawn and the swap is
+/// the instant one this replaced.
 ///
 /// Which card fronts is [`fronting`]'s to say, and it says it once — when the
 /// conversation is opened and this is built. Nothing is remembered between
@@ -699,8 +846,8 @@ export const SWIPE = 40;
 /// whoever is holding it.
 function Carousel(props: {
   conversation: ConversationView;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   const cards = () => props.conversation.pinned;
@@ -712,19 +859,91 @@ function Carousel(props: {
   /// task file goes.
   const showing = () => Math.min(at(), cards().length - 1);
 
+  /// The turn that is running, where there is one: the card it left, and the
+  /// way it is going. Nothing at all while the deck is at rest.
+  const [turning, setTurning] = createSignal<{
+    from: number;
+    onward: boolean;
+  } | null>(null);
+
+  let running: ReturnType<typeof setTimeout> | undefined;
+  onCleanup(() => clearTimeout(running));
+
   /// Turn to a card, counting round both ends.
   const turn = (to: number) => {
     const many = cards().length;
-    setAt(((to % many) + many) % many);
+    const was = showing();
+    const next = ((to % many) + many) % many;
+    if (next === was) {
+      return;
+    }
+
+    // Which way it travels is read before the count is folded back into the
+    // list: turning on past the last card is still travelling onwards, and the
+    // card it lands on is the first.
+    setTurning({ from: was, onward: to > was });
+    setAt(next);
+    clearTimeout(running);
+    running = setTimeout(() => setTurning(null), SLIDE);
   };
+
+  /// What the deck is holding: the card showing, and — while a turn runs — the
+  /// card it is leaving behind as well, in the order they travel in.
+  ///
+  /// Held still unless a turn changed one of them. The conversation is re-read
+  /// the whole time it is open, and a re-read that rebuilt the deck would
+  /// restart a slide that nothing asked for.
+  const deck = createMemo<Pane[]>(
+    () => {
+      const going = turning();
+      const now: Pane = { index: showing(), part: "showing", onward: true };
+      if (!going || going.from > cards().length - 1) {
+        return [now];
+      }
+      return [
+        { index: going.from, part: "leaving", onward: going.onward },
+        { ...now, part: "arriving", onward: going.onward },
+      ];
+    },
+    [],
+    {
+      equals: (was, now) =>
+        was.length === now.length &&
+        was.every(
+          (pane, index) =>
+            pane.index === now[index]!.index &&
+            pane.part === now[index]!.part &&
+            pane.onward === now[index]!.onward,
+        ),
+    },
+  );
 
   /// Where the finger went down, in the coordinates it will come back up in.
   let from: number | null = null;
 
   return (
     <div class={styles.carousel}>
+      {/* The dots, above the card: how many cards there are, which one is
+          showing, and a way straight to any of them. Each is named for the card
+          it turns to rather than numbered, because that is what a reader who
+          cannot see the dots needs to know about it. */}
+      <ol class={styles.dots}>
+        <For each={cards()}>
+          {(card, index) => (
+            <li>
+              <button
+                type="button"
+                aria-label={named(card)}
+                aria-current={showing() === index() ? "true" : undefined}
+                onClick={() => turn(index())}
+              />
+            </li>
+          )}
+        </For>
+      </ol>
+
       <div
-        class={styles.showing}
+        class={styles.deck}
         onTouchStart={(event) => {
           from = event.changedTouches[0]?.clientX ?? null;
         }}
@@ -741,54 +960,60 @@ function Carousel(props: {
           }
         }}
       >
-        <Card
-          event={cards()[showing()]!}
-          selected={props.selected}
-          select={props.select}
-          details={props.details}
-        />
-      </div>
-
-      {/* The arrows, which the stylesheet draws only where there is a pointer:
-          on a touch device the swipe is what these are, and two buttons lying
-          over the card would be two buttons in the way of it. */}
-      <button
-        type="button"
-        class={`${styles.step} ${styles.back}`}
-        aria-label="Previous pinned card"
-        onClick={() => turn(showing() - 1)}
-      >
-        ‹
-      </button>
-      <button
-        type="button"
-        class={`${styles.step} ${styles.on}`}
-        aria-label="Next pinned card"
-        onClick={() => turn(showing() + 1)}
-      >
-        ›
-      </button>
-
-      {/* And the dots: how many cards there are, which one is showing, and a way
-          straight to any of them. Each is named for the card it turns to rather
-          than numbered, because that is what a reader who cannot see the dots
-          needs to know about it. */}
-      <ol class={styles.dots}>
-        <For each={cards()}>
-          {(card, index) => (
-            <li>
-              <button
-                type="button"
-                aria-label={named(card)}
-                aria-current={showing() === index() ? "true" : undefined}
-                onClick={() => turn(index())}
-              />
-            </li>
+        <For each={deck()}>
+          {(pane) => (
+            <Show when={cards()[pane.index]}>
+              {(card) => (
+                <div class={parting(pane)}>
+                  <Card
+                    event={card()}
+                    selected={props.selected}
+                    select={props.select}
+                    details={props.details}
+                  />
+                </div>
+              )}
+            </Show>
           )}
         </For>
-      </ol>
+
+        {/* The arrows, which the stylesheet draws only where there is a
+            pointer: on a touch device the swipe is what these are, and two
+            buttons lying over the card would be two buttons in the way of it.
+
+            Inside the deck rather than beside it, so that what they are
+            centred against is the card rather than the card and its dots. */}
+        <button
+          type="button"
+          class={`${styles.step} ${styles.back}`}
+          aria-label="Previous pinned card"
+          onClick={() => turn(showing() - 1)}
+        >
+          ‹
+        </button>
+        <button
+          type="button"
+          class={`${styles.step} ${styles.on}`}
+          aria-label="Next pinned card"
+          onClick={() => turn(showing() + 1)}
+        >
+          ›
+        </button>
+      </div>
     </div>
   );
+}
+
+/// What a card in the deck wears: nothing where the deck is at rest, and while a
+/// turn runs the part it is playing and the way the deck is travelling — which
+/// is between them everything the stylesheet needs to slide it.
+function parting(pane: Pane): string | undefined {
+  if (pane.part === "showing") {
+    return undefined;
+  }
+
+  const part = pane.part === "leaving" ? styles.leaving : styles.arriving;
+  return `${part} ${pane.onward ? styles.onward : styles.backward}`;
 }
 
 /// Which card is showing when a conversation is opened: the one needing
@@ -799,11 +1024,10 @@ function Carousel(props: {
 /// the work goes through them in.
 ///
 /// Needing attention is the conversation being blocked on the card, which only a
-/// pull request can be: it is the one pinned event that is also on the record,
-/// and the two lists are read off the worktree rather than being moments
-/// anything could have stopped at. So a pull request with feedback waiting on it
-/// fronts over the backlog beside it, which is what a reader opening the
-/// conversation is being stopped for.
+/// pull request can be: what a wrap-up stops for is the review, and a backlog or
+/// a roadmap is a list read off the worktree with nothing on it to answer. So a
+/// pull request with feedback waiting on it fronts over the backlog beside it,
+/// which is what a reader opening the conversation is being stopped for.
 function fronting(conversation: ConversationView): number {
   const at = conversation.pinned.findIndex(
     (event) =>
@@ -826,22 +1050,43 @@ function named(event: PinnedEvent): string {
 
 /// One pinned card, whichever of the three kinds it is.
 ///
-/// One of them opens: a pull request has a full self, which is what is on it
-/// right now. Neither list does — what a details pane would show of one is what
-/// is already drawn here.
+/// All three open. A pull request has a full self, which is what is on it right
+/// now; a task list opens the documents its entries name and a roadmap the
+/// briefs its stages name, which is each list read at a second depth.
+///
+/// Each of the three is on the record as well, at the moment it arrived there,
+/// and the card drawn there is this same card — see the module docs.
 function Card(props: {
   event: PinnedEvent;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   return (
     <Switch>
       <Match when={"TaskList" in props.event && props.event.TaskList}>
-        {(tasks) => <TaskList tasks={tasks()} />}
+        {(tasks) => (
+          <TaskList
+            tasks={tasks()}
+            selected={props.selected === "backlog"}
+            open={() => {
+              props.select("backlog");
+              props.details();
+            }}
+          />
+        )}
       </Match>
       <Match when={"StageList" in props.event && props.event.StageList}>
-        {(stages) => <StageList stages={stages()} />}
+        {(stages) => (
+          <StageList
+            stages={stages()}
+            selected={props.selected === opensRoadmap(stages().name)}
+            open={() => {
+              props.select(opensRoadmap(stages().name));
+              props.details();
+            }}
+          />
+        )}
       </Match>
       <Match when={"PullRequest" in props.event && props.event.PullRequest}>
         {(opened) => (
@@ -865,6 +1110,10 @@ function Card(props: {
 /// details pane, fetched from GitHub when this is opened. The link out is a link
 /// rather than part of the button: merging is the human's act and it happens
 /// over there, so getting there must not depend on this page's own panes.
+///
+/// Drawn twice, from the pinned block and from the record, because it belongs in
+/// both. The two are the same Event and so the same selection: opening either
+/// opens the one details pane, and both read as selected while it is open.
 function PullRequest(props: {
   opened: PullRequestEvent;
   selected: boolean;
@@ -895,6 +1144,78 @@ function PullRequest(props: {
   );
 }
 
+/// Whether there is a card to draw at a row of the record.
+///
+/// True of every kind but the two lists, which are the only Events with no
+/// content of their own: what is drawn at one is the worktree read live, and a
+/// worktree that has been taken away — which is every closed conversation —
+/// leaves the moment on the record with nothing to show for it.
+///
+/// The row goes with the card rather than standing empty. The record is a
+/// column with a rem between its rows, so a row with nothing in it is not
+/// nothing: it is two rems of blank paper where the backlog landed, which reads
+/// as something missing rather than as something that never had a card.
+function drawable(event: TimelineEvent): boolean {
+  if ("TaskList" in event) {
+    return event.TaskList.list !== null;
+  }
+
+  if ("StageList" in event) {
+    return event.StageList.roadmaps.length > 0;
+  }
+
+  return true;
+}
+
+/// The backlog on the record, at the row that says it landed on the branch.
+///
+/// The same card the pinned block holds, and the same reading behind both — the
+/// server hands the one it took over twice. Nothing at all where there is
+/// nothing left to read: a worktree that has been taken away leaves the moment
+/// on the record with no list to show for it, and [`drawable`] above takes the
+/// row with it.
+function TaskListRow(props: {
+  reached: TaskListReached;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <Show when={props.reached.list}>
+      {(tasks) => (
+        <TaskList tasks={tasks()} selected={props.selected} open={props.open} />
+      )}
+    </Show>
+  );
+}
+
+/// And the roadmap on the record, at the row that says it landed.
+///
+/// Every roadmap the branch wrote to rather than one, because the pinned block
+/// holds every one of them too — ordinarily that is exactly one. Which is why
+/// the selection travels down here whole rather than as a yes or no: each card
+/// opens its own roadmap, and the one that is open is the one that is selected.
+function StageListRow(props: {
+  reached: StageListReached;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
+  details: () => void;
+}): JSX.Element {
+  return (
+    <For each={props.reached.roadmaps}>
+      {(stages) => (
+        <StageList
+          stages={stages}
+          selected={props.selected === opensRoadmap(stages.name)}
+          open={() => {
+            props.select(opensRoadmap(stages.name));
+            props.details();
+          }}
+        />
+      )}
+    </For>
+  );
+}
+
 /// Whether one entry of a list is finished, drawn the way the file it is read
 /// out of writes it: an empty box, or a checked one.
 ///
@@ -912,18 +1233,33 @@ function Box(props: { done: boolean }): JSX.Element {
 /// The backlog: every task of it, and how far through it the work has got.
 ///
 /// The whole list rather than a summary, because the whole list is short and it
-/// is the one thing a conversation being built from a backlog is *about*. There
-/// is nothing to open: the design gives a task list no details pane, since what
-/// a details pane would show is what is already drawn here.
+/// is the one thing a conversation being built from a backlog is *about*.
+///
+/// It opens, and what it opens is not the list again: each entry names a
+/// document in `.tasks/` that says what that task is, and those are what the
+/// details pane holds — see `Backlog.tsx`. The whole card is the press, as a
+/// document's card is, because there is nothing else on it to press.
 ///
 /// Read out of `.tasks/` in the worktree every time the page reads the
 /// conversation, so a task finishing moves this without anybody pressing
-/// anything.
-function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
+/// anything — in the pinned block and at the row on the record where the
+/// backlog landed alike, both being drawn from the one reading. Drawn twice and
+/// selected once for the reason the pull request beside it is: the two are one
+/// backlog, so opening either opens the one details pane and both read as
+/// selected while it is open.
+function TaskList(props: {
+  tasks: TaskListEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
   return (
-    <article class={styles.taskList}>
+    <Openable
+      kind={styles.taskList!}
+      selected={props.selected}
+      open={props.open}
+    >
       <div class={styles.eventHead}>
         <h2>Task list</h2>
         <Show when={props.tasks.feature !== ""}>
@@ -952,7 +1288,7 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
           )}
         </For>
       </ol>
-    </article>
+    </Openable>
   );
 }
 
@@ -961,15 +1297,31 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
 /// Beside the task list and drawn the same way, because it is the same kind of
 /// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
-/// without anybody pressing anything. There is nothing to open here either.
+/// without anybody pressing anything, in both of the places it is drawn.
+///
+/// It opens the same way too, and what it opens is not the list again: each
+/// entry names a brief beside `ROADMAP.md` that says what that stage is for, and
+/// those are what the details pane holds — see `Roadmap.tsx`. The whole card is
+/// the press, as a document's card is, because there is nothing else on it to
+/// press.
 ///
 /// Which roadmap this is, is the one this branch has written to: a repository
 /// keeps its finished roadmaps, and a conversation is about the one it touched.
-function StageList(props: { stages: StageListEvent }): JSX.Element {
+/// It is also what the card opens *by* — a branch that touched two roadmaps has
+/// two cards, and each of them opens its own.
+function StageList(props: {
+  stages: StageListEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   const done = () => props.stages.stages.filter((stage) => stage.done).length;
 
   return (
-    <article class={styles.stageList}>
+    <Openable
+      kind={styles.stageList!}
+      selected={props.selected}
+      open={props.open}
+    >
       <div class={styles.eventHead}>
         <h2>Roadmap</h2>
         <span class={styles.feature}>
@@ -997,7 +1349,7 @@ function StageList(props: { stages: StageListEvent }): JSX.Element {
           )}
         </For>
       </ol>
-    </article>
+    </Openable>
   );
 }
 
@@ -1038,11 +1390,11 @@ function Handoff(props: {
 /// branch went, a roadmap with nothing left to run — or a stop, which is what
 /// stopped the run, why, and what the evidence was.
 ///
-/// A line and not a card, unlike the handoff above it: it is a sentence rather
-/// than a document, and there is nothing to open and nothing to answer. It is
-/// rendered markdown all the same, because what it names — a branch, a stage, a
-/// file the repository records its process in — reads better set apart from the
-/// prose around it.
+/// A card like the events around it, because it is one of the things that
+/// happened — quiet among them, in the dim ink, because there is nothing to open
+/// and nothing to answer. It is rendered markdown, because what it names — a
+/// branch, a stage, a file the repository records its process in — reads better
+/// set apart from the prose around it.
 ///
 /// Marked while it is what the conversation is blocked on, which is the whole of
 /// what the badge above does: a timeline is long by the time a run stops, and
@@ -1069,9 +1421,9 @@ function Notice(props: {
 /// beside it — so this is a record of something that happened, kept and read
 /// rather than rewritten.
 ///
-/// A line and not a card, like the notice above it: it is what was asked for, in
-/// somebody's own words, and there is nothing to open and nothing to answer. It
-/// is rendered markdown all the same, because that is what was typed.
+/// A card like the notice above it, and read the same way: it is what was asked
+/// for, in somebody's own words, and there is nothing to open and nothing to
+/// answer. It is rendered markdown, because that is what was typed.
 ///
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it
@@ -1231,7 +1583,7 @@ function QuestionSet(props: {
 }): JSX.Element {
   const standing = () => props.asked.standing;
   const waiting = () => "Waiting" in standing();
-  const archived = () => "ArchivedUnanswered" in standing();
+  const locked = () => "LockedUnanswered" in standing();
 
   /// Whether the Set nobody has answered yet was a Deferred Ask. Read off the
   /// standing, which is where the fact lives while it matters: an answered Set
@@ -1261,7 +1613,7 @@ function QuestionSet(props: {
         <Show when={deferred()}>
           <span class={styles.deferred}>deferred</span>
         </Show>
-        <Show when={archived()}>
+        <Show when={locked()}>
           <span class={styles.closed}>closed unanswered</span>
         </Show>
       </span>
@@ -1482,261 +1834,6 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         </Show>
       </div>
     </Show>
-  );
-}
-
-/// What can be done to the conversation as a whole, rather than to any one
-/// event: a menu on the header, holding the three ways of ending what it is
-/// doing.
-///
-/// A menu rather than three buttons, because the last of them throws a worktree
-/// away and the header is somewhere the human's cursor passes on the way to
-/// everything else. The [`Menu`](../Menu.tsx) every dropdown here is, so it
-/// opens, closes and reaches the keyboard without any of that being this
-/// component's to get right.
-///
-/// In order of what each costs: stop, which waits for the task the run is on;
-/// force stop, which does not; and close, which is not a stop at all but the end
-/// of the conversation. Each says what it does under it, because *stop* and
-/// *force stop* are two words apart and hours of work apart.
-///
-/// Each is drawn only where it applies. The two stops need something to stop —
-/// see `ready_to_stop`, which is the server's rule and not this page's — and
-/// force stop needs a session to end, which is what `working` says.
-function Actions(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
-  const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
-
-  /// What the click found, once it has answered, and `null` while the modal is
-  /// shut. Held out here rather than in the menu's rows, because the menu's rows
-  /// are built when it opens and thrown away when it closes — and the modal
-  /// outlives the menu that opened it by design: the press shuts the menu.
-  const [steering, setSteering] = createSignal<{ working: boolean } | null>(
-    null,
-  );
-
-  /// And what the click said when there was nothing to open a modal about.
-  const [unsteerable, setUnsteerable] = createSignal(false);
-
-  // The menu's own way to shut, held here because what closes this one is the
-  // press coming back rather than the press going out.
-  let shut = (): void => {};
-
-  /// What every press here leaves behind: a page drawn against a conversation
-  /// that has moved. Reading it again is both the correction and, where the
-  /// press was refused, the explanation.
-  const reread = () => {
-    void queries.invalidateQueries({ queryKey: ["conversation"] });
-    void queries.invalidateQueries({ queryKey: ["conversations"] });
-  };
-
-  /// Both stops answer the same way, so both are pressed the same way: the
-  /// outcome is kept whatever it is — it is either what happened or why nothing
-  /// did — and the menu closes only on a conversation that has actually
-  /// stopped. A stop that is still waiting for a step to finish has something
-  /// left to say, and says it where it was pressed.
-  const pressing = (stopping: () => Promise<ConversationStopped>) => ({
-    mutationFn: stopping,
-    onSuccess: (outcome: ConversationStopped) => {
-      setStopped(outcome);
-
-      if (outcome === "Stopped") {
-        shut();
-      }
-
-      reread();
-    },
-  });
-
-  const stop = useMutation(() =>
-    pressing(() => stopConversation(props.conversation.id)),
-  );
-
-  const force = useMutation(() =>
-    pressing(() => forceStopConversation(props.conversation.id)),
-  );
-
-  /// Clicking Steer, which is a press before it is a modal: it stops the drive,
-  /// so that nothing new is launched while the human composes and the world the
-  /// modal is drawn against is the world the submit arrives in.
-  ///
-  /// The menu shuts on the way through — what opens over it is the modal, and a
-  /// dropdown left hanging behind one is a menu nobody can see to close.
-  const click = useMutation(() => ({
-    mutationFn: () => steerConversation(props.conversation.id),
-    onSuccess: (outcome: SteerOpened) => {
-      if (outcome === "NoSuchConversation") {
-        setUnsteerable(true);
-        reread();
-        return;
-      }
-
-      setUnsteerable(false);
-      setSteering({ working: outcome.Opened.working });
-      shut();
-
-      // The conversation has stopped, whatever the human goes on to decide, so
-      // the page behind the modal is already out of date.
-      reread();
-    },
-  }));
-
-  const close = useMutation(() => ({
-    mutationFn: () => closeConversation(props.conversation.id),
-    onSuccess: (outcome: ConversationClosed) => {
-      if (outcome === "NoSuchConversation" || outcome === "WorktreeStuck") {
-        setRefused(outcome);
-        return;
-      }
-
-      // Closed or already closed: what was asked for holds either way.
-      setRefused(null);
-      shut();
-      reread();
-    },
-  }));
-
-  return (
-    <>
-      <Menu
-        class={styles.conversationActions!}
-        label="Conversation actions"
-        name="Conversation actions"
-        closer={(close) => (shut = close)}
-        trigger="⋯"
-      >
-        {() => (
-          <>
-            <Show when={props.conversation.ready_to_stop}>
-              <div class={styles.action}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class={styles.stop}
-                  disabled={stop.isPending}
-                  onClick={() => stop.mutate()}
-                >
-                  {stop.isPending ? "Stopping…" : "Stop"}
-                </button>
-                <Note>Stop after the current task until you resume.</Note>
-                <Show when={stopped() === "Stopping"}>
-                  <Note class={styles.waiting}>
-                    The session running now finishes its task first. Nothing will
-                    be started after it.
-                  </Note>
-                </Show>
-              </div>
-
-              <Show when={props.conversation.working}>
-                <div class={styles.action}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class={styles.forceStop}
-                    disabled={force.isPending}
-                    onClick={() => force.mutate()}
-                  >
-                    {force.isPending ? "Stopping…" : "Force stop"}
-                  </button>
-                  <Note>End any running task and stop immediately.</Note>
-                </div>
-              </Show>
-            </Show>
-
-            {/* Drawn whatever state the conversation is in, unlike everything
-                around it: every state is somewhere to steer *from* — a draft
-                nothing has run in, a run in flight, work Verkstead has finished
-                with — and which states it can be steered *to* is the modal's to
-                offer. */}
-            <div class={styles.action}>
-              <button
-                type="button"
-                role="menuitem"
-                class={styles.steer}
-                disabled={click.isPending}
-                onClick={() => click.mutate()}
-              >
-                {click.isPending ? "Stopping…" : "Steer"}
-              </button>
-              <Note>
-                Stop the run and move this conversation somewhere else.
-              </Note>
-              <Show when={unsteerable()}>
-                <ErrorLine class={styles.failure}>
-                  This conversation is gone.
-                </ErrorLine>
-              </Show>
-              <Show when={click.isError}>
-                <ErrorLine class={styles.failure}>
-                  The conversation could not be stopped to steer it:{" "}
-                  {click.error?.message}
-                </ErrorLine>
-              </Show>
-            </div>
-
-            <Show
-              when={props.conversation.state !== "Closed"}
-              fallback={<Note>This conversation has been closed.</Note>}
-            >
-              <div class={styles.action}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  class={styles.close}
-                  disabled={close.isPending}
-                  onClick={() => close.mutate()}
-                >
-                  {close.isPending ? "Closing…" : "Close conversation"}
-                </button>
-                <Note>
-                  Permanently end the conversation and delete the worktree. The
-                  branch stays where it is.
-                </Note>
-              </div>
-            </Show>
-
-            <Show when={stopped() && STOP_REFUSAL[stopped()!]}>
-              <ErrorLine class={styles.failure}>
-                {STOP_REFUSAL[stopped()!]}
-              </ErrorLine>
-            </Show>
-            <Show when={stop.isError || force.isError}>
-              <ErrorLine class={styles.failure}>
-                The conversation could not be stopped:{" "}
-                {stop.error?.message ?? force.error?.message}
-              </ErrorLine>
-            </Show>
-
-            <Show when={refused()}>
-              {(outcome) => (
-                <ErrorLine class={styles.failure}>
-                  {CLOSE_REFUSAL[outcome()]}
-                </ErrorLine>
-              )}
-            </Show>
-            <Show when={close.isError}>
-              <ErrorLine class={styles.failure}>
-                The conversation could not be closed: {close.error?.message}
-              </ErrorLine>
-            </Show>
-          </>
-        )}
-      </Menu>
-
-      {/* Outside the menu, because the press that opens it shuts the menu: what
-          the human is looking at from here is one card over the page. */}
-      <Show when={steering()}>
-        {(opened) => (
-          <Steer
-            conversation={props.conversation}
-            working={opened().working}
-            close={() => setSteering(null)}
-          />
-        )}
-      </Show>
-    </>
   );
 }
 

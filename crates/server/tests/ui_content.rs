@@ -402,14 +402,14 @@ async fn answered_set(
 
 /// A Set the human closed unanswered: the third standing, and the one with no
 /// Response behind it.
-async fn archived_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
+async fn locked_set(app: &Router, pool: &SqlitePool, set: &QuestionSet) -> (SetView, String) {
     let stored = put(pool, set).await.unwrap();
-    let archiving = store::archive_set(pool, &store::Settlements::new(1), stored.id)
+    let locking = store::lock_set(pool, &store::Settlements::new(1), stored.id)
         .await
         .unwrap();
     assert!(
-        matches!(archiving, store::Archiving::Archived(_)),
-        "a freshly stored Set archives unanswered: {archiving:?}"
+        matches!(locking, store::Locking::Locked(_)),
+        "a freshly stored Set locks unanswered: {locking:?}"
     );
 
     fetch_set(app, stored.id).await
@@ -848,11 +848,11 @@ async fn a_settled_sets_material_is_rendered_the_way_a_waiting_ones_is() {
     let (_dir, pool, app) = fresh_app().await;
 
     let (answered, _) = answered_set(&app, &pool, &marked_up_set(), &decided_every_way()).await;
-    let (archived, _) = archived_set(&app, &pool, &marked_up_set()).await;
+    let (locked, _) = locked_set(&app, &pool, &marked_up_set()).await;
 
     // A settled Set is read for what was asked as well as for what was decided,
     // so nothing about the rendering turns on where it stands.
-    for set in [&answered, &archived] {
+    for set in [&answered, &locked] {
         assert!(
             set.questions[0]
                 .ask
@@ -1087,14 +1087,14 @@ async fn a_set_says_where_it_stands_in_each_of_the_three_ways_it_can() {
     assert_eq!(response, decided_every_way());
     assert!(!submitted_at.is_empty(), "expected when it was answered");
 
-    let (archived, _) = archived_set(&app, &pool, &full_grammar_set()).await;
-    let Standing::ArchivedUnanswered(archived_at) = archived.standing else {
+    let (locked, _) = locked_set(&app, &pool, &full_grammar_set()).await;
+    let Standing::LockedUnanswered(locked_at) = locked.standing else {
         panic!(
             "expected a Set closed unanswered, got {:?}",
-            archived.standing
+            locked.standing
         );
     };
-    assert!(!archived_at.is_empty(), "expected when it was closed");
+    assert!(!locked_at.is_empty(), "expected when it was closed");
 }
 
 #[tokio::test]
@@ -1356,8 +1356,8 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 
     // And closed unanswered, which is the one standing with no Response behind it.
     let (_dir, pool, app) = fresh_app().await;
-    let (_, json) = archived_set(&app, &pool, &marked_up_set()).await;
-    write("set-archived.json", &pinned(&json));
+    let (_, json) = locked_set(&app, &pool, &marked_up_set()).await;
+    write("set-locked.json", &pinned(&json));
 
     // And the one that is no standing at all: a stored body this build cannot
     // read, which is the record drawn as itself with nothing to press.
@@ -1862,10 +1862,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // the pinned Event.
     //
     // Its worktree is the one in these fixtures that has to be a real
-    // directory, because a task list is not in the store at all — it is the
-    // Worktree as it stands, read every time the Conversation is. So the
-    // backlog is written into a temporary directory and the path is pinned
-    // afterwards, the way every other filesystem reading here is.
+    // directory, because a task list's *content* is not in the store at all —
+    // the record fixes where the backlog landed and the Worktree says what it
+    // holds, read every time the Conversation is. So the backlog is written into
+    // a temporary directory and the path is pinned afterwards, the way every
+    // other filesystem reading here is.
     let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
         .await
         .unwrap()
@@ -1932,6 +1933,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap()
     .unwrap();
+
+    // And the row that fixes where the backlog landed, written where the runner
+    // sees the landing: before the move it is made on the strength of. The row
+    // carries nothing — what is drawn at it is the reading of `.tasks/` above,
+    // handed over a second time.
+    store::record_backlog(&pool, tasked).await.unwrap();
 
     store::start_implementing(&pool, tasked).await.unwrap();
 
@@ -2297,6 +2304,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And the row that fixes where the roadmap landed, as the backlog above has
+    // one: the branch carries a roadmap from here, and the stage list is drawn
+    // at that row as well as pinned.
+    store::record_roadmap(&pool, staged).await.unwrap();
+
     // And what Verkstead did on its own account: the roadmap's first stage
     // started as a Conversation of its own, said on the Timeline of the
     // Conversation that started it. Written here rather than driven, because
@@ -2510,11 +2522,11 @@ fn pin_health(json: &str) -> String {
 /// Pin where a Conversation's worktree is, for the one fixture whose worktree
 /// has to be a real directory.
 ///
-/// A task list is not in the store at all — it is read out of `.tasks/` every
-/// time the Conversation is — so the payload carrying one is written over a
-/// temporary directory whose name is different on every run. The path is put
-/// back to a stated one here, exactly as [`pin_health`] puts back everything
-/// else the filesystem would otherwise decide.
+/// A task list's content is not in the store at all — it is read out of
+/// `.tasks/` every time the Conversation is — so the payload carrying one is
+/// written over a temporary directory whose name is different on every run. The
+/// path is put back to a stated one here, exactly as [`pin_health`] puts back
+/// everything else the filesystem would otherwise decide.
 fn pin_worktree(json: &str, at: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 
@@ -2642,8 +2654,8 @@ fn pinned(json: &str) -> String {
 
     if let Some(answered) = standing.get_mut("Answered") {
         answered["submitted_at"] = settled.into();
-    } else if standing.get("ArchivedUnanswered").is_some() {
-        standing["ArchivedUnanswered"] = settled.into();
+    } else if standing.get("LockedUnanswered").is_some() {
+        standing["LockedUnanswered"] = settled.into();
     }
 
     serde_json::to_string(&payload).unwrap()
