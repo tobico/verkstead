@@ -1638,7 +1638,7 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
     // Asks that no session has been told about — under everything above, which
     // is where the newest and least general thing said goes. Here rather than in
     // `Sessions::start`, because this is where every session that *builds* is
-    // launched from: the two that are not launched here are the two an Answer
+    // launched from: the one that is not launched here is the one an Answer
     // must not be spent on — see [`crate::deferrals`].
     let folding = crate::deferrals::unfolded(&state.pool, conversation_id).await;
     let prompt = folding.under(&prompt);
