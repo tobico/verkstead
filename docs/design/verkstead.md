@@ -408,7 +408,8 @@ it combining a whole-repo rename with a process supervisor.
 4. **Wrap-up** — PR events, gh integration, CI monitoring, the wrap-up loop,
    stacking, staged roadmaps.
 5. **Refinement** — deferred asks, usage-limit pausing, manual sidebar
-   ordering, milestone notifications, reopening rounds.
+   ordering, milestone notifications, reopening rounds (*retired 2026-08-26,
+   building close-and-retirements*: a steer into Grilling opens a round now).
 
 Adoption happens **after stage 4**, when Verkstead covers everything
 roadrunner does. Until then roadrunner and the tobico-scripts wrappers stay
