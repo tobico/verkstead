@@ -9,6 +9,7 @@
     },
     "title": "MVP roadmap"
   },
+  "archived": false,
   "base_commit": null,
   "blocked_on": null,
   "branch": "spring-otter",

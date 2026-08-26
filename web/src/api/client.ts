@@ -20,6 +20,7 @@ import type {
   ConversationEntry,
   ConversationSteered,
   ConversationStopped,
+  ConversationUnarchived,
   ConversationView,
   GrillingStarted,
   ProfileChoice,
@@ -39,6 +40,7 @@ import type {
   SettingsEdit,
   SettingsSaved,
   SettingsView,
+  ShowingArchived,
   Started,
   SteerOpened,
   SteerSubmission,
@@ -162,6 +164,23 @@ export function listConversations(): Promise<ConversationEntry[]> {
 /// list drawn a moment ago is allowed to carry.
 export async function placeConversations(order: number[]): Promise<void> {
   await refused(await sent("/api/ui/conversations/order", { order }));
+}
+
+/// Whether the sidebar is drawing what has been archived.
+///
+/// The server's answer rather than this device's, because the choice is the
+/// human's rather than the browser's: a toggle kept here would be one they had
+/// to find again on their phone.
+export async function showingArchived(): Promise<boolean> {
+  return (await get<ShowingArchived>("/api/ui/conversations/archived")).showing;
+}
+
+/// And put that switch where they have just put it.
+///
+/// The position rather than a flip, so what is sent is what the human is
+/// looking at. Answered with nothing at all, as the order is.
+export async function showArchived(showing: boolean): Promise<void> {
+  await refused(await sent("/api/ui/conversations/archived", { showing }));
 }
 
 /// One Conversation with its Timeline.
@@ -342,6 +361,18 @@ export function archiveConversation(
   id: number,
 ): Promise<ConversationArchived> {
   return post<ConversationArchived>(`/api/ui/conversations/${id}/archive`, {});
+}
+
+/// And take it back out: it is on the sidebar again, for good.
+///
+/// Archiving's mirror, sending as little as archiving does.
+export function unarchiveConversation(
+  id: number,
+): Promise<ConversationUnarchived> {
+  return post<ConversationUnarchived>(
+    `/api/ui/conversations/${id}/unarchive`,
+    {},
+  );
 }
 
 /// Start driving a conversation again, from wherever the work now stands.

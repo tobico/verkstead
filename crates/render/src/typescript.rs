@@ -19,12 +19,12 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefSaved, Capture, CommitPane, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Locked,
-    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown,
-    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
-    Unsubscribe, UpdateNotice, Watching,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
+    GrillingStarted, Locked, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted,
+    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -92,6 +92,7 @@ fn the_viewers_types_are_written_from_these() {
     // And the press that puts a closed one away, which takes no request shape
     // either: which Conversation it is is the whole of what it says.
     ConversationArchived::export_all(&config).unwrap();
+    ConversationUnarchived::export_all(&config).unwrap();
 
     // And the press that starts an adopted stage, which is the grilling start's
     // sibling: one Conversation, one branch, and every way of being refused
@@ -125,6 +126,7 @@ fn the_viewers_types_are_written_from_these() {
     // down the socket — the repaint above, then what the session prints — and
     // what a watcher says back up it.
     Shown::export_all(&config).unwrap();
+    ShowingArchived::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
 
     // And what a session committed. The snippet rides on the Timeline too; the

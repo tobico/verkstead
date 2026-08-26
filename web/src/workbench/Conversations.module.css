@@ -52,6 +52,15 @@
   min-width: 9rem;
 }
 
+/* The one row of that menu that is a setting rather than a way out of the pane.
+   Padded to the rows beside it so the words line up with Settings under them,
+   and given the room a whole sentence needs: the label says what it shows, and
+   a switch labelled "Archived" would be one nobody could read the sense of. */
+.showArchived {
+  padding: 0.4rem 0.6rem;
+  max-width: 15rem;
+}
+
 /* Starting a conversation: which repo the work is in, and nothing else — the
    branch name is prefilled by the server and the brief is written in the
    timeline. One decision, so one press: the button is the whole of the form,

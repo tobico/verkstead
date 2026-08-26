@@ -345,6 +345,15 @@ pub struct ConversationView {
     /// Oldest first, which is reading order and puts the Brief at the top.
     pub timeline: Vec<TimelineEvent>,
 
+    /// Whether the human has put this Conversation away — see
+    /// [`ConversationArchived`].
+    ///
+    /// What the actions menu offers Unarchive by, in the place Archive stands
+    /// in on a Closed Conversation that is still on the list. Nothing else on
+    /// the page turns on it: an archived Conversation is drawn exactly as it
+    /// was, because being off the sidebar is the whole of what archiving does.
+    pub archived: bool,
+
     /// The Events that stay in view rather than scrolling past with the record.
     ///
     /// Apart from the Timeline rather than in it, because that is what pinning
@@ -2113,4 +2122,35 @@ pub enum ConversationArchived {
     NotClosed,
 
     NoSuchConversation,
+}
+
+/// And what became of taking one back out, which is the way back from it.
+///
+/// One refusal fewer than archiving has: there is no state a Conversation can
+/// be in that is the wrong one to put back on the list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum ConversationUnarchived {
+    /// Unarchived: it is on the list again, for good.
+    Unarchived,
+
+    /// It was not archived, which is not an error — what was asked for holds
+    /// either way.
+    NotArchived,
+
+    NoSuchConversation,
+}
+
+/// Whether the sidebar is drawing what the human has archived.
+///
+/// Their standing choice rather than this device's: it is read back off the
+/// server on every load, and what is sent when the toggle is flipped is the
+/// position it has been put in rather than the flip itself — a switch says
+/// where it stands, and saying it twice says the same thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct ShowingArchived {
+    /// On: the archived Conversations are on the list, in their ordinary
+    /// places. Off: they are not drawn at all.
+    pub showing: bool,
 }

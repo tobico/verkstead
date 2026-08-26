@@ -42,11 +42,14 @@ import {
 } from "solid-js";
 
 import { Menu } from "../Menu";
+import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
   listConversations,
   listRepos,
   placeConversations,
+  showArchived,
+  showingArchived,
   startAdoption,
   startConversation,
 } from "../api/client";
@@ -386,7 +389,43 @@ export function Conversations(props: {
 /// settings are a page of their own, so this is going somewhere in the way that
 /// opening a Conversation is not. Nothing here has to shut the menu — the
 /// navigation takes the whole sidebar with it.
+///
+/// Beside it, the one thing that is about this list rather than about the rest
+/// of Verkstead: whether the conversations the human has archived are drawn in
+/// it. A switch rather than a row that presses, because it is a state the list
+/// is in rather than something to do to it — and it stays where it is put, so
+/// the menu does not shut under a hand that may want it back.
 function WorkbenchActions(): JSX.Element {
+  const queries = useQueryClient();
+
+  /// The server's answer rather than this device's: the choice is the human's,
+  /// so a phone opened afterwards is looking at the same list.
+  const showing = useReading(() => ({
+    queryKey: ["conversations", "archived"],
+    queryFn: showingArchived,
+
+    // One boolean, so there is nothing in it to hold on to and nothing to
+    // match up: what a re-read lands on is the whole payload either way.
+    freshness: { reconcile: "id" } as const,
+  }));
+
+  const flip = useMutation(() => ({
+    mutationFn: (on: boolean) => showArchived(on),
+    onSuccess: () => {
+      // The list itself and the switch over it: what is drawn changes with the
+      // setting, which is the entire point of it. The other devices hear the
+      // same news as a Nudge.
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  /// Where the switch stands: the position asked for while that is in flight,
+  /// and the server's the rest of the time. A switch that snapped back to the
+  /// old position for the length of a round trip would read as a press that
+  /// failed.
+  const on = (): boolean =>
+    flip.isPending ? (flip.variables ?? false) : (showing.data ?? false);
+
   return (
     <Menu
       class={styles.workbenchActions!}
@@ -395,9 +434,25 @@ function WorkbenchActions(): JSX.Element {
       mark
     >
       {() => (
-        <A role="menuitem" href="/settings">
-          Settings
-        </A>
+        <>
+          <div class={styles.showArchived}>
+            <Toggle
+              label="Show archived conversations"
+              on={on()}
+              disabled={showing.isPending || flip.isPending}
+              flip={(wanted) => flip.mutate(wanted)}
+            />
+            <Show when={flip.isError}>
+              <ErrorLine>
+                The setting could not be saved: {flip.error?.message}
+              </ErrorLine>
+            </Show>
+          </div>
+
+          <A role="menuitem" href="/settings">
+            Settings
+          </A>
+        </>
       )}
     </Menu>
   );

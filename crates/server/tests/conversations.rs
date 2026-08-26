@@ -21,8 +21,9 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationView, GrillingStarted, Lifecycle,
-    PinnedEvent, ProfileSaved, Registered, Started, SteerOpened, TimelineEvent,
+    ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
+    GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, ShowingArchived, Started,
+    SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -745,6 +746,42 @@ async fn archive(app: &Router, id: i64) -> ConversationArchived {
         &serde_json::json!({}),
     )
     .await
+}
+
+/// And take it back out again, which is the same row saying the other word.
+async fn unarchive(app: &Router, id: i64) -> ConversationUnarchived {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/unarchive"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Whether the sidebar is drawing what has been put away.
+async fn showing_archived(app: &Router) -> bool {
+    get::<ShowingArchived>(app, "/api/ui/conversations/archived")
+        .await
+        .showing
+}
+
+/// And putting that switch where the human has put it. Answered with nothing,
+/// as the order is, because there is nothing to answer.
+async fn show_archived(app: &Router, showing: bool) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/ui/conversations/archived")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&serde_json::json!({ "showing": showing })).unwrap(),
+            ))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NO_CONTENT, "the toggle failed: {body}");
 }
 
 /// Click Steer, which is the press that stops the drive and opens the modal.
@@ -2137,6 +2174,99 @@ async fn archiving_a_conversation_that_is_not_there_says_so() {
     assert_eq!(
         archive(&app, 404).await,
         ConversationArchived::NoSuchConversation
+    );
+}
+
+/// The toggle is the way to see what has been put away without taking it back:
+/// on, the archived Conversations are on the list in their ordinary places; off,
+/// they are not drawn at all.
+#[tokio::test]
+async fn the_toggle_shows_and_hides_what_has_been_archived() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let kept = started(&app, repo_id).await;
+    let put_away = started(&app, repo_id).await;
+    close(&app, put_away).await;
+    archive(&app, put_away).await;
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![kept]);
+
+    show_archived(&app, true).await;
+
+    assert!(showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![put_away, kept]);
+
+    show_archived(&app, false).await;
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![kept]);
+}
+
+/// It is the human's standing choice rather than one device's, so it is read
+/// back off the server — which is what a second viewer opening the sidebar is.
+#[tokio::test]
+async fn the_toggle_is_read_back_off_the_server() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    show_archived(&app, true).await;
+
+    // Said twice, because a switch says where it stands rather than asking for
+    // a flip: the position asked for is the position it ends in.
+    show_archived(&app, true).await;
+
+    assert!(showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![id]);
+}
+
+/// Unarchiving is the other way back, and the lasting one: the Conversation is
+/// on the list again with the toggle off.
+#[tokio::test]
+async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    assert!(sidebar(&app).await.is_empty());
+    assert!(opened(&app, id).await.archived);
+
+    assert_eq!(
+        unarchive(&app, id).await,
+        ConversationUnarchived::Unarchived
+    );
+
+    assert!(!showing_archived(&app).await);
+    assert_eq!(order(&app).await, vec![id]);
+
+    let view = opened(&app, id).await;
+    assert!(!view.archived);
+    assert_eq!(view.state, Lifecycle::Closed);
+}
+
+/// Unarchiving one that was never put away is not an error — what the human
+/// asked for holds either way.
+#[tokio::test]
+async fn unarchiving_one_that_is_not_archived_is_not_an_error() {
+    let (_watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    assert_eq!(
+        unarchive(&app, id).await,
+        ConversationUnarchived::NotArchived
+    );
+    assert_eq!(order(&app).await, vec![id]);
+}
+
+#[tokio::test]
+async fn unarchiving_a_conversation_that_is_not_there_says_so() {
+    let (_watched, _dir, app, _repo, _repo_id) = workbench().await;
+
+    assert_eq!(
+        unarchive(&app, 404).await,
+        ConversationUnarchived::NoSuchConversation
     );
 }
 

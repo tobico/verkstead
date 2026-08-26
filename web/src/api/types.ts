@@ -562,6 +562,14 @@ export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequ
 export type ConversationStopped = "Stopped" | "Stopping" | "AlreadyStopped" | "NotDriven" | "NoSuchConversation";
 
 /**
+ * And what became of taking one back out, which is the way back from it.
+ *
+ * One refusal fewer than archiving has: there is no state a Conversation can
+ * be in that is the wrong one to put back on the list.
+ */
+export type ConversationUnarchived = "Unarchived" | "NotArchived" | "NoSuchConversation";
+
+/**
  * One Conversation, whole: what it is attached to, what the human has settled
  * about it, and everything that has happened to it.
  */
@@ -730,6 +738,16 @@ working: boolean,
  * Oldest first, which is reading order and puts the Brief at the top.
  */
 timeline: Array<TimelineEvent>, 
+/**
+ * Whether the human has put this Conversation away — see
+ * [`ConversationArchived`].
+ *
+ * What the actions menu offers Unarchive by, in the place Archive stands
+ * in on a Closed Conversation that is still on the list. Nothing else on
+ * the page turns on it: an archived Conversation is drawn exactly as it
+ * was, because being off the sidebar is the whole of what archiving does.
+ */
+archived: boolean, 
 /**
  * The Events that stay in view rather than scrolling past with the record.
  *
@@ -1471,6 +1489,21 @@ export type SettingsView = { git_author: Author,
  * none — which is what a Verkstead nobody has told anything looks like.
  */
 github_token: TokenSaved | null, };
+
+/**
+ * Whether the sidebar is drawing what the human has archived.
+ *
+ * Their standing choice rather than this device's: it is read back off the
+ * server on every load, and what is sent when the toggle is flipped is the
+ * position it has been put in rather than the flip itself — a switch says
+ * where it stands, and saying it twice says the same thing.
+ */
+export type ShowingArchived = { 
+/**
+ * On: the archived Conversations are on the list, in their ordinary
+ * places. Off: they are not drawn at all.
+ */
+showing: boolean, };
 
 /**
  * What the server says down a live Screen's socket.

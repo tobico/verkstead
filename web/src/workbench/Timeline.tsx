@@ -68,6 +68,7 @@ import {
   startGrilling,
   steerConversation,
   stopConversation,
+  unarchiveConversation,
 } from "../api/client";
 import type {
   AgentOutputEvent,
@@ -77,6 +78,7 @@ import type {
   ConversationArchived,
   ConversationClosed,
   ConversationStopped,
+  ConversationUnarchived,
   ConversationView,
   GrillingStarted,
   HandoffEvent,
@@ -186,6 +188,15 @@ export const ARCHIVE_REFUSAL: Record<ConversationArchived, string> = {
   Archived: "",
   AlreadyArchived: "",
   NotClosed: "This conversation is not closed, so there is nothing to put away.",
+  NoSuchConversation: "This conversation is gone.",
+};
+
+/// And the one way of being refused the way back out of it. There is no state
+/// a conversation can be in that is the wrong one to put on the list again, so
+/// the only thing left to refuse is a conversation that has gone.
+export const UNARCHIVE_REFUSAL: Record<ConversationUnarchived, string> = {
+  Unarchived: "",
+  NotArchived: "",
   NoSuchConversation: "This conversation is gone.",
 };
 
@@ -1696,6 +1707,8 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
   const [refused, setRefused] = createSignal<ConversationClosed | null>(null);
   const [unarchivable, setUnarchivable] =
     createSignal<ConversationArchived | null>(null);
+  const [unreturnable, setUnreturnable] =
+    createSignal<ConversationUnarchived | null>(null);
   const [stopped, setStopped] = createSignal<ConversationStopped | null>(null);
 
   /// What the click found, once it has answered, and `null` while the modal is
@@ -1804,6 +1817,23 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
     },
   }));
 
+  /// And the way back out, which is the same press mirrored: its one refusal is
+  /// a conversation that has gone, and either success means it is on the list
+  /// again.
+  const unarchive = useMutation(() => ({
+    mutationFn: () => unarchiveConversation(props.conversation.id),
+    onSuccess: (outcome: ConversationUnarchived) => {
+      if (outcome === "NoSuchConversation") {
+        setUnreturnable(outcome);
+        return;
+      }
+
+      setUnreturnable(null);
+      shut();
+      reread();
+    },
+  }));
+
   return (
     <>
       <Menu
@@ -1885,40 +1915,74 @@ function Actions(props: { conversation: ConversationView }): JSX.Element {
             {/* And where Close was, on a conversation that has already had it:
                 the way to put the record out of sight once there is nothing
                 left to read on it. Reversible, so there is nothing to confirm
-                — see the unarchive it is offered beside. */}
+                — and on one already put away it is the unarchive that stands
+                here instead, which is that same reversal made. */}
             <Show
               when={props.conversation.state !== "Closed"}
               fallback={
                 <>
                   <Note>This conversation has been closed.</Note>
-                  <div class={styles.action}>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class={styles.archive}
-                      disabled={archive.isPending}
-                      onClick={() => archive.mutate()}
-                    >
-                      {archive.isPending ? "Archiving…" : "Archive"}
-                    </button>
-                    <Note>
-                      Take it off the conversations list. Its record stays where
-                      it is.
-                    </Note>
-                    <Show when={unarchivable()}>
-                      {(outcome) => (
+                  <Show
+                    when={props.conversation.archived}
+                    fallback={
+                      <div class={styles.action}>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class={styles.archive}
+                          disabled={archive.isPending}
+                          onClick={() => archive.mutate()}
+                        >
+                          {archive.isPending ? "Archiving…" : "Archive"}
+                        </button>
+                        <Note>
+                          Take it off the conversations list. Its record stays
+                          where it is.
+                        </Note>
+                        <Show when={unarchivable()}>
+                          {(outcome) => (
+                            <ErrorLine class={styles.failure}>
+                              {ARCHIVE_REFUSAL[outcome()]}
+                            </ErrorLine>
+                          )}
+                        </Show>
+                        <Show when={archive.isError}>
+                          <ErrorLine class={styles.failure}>
+                            The conversation could not be archived:{" "}
+                            {archive.error?.message}
+                          </ErrorLine>
+                        </Show>
+                      </div>
+                    }
+                  >
+                    <div class={styles.action}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        class={styles.unarchive}
+                        disabled={unarchive.isPending}
+                        onClick={() => unarchive.mutate()}
+                      >
+                        {unarchive.isPending ? "Unarchiving…" : "Unarchive"}
+                      </button>
+                      <Note>
+                        Put it back on the conversations list, where it stays.
+                      </Note>
+                      <Show when={unreturnable()}>
+                        {(outcome) => (
+                          <ErrorLine class={styles.failure}>
+                            {UNARCHIVE_REFUSAL[outcome()]}
+                          </ErrorLine>
+                        )}
+                      </Show>
+                      <Show when={unarchive.isError}>
                         <ErrorLine class={styles.failure}>
-                          {ARCHIVE_REFUSAL[outcome()]}
+                          The conversation could not be unarchived:{" "}
+                          {unarchive.error?.message}
                         </ErrorLine>
-                      )}
-                    </Show>
-                    <Show when={archive.isError}>
-                      <ErrorLine class={styles.failure}>
-                        The conversation could not be archived:{" "}
-                        {archive.error?.message}
-                      </ErrorLine>
-                    </Show>
-                  </div>
+                      </Show>
+                    </div>
+                  </Show>
                 </>
               }
             >

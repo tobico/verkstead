@@ -1110,6 +1110,12 @@
 .archive {
 }
 
+/* And the row that stands in its place on a conversation already put away,
+   drawn the same way for the same reason: it is the reversal of a press that
+   ended nothing. Named here so the row can be found. */
+.unarchive {
+}
+
 /* The one that cannot be undone, in the colour of what cannot be undone. Both
    stops are reversed by a resume, and read as the ordinary buttons they are. */
 .close {

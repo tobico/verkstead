@@ -530,8 +530,16 @@ so it is closed first and archived after.
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
 because nothing is lost. The two words are not each other's — one is a Question
 Set settling for good, this is a Conversation leaving a list.
+
+Two ways back, and they are different things. **Unarchive** takes it out for
+good, and the Conversation is on the sidebar again as it was. **Show archived
+conversations** is a way of looking rather than a change to anything: with it
+on, what has been archived is drawn in its ordinary place; with it off, it is
+not. That is the human's standing choice rather than a device's, so it is kept
+beside the archivings and read back on every load.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
-being archived, not the archiving), done
+being archived, not the archiving), done, restore or unhide (the word is
+unarchive)
 
 **Blocking Ask** / **Deferred Ask**:
 The two ways an agent puts a Question Set to the human. A **Blocking Ask** idles

@@ -27,6 +27,7 @@ import type {
   ConversationEntry,
   ConversationSteered,
   ConversationStopped,
+  ConversationUnarchived,
   ConversationView,
   GrillingStarted,
   ProfileEntry,
@@ -34,6 +35,7 @@ import type {
   Resumed,
   Screen,
   Shown,
+  ShowingArchived,
   SteerOpened,
   Submitted,
   TimelineEvent,
@@ -99,6 +101,7 @@ import {
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
   BRANCHES,
+  HIDING_ARCHIVED,
   OPEN,
   PROFILES,
   REPOS,
@@ -380,6 +383,7 @@ describe("the workbench", () => {
   it("says so plainly when nothing is being worked on", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
     );
     mount();
@@ -410,6 +414,79 @@ describe("the workbench", () => {
     await waitFor(() => expect(history.get()).toBe("/settings"));
   });
 
+  /// And the one row of that menu that is about this list rather than about the
+  /// rest of Verkstead: whether the conversations put away are drawn in it.
+  ///
+  /// The server's answer rather than this device's, which is what makes it the
+  /// same list on a phone opened afterwards.
+  it("draws the archived toggle where the server has it", async () => {
+    theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json({ showing: true } satisfies ShowingArchived),
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+
+    const toggle = await waitFor(() =>
+      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+    );
+    expect(toggle.checked).toBe(true);
+  });
+
+  /// A switch says where it stands rather than asking for a flip, so what goes
+  /// out is the position the human has just put it in.
+  it("sends the position the switch was put in", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json(undefined, 204),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+    const toggle = await waitFor(() =>
+      screen.getByLabelText<HTMLInputElement>("Show archived conversations"),
+    );
+    fireEvent.click(toggle);
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/conversations/archived")).toEqual({
+        showing: true,
+      }),
+    );
+  });
+
+  /// The list is drawn from the setting, so flipping it reads the list again —
+  /// which is where the archived conversations come from and go back to.
+  it("reads the list again once the setting has been saved", async () => {
+    const fetching = theWorkbench(
+      whenever(
+        "/api/ui/conversations/archived",
+        json(undefined, 204),
+        "POST",
+      ),
+    );
+    const { container } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    await openWorkbenchActions(container);
+    const read = askedFor(fetching, "/api/ui/conversations");
+    fireEvent.click(
+      await waitFor(() => screen.getByLabelText("Show archived conversations")),
+    );
+
+    await waitFor(() =>
+      expect(askedFor(fetching, "/api/ui/conversations")).toBeGreaterThan(read),
+    );
+  });
+
   /// Nothing of it until it is pressed, which is the point of putting it there:
   /// the head of the pane gives up a mark's worth of room and no more.
   it("keeps the way out of the workbench behind that menu", async () => {
@@ -431,6 +508,7 @@ describe("the workbench", () => {
   it("says where to go when there is no repo to start one against", async () => {
     serving(
       whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json([])),
     );
     const { container } = mount();
@@ -1583,6 +1661,7 @@ describe("a conversation's timeline", () => {
   it("shows the server's own wording when a conversation cannot be read", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever(
         `/api/ui/conversations/${OPEN.id}`,
@@ -1790,6 +1869,7 @@ describe("writing the brief", () => {
     let standing = OPEN;
     const fetching = serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(READING, () => json(standing)()),
@@ -2082,6 +2162,7 @@ describe("a conversation's setup", () => {
   it("still shows a pinned branch the list has lost", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(["main"])),
@@ -2107,6 +2188,7 @@ describe("a conversation's setup", () => {
     const rule: ConversationView = { ...OPEN, base_commit: null };
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(BRANCHES)),
@@ -2162,6 +2244,7 @@ describe("a conversation's pairings", () => {
   ) {
     return serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(view)),
@@ -2349,6 +2432,7 @@ describe("a conversation's pairings", () => {
   it("says where to go when there is no profile to choose", async () => {
     serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
       whenever("/api/ui/repos", json(REPOS)),
       whenever("/api/ui/profiles", json([])),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(UNCHOSEN)),
@@ -2664,6 +2748,7 @@ const REST_OF_IT = `${TRANSCRIPT_OF_IT}?after=${encodeURIComponent(
 function theGrilling(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
@@ -2679,6 +2764,7 @@ function theGrilling(...answers: Parameters<typeof serving>) {
 function theSpeaking(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
@@ -2705,6 +2791,7 @@ function theGrillingOutput(
 
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -2737,6 +2824,7 @@ function theWorkbenchWith(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, ...over })),
@@ -2769,6 +2857,7 @@ const SECOND: ConversationView = {
 function theThree(...answers: Parameters<typeof serving>) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/abandoned-roadmaps", json([])),
@@ -4480,6 +4569,83 @@ describe("archiving a conversation", () => {
   });
 });
 
+/// And the way back out of it, which stands in the same place on a conversation
+/// that has already been put away: archiving is reversible, and this is the
+/// reversal.
+describe("unarchiving a conversation", () => {
+  /// One row or the other, never both — the two say opposite things about the
+  /// same conversation.
+  it("stands where archive was, on one already put away", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const menu = await openActions(container);
+    await waitFor(() =>
+      expect(menu.querySelector(`.${timeline.unarchive}`)).toBeTruthy(),
+    );
+    expect(menu.querySelector(`.${timeline.archive}`)).toBeNull();
+  });
+
+  it("posts to the conversation's own unarchive route", async () => {
+    const fetching = theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false, archived: true },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/unarchive`,
+        json("Unarchived" satisfies ConversationUnarchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.unarchive}`));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/unarchive`)).toEqual({}),
+    );
+  });
+
+  /// What the human is owed before a press that puts something back: that it is
+  /// the list it returns to, and that it stays there.
+  it("says the conversation goes back on the list", async () => {
+    theWorkbenchWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+
+    await waitFor(() =>
+      screen.getByText(/Put it back on the conversations list/),
+    );
+  });
+
+  /// The one thing left to refuse: a page drawn against a conversation that has
+  /// since gone.
+  it("says when the conversation is gone", async () => {
+    theWorkbenchWith(
+      { state: "Closed", ready_to_grill: false, archived: true },
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/unarchive`,
+        json("NoSuchConversation" satisfies ConversationUnarchived),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${timeline.conversationActions} .${timeline.unarchive}`));
+
+    await waitFor(() => screen.getByText("This conversation is gone."));
+  });
+});
+
 /// A conversation Verkstead had finished with, steered into a second round: the
 /// first round's brief above the boundary and the round steered into below it.
 ///
@@ -5703,6 +5869,7 @@ function theBuilding(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6484,6 +6651,7 @@ function theTasked(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6677,6 +6845,7 @@ function theStaged(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6836,6 +7005,7 @@ function theStopped(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -6904,6 +7074,7 @@ function thePaused(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(
@@ -7104,6 +7275,7 @@ function theWrapping(
 ) {
   return serving(
     whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
     whenever("/api/ui/repos", json(REPOS)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever(

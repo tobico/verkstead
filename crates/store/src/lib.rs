@@ -47,7 +47,10 @@ mod transcripts;
 mod waits;
 mod wrap_up;
 
-pub use archives::{Archiving, archive_conversation};
+pub use archives::{
+    Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
+    unarchive_conversation,
+};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{

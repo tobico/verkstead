@@ -22,7 +22,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 10: Commit message block — [details](10-commit-message-block.md)
 - [x] 11: Locked Sets — [details](11-locked-sets.md)
 - [x] 12: Archive Closed conversations — [details](12-archive-closed.md)
-- [ ] 13: Show archived, and Unarchive — [details](13-show-archived.md)
+- [x] 13: Show archived, and Unarchive — [details](13-show-archived.md)
 - [ ] 14: Context menu on cards — [details](14-card-context-menu.md)
 - [ ] 15: The PR card twice — [details](15-pull-request-twice.md)
 - [ ] 16: Backlog and roadmap rows — [details](16-backlog-roadmap-rows.md)

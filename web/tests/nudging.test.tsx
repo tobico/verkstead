@@ -96,6 +96,10 @@ const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 /// question of what a kind stands for, and the reason the tests below can tell
 /// a narrow reaction from the widest one.
 const SIDEBAR = "/api/ui/conversations";
+
+/// And the sidebar's one setting, which moves when the list does — the archived
+/// Conversations being drawn or not is a fact about that list.
+const SHOWING_ARCHIVED = "/api/ui/conversations/archived";
 const REPOS = "/api/ui/repos";
 const ROADMAPS = "/api/ui/abandoned-roadmaps";
 const PROFILES = "/api/ui/profiles";
@@ -106,6 +110,7 @@ const PROFILES = "/api/ui/profiles";
 /// nothing on the workbench asks for one.
 const BESIDE = [
   whenever(SIDEBAR, json(conversations as ConversationEntry[])),
+  whenever(SHOWING_ARCHIVED, json({ showing: false })),
   whenever(REPOS, json(repos as RepoEntry[])),
   whenever(PROFILES, json(profiles as ProfileEntry[])),
   whenever(ROADMAPS, json([])),

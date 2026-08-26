@@ -1039,10 +1039,16 @@ async fn started(
 /// the human in the ordinary sense, and the sidebar says so by drawing it as a
 /// draft rather than by marking it as an ask.
 ///
-/// What the human has archived is not here at all — see
-/// [`super::archive_conversation`]. Archiving is the one thing that takes a
+/// What the human has archived is not here at all, unless they have asked to be
+/// shown it — see [`super::archive_conversation`] and
+/// [`super::showing_archived`]. Archiving is the one thing that takes a
 /// Conversation off this list, and it takes it off nothing else: its Timeline,
 /// its branch and its own page are where they were.
+///
+/// The toggle is read inside the query rather than handed in, because it is a
+/// fact about this list and this is the one thing that draws it: a caller given
+/// the choice would be a second place to get it wrong, and there is no other way
+/// the sidebar should ever be read.
 pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
     let rows: Vec<(i64, String, String, String, bool)> = sqlx::query_as(
         "SELECT c.id, c.branch, r.name, c.state,
@@ -1063,9 +1069,10 @@ pub async fn conversations(pool: &SqlitePool) -> Result<Vec<ConversationRow>> {
          FROM conversations c
          JOIN repos r ON r.id = c.repo_id
          LEFT JOIN placements m ON m.conversation_id = c.id
-         WHERE NOT EXISTS (
-             SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
-         )
+         WHERE EXISTS (SELECT 1 FROM shown_archives)
+            OR NOT EXISTS (
+                   SELECT 1 FROM archived_conversations a WHERE a.conversation_id = c.id
+               )
          ORDER BY m.place IS NULL DESC, m.place, c.id DESC",
     )
     .fetch_all(pool)

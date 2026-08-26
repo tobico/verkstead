@@ -1,5 +1,6 @@
 {
   "adopting": null,
+  "archived": false,
   "base_commit": "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
   "blocked_on": 26,
   "branch": "deferred-asks",

@@ -30,11 +30,11 @@ use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationView, Cursor, GrillingStarted, Lifecycle, Locked, NewAdoption, NewConversation,
-    NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RepoEntry, Resumed,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, Lifecycle, Locked,
+    NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -65,6 +65,14 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the sidebar rather than about any one Conversation, and the whole
         // order is what a drag produces.
         .route("/api/ui/conversations/order", post(place_conversations))
+        // And whether that list is drawing what has been archived, which is
+        // about the sidebar in exactly the same way — the human's standing
+        // choice rather than this device's, so it is read back here on every
+        // load rather than kept where the toggle was flipped.
+        .route(
+            "/api/ui/conversations/archived",
+            get(showing_archived).post(show_archived),
+        )
         // The roadmaps in the registered Repos that nothing is driving, drawn
         // as a notice under the new-conversation box. Beside the Conversations
         // rather than under a Repo, because that is where it is read: what it
@@ -130,6 +138,9 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // around it, and with no body for the same reason: which Conversation
         // it is is the whole of what it says.
         .route("/api/ui/conversations/{id}/archive", post(archive))
+        // And the way back out of it, which is the same row saying the other
+        // word: archiving is reversible, and this is what reverses it.
+        .route("/api/ui/conversations/{id}/unarchive", post(unarchive))
         // No route for how the work gets built: the direction rides the closing
         // Question Set, and answering one is answering a Set — see
         // [`store::submit_response`].
@@ -838,6 +849,18 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
     // on — no stop resumes itself, so every one of them waits for the same press.
     let resets = stopped.and_then(|stopped| stopped.resets);
 
+    // And whether the human has put this Conversation away, which is what the
+    // actions menu offers Unarchive by. Read here rather than carried by the
+    // Conversation the store loaded: it is a fact about the sidebar, and the
+    // page is the one other place that has anything to say about it.
+    let archived = match store::archived(&state.pool, id).await {
+        Ok(archived) => archived,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was archived failed");
+            false
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -868,6 +891,7 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         pinned,
         blocked_on,
         resets,
+        archived,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -1557,7 +1581,10 @@ async fn archive(State(state): State<AppState>, Path(id): Path<String>) -> HttpR
     };
 
     match store::archive_conversation(&state.pool, id).await {
-        Ok(outcome) => Json(archived(outcome)).into_response(),
+        Ok(outcome) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(archived(outcome)).into_response()
+        }
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "archiving a Conversation failed");
             unavailable("the conversation could not be archived")
@@ -1572,6 +1599,72 @@ fn archived(outcome: store::Archiving) -> ConversationArchived {
         store::Archiving::AlreadyArchived => ConversationArchived::AlreadyArchived,
         store::Archiving::NotClosed => ConversationArchived::NotClosed,
         store::Archiving::NoSuchConversation => ConversationArchived::NoSuchConversation,
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/unarchive` — put it back on the list.
+///
+/// Archiving's mirror in every way, the store included: one row taken away,
+/// and no state to be in the wrong one of. The Nudge is what carries it to the
+/// other devices, a Conversation arriving on the list being the one thing every
+/// open sidebar has to read again.
+async fn unarchive(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(ConversationUnarchived::NoSuchConversation).into_response();
+    };
+
+    match store::unarchive_conversation(&state.pool, id).await {
+        Ok(outcome) => {
+            state.nudges.announce(Nudge::Conversations);
+            Json(unarchived(outcome)).into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "unarchiving a Conversation failed");
+            unavailable("the conversation could not be unarchived")
+        }
+    }
+}
+
+/// And its word for what became of that.
+fn unarchived(outcome: store::Unarchiving) -> ConversationUnarchived {
+    match outcome {
+        store::Unarchiving::Unarchived => ConversationUnarchived::Unarchived,
+        store::Unarchiving::NotArchived => ConversationUnarchived::NotArchived,
+        store::Unarchiving::NoSuchConversation => ConversationUnarchived::NoSuchConversation,
+    }
+}
+
+/// `GET /api/ui/conversations/archived` — whether the sidebar is drawing what
+/// has been put away.
+async fn showing_archived(State(state): State<AppState>) -> HttpResponse {
+    match store::showing_archived(&state.pool).await {
+        Ok(showing) => Json(ShowingArchived { showing }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "reading whether the archived Conversations are shown failed");
+            unavailable("the setting could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/archived` — and saying that it is, or is not.
+///
+/// The position the switch has been put in rather than a flip, so two devices
+/// pressing at once land on a state one of them asked for rather than on
+/// whichever order they arrived in. Refused for nothing, and there is nothing
+/// to answer with beyond that it was taken.
+async fn show_archived(
+    State(state): State<AppState>,
+    Json(showing): Json<ShowingArchived>,
+) -> HttpResponse {
+    match store::show_archived(&state.pool, showing.showing).await {
+        Ok(()) => {
+            state.nudges.announce(Nudge::Conversations);
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(error) => {
+            tracing::error!(error = ?error, "saying whether the archived Conversations are shown failed");
+            unavailable("the setting could not be saved")
+        }
     }
 }
 
