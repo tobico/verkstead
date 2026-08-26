@@ -15,7 +15,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 03: Mobile reopen fix — [details](03-mobile-reopen.md)
 - [x] 04: Badges and quiet rows — [details](04-badges-and-quiet-rows.md)
 - [x] 05: Carousel — [details](05-carousel.md)
-- [ ] 06: Sticky session strip — [details](06-sticky-session-strip.md)
+- [x] 06: Sticky session strip — [details](06-sticky-session-strip.md)
 - [ ] 07: Menus and pane chrome — [details](07-menus-and-pane-chrome.md)
 - [ ] 08: Brief card — [details](08-brief-card.md)
 - [ ] 09: Hover sweep — [details](09-hover-sweep.md)

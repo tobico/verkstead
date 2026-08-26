@@ -722,6 +722,31 @@
   color: var(--ink-soft);
 }
 
+/* And that same session again, held against the foot of the pane for as long as
+   it is running: the title and the mark on one line, pressed to open what the
+   card on the record opens. A line over it to say where the record ends.
+
+   What holds it down there is the pane's rather than this card's, as what holds
+   the header up there is: the strip wears `paneFoot` out of
+   `Workbench.module.css` and the frame says what a pane does about something
+   stuck to its bottom edge. Here is the paint alone. */
+.session {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 0;
+  border-top: 1px solid var(--edge);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session .what {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
 /* A Question Set the session put to the human, read as the interview it was: a
    question line and its answer under it, pair after pair. A button, as a
    session's output is, and for the same reason — the whole document is in the

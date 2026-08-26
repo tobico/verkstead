@@ -3834,6 +3834,92 @@ describe("a session's output on the timeline", () => {
   });
 });
 
+/// And that same session again, held against the foot of the pane for as long
+/// as it is running.
+///
+/// A second appearance rather than a move: the card stays where it is on the
+/// record, and this is the way back to it from however far down the human has
+/// read. What holds it there is one rule of the frame's, which is what makes it
+/// right in both scrolling regimes — a narrow window scrolls the page, a wide
+/// one scrolls the pane, and sticky hugs the bottom edge in either.
+describe("the strip for the session running now", () => {
+  /// Where the strip is found, which is the pane rather than the record: it is
+  /// no part of the list of what has happened.
+  const strip = (container: HTMLElement) =>
+    container.querySelector(`.${shell.timelinePane} > .${timeline.session}`);
+
+  it("holds the running session against the foot of the pane", async () => {
+    theGrillingOutput({ running: true, idle: false });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.textContent).toContain("Agent output");
+    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeTruthy();
+
+    // Outside the record, and inside the pane: the strip is a second appearance
+    // of the session rather than an event of its own.
+    expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
+    expect(strip(container)).toBe(pinned);
+  });
+
+  /// jsdom lays nothing out, so what says it stays down there is the rule, as
+  /// it is for the block stuck to the pane's top edge. One rule for both ways a
+  /// pane scrolls, and beneath the chrome in stacking terms so that a menu
+  /// coming down from the header passes over it.
+  it("stays against the bottom edge while the record scrolls past it", async () => {
+    theGrillingOutput({ running: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.classList).toContain(shell.paneFoot);
+    expect(shellCss).toContain(
+      ".pane > .paneFoot {\n  position: sticky;\n  bottom: 0;\n  z-index: 0;",
+    );
+  });
+
+  /// The mark says what the card's says, live: the two are one session read at
+  /// two distances, and a strip disagreeing with the row would be two answers
+  /// to the one question.
+  it("empties the ring while the session is idle", async () => {
+    theGrillingOutput({ running: true, idle: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const pinned = await drawn(container, `.${timeline.session}`);
+
+    expect(pinned.querySelector(`.${marks.mark}.${marks.idle}`)).toBeTruthy();
+    expect(pinned.querySelector(`.${marks.mark}.${marks.working}`)).toBeNull();
+  });
+
+  /// And the press is the card's own press: the same session's output in the
+  /// details pane, and the card on the record marked as the one that is open.
+  it("opens the session's output", async () => {
+    theGrillingOutput({ running: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.session}`));
+
+    await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
+
+    const card = container.querySelector(`.${timeline.agentOutput}`)!;
+    expect(card.classList).toContain(timeline.selected);
+  });
+
+  /// And nothing at all where nothing is running, which is every conversation
+  /// between one step and the next: there is no session to be found, so there
+  /// is nothing to hold in view.
+  it("draws no strip when no session is running", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(OUTPUT.running).toBe(false);
+    expect(strip(container)).toBeNull();
+  });
+});
+
 /// The Screen of a session that is still drawing it: watched over a socket
 /// rather than fetched, which is the one place in the app the viewer is sent
 /// something instead of asking for it.

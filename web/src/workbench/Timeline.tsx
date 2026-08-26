@@ -22,6 +22,13 @@
 //! to open, and it carries a Conversation's setup under it for as long as there
 //! is a draft to set up.
 //!
+//! Held against the foot of the pane, for as long as a session is running, is
+//! that session again: a strip carrying its title and its liveness mark, which
+//! opens the same details pane its card does. A second appearance rather than a
+//! move — the card keeps its place on the record — because a record grows past
+//! a screenful within the hour and the one thing on it that is moving should
+//! never have to be scrolled back to.
+//!
 //! The Timeline is also where the work is moved on from, because that is where
 //! the reason to move it is: a control sits at the end of everything that has
 //! happened so far, which is exactly where the next thing to happen belongs.
@@ -335,6 +342,20 @@ export function Timeline(props: {
   selected: number | null;
   select: (event: number) => void;
 }): JSX.Element {
+  /// The session running now, where there is one: the last output on the record
+  /// that is still being written to. The last, because a Conversation runs one
+  /// session at a time — a record is a column of finished sessions with at most
+  /// one live one at the end of it.
+  const live = createMemo(() =>
+    props.conversation.timeline
+      .flatMap((event) =>
+        "AgentOutput" in event && event.AgentOutput.running
+          ? [event.AgentOutput]
+          : [],
+      )
+      .at(-1),
+  );
+
   return (
     <>
       {/* The header and the pinned block as one block, because that is how they
@@ -542,7 +563,50 @@ export function Timeline(props: {
           What Verkstead was never going to do is not here: a steer is what says
           that, and it is in the menu on the header. */}
       <Resume conversation={props.conversation} />
+
+      {/* And the session running now, held against the foot of the pane so that
+          it can be reached from however far down the record the human has read.
+          A second appearance rather than a move: the session keeps its card in
+          its own place on the record, and this is the way back to it. */}
+      <Show when={live()}>
+        {(output) => (
+          <Session
+            output={output()}
+            open={() => {
+              props.select(output().id);
+              props.details();
+            }}
+          />
+        )}
+      </Show>
     </>
+  );
+}
+
+/// The session running now, held against the foot of the pane.
+///
+/// One line of what the record's own card says — the title and the mark — and
+/// the same press: it opens the session's output in the details pane. It shows
+/// only while something is running, because what it is for is finding the thing
+/// that is moving; a session that has ended is a card on the record like any
+/// other.
+function Session(props: {
+  output: AgentOutputEvent;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      class={`${styles.session} ${shell.paneFoot}`}
+      onClick={props.open}
+    >
+      <span class={styles.what}>Agent output</span>
+      <Mark
+        running={props.output.running}
+        idle={props.output.idle}
+        class={styles.rowMark}
+      />
+    </button>
   );
 }
 
