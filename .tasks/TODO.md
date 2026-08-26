@@ -21,4 +21,4 @@ dispatched owed fixes from the record goes with the grammar, by decision.
 - [x] 02: Key the review's outcomes on the branch and the session — [details](02-review-off-the-record.md)
 - [x] 03: Bring the batch sessions under the same rule — [details](03-batches-follow.md)
 - [x] 04: Remove the findings grammar from the schema — [details](04-remove-findings-grammar.md)
-- [ ] 05: Rewrite the reviewing and responding skills — [details](05-rewrite-the-skills.md)
+- [x] 05: Rewrite the reviewing and responding skills — [details](05-rewrite-the-skills.md)
