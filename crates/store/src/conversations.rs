@@ -220,6 +220,15 @@ const QUESTION_SET: &str = "question-set";
 /// an Event to hand.
 const PULL_REQUEST: &str = "pull-request";
 
+/// And the words it holds for the two rows that fix where a list landed on the
+/// branch: the backlog, and the roadmap.
+///
+/// Constants for a third reason again — [`landed`] asks whether a Timeline
+/// already carries one, and that question is put to the `kind` column rather
+/// than to an Event.
+const TASK_LIST: &str = "task-list";
+const STAGE_LIST: &str = "stage-list";
+
 /// One entry in a Conversation's Timeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TimelineEvent {
@@ -357,6 +366,23 @@ pub enum Event {
     /// to write, and it reads back as the steer it was — ADR-0006's rule, and
     /// the reason the target goes above the document rather than under it.
     Steer(Lifecycle, Option<String>),
+
+    /// The backlog landed on the branch, and this is where that happened.
+    ///
+    /// No body, and nothing joined in beside it either. What the Timeline draws
+    /// at this row is `.tasks/` as the Worktree holds it *now* — the same live
+    /// reading the pinned block is drawn from — so what the row keeps is the
+    /// position alone: the moment the work stopped being a plan and became a
+    /// list to work through.
+    ///
+    /// One per Conversation. A backlog lands once, and everything the run does
+    /// to it afterwards moves the files it is read from rather than the record
+    /// — see [`landed`].
+    TaskList,
+
+    /// And the roadmap landed on the branch, which is the same thing one level
+    /// up: written once, and drawn from a live reading of `docs/roadmaps/`.
+    StageList,
 }
 
 /// A Question Set as its Timeline Event holds it: which Set, what it asked, and
@@ -403,6 +429,8 @@ impl Event {
             Self::Notice(_) => "notice",
             Self::ManualTask(_) => "manual-task",
             Self::Steer(..) => "steer",
+            Self::TaskList => TASK_LIST,
+            Self::StageList => STAGE_LIST,
         }
     }
 
@@ -438,6 +466,10 @@ impl Event {
             Self::Steer(target, Some(instruction)) => {
                 Cow::Owned(format!("{}\n{instruction}", target.stored()))
             }
+            // Nothing, and for neither of those reasons: there is no content
+            // here to hold anywhere. The row fixes a position, and the card
+            // drawn at it is read off the Worktree — see the variants.
+            Self::TaskList | Self::StageList => Cow::Borrowed(""),
         }
     }
 
@@ -494,6 +526,8 @@ impl Event {
                 }
                 None => Self::Steer(Lifecycle::read(&body)?, None),
             },
+            TASK_LIST => Self::TaskList,
+            STAGE_LIST => Self::StageList,
             other => bail!("a Timeline holds an Event of the unknown kind {other:?}"),
         })
     }
@@ -2754,6 +2788,101 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
     .rows_affected();
 
     Ok(written > 0)
+}
+
+/// What became of stamping the row that fixes where a list landed.
+///
+/// Three answers rather than a `bool`, because the middle one is not a failure
+/// and is not a write either: a run that is seen out twice, or one taken up
+/// again after a stop, reaches the same landing a second time and finds the row
+/// already on the record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Landed {
+    /// The row is on the Timeline, written now.
+    Stamped,
+
+    /// It was already there, so nothing was written. A list lands once.
+    Already,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+}
+
+/// Put the row that says a list landed on this Conversation's branch — the
+/// backlog, or the roadmap — on its Timeline.
+///
+/// The row carries nothing: what the Timeline draws at it is the list as the
+/// Worktree holds it now, read at the moment somebody looks. What it fixes is
+/// *where* — the moment the plan became something to work through, which the
+/// runner is watching for anyway in order to move the Conversation on.
+///
+/// One transaction, and the looking is inside it, which is what makes a second
+/// go safe: the state is read and acted on without a gap for another to write
+/// through — the pattern [`super::record_pull_request`] uses one Event along.
+///
+/// Nothing is backfilled. A Conversation whose backlog landed before there was a
+/// row to stamp has none, and draws its list in the pinned block alone.
+async fn landed(pool: &SqlitePool, id: i64, event: Event) -> Result<Landed> {
+    let kind = event.kind();
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
+
+    let conversation: Option<(i64,)> = sqlx::query_as("SELECT id FROM conversations WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await
+        .with_context(|| format!("reading Conversation {id}"))?;
+
+    if conversation.is_none() {
+        return Ok(Landed::NoSuchConversation);
+    }
+
+    let stamped: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM timeline_events WHERE conversation_id = ? AND kind = ? LIMIT 1",
+    )
+    .bind(id)
+    .bind(kind)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| format!("looking for the {kind} row of Conversation {id}"))?;
+
+    if stamped.is_some() {
+        return Ok(Landed::Already);
+    }
+
+    sqlx::query(
+        "INSERT INTO timeline_events (conversation_id, at, kind, body)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, '')",
+    )
+    .bind(id)
+    .bind(kind)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| format!("putting the {kind} row of Conversation {id} on its Timeline"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("recording that {kind} landed on Conversation {id}"))?;
+
+    Ok(Landed::Stamped)
+}
+
+/// The backlog landed: the breakdown committed `.tasks/`, and there is a list to
+/// work through from here.
+///
+/// Written where the runner sees that landing, which is the same moment it moves
+/// the Conversation on — see `crate::runner` in the server.
+pub async fn record_backlog(pool: &SqlitePool, id: i64) -> Result<Landed> {
+    landed(pool, id, Event::TaskList).await
+}
+
+/// And the roadmap landed: the staging session committed `docs/roadmaps/`, and
+/// the stages it names are what the effort is now against.
+pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
+    landed(pool, id, Event::StageList).await
 }
 
 /// Start a roadmap stage's Conversation working: its base commit, its worktree,

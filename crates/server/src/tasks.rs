@@ -1,5 +1,5 @@
-//! The backlog a Conversation's Worktree holds, read back as the pinned
-//! task-list Event.
+//! The backlog a Conversation's Worktree holds, read back as the task-list
+//! Event.
 //!
 //! Nothing here is stored. `.tasks/` is the repository's — written by the
 //! breaking-down session and rewritten by every session that finishes a task —
@@ -7,6 +7,12 @@
 //! somebody remembered to keep up to date. That is what makes it worth pinning:
 //! a record of the backlog *as it was* would be one more thing to be wrong,
 //! where this cannot disagree with the branch it is read off.
+//!
+//! What *is* stored is where the backlog landed — one row with nothing on it,
+//! written when the branch first carried one, so that the Timeline has a place
+//! to draw the card as well as a block to pin it in. The reading here is what
+//! is drawn in both, so the two are one card in two places rather than two
+//! answers to the same question. See `store::record_backlog`.
 //!
 //! Two files say what the list is, and each says a different half of it.
 //! `TODO.md` holds the entries — their order, their numbers and their titles —
@@ -22,7 +28,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use verkstead_render::{PinnedEvent, TaskEntry};
+use verkstead_render::{TaskEntry, TaskListEvent};
 
 use crate::checklist;
 
@@ -32,26 +38,26 @@ pub(crate) const BACKLOG: &str = ".tasks";
 /// The list itself, inside that directory.
 pub(crate) const TODO: &str = "TODO.md";
 
-/// The backlog pinned to a Conversation's Timeline, where its Worktree holds
-/// one.
+/// The backlog a Conversation's Timeline draws, where its Worktree holds one.
 ///
-/// Empty where a Conversation has no Worktree, where the Worktree has no
+/// `None` where a Conversation has no Worktree, where the Worktree has no
 /// `.tasks/`, or where what is there is not a list this can read. All three are
-/// the same thing to draw: nothing is pinned.
+/// the same thing to draw: no card, in either of the two places one goes.
+///
+/// One reading behind both of them — the pinned block and the row on the record
+/// where the backlog landed — because the card is the same card, and a page that
+/// read the directory twice could draw two backlogs that disagreed.
 ///
 /// Blocking work, so it happens off the runtime's threads — this is a directory
 /// read and a file read per Conversation the human opens.
-pub(crate) async fn pinned(worktree: Option<PathBuf>) -> Vec<PinnedEvent> {
-    let Some(worktree) = worktree else {
-        return Vec::new();
-    };
+pub(crate) async fn showing(worktree: Option<PathBuf>) -> Option<TaskListEvent> {
+    let worktree = worktree?;
 
     match tokio::task::spawn_blocking(move || backlog(&worktree)).await {
-        Ok(Some(list)) => vec![list],
-        Ok(None) => Vec::new(),
+        Ok(list) => list,
         Err(error) => {
             tracing::error!(error = ?error, "reading a Worktree's backlog failed");
-            Vec::new()
+            None
         }
     }
 }
@@ -62,7 +68,7 @@ pub(crate) async fn pinned(worktree: Option<PathBuf>) -> Vec<PinnedEvent> {
 /// empty list: what would be pinned is a heading over nothing, and a
 /// Conversation whose backlog cannot be read should read the same as one that
 /// has no backlog — there is nothing for the human to do about either.
-fn backlog(worktree: &Path) -> Option<PinnedEvent> {
+fn backlog(worktree: &Path) -> Option<TaskListEvent> {
     let backlog = worktree.join(BACKLOG);
 
     let list = match std::fs::read_to_string(backlog.join(TODO)) {
@@ -99,7 +105,7 @@ fn backlog(worktree: &Path) -> Option<PinnedEvent> {
         return None;
     }
 
-    Some(verkstead_render::task_list_event(
+    Some(verkstead_render::task_list(
         checklist::heading(&list),
         tasks,
     ))
@@ -174,11 +180,8 @@ Takes a Conversation from finished grilling to implemented work.
     }
 
     /// The task list a worktree comes back with, which every test here wants.
-    fn list(dir: &tempfile::TempDir) -> verkstead_render::TaskListEvent {
-        match backlog(dir.path()).expect("there is a backlog to read") {
-            PinnedEvent::TaskList(list) => list,
-            pinned => panic!("a backlog is a task list, not {pinned:?}"),
-        }
+    fn list(dir: &tempfile::TempDir) -> TaskListEvent {
+        backlog(dir.path()).expect("there is a backlog to read")
     }
 
     #[test]

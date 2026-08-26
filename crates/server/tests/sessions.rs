@@ -47,7 +47,8 @@ use verkstead_render::{
     Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, ConversationClosed,
     ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
     NoticeEvent, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resumed, Shown, Size,
-    Started, SteerOpened, Submitted, TaskListEvent, TimelineEvent, TranscriptView, Turn, Watching,
+    StageListReached, Started, SteerOpened, Submitted, TaskListEvent, TaskListReached,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::handoffs::Handoffs;
@@ -1310,6 +1311,27 @@ fn sets(view: &ConversationView) -> Vec<&verkstead_render::QuestionSetEvent> {
 fn backlog(view: &ConversationView) -> Option<&TaskListEvent> {
     view.pinned.iter().find_map(|pinned| match pinned {
         PinnedEvent::TaskList(list) => Some(list),
+        _ => None,
+    })
+}
+
+/// And the same backlog on the record, at the row that says it landed on the
+/// branch.
+///
+/// The other of the two places a task list is drawn. Its content is the same
+/// live reading the pinned copy is drawn from — the server takes it once and
+/// hands it over twice — so what this adds is where it landed.
+fn backlog_row(view: &ConversationView) -> Option<&TaskListReached> {
+    view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::TaskList(reached) => Some(reached),
+        _ => None,
+    })
+}
+
+/// And the roadmap on the record, at the row that says it landed.
+fn roadmap_row(view: &ConversationView) -> Option<&StageListReached> {
+    view.timeline.iter().find_map(|event| match event {
+        TimelineEvent::StageList(reached) => Some(reached),
         _ => None,
     })
 }
@@ -3208,6 +3230,33 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
         ],
         "the roadmap's own order, numbers and titles, and the boxes as it wrote them",
     );
+
+    // And the same roadmap on the record, at the row the landing stamped —
+    // before the pull request the same session went on to open, which is the
+    // order the two happened in.
+    let view = fixture.view().await;
+    let reached = roadmap_row(&view).expect("the roadmap landing is on the record");
+
+    assert_eq!(
+        reached.roadmaps,
+        [stages],
+        "the record draws the pinned card itself",
+    );
+
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::StageList(_)));
+    let opened = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::PullRequest(_)));
+
+    assert!(
+        at < opened,
+        "the roadmap landed before the branch went up for review: {:?}",
+        view.timeline,
+    );
 }
 
 /// The backlog working itself: once `.tasks/` is committed, Verkstead launches
@@ -3436,6 +3485,35 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             .collect::<Vec<_>>(),
         [true, false],
         "the task whose file has gone is done, and the one still to do is not",
+    );
+
+    // And the same list is on the record, at the row the backlog landing
+    // stamped. One card in two places: the row fixes where it landed and the
+    // card at it is the pinned card's own reading, so it has ticked along with
+    // the work exactly as the pinned one has.
+    let view = fixture.view().await;
+    let reached = backlog_row(&view).expect("the backlog landing is on the record");
+
+    assert_eq!(
+        reached.list.as_ref(),
+        backlog(&view),
+        "the record draws the pinned card itself",
+    );
+
+    // Where it landed, which is before the move it was made on the strength of:
+    // the plan commit is the end of the planning and the start of the run.
+    let at = view
+        .timeline
+        .iter()
+        .position(|event| matches!(event, TimelineEvent::TaskList(_)));
+    let moved = view.timeline.iter().position(
+        |event| matches!(event, TimelineEvent::Moved(moved) if moved.state == Lifecycle::Implementing),
+    );
+
+    assert!(
+        at < moved,
+        "the backlog is on the record before the move it wrote: {:?}",
+        view.timeline,
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -8507,6 +8585,14 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     assert!(
         backlog(&stage).is_some(),
         "and the backlog it wrote is pinned beside it, as a feature's is",
+    );
+
+    // And on the record where it landed, as a feature's is: a stage's first step
+    // is the one that writes its backlog, and landing that is the same moment.
+    assert_eq!(
+        backlog_row(&stage).map(|reached| reached.list.as_ref()),
+        Some(backlog(&stage)),
+        "the stage's backlog is on the record too, drawn from the pinned reading",
     );
 
     // The annotation itself, which is what says the stage is in flight and on

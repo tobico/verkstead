@@ -1,12 +1,13 @@
-//! The roadmaps Verkstead reads: a Conversation's Worktree, pinned as
-//! stage-list Events, and a registered Repo's, read at a commit for the ones
-//! nothing is driving.
+//! The roadmaps Verkstead reads: a Conversation's Worktree, drawn as stage-list
+//! Events, and a registered Repo's, read at a commit for the ones nothing is
+//! driving.
 //!
 //! Nothing here is stored, for the reason nothing about a backlog is — see
-//! [`crate::tasks`]. `docs/roadmaps/` is the repository's: written by the
-//! roadmap direction's session, and rewritten by every stage that ticks itself
-//! off as it finishes. So the Event is a reading of the Worktree as it stands
-//! and cannot disagree with the branch it is read off.
+//! [`crate::tasks`], which is also where the one row that *is* stored is
+//! explained. `docs/roadmaps/` is the repository's: written by the roadmap
+//! direction's session, and rewritten by every stage that ticks itself off as it
+//! finishes. So the Event is a reading of the Worktree as it stands and cannot
+//! disagree with the branch it is read off.
 //!
 //! Where this parts company with a backlog is what says a stage is done. A task
 //! is done when its file has gone, because a session deletes one as it lands;
@@ -36,7 +37,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use verkstead_render::{
-    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, PinnedEvent, StageEntry,
+    AbandonedRepo, AbandonedRoadmap, AdoptedStage, AdoptionView, StageEntry, StageListEvent,
 };
 
 use crate::checklist;
@@ -50,17 +51,23 @@ pub(crate) const ROADMAPS: &str = "docs/roadmaps";
 /// The index of one roadmap, inside its own directory under that.
 pub(crate) const INDEX: &str = "ROADMAP.md";
 
-/// The stage list pinned to a Conversation's Timeline: the roadmap its branch
-/// has written to, where there is one.
+/// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
+/// written to, where there are any.
 ///
 /// Empty where a Conversation has no Worktree, where its branch has touched no
 /// roadmap, or where what it touched is not a roadmap this can read. All three
-/// are the same thing to draw: nothing is pinned, and there is nothing for the
-/// human to do about any of them.
+/// are the same thing to draw: no card, in either of the two places one goes.
+///
+/// One reading behind both of them, for the reason [`crate::tasks::showing`] is
+/// one reading: the pinned block and the row on the record where the roadmap
+/// landed draw the same cards.
 ///
 /// Blocking work, so it happens off the runtime's threads — this is a git read
 /// and a file read per Conversation the human opens.
-pub(crate) async fn pinned(worktree: Option<PathBuf>, base: Option<String>) -> Vec<PinnedEvent> {
+pub(crate) async fn showing(
+    worktree: Option<PathBuf>,
+    base: Option<String>,
+) -> Vec<StageListEvent> {
     let (Some(worktree), Some(base)) = (worktree, base) else {
         return Vec::new();
     };
@@ -82,7 +89,7 @@ pub(crate) async fn pinned(worktree: Option<PathBuf>, base: Option<String>) -> V
 /// a branch that touched two roadmaps has two worth showing — and sorted rather
 /// than taken as the filesystem hands them over, so a page that drew them twice
 /// cannot draw them in two orders.
-fn roadmaps(worktree: &Path, base: &str) -> Vec<PinnedEvent> {
+fn roadmaps(worktree: &Path, base: &str) -> Vec<StageListEvent> {
     touched(worktree, base)
         .iter()
         .filter_map(|name| roadmap(&worktree.join(ROADMAPS).join(name)))
@@ -342,7 +349,7 @@ fn named(path: &str) -> Option<&str> {
 /// A `ROADMAP.md` with no stages in it comes back as `None` rather than as an
 /// empty list, exactly as an empty backlog does: what would be pinned is a
 /// heading over nothing.
-fn roadmap(directory: &Path) -> Option<PinnedEvent> {
+fn roadmap(directory: &Path) -> Option<StageListEvent> {
     let index = directory.join(INDEX);
 
     let list = match std::fs::read_to_string(&index) {
@@ -378,7 +385,7 @@ fn roadmap(directory: &Path) -> Option<PinnedEvent> {
         return None;
     }
 
-    Some(verkstead_render::stage_list_event(
+    Some(verkstead_render::stage_list(
         name(directory),
         checklist::heading(&list),
         stages,
@@ -924,14 +931,8 @@ Turns this askance clone into Verkstead.
         }
         /// The stage lists this worktree comes back with, which every test here
         /// wants.
-        fn lists(&self) -> Vec<verkstead_render::StageListEvent> {
+        fn lists(&self) -> Vec<StageListEvent> {
             roadmaps(self.path(), &self.base)
-                .into_iter()
-                .map(|pinned| match pinned {
-                    PinnedEvent::StageList(list) => list,
-                    pinned => panic!("a roadmap is a stage list, not {pinned:?}"),
-                })
-                .collect()
         }
     }
 
@@ -1115,10 +1116,8 @@ Turns this askance clone into Verkstead.
             .join(ROADMAPS);
 
         for name in ["mvp", "public-release"] {
-            let list = match roadmap(&roadmaps.join(name)) {
-                Some(PinnedEvent::StageList(list)) => list,
-                pinned => panic!("{name} should read back as a stage list, not {pinned:?}"),
-            };
+            let list = roadmap(&roadmaps.join(name))
+                .unwrap_or_else(|| panic!("{name} should read back as a stage list"));
 
             assert_eq!(list.name, name);
             assert!(

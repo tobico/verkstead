@@ -311,8 +311,8 @@ Timeline events:
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
-| Task list | inline, pinned | — |
-| Stage list | inline, pinned | — |
+| Task list | inline, pinned *and* on the record where the backlog landed | — |
+| Stage list | inline, pinned *and* on the record where the roadmap landed | — |
 | PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
 | Notice | inline, nothing to do about it | — |
 
@@ -335,8 +335,14 @@ Timeline events:
   between visits, and a single pinned card gets none of the furniture. A pinned
   card that is also a moment on the record is drawn in both places — one card,
   the same behaviour either way, and the same selection behind both — because a
-  record with the moment folded out of it would be a record missing it. The PR
-  is the one so far: it is the only pinned card with a stamp of its own.
+  record with the moment folded out of it would be a record missing it. All
+  three are: the PR at the moment the finish step opened it, and the two lists
+  at the moment they landed on the branch (*settled 2026-08-26, building
+  design-fixes*). The lists differ in where their content comes from — the row
+  carries a stamp and nothing else, and the card at it is `.tasks/` or
+  `docs/roadmaps/` read live at the moment somebody looks, exactly as the pinned
+  copy is. Conversations from before the rows existed are not backfilled: they
+  keep their pinned cards alone.
 - **A session's liveness is a mark rather than a word**, and the same mark
   everywhere it is said — the sidebar card, the agent-output row and the
   details pane above the record. A slowly turning ring while the session is

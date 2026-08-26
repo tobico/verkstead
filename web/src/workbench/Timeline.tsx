@@ -13,11 +13,19 @@
 //! pinned is held above the record and a stack of them is what the record is
 //! pushed down by.
 //!
-//! One of them is a moment as well — the pull request, which the finish step
-//! opened at a time worth keeping — and that one is drawn in both places: the
-//! same card in the pinned block and on the record where it happened. A second
-//! appearance rather than a move, for the reason the running session's strip
-//! below is one: what the record says happened should stay on it.
+//! Each of them is a moment as well — the pull request the finish step opened,
+//! and the backlog and the roadmap at the moment they landed on the branch — so
+//! each is drawn in both places: the same card in the pinned block and on the
+//! record where it happened. A second appearance rather than a move, for the
+//! reason the running session's strip below is one: what the record says
+//! happened should stay on it.
+//!
+//! The two lists differ from the pull request in where the card's content comes
+//! from. A PR is three facts the record holds; a backlog and a roadmap are read
+//! off the worktree every time the conversation is, so what the record row fixes
+//! is the position and the card at it says what the list holds now. Nothing is
+//! backfilled: a conversation from before the rows existed has its cards in the
+//! pinned block alone.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. Three of them
@@ -84,8 +92,10 @@ import type {
   QuestionSetEvent,
   Resumed,
   StageListEvent,
+  StageListReached,
   SteerEvent,
   TaskListEvent,
+  TaskListReached,
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
@@ -519,6 +529,18 @@ export function Timeline(props: {
                       }}
                     />
                   )}
+                </Match>
+                {/* And the two lists where they landed, drawn the same way and
+                    from the same reading the pinned block is drawn from — so
+                    the copy on the record ticks along with the work exactly as
+                    the pinned one does. Nothing where the worktree has gone:
+                    the row is a moment that happened, and what it showed is
+                    read off a branch that is no longer there. */}
+                <Match when={"TaskList" in event && event.TaskList}>
+                  {(reached) => <TaskListRow reached={reached()} />}
+                </Match>
+                <Match when={"StageList" in event && event.StageList}>
+                  {(reached) => <StageListRow reached={reached()} />}
                 </Match>
               </Switch>
             </li>
@@ -954,11 +976,10 @@ function parting(pane: Pane): string | undefined {
 /// the work goes through them in.
 ///
 /// Needing attention is the conversation being blocked on the card, which only a
-/// pull request can be: it is the one pinned event that is also on the record,
-/// and the two lists are read off the worktree rather than being moments
-/// anything could have stopped at. So a pull request with feedback waiting on it
-/// fronts over the backlog beside it, which is what a reader opening the
-/// conversation is being stopped for.
+/// pull request can be: what a wrap-up stops for is the review, and a backlog or
+/// a roadmap is a list read off the worktree with nothing on it to answer. So a
+/// pull request with feedback waiting on it fronts over the backlog beside it,
+/// which is what a reader opening the conversation is being stopped for.
 function fronting(conversation: ConversationView): number {
   const at = conversation.pinned.findIndex(
     (event) =>
@@ -984,6 +1005,9 @@ function named(event: PinnedEvent): string {
 /// One of them opens: a pull request has a full self, which is what is on it
 /// right now. Neither list does — what a details pane would show of one is what
 /// is already drawn here.
+///
+/// Each of the three is on the record as well, at the moment it arrived there,
+/// and the card drawn there is this same card — see the module docs.
 function Card(props: {
   event: PinnedEvent;
   selected: number | null;
@@ -1054,6 +1078,32 @@ function PullRequest(props: {
   );
 }
 
+/// The backlog on the record, at the row that says it landed on the branch.
+///
+/// The same card the pinned block holds, and the same reading behind both — the
+/// server hands the one it took over twice. Nothing at all where there is
+/// nothing left to read: a worktree that has been taken away leaves the moment
+/// on the record with no list to show for it.
+function TaskListRow(props: { reached: TaskListReached }): JSX.Element {
+  return (
+    <Show when={props.reached.list}>
+      {(tasks) => <TaskList tasks={tasks()} />}
+    </Show>
+  );
+}
+
+/// And the roadmap on the record, at the row that says it landed.
+///
+/// Every roadmap the branch wrote to rather than one, because the pinned block
+/// holds every one of them too — ordinarily that is exactly one.
+function StageListRow(props: { reached: StageListReached }): JSX.Element {
+  return (
+    <For each={props.reached.roadmaps}>
+      {(stages) => <StageList stages={stages} />}
+    </For>
+  );
+}
+
 /// Whether one entry of a list is finished, drawn the way the file it is read
 /// out of writes it: an empty box, or a checked one.
 ///
@@ -1077,7 +1127,8 @@ function Box(props: { done: boolean }): JSX.Element {
 ///
 /// Read out of `.tasks/` in the worktree every time the page reads the
 /// conversation, so a task finishing moves this without anybody pressing
-/// anything.
+/// anything — in the pinned block and at the row on the record where the
+/// backlog landed alike, both being drawn from the one reading.
 function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
@@ -1120,7 +1171,8 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
 /// Beside the task list and drawn the same way, because it is the same kind of
 /// thing one level up — and it is read out of `docs/roadmaps/` in the worktree
 /// every time the page reads the conversation, so a stage finishing moves this
-/// without anybody pressing anything. There is nothing to open here either.
+/// without anybody pressing anything, in both of the places it is drawn. There
+/// is nothing to open here either.
 ///
 /// Which roadmap this is, is the one this branch has written to: a repository
 /// keeps its finished roadmaps, and a conversation is about the one it touched.

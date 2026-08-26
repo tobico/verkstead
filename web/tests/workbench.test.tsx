@@ -6974,14 +6974,65 @@ describe("the pinned task list", () => {
 
   /// Pinned is a thing an event *is*, decided by its kind: it is drawn outside
   /// the record, so it does not scroll away with it.
-  it("is drawn above the record rather than in it", async () => {
+  it("is drawn above the record as well as in it", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
     expect(pinned.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.tasks}`)).toBeNull();
+
+    // And a second copy on the record, at the row that says the backlog landed
+    // — one card in two places, so the record keeps the moment the work stopped
+    // being a plan.
+    expect(
+      container.querySelectorAll(`.${timeline.timeline} .${timeline.taskList}`),
+    ).toHaveLength(1);
+  });
+
+  /// The row fixes where the backlog landed and nothing else: the card at it is
+  /// the same live reading the pinned one is drawn from, so the two cannot come
+  /// to disagree about how far through the work is.
+  it("draws the same list at the row where the backlog landed", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.taskList}`,
+    );
+
+    expect(
+      [...listed.querySelectorAll(`.${timeline.tasks} li`)].map((row) => [
+        row.querySelector(`.${timeline.what}`)!.textContent,
+        row.querySelector(`.${timeline.state}`)!.textContent,
+      ]),
+    ).toEqual(
+      BACKLOG.tasks.map((task) => [task.title, task.done ? "done" : "to do"]),
+    );
+
+    expect(
+      listed.querySelector(`.${timeline.progress}`)!.textContent,
+    ).toBe("2 of 4 done");
+  });
+
+  /// The reading is the worktree's, and a worktree can be taken away. The row
+  /// stays — it is the record of a moment, and the moment happened — with no
+  /// card to draw at it.
+  it("draws nothing at that row once there is no backlog left to read", async () => {
+    theTasked({
+      pinned: [],
+      timeline: TASKED.timeline.map((event) =>
+        "TaskList" in event
+          ? { TaskList: { ...event.TaskList, list: null } }
+          : event,
+      ),
+    });
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.taskList}`)).toBeNull();
   });
 
   /// Nothing pins or unpins one: the set is fixed, so there is no control for
@@ -7157,7 +7208,7 @@ describe("the pinned stage list", () => {
   });
 
   /// Pinned beside the backlog and the pull request, and drawn the same way:
-  /// outside the record, with nothing to pin, unpin or open.
+  /// above the record and again on it, with nothing to pin, unpin or open.
   it("is drawn above the record and asks the human for nothing", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
@@ -7165,8 +7216,51 @@ describe("the pinned stage list", () => {
     const list = await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
 
     expect(list.closest(`.${timeline.timeline}`)).toBeNull();
-    expect(container.querySelector(`.${timeline.timeline} .${timeline.stages}`)).toBeNull();
     expect(list.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  /// And on the record at the row that says the roadmap landed, drawn from the
+  /// same reading the pinned copy is — a stage ticking moves both at once.
+  it("draws the same roadmap at the row where it landed", async () => {
+    theStaged();
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    const listed = await drawn(
+      container,
+      `.${timeline.timeline} .${timeline.stageList}`,
+    );
+
+    expect(
+      [...listed.querySelectorAll(`.${timeline.stages} li`)].map((row) => [
+        row.querySelector(`.${timeline.what}`)!.textContent,
+        row.querySelector(`.${timeline.state}`)!.textContent,
+      ]),
+    ).toEqual(
+      ROADMAP.stages.map((stage) => [
+        stage.title,
+        stage.done ? "done" : "to do",
+      ]),
+    );
+
+    expect(listed.querySelectorAll("button")).toHaveLength(0);
+  });
+
+  /// Read off the worktree like the backlog's, so a worktree that has gone
+  /// leaves the row with no card to draw at it.
+  it("draws nothing at that row once there is no roadmap left to read", async () => {
+    theStaged({
+      pinned: [],
+      timeline: STAGED.timeline.map((event) =>
+        "StageList" in event
+          ? { StageList: { ...event.StageList, roadmaps: [] } }
+          : event,
+      ),
+    });
+    const { container } = mount(`/conversations/${STAGED.id}`);
+
+    await drawn(container, `.${timeline.timeline}`);
+
+    expect(container.querySelector(`.${timeline.stageList}`)).toBeNull();
   });
 
   /// What Verkstead did on its own account while nobody was watching — here,

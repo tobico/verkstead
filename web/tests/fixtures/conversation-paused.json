@@ -2,7 +2,7 @@
   "adopting": null,
   "archived": false,
   "base_commit": "9e6cb584eeb157fd49f0c36e00bf87783fa2bfab",
-  "blocked_on": 26,
+  "blocked_on": 27,
   "branch": "deferred-asks",
   "direction": null,
   "grilling_pairing": {
@@ -54,21 +54,21 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>Deferred asks</h1>\n<p>An ask that never idles the session that sends it.</p>\n",
-        "id": 22,
+        "id": 23,
         "markdown": "# Deferred asks\n\nAn ask that never idles the session that sends it.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 23,
+        "id": 24,
         "state": "Grilling"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 24,
+        "id": 25,
         "state": "Implementing"
       }
     },
@@ -76,14 +76,14 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p>the account <strong>opus</strong> was being spent is out of window: Usage limit reached · continuing automatically at 3pm · esc to cancel</p>\n",
-        "id": 25
+        "id": 26
       }
     },
     {
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p><strong>Implementing the work</strong> stopped.</p>\n<p>the account <strong>opus</strong> was being spent is out of window: Usage limit reached · continuing automatically at 3pm · esc to cancel</p>\n<h3>The worktree</h3>\n<p>Git had nothing pending, or the repository would not answer.</p>\n<h3>What the last session said</h3>\n<p>It said nothing at all.</p>\n",
-        "id": 26
+        "id": 27
       }
     }
   ],

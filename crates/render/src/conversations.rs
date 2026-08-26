@@ -484,6 +484,59 @@ pub enum TimelineEvent {
     /// record that folded it out would be a record missing the moment the work
     /// went up for review.
     PullRequest(PullRequestEvent),
+
+    /// The backlog, at the moment it landed on the branch.
+    ///
+    /// A [`PinnedEvent`] as well, as the pull request above is, and drawn twice
+    /// for the same reason: the sticky block keeps the list in view wherever the
+    /// record is being read, and this is where the work stopped being a plan.
+    ///
+    /// What differs from the pull request is where the content comes from. A PR
+    /// is three facts on the record; a backlog is `.tasks/` in the Worktree, read
+    /// live — so this row carries the reading of the moment somebody looked, and
+    /// carries none where there is no Worktree left to read.
+    TaskList(TaskListReached),
+
+    /// And the roadmap, at the moment it landed. The same arrangement one level
+    /// up, read live off `docs/roadmaps/`.
+    StageList(StageListReached),
+}
+
+/// The backlog on the record: where it landed, and what it says now.
+///
+/// The two halves come from different places on purpose. `id` and `at` are the
+/// row's, stamped once when the branch first carried a backlog; `list` is the
+/// Worktree's, read afresh every time the Conversation is — so the card ticks
+/// along with the work while the row it sits at stays where it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskListReached {
+    pub id: i64,
+
+    /// When the backlog landed, RFC 3339.
+    pub at: String,
+
+    /// The backlog as it stands, or nothing where there is none to read: a
+    /// Worktree that has been taken away, or a `.tasks/` the branch has since
+    /// finished with. The row stays either way — it is the record of a moment,
+    /// and the moment happened.
+    pub list: Option<TaskListEvent>,
+}
+
+/// The roadmap on the record: where it landed, and what it says now.
+///
+/// The stage lists rather than one, because a branch may have written to more
+/// than one roadmap and the pinned block draws each of them. Empty where there
+/// is nothing left to read, exactly as the backlog's is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct StageListReached {
+    pub id: i64,
+
+    /// When the roadmap landed, RFC 3339.
+    pub at: String,
+
+    pub roadmaps: Vec<StageListEvent>,
 }
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
@@ -492,6 +545,9 @@ pub enum TimelineEvent {
 /// unpin: what is pinned is decided by what kind of thing it is, so there is no
 /// state here to flip and no route to flip it with. A tagged kind for the reason
 /// [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+///
+/// All three are on the record as well, each at the moment it arrived there, and
+/// each is one card drawn twice rather than two cards.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PinnedEvent {
@@ -511,12 +567,18 @@ pub enum PinnedEvent {
 /// The backlog as the Timeline shows it: what the work is called, and every
 /// task against whether it is done.
 ///
-/// No id and no stamp, unlike every Event in the record. It is read out of
-/// `.tasks/` each time the Conversation is — the repository owns the files, and
-/// Verkstead never does — so what it says is what the Worktree holds now rather
-/// than what it held at a moment worth stamping. Nothing opens it either: the
-/// whole of a task list is the list, which is why the design gives it no details
-/// pane.
+/// No id and no stamp of its own. It is read out of `.tasks/` each time the
+/// Conversation is — the repository owns the files, and Verkstead never does —
+/// so what it says is what the Worktree holds now rather than what it held at
+/// any one moment.
+///
+/// Which does not keep it off the record. The moment a backlog *landed* is worth
+/// stamping and is stamped — see [`TaskListReached`], which carries this reading
+/// at that row — so the identity is on the row and the content is here, and the
+/// card is the same card in both places.
+///
+/// Nothing opens it: the whole of a task list is the list, which is why the
+/// design gives it no details pane.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TaskListEvent {
@@ -549,10 +611,11 @@ pub struct TaskEntry {
 /// The roadmap as the Timeline shows it: what it is called, and every stage
 /// against whether it is checked.
 ///
-/// No id and no stamp, for the reason the task list beside it has none: it is
-/// read out of `docs/roadmaps/` each time the Conversation is, so what it says
-/// is what the Worktree holds now rather than what it held at a moment worth
-/// stamping. Nothing opens it either — the whole of a stage list is the list.
+/// No id and no stamp of its own, for the reason the task list beside it has
+/// none: it is read out of `docs/roadmaps/` each time the Conversation is, so
+/// what it says is what the Worktree holds now. The moment the roadmap landed is
+/// stamped all the same — see [`StageListReached`]. Nothing opens it either —
+/// the whole of a stage list is the list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct StageListEvent {
@@ -589,11 +652,13 @@ pub struct StageEntry {
 /// The pull request as the Timeline shows it: what it is called and what number
 /// it answers to, with a way out to GitHub itself.
 ///
-/// An id and a stamp, unlike the task list beside it, because this one *is* on
-/// the record: the finish step opened a pull request at a moment worth keeping,
-/// and the Conversation moved into Wrapping on the strength of it. What is not
-/// on the record is what the PR holds — see [`PullRequestDetails`], which the
-/// details pane fetches when somebody opens this.
+/// An id and a stamp of its own, unlike the task list beside it, because a pull
+/// request is the whole of what it says: the finish step opened one at a moment
+/// worth keeping, and the Conversation moved into Wrapping on the strength of
+/// it. What is not on the record is what the PR holds — see
+/// [`PullRequestDetails`], which the details pane fetches when somebody opens
+/// this.
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PullRequestEvent {
@@ -1370,21 +1435,55 @@ pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
     }
 }
 
-/// A backlog as the Event that gets pinned. Nothing to render — a task is a
-/// number, a title and whether its file is still there — and here beside the
-/// rest for the reason a move is: one place knows how a Timeline is made.
-pub fn task_list_event(feature: String, tasks: Vec<TaskEntry>) -> PinnedEvent {
-    PinnedEvent::TaskList(TaskListEvent { feature, tasks })
+/// A backlog as the Timeline shows it. Nothing to render — a task is a number, a
+/// title and whether its file is still there — and here beside the rest for the
+/// reason a move is: one place knows how a Timeline is made.
+///
+/// The card itself rather than either placement of it, because there are two:
+/// [`task_list_event`] pins it above the record and [`task_list_reached`] puts
+/// it on the record where it landed, and both are handed this one reading.
+pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
+    TaskListEvent { feature, tasks }
 }
 
-/// A roadmap as the Event that gets pinned. Nothing to render either — a stage
-/// is a number, a title and a ticked box.
-pub fn stage_list_event(name: String, title: String, stages: Vec<StageEntry>) -> PinnedEvent {
-    PinnedEvent::StageList(StageListEvent {
+/// That backlog as the Event that gets pinned, which is where it is held in
+/// view for as long as there is one.
+pub fn task_list_event(list: TaskListEvent) -> PinnedEvent {
+    PinnedEvent::TaskList(list)
+}
+
+/// And as the Event on the record, which is where it landed.
+///
+/// The stamp is the row's and the content is the Worktree's, which is the whole
+/// arrangement: the row says when the branch stopped being a plan, and what is
+/// drawn at it is `.tasks/` as it stands when somebody looks.
+pub fn task_list_reached(id: i64, at: String, list: Option<TaskListEvent>) -> TimelineEvent {
+    TimelineEvent::TaskList(TaskListReached { id, at, list })
+}
+
+/// A roadmap as the Timeline shows it. Nothing to render either — a stage is a
+/// number, a title and a ticked box — and one reading behind two placements,
+/// exactly as the backlog above is.
+pub fn stage_list(name: String, title: String, stages: Vec<StageEntry>) -> StageListEvent {
+    StageListEvent {
         name,
         title,
         stages,
-    })
+    }
+}
+
+/// That roadmap as the Event that gets pinned.
+pub fn stage_list_event(list: StageListEvent) -> PinnedEvent {
+    PinnedEvent::StageList(list)
+}
+
+/// And as the Event on the record, which is where the roadmap landed.
+///
+/// Every roadmap this branch has written to rather than one, because the pinned
+/// block holds every one of them too: a branch that touched two has two cards,
+/// and the record row is the same cards in their place.
+pub fn stage_list_reached(id: i64, at: String, roadmaps: Vec<StageListEvent>) -> TimelineEvent {
+    TimelineEvent::StageList(StageListReached { id, at, roadmaps })
 }
 
 /// A pull request as the Event that gets pinned. Nothing to render — a PR is a

@@ -55,13 +55,13 @@ pub use captures::{Summary, append_capture, capture, start_capture, summarise_ca
 pub use commits::{Commit, commit, record_commit, recorded_commits};
 pub use conversations::{
     Chosen, Closing, Conversation, ConversationRow, Directing, Edited, Event, Fixing, Grilling,
-    Implementing, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer, Steering,
-    TimelineEvent, adopting, ask, asked_from, close_conversation, conversations, implement_again,
-    last_proposal, load_conversation, note, pick_direction, record_handoff, rename_branch,
-    review_asked, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
-    set_implementation_pairing, set_state, split_out, stacks_on, start_adoption,
-    start_conversation, start_grilling, start_implementing, start_stage, steer_conversation,
-    timeline, unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
+    Implementing, Landed, Lifecycle, Rebuilding, Role, SetOnTimeline, Settling, Staged, Steer,
+    Steering, TimelineEvent, adopting, ask, asked_from, close_conversation, conversations,
+    implement_again, last_proposal, load_conversation, note, pick_direction, record_backlog,
+    record_handoff, record_roadmap, rename_branch, review_asked, save_brief, set_asked_from,
+    set_base_commit, set_grilling_pairing, set_implementation_pairing, set_state, split_out,
+    stacks_on, start_adoption, start_conversation, start_grilling, start_implementing, start_stage,
+    steer_conversation, timeline, unanswered_set_since, unlanded_batch_fixes, unlanded_fixes,
 };
 pub use deferrals::{Ask, Unfolded, deferred, deferred_on_timeline, record_folded, unfolded};
 pub use pairings::{RepoPairings, remembered_pairings};

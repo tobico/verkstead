@@ -342,6 +342,56 @@ pub(crate) async fn grilling_over(state: &AppState, id: i64) {
     }
 }
 
+/// Put the row that says the backlog landed on the Conversation's Timeline.
+///
+/// Called where the runner sees the landing, which is the moment it moves the
+/// Conversation on: the plan commit is what puts `.tasks/` under version
+/// control, and from here there is a list to work through. What the row fixes is
+/// the position — the card drawn at it is read off the Worktree when somebody
+/// looks, exactly as the pinned one is.
+///
+/// Refusing for nothing, and its own call rather than part of the move beside
+/// it. A Conversation implementing without a row is a Conversation whose backlog
+/// landed before there were rows — which is every one of them from before this,
+/// and none of them is broken by it.
+pub(crate) async fn backlog_landed(state: &AppState, id: i64) {
+    landed(id, store::record_backlog(&state.pool, id).await, "backlog")
+}
+
+/// And the row that says the roadmap landed, which is the same thing one level
+/// up: the staging session committed `docs/roadmaps/`, and the stages it names
+/// are what the effort is against from here.
+pub(crate) async fn roadmap_landed(state: &AppState, id: i64) {
+    landed(id, store::record_roadmap(&state.pool, id).await, "roadmap")
+}
+
+/// What the two above do with what the store answered, which is the same thing
+/// twice: say what happened, and carry on either way.
+fn landed(id: i64, stamped: Result<store::Landed>, what: &str) {
+    match stamped {
+        Ok(store::Landed::Stamped) => {
+            tracing::info!(
+                conversation_id = id,
+                what,
+                "a list has landed, so it is on the record"
+            )
+        }
+        Ok(store::Landed::Already) => tracing::debug!(
+            conversation_id = id,
+            what,
+            "a list landed a second time, and the record already says where it landed"
+        ),
+        Ok(store::Landed::NoSuchConversation) => tracing::error!(
+            conversation_id = id,
+            what,
+            "a list landed for a Conversation that is not there"
+        ),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, what, "a list landing could not be recorded")
+        }
+    }
+}
+
 /// Put the handoff the grilling wrote on the Timeline, refusing for nothing —
 /// which is [`take_handoff`] with the one thing its caller does about a failure
 /// done where the reason for it is.

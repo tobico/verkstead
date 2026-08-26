@@ -2,7 +2,7 @@
   "adopting": null,
   "archived": false,
   "base_commit": "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
-  "blocked_on": 21,
+  "blocked_on": 22,
   "branch": "task-runner",
   "direction": "task-list",
   "grilling_pairing": {
@@ -106,9 +106,40 @@
       }
     },
     {
-      "Moved": {
+      "TaskList": {
         "at": "2026-08-03T09:07:11.000Z",
         "id": 20,
+        "list": {
+          "feature": "Task runner",
+          "tasks": [
+            {
+              "done": true,
+              "number": "01",
+              "title": "Pick the next task"
+            },
+            {
+              "done": true,
+              "number": "02",
+              "title": "Run it in a session of its own"
+            },
+            {
+              "done": false,
+              "number": "03",
+              "title": "Notice when it is finished"
+            },
+            {
+              "done": false,
+              "number": "04",
+              "title": "Move on to the next one"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "Moved": {
+        "at": "2026-08-03T09:07:11.000Z",
+        "id": 21,
         "state": "Implementing"
       }
     },
@@ -116,7 +147,7 @@
       "Notice": {
         "at": "2026-08-03T09:07:11.000Z",
         "html": "<p><strong>The task in .tasks/03-commit-events.md</strong> stopped.</p>\n<p>the session exited with status 1</p>\n<h3>The worktree</h3>\n<div class=\"wide\">\n<pre><code>## task-runner\n M crates/store/src/commits.rs\n?? crates/store/src/sweep.rs\n</code></pre>\n</div>\n<h3>What the last session said</h3>\n<div class=\"wide\">\n<pre><code>error[E0432]: unresolved import `crate::sweep`\n  --&gt; crates/store/src/commits.rs:9:5\nerror: could not compile `verkstead-store` (lib) due to 1 previous error\n</code></pre>\n</div>",
-        "id": 21
+        "id": 22
       }
     }
   ],

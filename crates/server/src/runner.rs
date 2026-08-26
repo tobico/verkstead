@@ -289,6 +289,11 @@ async fn follow_breakdown(
         return;
     }
 
+    // The backlog is on the branch, so the record says where that happened —
+    // before the move, because it is what the move is being made on the
+    // strength of.
+    crate::conversations::backlog_landed(&state, conversation_id).await;
+
     crate::conversations::grilling_over(&state, conversation_id).await;
 
     carry_on(state, conversation_id, driving).await
@@ -473,6 +478,12 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
             "the roadmap is written, so this looks for the pull request again"
         );
 
+        // Which is this path's own sighting of the landing: the run that wrote
+        // the roadmap stopped before anything saw it out, so the row it never
+        // got is written now. A second sighting writes nothing — see
+        // [`store::record_roadmap`].
+        crate::conversations::roadmap_landed(&state, conversation_id).await;
+
         return crate::wrapping::opened(&state, conversation_id, None).await;
     }
 
@@ -538,6 +549,15 @@ async fn work(
     let Some(writing) = see_out(&state, conversation_id, first.clone(), session).await else {
         return;
     };
+
+    // A stage's first step is the one that writes its backlog, and landing that
+    // is the same moment [`follow_breakdown`] records one step earlier: the
+    // branch now carries a list to work through. Asked here for the reason the
+    // finish is asked here — this is the one place that knows *which* step just
+    // landed.
+    if first == Step::PlanningStage {
+        crate::conversations::backlog_landed(&state, conversation_id).await;
+    }
 
     // The finish step is the last one a backlog has, and landing it is not the
     // end of the run: what the finish did was push and open a pull request, and
@@ -1079,6 +1099,11 @@ async fn follow_roadmap(
     let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
         return;
     };
+
+    // The roadmap is on the branch, so the record says where that happened —
+    // before the pull request the same session went on to open, which is the
+    // order the two happened in.
+    crate::conversations::roadmap_landed(&state, conversation_id).await;
 
     crate::wrapping::opened(&state, conversation_id, Some(writing)).await;
 }

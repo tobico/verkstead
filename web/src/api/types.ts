@@ -980,6 +980,9 @@ model: string | null, };
  * unpin: what is pinned is decided by what kind of thing it is, so there is no
  * state here to flip and no route to flip it with. A tagged kind for the reason
  * [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+ *
+ * All three are on the record as well, each at the moment it arrived there, and
+ * each is one card drawn twice rather than two cards.
  */
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
@@ -1143,11 +1146,12 @@ commits: Array<PullRequestCommit>, comments: Array<PullRequestComment>, };
  * The pull request as the Timeline shows it: what it is called and what number
  * it answers to, with a way out to GitHub itself.
  *
- * An id and a stamp, unlike the task list beside it, because this one *is* on
- * the record: the finish step opened a pull request at a moment worth keeping,
- * and the Conversation moved into Wrapping on the strength of it. What is not
- * on the record is what the PR holds — see [`PullRequestDetails`], which the
- * details pane fetches when somebody opens this.
+ * An id and a stamp of its own, unlike the task list beside it, because a pull
+ * request is the whole of what it says: the finish step opened one at a moment
+ * worth keeping, and the Conversation moved into Wrapping on the strength of
+ * it. What is not on the record is what the PR holds — see
+ * [`PullRequestDetails`], which the details pane fetches when somebody opens
+ * this.
  */
 export type PullRequestEvent = { id: number, 
 /**
@@ -1546,10 +1550,11 @@ done: boolean, };
  * The roadmap as the Timeline shows it: what it is called, and every stage
  * against whether it is checked.
  *
- * No id and no stamp, for the reason the task list beside it has none: it is
- * read out of `docs/roadmaps/` each time the Conversation is, so what it says
- * is what the Worktree holds now rather than what it held at a moment worth
- * stamping. Nothing opens it either — the whole of a stage list is the list.
+ * No id and no stamp of its own, for the reason the task list beside it has
+ * none: it is read out of `docs/roadmaps/` each time the Conversation is, so
+ * what it says is what the Worktree holds now. The moment the roadmap landed is
+ * stamped all the same — see [`StageListReached`]. Nothing opens it either —
+ * the whole of a stage list is the list.
  */
 export type StageListEvent = { 
 /**
@@ -1567,6 +1572,19 @@ title: string,
  * In the order the roadmap has them, which is the order they get worked in.
  */
 stages: Array<StageEntry>, };
+
+/**
+ * The roadmap on the record: where it landed, and what it says now.
+ *
+ * The stage lists rather than one, because a branch may have written to more
+ * than one roadmap and the pinned block draws each of them. Empty where there
+ * is nothing left to read, exactly as the backlog's is.
+ */
+export type StageListReached = { id: number, 
+/**
+ * When the roadmap landed, RFC 3339.
+ */
+at: string, roadmaps: Array<StageListEvent>, };
 
 /**
  * How a Set stands: still waiting on the human, answered, or closed unanswered.
@@ -1767,12 +1785,18 @@ done: boolean, };
  * The backlog as the Timeline shows it: what the work is called, and every
  * task against whether it is done.
  *
- * No id and no stamp, unlike every Event in the record. It is read out of
- * `.tasks/` each time the Conversation is — the repository owns the files, and
- * Verkstead never does — so what it says is what the Worktree holds now rather
- * than what it held at a moment worth stamping. Nothing opens it either: the
- * whole of a task list is the list, which is why the design gives it no details
- * pane.
+ * No id and no stamp of its own. It is read out of `.tasks/` each time the
+ * Conversation is — the repository owns the files, and Verkstead never does —
+ * so what it says is what the Worktree holds now rather than what it held at
+ * any one moment.
+ *
+ * Which does not keep it off the record. The moment a backlog *landed* is worth
+ * stamping and is stamped — see [`TaskListReached`], which carries this reading
+ * at that row — so the identity is on the row and the content is here, and the
+ * card is the same card in both places.
+ *
+ * Nothing opens it: the whole of a task list is the list, which is why the
+ * design gives it no details pane.
  */
 export type TaskListEvent = { 
 /**
@@ -1786,13 +1810,34 @@ feature: string,
 tasks: Array<TaskEntry>, };
 
 /**
+ * The backlog on the record: where it landed, and what it says now.
+ *
+ * The two halves come from different places on purpose. `id` and `at` are the
+ * row's, stamped once when the branch first carried a backlog; `list` is the
+ * Worktree's, read afresh every time the Conversation is — so the card ticks
+ * along with the work while the row it sits at stays where it was.
+ */
+export type TaskListReached = { id: number, 
+/**
+ * When the backlog landed, RFC 3339.
+ */
+at: string, 
+/**
+ * The backlog as it stands, or nothing where there is none to read: a
+ * Worktree that has been taken away, or a `.tasks/` the branch has since
+ * finished with. The row stays either way — it is the record of a moment,
+ * and the moment happened.
+ */
+list: TaskListEvent | null, };
+
+/**
  * One entry in a Timeline.
  *
  * A tagged kind rather than a struct with a nullable field per kind: what the
  * details pane draws is decided by which kind an Event is, and the stages after
  * this one add their kinds here.
  */
-export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent };
+export type TimelineEvent = { "Brief": BriefEvent } | { "Moved": MovedEvent } | { "AgentOutput": AgentOutputEvent } | { "QuestionSet": QuestionSetEvent } | { "UnreadableSet": UnreadableSetEvent } | { "Handoff": HandoffEvent } | { "Commit": CommitEvent } | { "Notice": NoticeEvent } | { "ManualTask": ManualTaskEvent } | { "Steer": SteerEvent } | { "PullRequest": PullRequestEvent } | { "TaskList": TaskListReached } | { "StageList": StageListReached };
 
 /**
  * What is to become of the configured token.

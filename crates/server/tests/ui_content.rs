@@ -1864,10 +1864,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // the pinned Event.
     //
     // Its worktree is the one in these fixtures that has to be a real
-    // directory, because a task list is not in the store at all — it is the
-    // Worktree as it stands, read every time the Conversation is. So the
-    // backlog is written into a temporary directory and the path is pinned
-    // afterwards, the way every other filesystem reading here is.
+    // directory, because a task list's *content* is not in the store at all —
+    // the record fixes where the backlog landed and the Worktree says what it
+    // holds, read every time the Conversation is. So the backlog is written into
+    // a temporary directory and the path is pinned afterwards, the way every
+    // other filesystem reading here is.
     let tasked = store::start_conversation(&pool, repos[0].id, "task-runner")
         .await
         .unwrap()
@@ -1934,6 +1935,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     .await
     .unwrap()
     .unwrap();
+
+    // And the row that fixes where the backlog landed, written where the runner
+    // sees the landing: before the move it is made on the strength of. The row
+    // carries nothing — what is drawn at it is the reading of `.tasks/` above,
+    // handed over a second time.
+    store::record_backlog(&pool, tasked).await.unwrap();
 
     store::start_implementing(&pool, tasked).await.unwrap();
 
@@ -2299,6 +2306,11 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And the row that fixes where the roadmap landed, as the backlog above has
+    // one: the branch carries a roadmap from here, and the stage list is drawn
+    // at that row as well as pinned.
+    store::record_roadmap(&pool, staged).await.unwrap();
+
     // And what Verkstead did on its own account: the roadmap's first stage
     // started as a Conversation of its own, said on the Timeline of the
     // Conversation that started it. Written here rather than driven, because
@@ -2512,11 +2524,11 @@ fn pin_health(json: &str) -> String {
 /// Pin where a Conversation's worktree is, for the one fixture whose worktree
 /// has to be a real directory.
 ///
-/// A task list is not in the store at all — it is read out of `.tasks/` every
-/// time the Conversation is — so the payload carrying one is written over a
-/// temporary directory whose name is different on every run. The path is put
-/// back to a stated one here, exactly as [`pin_health`] puts back everything
-/// else the filesystem would otherwise decide.
+/// A task list's content is not in the store at all — it is read out of
+/// `.tasks/` every time the Conversation is — so the payload carrying one is
+/// written over a temporary directory whose name is different on every run. The
+/// path is put back to a stated one here, exactly as [`pin_health`] puts back
+/// everything else the filesystem would otherwise decide.
 fn pin_worktree(json: &str, at: &str) -> String {
     let mut payload: serde_json::Value = serde_json::from_str(json).unwrap();
 

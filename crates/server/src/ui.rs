@@ -689,23 +689,40 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         }
     };
 
-    // What the worktree holds that is not a moment in the record: the backlog,
-    // as `.tasks/` stands right now. Read off the filesystem for the reason the
-    // worktree's own missing-ness is — the repository owns those files, and a
-    // row remembering what they said would be one more thing to be wrong.
-    let mut pinned = crate::tasks::pinned(conversation.worktree.clone()).await;
+    // What the worktree holds rather than what the record remembers: the
+    // backlog, as `.tasks/` stands right now. Read off the filesystem for the
+    // reason the worktree's own missing-ness is — the repository owns those
+    // files, and a row remembering what they said would be one more thing to be
+    // wrong.
+    let backlog = crate::tasks::showing(conversation.worktree.clone()).await;
 
     // And the roadmap this branch is about, read the same way and for the same
     // reason — `docs/roadmaps/` is the repository's too. Which of a repository's
     // roadmaps is this one's is asked of git against the base commit: a
     // repository keeps its finished roadmaps, and a Conversation is about the
     // one its branch has written to. See [`crate::stages`].
+    let roadmaps = crate::stages::showing(
+        conversation.worktree.clone(),
+        conversation.base_commit.clone(),
+    )
+    .await;
+
+    // Each of those goes in two places — pinned above the record, and on the
+    // record at the row that says it landed — and this is the one reading behind
+    // both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
+        .clone()
+        .map(verkstead_render::task_list_event)
+        .into_iter()
+        .collect();
+
     pinned.extend(
-        crate::stages::pinned(
-            conversation.worktree.clone(),
-            conversation.base_commit.clone(),
-        )
-        .await,
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
     );
 
     // And the pull request the work ended up on, which is pinned beside it. This
@@ -1049,6 +1066,18 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                             url: opened.url,
                         },
                     ),
+                    // And the two rows that carry nothing of their own: what is
+                    // drawn at them is the live reading above, handed over a
+                    // second time. The row says when the branch first carried a
+                    // backlog — or a roadmap — and the card at it says what that
+                    // list holds now, which is the same card the pinned block is
+                    // showing.
+                    store::Event::TaskList => {
+                        verkstead_render::task_list_reached(event.id, event.at, backlog.clone())
+                    }
+                    store::Event::StageList => {
+                        verkstead_render::stage_list_reached(event.id, event.at, roadmaps.clone())
+                    }
                 }
             })
             .collect(),
