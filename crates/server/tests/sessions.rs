@@ -5577,6 +5577,135 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     );
 }
 
+/// An inline run whose review splits work out: the backlog that arrives is the
+/// first this Conversation has ever carried, and the record says where it
+/// landed.
+///
+/// The landing a Conversation built from a backlog cannot show. There, the row
+/// was stamped by the breakdown long before the review, so a split-out backlog
+/// that stamped nothing would look exactly right. An inline run has no backlog
+/// at all until the review writes one, which is what makes this the case that
+/// tells the two apart.
+fn an_inline_run_then_splits(reviews: &Path, review: &str) -> String {
+    format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {reviews}
+{review}
+    ;;
+*implementing/SKILL.md*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    printf 'pushed, and the pull request is open\n'
+    ;;
+*next-task/SKILL.md*)
+    next=$(ls .tasks | grep -E '^[0-9]+-' | sort | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'one clock\n' >> clocks.md
+        rm ".tasks/$next"
+        git add -A
+        git commit --quiet -m 'feat: collapse the clocks'
+    else
+        git rm --quiet .tasks/TODO.md
+        git commit --quiet -m 'chore: finish the clocks'
+        printf 'pushed, and the pull request is open\n'
+    fi
+    sleep 300
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        reviews = quoted(reviews),
+    )
+}
+
+#[tokio::test]
+async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let once = spill.path().join("split-written");
+
+    let stub = an_inline_run_then_splits(&reviews, &review_then_split(&once, ""));
+    let gh = gh_about(CHECKS_UNANSWERABLE, "", "");
+
+    let fixture = grilling_spilling(spill, &stub, &gh).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    until_written(&reviews).await;
+
+    // Nothing has been broken down and nothing ever will be by this run, so
+    // there is no landing to have stamped yet.
+    let view = fixture.view().await;
+
+    assert!(
+        backlog(&view).is_none(),
+        "an inline run carries no backlog: {:?}",
+        view.pinned,
+    );
+    assert!(
+        backlog_row(&view).is_none(),
+        "and nothing has landed one on the record: {:?}",
+        view.timeline,
+    );
+
+    let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
+
+    assert_eq!(
+        fixture
+            .respond(
+                set,
+                serde_json::json!([
+                    { "label": "Q1", "selected": 2 },
+                    { "label": "Q2", "selected": 2 },
+                ]),
+            )
+            .await,
+        Submitted::Accepted,
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The one move down the ladder, which is the review's backlog being picked
+    // up — and the landing that goes on the record with it.
+    fixture
+        .until(|view| (moves_into(view, Lifecycle::Implementing) == 2).then_some(()))
+        .await;
+
+    let reached = fixture.until(|view| backlog_row(view).cloned()).await;
+
+    assert_eq!(
+        reached.list.map(|list| list.feature),
+        Some("Rebuilding the clock".to_owned()),
+        "the row draws the backlog the review wrote",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.timeline
+            .iter()
+            .filter(|event| matches!(event, TimelineEvent::TaskList(_)))
+            .count(),
+        1,
+        "one row, a list landing once: {:?}",
+        view.timeline,
+    );
+}
+
 /// And a session that landed neither stops the run, saying which half is which.
 ///
 /// *Nothing the human accepted goes quietly* reads a split pick the other way

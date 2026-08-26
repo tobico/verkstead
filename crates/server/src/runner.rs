@@ -586,11 +586,23 @@ async fn work(
 /// The registration is taken here rather than by the caller, because the caller
 /// is the review's own task and is about to end: a gap between the two would be
 /// a Conversation the stall sweep found with nothing driving it.
+///
+/// And the landing is stamped here for the same reason it is stamped at the
+/// other two: this is where a backlog is known to be on the branch. It is a
+/// landing like any other — the review wrote `.tasks/` and committed it — and a
+/// Conversation implemented inline has never had one before, so without this
+/// its list is pinned above a record that says nothing about where it came
+/// from. One that already carries a row keeps the row it has: a list lands
+/// once, and [`store::record_backlog`] answers a second sighting by saying so.
 pub(crate) fn build_the_split_out(state: &AppState, conversation_id: i64) {
     let driving = state.drivers.driving(conversation_id);
     let state = state.clone();
 
-    tokio::spawn(async move { carry_on(state, conversation_id, driving).await });
+    tokio::spawn(async move {
+        crate::conversations::backlog_landed(&state, conversation_id).await;
+
+        carry_on(state, conversation_id, driving).await
+    });
 }
 
 /// Whether `worktree` holds a backlog, committed as it stands.
