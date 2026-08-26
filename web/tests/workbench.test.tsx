@@ -5940,8 +5940,9 @@ describe("a commit on the timeline", () => {
 
   /// What the commit said about itself, between the header and the diff — the
   /// server rendered and sanitized it, so the pane only has to put it in the
-  /// page.
-  it("shows the commit's summary above the diff", async () => {
+  /// page. Headed and boxed the way a Set's Preface is, which is the same kind
+  /// of thing read the same way.
+  it("shows the commit's message above the diff, headed and boxed", async () => {
     theBuilding(
       {},
       whenever(
@@ -5956,49 +5957,56 @@ describe("a commit on the timeline", () => {
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
-    expect(summary.innerHTML).toBe("<p>A bucket per account.</p>");
+    expect(body.innerHTML).toBe("<p>A bucket per account.</p>");
+
+    // In the box, under a heading of its own — the heading outside the box, as
+    // a Preface's is.
+    const message = body.closest(`.${commitPane.message}`)!;
+
+    expect(message.querySelector("h2")!.textContent).toBe("Message");
+    expect(message.querySelector("h2")!.nextElementSibling).toBe(body);
 
     // Read in the order it is written in: what the commit says about itself,
     // then what it changed.
     const diff = await drawn(container, `.${shell.detailsPane} .${diffSection.diff}`);
 
     expect(
-      summary.compareDocumentPosition(diff) &
+      message.compareDocumentPosition(diff) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  /// A Diagram in the summary is the one thing the pane draws for itself, and it
+  /// A Diagram in the message is the one thing the pane draws for itself, and it
   /// draws it the Set page's way: over the source block the server left, once the
-  /// summary is in the page. What it drew is `diagrams.test.ts`'s subject; what
+  /// message is in the page. What it drew is `diagrams.test.ts`'s subject; what
   /// is asked here is that it was reached for, and over this block alone — a Set
   /// page open behind the workbench draws its own.
-  it("draws the Diagram in a summary that holds one", async () => {
+  it("draws the Diagram in a message that holds one", async () => {
     theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
 
-    const summary = await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    const body = await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
     // The source block the renderer draws over — and what the reader is left
     // with if it never draws.
-    expect(summary.querySelector("pre.mermaid")!.textContent).toContain(
+    expect(body.querySelector("pre.mermaid")!.textContent).toContain(
       "flowchart LR",
     );
 
     await waitFor(() => expect(drawing).toHaveBeenCalledOnce());
-    expect(drawing.mock.calls[0]![0]).toEqual({ root: summary });
+    expect(drawing.mock.calls[0]![0]).toEqual({ root: body });
   });
 
   /// And draws it again for the next commit opened, which is not a second mount:
-  /// the pane is not rebuilt per commit, so the second summary's markup lands in
+  /// the pane is not rebuilt per commit, so the second message's markup lands in
   /// the block the first one was drawn in.
   ///
   /// Read three commits deep on purpose. The first switch is masked — the second
-  /// commit is still being fetched for a tick, and a pane with no summary yet
+  /// commit is still being fetched for a tick, and a pane with no message yet
   /// takes the block out of the page and puts a fresh one back — but a commit the
   /// cache already holds comes back with no such gap, and that is the one a
   /// drawing hung on the mount would never follow.
@@ -6019,12 +6027,12 @@ describe("a commit on the timeline", () => {
         (row) => row.querySelector(`.${timeline.subject}`)!.textContent === subject,
       )!;
 
-    /// The summary block once it is holding the commit that was clicked, rather
+    /// The message block once it is holding the commit that was clicked, rather
     /// than the one before it: which commit the pane is showing is exactly what
     /// this test is about, so waiting for the block alone would prove nothing.
     const showing = (words: string) =>
       waitFor(() => {
-        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`);
+        const block = container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`);
         if (!block?.textContent?.includes(words)) {
           throw new Error(`the pane is not showing ${words} yet`);
         }
@@ -6057,7 +6065,7 @@ describe("a commit on the timeline", () => {
 
   /// Which is every other commit: mermaid is megabytes, and a pane with nothing
   /// to draw pays none of them.
-  it("never reaches for the renderer where the summary holds no Diagram", async () => {
+  it("never reaches for the renderer where the message holds no Diagram", async () => {
     theBuilding(
       {},
       whenever(
@@ -6071,21 +6079,21 @@ describe("a commit on the timeline", () => {
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
-    await drawn(container, `.${shell.detailsPane} .${commitPane.summary}`);
+    await drawn(container, `.${shell.detailsPane} .${commitPane.messageBody}`);
 
     expect(drawing).not.toHaveBeenCalled();
   });
 
   /// The ordinary commit, and every commit recorded before summaries were kept:
   /// the pane is the header and the diff, exactly as it always was.
-  it("draws nothing where the commit carried no summary", async () => {
+  it("draws nothing where the commit carried no message", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     fireEvent.click(await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`));
     await drawn(container, `.${shell.detailsPane} .${diffSection.diffFiles}`);
 
-    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.summary}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${commitPane.messageBody}`)).toBeNull();
   });
 
   it("says so plainly when the commit changed no files", async () => {
@@ -6262,7 +6270,7 @@ describe("the contents of a details pane", () => {
 
   /// And above them, what the commit said about itself — one nav over the whole
   /// pane, in the order the pane is read in.
-  it("lists a commit's summary above its diff, and jumps to both", async () => {
+  it("lists a commit's message above its diff, and jumps to both", async () => {
     theBuilding({}, whenever(DIFF_OF_IT, json(SUMMARISED)));
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
@@ -6274,11 +6282,17 @@ describe("the contents of a details pane", () => {
       [...nav.querySelectorAll(`a.${contents.link}`)].map((line) =>
         line.getAttribute("href"),
       ),
-    ).toEqual(["#commit-summary", "#commit-diff", "#diff-1", "#diff-2"]);
+    ).toEqual(["#commit-message", "#commit-diff", "#diff-1", "#diff-2"]);
+
+    // And the line that jumps to it is named for the section it lands on, which
+    // is the heading the reader arrives at.
+    expect(
+      nav.querySelector(`a[href="#commit-message"]`)!.textContent,
+    ).toBe("Message");
 
     // And both lines land on something: the ids are the pane's own sections
     // rather than names the nav made up.
-    for (const anchor of ["commit-summary", "commit-diff"]) {
+    for (const anchor of ["commit-message", "commit-diff"]) {
       const section = container.querySelector(`.${shell.detailsPane} #${anchor}`);
       expect(section, `expected the pane to hold #${anchor}`).toBeTruthy();
 

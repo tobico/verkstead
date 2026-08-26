@@ -128,10 +128,11 @@ flowchart LR
   Work blocks **only** on questions whose answers affect upcoming work.
 - **No commit gates.** The agent commits on its own; review happens later.
   What the gate's summary did survives without it (*settled 2026-08-24,
-  building commit-summaries*): a code commit carries an agent-written summary
-  as its message body — delta diagram first, per the convention the retired
-  gates topic taught — and the sweep keeps the body (trailers stripped) so the
-  commit's pane shows it above the diff and its card a clamped prose snippet.
+  building commit-summaries; refined 2026-08-26, building design-fixes*): a
+  code commit carries an agent-written summary as its message body — prose
+  first, then the delta diagram the retired gates topic taught — and the sweep
+  keeps the body (trailers stripped) so the commit's pane shows it as a headed
+  Message above the diff and its card a clamped prose snippet.
   Bookkeeping commits (plans, roadmaps, the finish, ADRs) stay subject-only,
   and a commit without a summary draws as it always did.
   Auto-advance runs the whole pipeline unattended: fresh session per task,
@@ -309,7 +310,7 @@ Timeline events:
 | Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
-| Commit | +/− and changed-line counts, clamped summary snippet | summary (diagram drawn) above the server-rendered diff viewer |
+| Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
 | Task list | inline, pinned | — |
 | Stage list | inline, pinned | — |
 | PR | name + id, pinned | fetched commit list and comments |

@@ -485,7 +485,10 @@ mod tests {
     /// follows it differs from skill to skill, so the end is found by its own
     /// last line rather than by whatever section comes after.
     const SUMMARY_BLOCK: &str = "### What the message body says";
-    const SUMMARY_BLOCK_END: &str = "the in-process throttle it replaces goes away.\n";
+    /// The example's closing fence, which is the last line of the block now the
+    /// diagram comes after the prose. The opening fence names its language, so
+    /// this matches the closing one and nothing else.
+    const SUMMARY_BLOCK_END: &str = "    ```\n";
 
     /// The block as one skill carries it, cut out so that the five can be held
     /// against each other.
@@ -1927,7 +1930,8 @@ mod tests {
     }
 
     /// And what the block says, held once: which commits get a summary, when the
-    /// diagram is required, what kind of diagram it is, and that it comes first.
+    /// diagram is required, what kind of diagram it is, and that it comes after
+    /// the prose.
     #[test]
     fn the_summary_block_says_which_commits_and_what_goes_in_one() {
         let block = summary_block("next-task/SKILL.md");
@@ -1970,8 +1974,9 @@ mod tests {
             "and small enough to read on a phone: {block}"
         );
         assert!(
-            block.find("The diagram first") < block.find("The prose after it"),
-            "the glance comes before the reading, in the block as in the message: {block}"
+            block.find("The prose first") < block.find("The diagram after it"),
+            "the words come first and the picture is checked against them, in the block \
+             as in the message: {block}"
         );
     }
 

@@ -78,8 +78,9 @@
 
    The Postscript's card is the same box drawn around its body — see
    `.postscriptCard` in `Postscript.module.css`, which is the same five lines
-   and has to stay the same five. The heading stays outside the box in both,
-   which is what makes the two sections look alike. */
+   and has to stay the same five, and so is a commit's Message in
+   `workbench/Commit.module.css`. The heading stays outside the box in all
+   three, which is what makes the sections look alike. */
 .prefaceBody {
   padding: 1rem;
   background: var(--card);

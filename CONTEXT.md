@@ -137,9 +137,10 @@ are **pinned**: a fixed set, with no manual pin or unpin.
 _Avoid_: item, record, message, step
 
 **Commit Summary**:
-The agent-written account a code commit carries as its message body — a delta
-Diagram first, prose after — kept by the sweep with its trailers stripped,
-rendered above the diff in the commit's details pane, and clamped to a prose
+The agent-written account a code commit carries as its message body — prose
+first, a delta Diagram after it — kept by the sweep with its trailers stripped,
+rendered as the **Message** above the diff in the commit's details pane —
+headed and boxed there the way a Set's Preface is — and clamped to a prose
 snippet on its Timeline card. Written for commits that deliver work; pure
 bookkeeping commits carry none, and a commit without one draws as it always
 did.

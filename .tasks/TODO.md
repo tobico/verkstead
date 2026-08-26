@@ -19,7 +19,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 07: Menus and pane chrome — [details](07-menus-and-pane-chrome.md)
 - [x] 08: Brief card — [details](08-brief-card.md)
 - [x] 09: Hover sweep — [details](09-hover-sweep.md)
-- [ ] 10: Commit message block — [details](10-commit-message-block.md)
+- [x] 10: Commit message block — [details](10-commit-message-block.md)
 - [ ] 11: Locked Sets — [details](11-locked-sets.md)
 - [ ] 12: Archive Closed conversations — [details](12-archive-closed.md)
 - [ ] 13: Show archived, and Unarchive — [details](13-show-archived.md)

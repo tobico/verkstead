@@ -12,14 +12,17 @@
 //! parser in the browser, and one place where a diff is decided to look the way
 //! it does.
 //!
-//! The summary above it is the agent's own account of the commit: its message
+//! The Message above it is the agent's own account of the commit: its message
 //! body, with git's trailers off it, rendered and sanitized on the server like
 //! every other document on a timeline. So there is no markdown parser here
 //! either — and a commit that carried none draws the pane as it always did.
+//! Headed and boxed the way a Set's Preface is, because it is the same kind of
+//! thing read the same way: the agent's markdown, in one padded card under a
+//! heading the table of contents offers a way to.
 //!
-//! The one thing that is drawn here is a Diagram in that summary, which is the
+//! The one thing that is drawn here is a Diagram in that Message, which is the
 //! Set page's own arrangement: the server leaves the source block, the client
-//! draws over it, and a pane whose summary holds none never asks for mermaid.
+//! draws over it, and a pane whose Message holds none never asks for mermaid.
 //!
 //! The file list down its margin is the Set page's own table of contents, drawn
 //! from the paths that travel beside the rendered markup: the same entries, the
@@ -66,24 +69,24 @@ import { ABBREVIATED } from "./Timeline";
 /// Set's page can be open at once and an id names one element.
 const DIFF = "commit-diff";
 
-/// And what the summary above it is reached by, for the same reason.
-const SUMMARY = "commit-summary";
+/// And what the Message above it is reached by, for the same reason.
+const MESSAGE = "commit-message";
 
 /// What the commit said about itself, put in the page and — where it holds one
 /// — drawn.
 ///
-/// Its own component so that the drawing is worked out from the summary rather
-/// than from the pane: the summary arrives with the fetch, and a pane that
+/// Its own component so that the drawing is worked out from the message rather
+/// than from the pane: the message arrives with the fetch, and a pane that
 /// reached for the renderer on its own mount would be reaching before there was
 /// anything to draw over.
 ///
 /// The renderer is turned loose on this block alone rather than on the document,
 /// because a Set's page can be open behind the workbench and its Diagrams are its
 /// own to draw.
-function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
-  let block!: HTMLElement;
+function Message(props: { html: string; diagrams: boolean }): JSX.Element {
+  let block!: HTMLDivElement;
 
-  // On the summary that is in the block, rather than on this component's mount:
+  // On the message that is in the block, rather than on this component's mount:
   // opening a second commit is not a second mount. Neither the `Show` this sits
   // under nor the `Match` holding the whole pane is keyed, so the next commit's
   // markup is assigned into the block of the component the first one built — and
@@ -101,7 +104,7 @@ function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
           return;
         }
 
-        // Stopped when the next summary arrives as much as when the pane goes: a
+        // Stopped when the next message arrives as much as when the pane goes: a
         // drawing nobody stopped is still watching the colour scheme, and would
         // go on redrawing nodes this block no longer holds.
         onCleanup(drawDiagrams({ root: block }));
@@ -110,12 +113,21 @@ function Summary(props: { html: string; diagrams: boolean }): JSX.Element {
   );
 
   return (
-    <section
-      id={SUMMARY}
-      class={`${styles.summary} markdown`}
-      ref={block}
-      innerHTML={props.html}
-    />
+    /* Named and anchored the way a Set's Preface is: the heading is what a jump
+       from the table of contents lands on, the id is what it jumps to, and the
+       heading stays outside the box, which is what makes the two look alike.
+
+       The body is marked as rendered markdown, so the agent's headings, tables
+       and code get the same rules here as they get in a Preface — the box
+       around it is all that is this section's own. */
+    <section id={MESSAGE} class={styles.message}>
+      <h2 class={app.sectionHeading}>Message</h2>
+      <div
+        class={`${styles.messageBody} markdown`}
+        ref={block}
+        innerHTML={props.html}
+      />
+    </section>
   );
 }
 
@@ -154,7 +166,7 @@ export function Commit(props: {
   // the pane rather than from a Set — but the entries are the Set page's own,
   // off the same paths and pointing at the same renderer-stamped anchors.
   //
-  // A commit that said nothing has no Summary line, exactly as it has no summary
+  // A commit that said nothing has no Message line, exactly as it has no message
   // to jump to; one that changed nothing has no Diff line either, and a pane with
   // neither gets no nav at all.
   const sections = createMemo((): Section[] => {
@@ -162,7 +174,7 @@ export function Commit(props: {
     const listed: Section[] = [];
 
     if (pane?.summary) {
-      listed.push({ anchor: SUMMARY, name: "Summary", entries: [] });
+      listed.push({ anchor: MESSAGE, name: "Message", entries: [] });
     }
 
     const view = pane?.diff;
@@ -199,14 +211,11 @@ export function Commit(props: {
           summaries were kept — has nothing here at all. */}
       <Show when={opened.data?.summary}>
         {(summary) => (
-          <Summary
-            html={summary()}
-            diagrams={opened.data?.diagrams ?? false}
-          />
+          <Message html={summary()} diagrams={opened.data?.diagrams ?? false} />
         )}
       </Show>
 
-      {/* After the summary and before the diff. The stylesheet takes it out of
+      {/* After the Message and before the diff. The stylesheet takes it out of
           the flow and puts it in the pane's margin where there is one. A commit
           that changed no files has no folds to list, and gets none. */}
       <Show when={sections().length > 0}>

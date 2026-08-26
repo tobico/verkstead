@@ -72,18 +72,22 @@ none: a plan or backlog commit, a roadmap commit, the finish commit, an ADR
 recorded along the way. A commit still counts as delivering work when a task
 file's deletion rides along with the code.
 
-- **The diagram first**, whenever the diff is more than three changed lines.
-  The glance comes before the reading, so it goes above the prose. Diagram the
+- **The prose first** — what you built and how it hangs together.
+- **The diagram after it**, whenever the diff is more than three changed lines.
+  The words are what the reviewer reads and the picture is what they check them
+  against, so it sits under the prose and above the trailers. Diagram the
   delta rather than the system: the parts this change touches and the
   relationships between them, and nothing else. Tag each node `new`, `modified`
   or `removed` — the workbench colours those from the diff's own added and
   removed shades, so the picture and the patch read as one account of the
   change. Around ten nodes, so that it reads on a phone.
-- **The prose after it** — what you built and how it hangs together.
 
 Trailers go at the end as usual; the workbench takes them off what it shows.
 
     feat: share the rate limiter's count between instances
+
+    The counter moves out of the process, so every instance counts against the
+    same window, and the in-process throttle it replaces goes away.
 
     ```mermaid
     flowchart LR
@@ -95,9 +99,6 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class api modified
       class throttle removed
     ```
-
-    The counter moves out of the process, so every instance counts against the
-    same window, and the in-process throttle it replaces goes away.
 
 Then **stop**. Do not start the next task, and do not say anything about clearing
 a context — Verkstead runs a fresh session of its own for it, and starting on it
