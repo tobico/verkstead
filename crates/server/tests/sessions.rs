@@ -4754,9 +4754,11 @@ async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
 /// waiting for — its Answers reach a later session by design — and the session
 /// would sit there until they got round to it.
 ///
-/// The ending is the whole of what is asked here. What the wrap-up then makes of
-/// a review that left a Set standing is the review's own business, and it is the
-/// same business whichever way the Set was asked.
+/// And the wrap-up reads it the same way the ending did: a Deferred Ask left
+/// standing is nobody's proposal, so the review settles over the top of one and
+/// the question stays open for the human to answer in their own time. Reading it
+/// as a proposal with nobody behind it would stop the run over a question that
+/// was working, and close it on the human's behalf as it went.
 #[tokio::test]
 async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
     let spill = tempfile::tempdir().unwrap();
@@ -4793,6 +4795,41 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
         "and nobody ever answered it: {:?}",
         sets(&view),
     );
+
+    let deadline = Instant::now() + PATIENCE;
+    while !review_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the session was seen out and the review never settled: {:?}",
+            notices(&fixture.view().await),
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "nothing stopped over a question nobody was waiting on: {:?}",
+        notices(&view),
+    );
+    assert!(
+        matches!(
+            where_it_stands(&view, set),
+            Some(verkstead_render::Standing::Waiting(_))
+        ),
+        "and it is still there to be answered in their own time: {:?}",
+        where_it_stands(&view, set),
+    );
+}
+
+/// Where this Set of the Conversation's stands, or `None` where the Conversation
+/// has no such Set.
+fn where_it_stands(view: &ConversationView, set_id: i64) -> Option<verkstead_render::Standing> {
+    sets(view)
+        .into_iter()
+        .find(|asked| asked.set_id == set_id)
+        .map(|asked| asked.standing.clone())
 }
 
 /// Whether this Set of the Conversation's was answered, as against still open or

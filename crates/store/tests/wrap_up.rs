@@ -578,6 +578,61 @@ async fn a_proposal_closed_unanswered_stops_being_the_review() {
     );
 }
 
+/// A Deferred Ask is nobody's proposal, however long it stands unanswered.
+///
+/// The one thing "every Set this wrap asked" must not swallow. A Deferred Ask
+/// idles nobody — the session that sent one carried straight on, and its Answers
+/// reach a later session by design — so it is unanswered for as long as the
+/// human likes with nothing owed on it. Counting one would have a wrap-up stop
+/// over a question that was working exactly as it was meant to, and close it on
+/// the human's behalf as it went.
+#[tokio::test]
+async fn a_deferred_ask_is_no_proposal_of_the_wraps() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = wrapping(&pool).await;
+
+    let deferred = ask(&pool, id, &reviewing(), Ask::Deferred)
+        .await
+        .unwrap()
+        .expect("the Conversation is there to ask from");
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        None,
+        "a wrap-up whose only ask idles nobody has nothing standing on it",
+    );
+
+    let blocking = ask(&pool, id, &reviewing(), Ask::Blocking)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        last_proposal(&pool, id).await.unwrap(),
+        Some(blocking.id),
+        "and the Blocking Set beside it is the proposal, whichever was asked last",
+    );
+
+    settle_wrap_up(&pool, id, WaitingOn::Review).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let after = ask(&pool, id, &reviewing(), Ask::Deferred)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        last_batch_proposal(&pool, id).await.unwrap(),
+        None,
+        "and one deferred after the review settled is no batch's proposal either",
+    );
+    assert_ne!(
+        deferred.id, after.id,
+        "the two Deferred Asks are different Sets, neither of them counted",
+    );
+}
+
 /// The Set a batch session asked with, which is the review's shape about what
 /// somebody said rather than about the branch.
 fn answering_the_comments() -> verkstead_schema::QuestionSet {

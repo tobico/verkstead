@@ -1716,20 +1716,31 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
         .next_back())
 }
 
-/// Every Set this wrap has put to the human, oldest first.
+/// Every Blocking Set this wrap has put to the human, oldest first.
 ///
-/// **Every Set**, because a wrap-up's asks are all of them proposals: the review
-/// reads the branch and proposes what to do about what it found, and a batch
-/// session proposes what to do about what was said on the pull request. Nothing
-/// marks one as such and nothing needs to — a Set that says which kind of ask it
-/// was would be a second record to keep true, and the one that could disagree
-/// with the session that asked it.
+/// **Every Blocking Set**, because a wrap-up's asks are all of them proposals:
+/// the review reads the branch and proposes what to do about what it found, and
+/// a batch session proposes what to do about what was said on the pull request.
+/// Nothing marks one as such and nothing needs to — a Set that says which kind
+/// of ask it was would be a second record to keep true, and the one that could
+/// disagree with the session that asked it.
 ///
 /// Which widens what counts: a Set some other session of this wrap put up is one
 /// of these too, and a Set left standing behind one is read as this wrap's ask
 /// with nobody behind it. That is the safe way round for what hangs on it —
 /// what is on the other side is a run stopping, and a question nobody is coming
 /// back to answer is worth stopping over whoever asked it.
+///
+/// **Blocking, though, and never Deferred**, which is the one thing that width
+/// must not swallow. A Deferred Ask idles nobody: the session that sent one
+/// carried straight on, its Answers reach a later session by design, and it is
+/// unanswered for as long as the human likes without anything being owed. So a
+/// Deferred Set is not a proposal left standing — and reading one as such would
+/// stop the run over a question that was working exactly as it was meant to,
+/// and close it on the human's behalf into the bargain. This is the same
+/// question [`unanswered_set_since`] asks of a quiet session, and the two have
+/// to answer it the same way: a Set that holds no session open holds no wrap-up
+/// open either.
 ///
 /// **This wrap's**, because a Conversation can wrap up more than once: a review
 /// that splits its findings out into a backlog leaves Wrapping to build them and
@@ -1752,8 +1763,10 @@ async fn proposals(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Propos
          JOIN set_events s ON s.set_id = q.id
          JOIN timeline_events e ON e.id = s.event_id
          LEFT JOIN archivings a ON a.set_id = q.id
+         LEFT JOIN deferrals d ON d.set_id = q.id
          WHERE e.conversation_id = ?
            AND a.set_id IS NULL
+           AND d.set_id IS NULL
            AND e.id > COALESCE(
                    (SELECT MAX(w.id) FROM timeline_events w
                     WHERE w.conversation_id = ? AND w.kind = ? AND w.body = ?),

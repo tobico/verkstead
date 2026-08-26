@@ -468,6 +468,11 @@ async fn wanted(state: &AppState, conversation_id: i64) -> Wanted {
 /// nobody is coming back to answer, and that is worth stopping over whoever asked
 /// it.
 ///
+/// A Deferred Ask is none of them, for the reason no session was ever held open
+/// by one: it idles nobody, its Answers reach a later session by design, and a
+/// wrap-up that stopped over one would be stopping over a question that is
+/// working exactly as it was meant to.
+///
 /// A store that will not answer reads as *it never asked*, which is the same way
 /// round the rest of this module reads one: everything on the other side of a
 /// `None` here waits on the Worktree and asks the record again.
