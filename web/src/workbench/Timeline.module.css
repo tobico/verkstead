@@ -547,14 +547,22 @@
 }
 
 /* And what says the card can be pressed. The events that are buttons carry this
-   for nothing; these three are articles, because rendered markdown cannot live
-   inside a button, so the same two things a pressable card has — a pointer and a
-   border in the accent while it is the one open — are said here instead. */
-.timelineEvent > .openable {
+   for nothing; the documents and the two lists are articles, because rendered
+   markdown cannot live inside a button, so the same two things a pressable card
+   has — a pointer and a border in the accent while it is the one open — are
+   said here instead.
+
+   Wherever the card is drawn rather than only on the record, which is what the
+   two lists made matter: a task list and a roadmap are drawn twice, pinned and
+   listed, and a rule that reached one copy would have the human press the card
+   held above the pane and watch a different one light up. Said the way
+   `.pullRequest.selected` above says it, and true of both copies for the same
+   reason. */
+.openable {
   cursor: pointer;
 }
 
-.timelineEvent > .openable.selected {
+.openable.selected {
   border-color: var(--accent);
 }
 
@@ -1104,7 +1112,9 @@
     color: var(--accent);
   }
 
-  .timelineEvent > .openable:hover,
+  /* The pressable card, wherever it is drawn — the pinned copies of the two
+     lists included, for the reason `.openable` itself is unscoped. */
+  .openable:hover,
   .timelineEvent > .agentOutput:hover,
   .timelineEvent > .questionSet:hover,
   .timelineEvent > .commit:hover {

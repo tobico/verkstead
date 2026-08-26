@@ -7056,6 +7056,53 @@ describe("the pinned task list", () => {
     expect(list.getAttribute("aria-pressed")).toBe("false");
   });
 
+  /// And it *says* it is one, in the same three ways the copy on the record
+  /// does. The card is drawn twice, so a rule that reached only the record
+  /// would have the human press the card held above the pane and watch a
+  /// different one light up. jsdom lays nothing out, so the rules themselves
+  /// are what is read.
+  it("reads as pressable wherever it is drawn", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
+
+    // The classes are on both copies already — what had to change is that the
+    // stylesheet says something about them off the record too.
+    expect(list.classList.contains(timeline.openable!)).toBe(true);
+
+    for (const rule of [
+      ".openable {\n  cursor: pointer;\n}",
+      ".openable.selected {\n  border-color: var(--accent);\n}",
+      "  .openable:hover,",
+    ]) {
+      expect(timelineCss).toContain(rule);
+    }
+
+    expect(timelineCss).not.toContain(".timelineEvent > .openable");
+  });
+
+  /// Pressing it marks it — both copies of it, because the two are one backlog
+  /// and there is one details pane behind them.
+  it("marks both copies of itself while its pane is open", async () => {
+    theTasked();
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    const list = await drawn(container, `.${timeline.pinned} .${timeline.taskList}`);
+
+    fireEvent.click(list);
+
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll(
+          `.${timeline.taskList}.${timeline.selected}`,
+        ),
+      ).toHaveLength(2),
+    );
+
+    expect(list.getAttribute("aria-pressed")).toBe("true");
+  });
+
   /// What holds it in view is the block it shares with the header, so that is
   /// where the rule is read. jsdom lays nothing out, so the rule itself is what
   /// is read, as the panes' own is.
