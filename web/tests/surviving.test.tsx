@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   ConversationEntry,
   ConversationView,
+  SteerOpened,
 } from "../src/api/types";
 import { Picker } from "../src/picking";
 import {
@@ -48,7 +49,7 @@ import building from "./fixtures/conversation-building.json" with { type: "json"
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 /// A conversation with a worktree and nothing running in it, which is where the
-/// manual task composer — and the third profile picker — is drawn.
+/// steer modal — and the third profile picker — is opened over.
 const BUILDING = building as ConversationView;
 
 /// The sidebar with a session talking on one of its rows, which is what puts a
@@ -184,19 +185,37 @@ describe("what a Nudge leaves standing", () => {
     survived(implementing, nodes(container, "#implementation-pairing option"));
   });
 
-  /// The third picker, and the one a Nudge is loudest around: it sits under a
-  /// half-typed instruction while a session talks above it.
-  it("keeps the manual task composer's options", async () => {
+  /// The third picker, and the one a Nudge is loudest around: it sits in the
+  /// steer modal under a half-typed instruction, while a session talks behind
+  /// it.
+  ///
+  /// Looked for on the document rather than in the container: a native
+  /// `dialog` opened with `showModal` is drawn in the top layer, which is not
+  /// inside the page's own tree.
+  it("keeps the steer modal's pairing options", async () => {
     theWorkbench(
       whenever(`/api/ui/conversations/${BUILDING.id}`, json(BUILDING)),
+      whenever(
+        `/api/ui/conversations/${BUILDING.id}/steer`,
+        json({ Opened: { working: false } } satisfies SteerOpened),
+        "POST",
+      ),
     );
     const { container, client } = mount(`/conversations/${BUILDING.id}`);
-    await drawn(container, "#manual-task-pairing option");
-    const options = nodes(container, "#manual-task-pairing option");
+
+    fireEvent.click(
+      await drawn(container, ".conversation-actions > .menu-trigger"),
+    );
+    const menu = await drawn(container, ".conversation-actions > .menu-drop");
+    fireEvent.click(await drawn(menu, ".steer"));
+    await drawn(document.body, ".steer-conversation");
+
+    await drawn(document.body, "#steer-pairing option");
+    const options = nodes(document.body, "#steer-pairing option");
 
     await nudged(client);
 
-    survived(options, nodes(container, "#manual-task-pairing option"));
+    survived(options, nodes(document.body, "#steer-pairing option"));
   });
 });
 

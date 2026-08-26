@@ -53,7 +53,6 @@ import type {
   CommitEvent,
   ConversationView,
   HandoffEvent,
-  ManualTaskEvent,
   SteerEvent,
   PullRequestEvent,
   QuestionSetEvent,
@@ -94,7 +93,6 @@ type Opened =
   | { opened: PullRequestEvent }
   | { brief: BriefEvent }
   | { handoff: HandoffEvent }
-  | { manual: ManualTaskEvent }
   | { steer: SteerEvent };
 
 /// The Event inside, whichever kind it turned out to be — what they have in
@@ -109,7 +107,6 @@ function which(
   | PullRequestEvent
   | BriefEvent
   | HandoffEvent
-  | ManualTaskEvent
   | SteerEvent {
   if ("output" in open) {
     return open.output;
@@ -125,9 +122,6 @@ function which(
   }
   if ("handoff" in open) {
     return open.handoff;
-  }
-  if ("manual" in open) {
-    return open.manual;
   }
   return "steer" in open ? open.steer : open.opened;
 }
@@ -156,10 +150,6 @@ function briefIn(open: Opened): BriefEvent | undefined {
 
 function handoffIn(open: Opened): HandoffEvent | undefined {
   return "handoff" in open ? open.handoff : undefined;
-}
-
-function manualIn(open: Opened): ManualTaskEvent | undefined {
-  return "manual" in open ? open.manual : undefined;
 }
 
 function steerIn(open: Opened): SteerEvent | undefined {
@@ -466,8 +456,8 @@ function Reading(props: {
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; and the three documents — the
-  /// Brief, the handoff and a Manual Task's instruction — whose full self is
-  /// the markdown their card shows five lines of. The kind travels with it,
+  /// Brief, the handoff and the instruction a steer carried — whose full self
+  /// is the markdown their card shows five lines of. The kind travels with it,
   /// because it is what decides which pane is drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
@@ -503,9 +493,6 @@ function Reading(props: {
         }
         if ("Handoff" in entry) {
           return { handoff: entry.Handoff };
-        }
-        if ("ManualTask" in entry) {
-          return { manual: entry.ManualTask };
         }
         // Only where it carries one. A steer into wrapping up or done says
         // nothing but the state, so there is no document under it to open —
@@ -657,17 +644,6 @@ function Reading(props: {
                         heading="Handoff"
                         html={handoff().html}
                         empty="The grilling wrote nothing down."
-                        back={() => props.pane("timeline")}
-                        close={props.close}
-                      />
-                    )}
-                  </Match>
-                  <Match when={manualIn(open())}>
-                    {(manual) => (
-                      <Document
-                        heading="Manual task"
-                        html={manual().html}
-                        empty="Nothing was asked for."
                         back={() => props.pane("timeline")}
                         close={props.close}
                       />

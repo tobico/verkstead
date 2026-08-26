@@ -43,6 +43,7 @@ import {
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
+import drafting from "./fixtures/conversation.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
@@ -61,13 +62,24 @@ vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 /// them.
 const CONVERSATION = grilling as ConversationView;
 
+/// And a Conversation still being drafted, which is where the setup draws its
+/// pairing pickers — the one page of the workbench that reads the Agent
+/// Profiles by being drawn.
+const DRAFTING = drafting as ConversationView;
+
 /// The Conversation the workbench reads, which is what most of this file
 /// counts.
 const OPENED = `/api/ui/conversations/${CONVERSATION.id}`;
 
 /// The four lists the workbench draws its panes over: the sidebar, the Repos the
 /// picker on it needs, the roadmaps nothing is driving beside them, and the
-/// Agent Profiles the details pane picks from.
+/// Agent Profiles.
+///
+/// The Profiles are the one of the four a conversation page does not read by
+/// being drawn: what reads them is a pairing picker, and the pickers are on a
+/// draft's setup and in the steer modal. So the sweeps below count them at zero
+/// on the conversation they open, and [`a Nudge of kind profiles`] is asked
+/// about where one is drawn.
 ///
 /// Named because they are counted. Which of them a Nudge moves is the whole
 /// question of what a kind stands for, and the reason the tests below can tell
@@ -360,7 +372,9 @@ describe("the Nudge stream", () => {
     const fetching = serving(...BESIDE, json(CONVERSATION), json(MOVED_ON));
     render(() => <App />);
     await waitFor(() => screen.getByText(ALREADY_THERE));
-    const lists = [SIDEBAR, REPOS, ROADMAPS, PROFILES].map((path) =>
+    // The Profiles are not among them: nothing on a conversation page reads
+    // that list, so there is no query mounted for a re-read to land in.
+    const lists = [SIDEBAR, REPOS, ROADMAPS].map((path) =>
       askedFor(fetching, path),
     );
     stream().opens();
@@ -372,7 +386,7 @@ describe("the Nudge stream", () => {
     // moved, which is what it used to do about everything.
     await waitFor(() => screen.getByText(ARRIVAL.title));
     expect(askedFor(fetching, OPENED)).toBe(2);
-    [SIDEBAR, REPOS, ROADMAPS, PROFILES].forEach((path, at) => {
+    [SIDEBAR, REPOS, ROADMAPS].forEach((path, at) => {
       expect(askedFor(fetching, path), `${path} was not read again`).toBe(
         lists[at]! + 1,
       );
@@ -496,7 +510,10 @@ const ABOUT: Record<string, readonly string[]> = {
   conversation: [OPENED, SIDEBAR],
   conversations: [SIDEBAR],
   repos: [REPOS, ROADMAPS],
-  profiles: [PROFILES],
+  // Nothing on the conversation this sweep opens draws a pairing picker, so
+  // there is no Profiles query mounted for the re-read to land in. What a Nudge
+  // of this kind does where one *is* drawn is the test under the sweep.
+  profiles: [],
 };
 
 describe("what a Nudge is about", () => {
@@ -536,6 +553,36 @@ describe("what a Nudge is about", () => {
       });
     },
   );
+
+  /// The Agent Profiles, asked about where one is drawn: a draft's setup, whose
+  /// two pairing pickers are the list on the page.
+  ///
+  /// Its own test rather than a row of the sweep, because it is its own page.
+  /// The sweep opens a conversation being grilled and nothing there picks a
+  /// pairing, so the reaction to this kind can only be read where a picker is.
+  it("reads the Agent Profiles back where a picker is drawing them", async () => {
+    const opened = `/api/ui/conversations/${DRAFTING.id}`;
+
+    window.history.pushState({}, "", `/conversations/${DRAFTING.id}`);
+    const fetching = serving(
+      ...BESIDE,
+      whenever(opened, json(DRAFTING)),
+      whenever(`/api/ui/repos/${DRAFTING.repo.id}/branches`, json(["main"])),
+    );
+    render(() => <App />);
+    await waitFor(() =>
+      expect(
+        document.querySelector("#implementation-pairing option"),
+      ).not.toBeNull(),
+    );
+    stream().opens();
+    const before = askedFor(fetching, PROFILES);
+
+    stream().nudges({ kind: "profiles" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await waitFor(() => expect(askedFor(fetching, PROFILES)).toBe(before + 1));
+  });
 
   it.each(
     KINDS.filter((moved) => "conversation" in moved).map(

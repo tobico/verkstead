@@ -19,12 +19,12 @@ use ts_rs::TS;
 use crate::{
     AbandonedRepo, Adopted, Archived, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed,
     BriefEdit, BriefSaved, Capture, CommitPane, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, ManualTaskStarted,
-    ManualTaskSubmission, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, NewAdoption,
+    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
+    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, Shown, Started,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -133,14 +133,8 @@ fn the_viewers_types_are_written_from_these() {
     // own payload, because reading that is asking GitHub over the network.
     PullRequestDetails::export_all(&config).unwrap();
 
-    // What the human sets going by hand at the end of a Timeline, and every way
-
-    // of being refused it. The instruction's own Event rides on the
-    // `ConversationView` above, rendered like the handoff.
-    ManualTaskSubmission::export_all(&config).unwrap();
-    ManualTaskStarted::export_all(&config).unwrap();
-
-    // And the press beside it, which takes no request shape at all: what to
+    // The press that gets a stopped Conversation going again, which takes no
+    // request shape at all: what to
     // start again is recomputed from the lifecycle and the branch, so all there
     // is to send is which Conversation. What comes back is the outcome — a
     // start, or the named reason there was nothing to start.

@@ -21,9 +21,8 @@
 //! than of a session that failed, because nothing failed and nothing exited:
 //! there was no session there at all.
 //!
-//! **When it looks.** At startup, every [`crate::Pace::stalls`] while the server
-//! runs, and the moment a Manual Task's session ends. Startup is the one that
-//! matters least, and deliberately: no driver survives the process, so a server
+//! **When it looks.** At startup, and every [`crate::Pace::stalls`] while the
+//! server runs. Startup is the one that matters least, and deliberately: no driver survives the process, so a server
 //! coming back holds no registrations at all — and what puts that right is the
 //! restart's own resume, which runs first and takes up everything it can. See
 //! [`crate::resume::at_startup`] and [`sweeping`], which waits for it. What is
@@ -92,15 +91,10 @@ pub(crate) fn sweeping(state: &AppState, resumed: Vec<JoinHandle<()>>) {
 
 /// One look over every Conversation: stop each one that has stalled.
 ///
-/// Called on its own the moment a Manual Task's session ends, which is the one
-/// time a stall is worth noticing without waiting for the next sweep: the human
-/// set that session going by hand because nothing was moving, and what they want
-/// to know when it stops is whether anything is moving now.
-///
 /// Nothing is refused for and nothing is returned. This runs unattended with
 /// nobody watching, and what it has to say it says on the Timeline or in the
 /// log.
-pub(crate) async fn sweep(state: &AppState) {
+async fn sweep(state: &AppState) {
     let conversations = match store::conversations(&state.pool).await {
         Ok(conversations) => conversations,
         Err(error) => {

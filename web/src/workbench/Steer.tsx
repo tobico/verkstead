@@ -41,7 +41,7 @@
 //! worktree holds one agent, so a target something runs in ends it by starting:
 //! the session this steer launches takes the worktree over, at once where it can
 //! and once the session in front of it has finished where it cannot — a review
-//! waiting on an ask, or a manual task. **Done** launches nothing, so there it
+//! waiting on an ask. **Done** launches nothing, so there it
 //! runs to its own end and the box is the only thing that would stop it. The box
 //! is drawn only where the click found a session running — there is otherwise
 //! nothing to interrupt.
@@ -452,25 +452,37 @@ export function Steer(props: {
         <Show when={runs()}>
           <div class="steer-pairing">
             <label for="steer-pairing">Run it under</label>
-            <Picker
-              id="steer-pairing"
-              options={pairing.pairings(profiles.data ?? [])}
-              value={pairing.value}
-              label={pairing.label}
-              chosen={picked()}
-              pick={pick}
-              gone={() => pick("")}
-              disabled={submit.isPending}
-            />
+            {/* Drawn only once the list is here, the way the setup's pickers
+                are: a select whose value is set before its options exist is a
+                select showing nothing, and the modal reads the profiles when it
+                opens rather than finding them already read. */}
+            <Show
+              when={profiles.data}
+              fallback={
+                <p class="note">
+                  {profiles.isError
+                    ? `Could not read the agent profiles: ${profiles.error?.message}`
+                    : "Reading the agent profiles…"}
+                </p>
+              }
+            >
+              {(saved) => (
+                <Picker
+                  id="steer-pairing"
+                  options={pairing.pairings(saved())}
+                  value={pairing.value}
+                  label={pairing.label}
+                  chosen={picked()}
+                  pick={pick}
+                  gone={() => pick("")}
+                  disabled={submit.isPending}
+                />
+              )}
+            </Show>
             <p class="note">
               What the work runs under from here. This is recorded as the
               conversation's, not just this run's.
             </p>
-            <Show when={profiles.isError}>
-              <p class="error">
-                Could not read the agent profiles: {profiles.error?.message}
-              </p>
-            </Show>
           </div>
         </Show>
 

@@ -71,7 +71,7 @@ pub(crate) enum Digest {
 pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Driving, digest: Digest) {
     // Waited for rather than tried for: the human presses Resume whenever they
     // get to it, and nothing is holding a request open on what it starts. So
-    // whatever is running — a Manual Task they set going while the work stood
+    // whatever is running — a session they steered the work into while it stood
     // still — finishes, and this goes next rather than killing it mid-sentence.
     let _turn = state.sessions.turn(conversation_id).await;
 

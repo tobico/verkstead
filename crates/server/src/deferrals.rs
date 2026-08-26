@@ -15,12 +15,10 @@
 //! been started on the prompt, so a launch that came to nothing does not cost
 //! the human the one session their Answers were folded into.
 //!
-//! Where this is *not* done is the sessions that are not building anything: a
-//! Manual Task, whose prompt is the instruction the human typed and nothing else
-//! (see [`crate::manual`]), and a relaunched grilling, which is already primed
-//! with every Set the Conversation has answered (see [`crate::grillings`]).
-//! Folding into either would be an Answer spent on a session it was not meant
-//! for.
+//! Where this is *not* done is the one session that is not building anything: a
+//! relaunched grilling, which is already primed with every Set the Conversation
+//! has answered (see [`crate::grillings`]). Folding into it would be an Answer
+//! spent on a session it was not meant for.
 
 use sqlx::SqlitePool;
 

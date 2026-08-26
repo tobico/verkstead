@@ -21,7 +21,6 @@ import type {
   ConversationStopped,
   ConversationView,
   GrillingStarted,
-  ManualTaskStarted,
   ProfileChoice,
   ProfileChosen,
   ProfileDeleted,
@@ -330,27 +329,6 @@ export function adoptRoadmap(id: number): Promise<Adopted> {
 /// left where it is.
 export function closeConversation(id: number): Promise<ConversationClosed> {
   return post<ConversationClosed>(`/api/ui/conversations/${id}/close`, {});
-}
-
-/// Set a manual task going: this one instruction, under the pairing picked
-/// beside it, in a session of its own.
-///
-/// Outside the pipeline, so nothing about the conversation moves. What it leaves
-/// behind is the instruction on the timeline, whatever the session printed, and
-/// whatever that committed.
-///
-/// The pairing is sent rather than left to the server to read off the
-/// conversation, because the pick is one-off: it is what *this* task runs under
-/// and never becomes the conversation's own implementation pairing.
-export function startManualTask(
-  id: number,
-  instruction: string,
-  pairing: ProfileChoice,
-): Promise<ManualTaskStarted> {
-  return post<ManualTaskStarted>(`/api/ui/conversations/${id}/manual-task`, {
-    instruction,
-    ...pairing,
-  });
 }
 
 /// Start driving a conversation again, from wherever the work now stands.

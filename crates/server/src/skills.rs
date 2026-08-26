@@ -77,18 +77,13 @@ const REVIEWING: &str = "~/.claude/skills/reviewing/SKILL.md";
 /// shape again, about what somebody has just said rather than about the branch.
 const RESPONDING: &str = "~/.claude/skills/responding/SKILL.md";
 
-/// And the manual-task skill's, which the one-off session a human sets going by
-/// hand runs inside — the one skill nothing in the pipeline ever launches.
-const MANUAL_TASK: &str = "~/.claude/skills/manual-task/SKILL.md";
-
 /// And the instruction skill's, which the session a steer into Implementing
 /// writes its way into runs inside.
 ///
-/// Beside the manual task's rather than the same one, because the two say
-/// opposite things about what happens next. A manual task is outside whatever
-/// else the Conversation is doing and leaves the branch to the human; an
-/// instruction session is the pipeline's own, and what follows it is whatever
-/// the branch then holds — see [`crate::runner::instructed`].
+/// The one session a human sets going by hand, and it is the pipeline's own:
+/// what follows it is whatever the branch then holds, rather than a
+/// Conversation left standing beside the work its session did — see
+/// [`crate::runner::instructed`].
 const INSTRUCTION: &str = "~/.claude/skills/instruction/SKILL.md";
 
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
@@ -400,34 +395,12 @@ pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> 
     )
 }
 
-/// What a Manual Task's session is started on: the instruction the human typed,
-/// under the line that sends the agent into the manual-task skill.
-///
-/// The instruction and nothing else — alone among these, no Brief and no
-/// handoff. A Manual Task is outside the pipeline in every sense: it is not a
-/// slice of the work the two documents describe, and a session primed with them
-/// would be one told that the thing it was asked to do was part of something
-/// else. What the human typed is the whole of what they meant.
-///
-/// It goes last and whole, where every other prompt's last thing goes: it is
-/// the human's own markdown, and nothing here interprets it.
-pub(crate) fn manual_task(instruction: &str) -> String {
-    format!(
-        "Read {MANUAL_TASK} and do what I have asked for below, the way it says. \
-         Nothing else in this session tells you how to reach me.\n\n\
-         # What I have asked for\n\n{}\n",
-        instruction.trim()
-    )
-}
-
 /// What an instruction session is started on: the documents the work is written
 /// down in, and under them the instruction the human steered it with.
 ///
-/// The documents *and* the instruction, which is the whole difference between
-/// this and [`manual_task`] at the prompt. A manual task is outside whatever
-/// else the Conversation is doing, so it is primed with nothing; this is a
-/// session the pipeline carries on from, working the same branch as everything
-/// before it — so it is told what the work is, and then told what it is for.
+/// The documents *and* the instruction, both. This is a session the pipeline
+/// carries on from, working the same branch as everything before it — so it is
+/// told what the work is, and then told what it is for.
 ///
 /// The instruction goes *last*, under the documents rather than over them, for
 /// the reason everything written under them goes there: it is the newest thing
@@ -1715,100 +1688,8 @@ mod tests {
         );
     }
 
-    /// What a manual task's session has to leave behind, and the gate it does
-    /// not stop at — the same two things every other working skill here says,
-    /// because it is implementation-flavoured rather than grilling-flavoured.
-    #[test]
-    fn the_manual_task_skill_says_to_commit_without_asking() {
-        let manual_task = skill("manual-task/SKILL.md");
-
-        assert!(
-            manual_task.contains("git commit"),
-            "committing what it changed is how a manual task reports: {manual_task}"
-        );
-        assert!(
-            manual_task.contains("Nothing waits on approval"),
-            "and there is no gate in front of it, as there is in front of none: {manual_task}"
-        );
-        assert!(
-            !manual_task.contains("gh pr create"),
-            "what happens to the branch after a manual task is the human's to decide: \
-             {manual_task}"
-        );
-    }
-
-    /// The one thing this skill says differently from every other: it *may* ask,
-    /// and nothing compels it to. A manual task is usually one instruction that
-    /// already says what it means, and a session that asked about work it
-    /// understood would idle for hours over nothing.
-    #[test]
-    fn the_manual_task_skill_leaves_asking_to_the_agents_judgement() {
-        let manual_task = skill("manual-task/SKILL.md");
-
-        assert!(
-            manual_task.contains("verkstead guide") && manual_task.contains("verkstead ask"),
-            "the one way to the human, for an instruction that cannot be carried out as \
-             it stands: {manual_task}"
-        );
-        assert!(
-            manual_task.contains("may** put a Question Set")
-                && manual_task.contains("nothing here says you have to"),
-            "asking is offered rather than required: {manual_task}"
-        );
-        assert!(
-            !manual_task.contains("proposal:"),
-            "and this is not a grilling: the `proposal` block is a grilling's closing \
-             move, and a manual task is outside the pipeline altogether — {manual_task}"
-        );
-    }
-
-    /// The scope is the instruction and nothing beside it, which is what makes a
-    /// manual task reviewable against what the human actually typed.
-    #[test]
-    fn the_manual_task_skill_keeps_the_work_to_the_instruction() {
-        let manual_task = skill("manual-task/SKILL.md");
-
-        assert!(
-            manual_task.contains("Keep to what was asked"),
-            "anything else it notices is another manual task: {manual_task}"
-        );
-        assert!(
-            manual_task.contains("commit nothing"),
-            "and an instruction that changes no files is a manual task done rather than \
-             one failed: {manual_task}"
-        );
-    }
-
-    /// A manual session is put inside the skill the same way every other is, and
-    /// primed with the instruction *alone* — which is the one thing that makes
-    /// this prompt different from all of them.
-    #[test]
-    fn a_manual_session_is_started_on_the_instruction_and_nothing_else() {
-        let prompt = manual_task("Rebase this onto `main` and force-push.\n");
-
-        assert!(
-            prompt.contains(MANUAL_TASK),
-            "the skill is named by the path it is mounted at: {prompt:?}"
-        );
-        assert!(
-            prompt.ends_with("Rebase this onto `main` and force-push.\n"),
-            "and the instruction is what follows, whole: {prompt:?}"
-        );
-        assert!(
-            !prompt.contains("The Brief this started from")
-                && !prompt.contains("What the grilling settled"),
-            "neither document goes in: a manual task is not a slice of the work they \
-             describe — {prompt:?}"
-        );
-        assert!(
-            !prompt.contains(IMPLEMENTING) && !prompt.contains(NEXT_TASK),
-            "and nothing sends this session to build the work or work a task instead: \
-             {prompt:?}"
-        );
-    }
-
-    /// What the instruction skill has to say that the manual-task skill it
-    /// stands beside says the opposite of: the pipeline carries on from here.
+    /// What the instruction skill has to say that no other working skill here
+    /// does: the pipeline carries on from here.
     ///
     /// The whole reason it is a skill of its own. A session told that what
     /// happens to the branch next is the human's would be one that lined the
@@ -1825,8 +1706,8 @@ mod tests {
         );
         assert!(
             !instruction.contains("the human's to decide"),
-            "which is the opposite of what the manual-task skill says about the same \
-             moment: {instruction}"
+            "rather than a branch left lined up for somebody to come and look at: \
+             {instruction}"
         );
         assert!(
             !instruction.contains("gh pr create"),
@@ -1866,8 +1747,7 @@ mod tests {
     }
 
     /// An instruction session is put inside its own skill by its prompt, and
-    /// primed with the documents *and* the instruction — which is the other half
-    /// of what tells it from a manual task.
+    /// primed with the documents *and* the instruction.
     ///
     /// The documents because it works the same branch as everything before it,
     /// and the instruction last because it is the newest thing said and the
@@ -1886,9 +1766,9 @@ mod tests {
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
-            !prompt.contains(MANUAL_TASK) && !prompt.contains(IMPLEMENTING),
-            "and not the manual task's, which says the opposite about what follows, \
-             nor the inline implementation's: {prompt:?}"
+            !prompt.contains(IMPLEMENTING),
+            "and not the inline implementation's, which says something else about \
+             what follows: {prompt:?}"
         );
         assert!(
             prompt.contains("The API has none.") && prompt.contains("In-process counter."),
@@ -1981,7 +1861,6 @@ mod tests {
 
         for name in [
             "implementing/SKILL.md",
-            "manual-task/SKILL.md",
             "instruction/SKILL.md",
             "addressing/SKILL.md",
             "reviewing/SKILL.md",

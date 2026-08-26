@@ -18,5 +18,5 @@ Roadmap stage: [03: Close and the retirements](docs/roadmaps/steer/03-close-and-
 
 - [x] 01: Close, wherever the press is named — [details](01-close.md)
 - [x] 02: Retire Reopen — [details](02-retire-reopen.md)
-- [ ] 03: Retire Manual Task — [details](03-retire-manual-task.md)
+- [x] 03: Retire Manual Task — [details](03-retire-manual-task.md)
 - [ ] 04: Sweep the vocabulary — [details](04-sweep-the-vocabulary.md)

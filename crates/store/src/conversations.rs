@@ -321,18 +321,20 @@ pub enum Event {
     /// [`super::stops`].
     Notice(String),
 
-    /// A Manual Task: the instruction the human typed at the end of the
-    /// Timeline for a one-off session to carry out.
+    /// A Manual Task: the instruction a human typed at the end of the Timeline
+    /// for a one-off session to carry out.
     ///
     /// Markdown in the `body` column like the Brief and the handoff, because
     /// that is what it is — one document, written by a human for an agent to
     /// read. Nothing is joined in beside it: a Manual Task is its instruction,
-    /// and what the session it starts does lands as the Events that work lands
+    /// and what the session it started did lands as the Events that work lands
     /// as.
     ///
-    /// Beside the run rather than a step of it. It moves no state, and it is not
-    /// a Step — the unattended unit a done file ends — however much the two look
-    /// alike from the session's end.
+    /// **Read rather than written.** Nothing puts another on a Timeline — a
+    /// steer into Implementing carries the human's instruction now, and drives
+    /// the Conversation with it — and nothing rewrote the ones that are there.
+    /// The kind stays because the rows do: ADR-0006's rule is that the record
+    /// is kept and read as it was written.
     ManualTask(String),
 
     /// A Steer: the state the human moved the Conversation into, and whatever
@@ -1926,8 +1928,9 @@ async fn landed_since(pool: &SqlitePool, conversation_id: i64, submitted_at: &st
 /// The Event id is what makes it *whose* Set. Nothing else on the record says
 /// which session asked one, and nothing has to: one Worktree holds one agent, so
 /// every Set that landed after a session's own Event is that session's. What
-/// asks is the driver of a Manual Task — a session idling on a Blocking Ask
-/// prints nothing for hours, and quiet alone would reap it mid-question.
+/// asks is a driver deciding whether a quiet session is finished — a session
+/// idling on a Blocking Ask prints nothing for hours, and quiet alone would reap
+/// it mid-question.
 ///
 /// Blocking Asks alone, for that same reason read the other way: a Deferred Ask
 /// idles nobody, so a session that has gone quiet behind one has finished rather
@@ -2421,8 +2424,7 @@ pub async fn implement_again(pool: &SqlitePool, id: i64) -> Result<Rebuilding> {
 ///
 /// Two Events, in the order the moment happened in. The Steer goes first because
 /// it is the act — somebody decided this — and the Moved line follows it because
-/// it is what came of the act, which is the same order a Manual Task's
-/// instruction stands in above what its session went on to do.
+/// it is what came of the act.
 ///
 /// **The Steer carries what the human wrote**, where a target takes anything
 /// written: the instruction a steer into Implementing sends a session off with
@@ -2643,11 +2645,10 @@ pub struct Steer<'a> {
     /// The hand-written work a steer into Implementing carries, which lands as
     /// the Steer Event's own body rather than beside it.
     ///
-    /// Not a Brief and not a Manual Task's instruction, however alike the three
-    /// look on the page. A Brief is what a round is grilled *about*; this is
-    /// one session's whole job, said by the human at the moment they steered —
-    /// so it belongs to the steer, and reading the Event back is reading what
-    /// they asked for.
+    /// Not a Brief, however alike the two look on the page. A Brief is what a
+    /// round is grilled *about*; this is one session's whole job, said by the
+    /// human at the moment they steered — so it belongs to the steer, and
+    /// reading the Event back is reading what they asked for.
     pub instruction: Option<&'a str>,
 
     /// How the work is being built from here, for a Conversation that has never
@@ -2735,33 +2736,6 @@ pub async fn note(pool: &SqlitePool, id: i64, markdown: &str) -> Result<bool> {
     .execute(pool)
     .await
     .with_context(|| format!("putting a notice on the Timeline of Conversation {id}"))?
-    .rows_affected();
-
-    Ok(written > 0)
-}
-
-/// Put a Manual Task's instruction on a Conversation's Timeline.
-///
-/// `false` means there is no such Conversation, by the same insert-from-select
-/// every other Event is written with.
-///
-/// The record of what was asked for by hand, written as it is asked and never
-/// rewritten: a Manual Task is a moment on the Timeline like the rest of them,
-/// and what its session goes on to do lands beside it as its own Events.
-pub async fn record_manual_task(pool: &SqlitePool, id: i64, instruction: &str) -> Result<bool> {
-    let event = Event::ManualTask(instruction.to_owned());
-
-    let written = sqlx::query(
-        "INSERT INTO timeline_events (conversation_id, at, kind, body)
-         SELECT id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?
-         FROM conversations WHERE id = ?",
-    )
-    .bind(event.kind())
-    .bind(event.body().into_owned())
-    .bind(id)
-    .execute(pool)
-    .await
-    .with_context(|| format!("putting a manual task on the Timeline of Conversation {id}"))?
     .rows_affected();
 
     Ok(written > 0)

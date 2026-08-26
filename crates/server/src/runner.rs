@@ -71,17 +71,6 @@ pub struct Pace {
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
 
-    /// And how long a Manual Task's session must have printed nothing before it
-    /// is ended — see [`crate::manual`].
-    ///
-    /// Distinctly longer than [`Pace::grace`], because it is carrying more
-    /// weight. A backlog step is ended on quiet *and* a landing read off the
-    /// repository, so quiet is the second of two signals; a manual task has no
-    /// done file and no path to watch, and quiet is the only one there is.
-    /// Ending one early kills a working session silently, and a minute of
-    /// nothing is the shortest silence an agent still at work reliably breaks.
-    pub manual: Duration,
-
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -98,7 +87,6 @@ impl Default for Pace {
             poll: Duration::from_secs(2),
             grace: Duration::from_secs(5),
             checks: crate::checks::ASKED_EVERY,
-            manual: Duration::from_secs(60),
             stalls: crate::stalls::SWEPT_EVERY,
         }
     }
@@ -735,10 +723,9 @@ async fn follow_inline(
 /// Do the one thing the human wrote when they steered the Conversation into
 /// Implementing, and then carry the pipeline on from what the branch holds.
 ///
-/// **A driver rather than an errand**, which is the whole of what tells this
-/// from the Manual Task it replaces. The registration it is handed says the
-/// Conversation is being driven for as long as this runs, so nothing sweeps it
-/// as standing still; it is judged by the rules every other session here is
+/// **A driver rather than an errand beside the work.** The registration it is
+/// handed says the Conversation is being driven for as long as this runs, so
+/// nothing sweeps it as standing still; it is judged by the rules every other session here is
 /// judged by, so one that ends badly stops the Conversation with the ordinary
 /// Notice; and what follows a clean finish is [`onwards`] rather than nothing.
 ///
@@ -1523,10 +1510,10 @@ enum Prompt {
     /// The instruction skill, carrying the hand-written work a steer into
     /// Implementing sent the session off with.
     ///
-    /// Its own skill rather than the manual task's, because the two say
-    /// opposite things about what happens next: a manual task leaves the branch
-    /// to the human, and this is a session the pipeline carries on from — see
-    /// [`instructed`].
+    /// Its own skill rather than the implementation's, because it is one
+    /// session's whole job rather than a slice of the work the documents
+    /// describe — and the pipeline carries on from what it commits, which is
+    /// what the skill has to say and no other says — see [`instructed`].
     Instruction(String),
 
     /// The addressing skill, carrying the feedback the fix session is for.
@@ -1556,10 +1543,10 @@ enum Prompt {
 /// The wait is what keeps a launch from displacing a session somebody else put
 /// there. [`crate::sessions::Sessions::start`] ends whatever is registered, which
 /// is exactly what a run relaunching its own step wants and exactly what must
-/// not happen to a Manual Task — the human sets one going in a quiet moment
-/// between steps, and a run that reached the next one a second later would kill
-/// it mid-sentence. A manual session holds the Turn for as long as it runs, so
-/// this waits for it rather than ending it.
+/// not happen to a session a steer set going — the human steers in a quiet
+/// moment between steps, and a run that reached the next one a second later
+/// would kill it mid-sentence. A steer holds the Turn for as long as its session
+/// runs, so this waits for it rather than ending it.
 ///
 /// Held across the launch alone rather than across the session, because that is
 /// the whole of what it is protecting: once a session is registered, everything

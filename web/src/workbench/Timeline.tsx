@@ -14,8 +14,8 @@
 //!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one. Three of them
-//! are documents — the frozen Brief, the handoff and a Manual Task's
-//! instruction — and a document's summary is its own opening: the card shows
+//! are documents — the frozen Brief, the handoff and the instruction a steer
+//! carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
 //! Brief is also the one Event that is written here as well as read: while the
 //! Conversation is drafting it is a field that saves itself rather than a card
@@ -53,11 +53,9 @@ import {
 import {
   closeConversation,
   forceStopConversation,
-  listProfiles,
   resume,
   saveBrief,
   startGrilling,
-  startManualTask,
   steerConversation,
   stopConversation,
 } from "../api/client";
@@ -73,7 +71,6 @@ import type {
   HandoffEvent,
   Lifecycle,
   ManualTaskEvent,
-  ManualTaskStarted,
   MovedEvent,
   NoticeEvent,
   PinnedEvent,
@@ -88,9 +85,6 @@ import type {
   UnreadableSetEvent,
 } from "../api/types";
 import { Menu } from "../Menu";
-import { useReading } from "../freshness";
-import * as pairing from "../pairing";
-import { Picker } from "../picking";
 import { Adoption } from "./Adoption";
 import { Mark } from "./Mark";
 import { Setup } from "./Setup";
@@ -159,27 +153,6 @@ export const CLOSE_REFUSAL: Record<ConversationClosed, string> = {
   NoSuchConversation: "This conversation is gone.",
   WorktreeStuck:
     "The worktree could not be removed, so nothing was changed. The server log says why.",
-};
-
-/// And each way of being refused a manual task.
-///
-/// `AlreadyRunning` is the one worth reading twice: the composer is drawn
-/// wherever nothing is running, so a submit that arrives to find something
-/// running was pressed against a page a moment out of date. Nothing is queued,
-/// because an instruction written against a worktree that has since moved may no
-/// longer be the thing to do.
-export const MANUAL_TASK_REFUSAL: Record<ManualTaskStarted, string> = {
-  Started: "",
-  NoSuchConversation: "This conversation is gone.",
-  NowhereToWork:
-    "This conversation has no worktree to run in — start the grilling first.",
-  AlreadyRunning:
-    "An agent is already running here, so nothing was started. Have a look at what it is doing and ask again after.",
-  EmptyInstruction: "Say what to do — the instruction is the whole of the task.",
-  NoSuchProfile: "That profile has been removed.",
-  NoSuchModel: "That profile no longer lists that model.",
-  NotStarted:
-    "The instruction is on the timeline and no session could be started for it. The server log says why.",
 };
 
 /// And each way of being refused a resume.
@@ -444,16 +417,7 @@ export function Timeline(props: {
                   )}
                 </Match>
                 <Match when={"ManualTask" in event && event.ManualTask}>
-                  {(manual) => (
-                    <ManualTask
-                      manual={manual()}
-                      selected={props.selected === manual().id}
-                      open={() => {
-                        props.select(manual().id);
-                        props.details();
-                      }}
-                    />
-                  )}
+                  {(manual) => <ManualTask manual={manual()} />}
                 </Match>
                 <Match when={"AgentOutput" in event && event.AgentOutput}>
                   {(output) => (
@@ -524,15 +488,14 @@ export function Timeline(props: {
           <Adoption conversation={props.conversation} adopting={adopting()} />
         )}
       </Show>
-      {/* And under that, the two ways to get a conversation moving again. Both
-          are offered *whenever nothing is running*, which is a quiet moment
-          between steps as much as it is a run that has stopped, so they sit
-          below whichever of the two above is drawn rather than instead of it.
+      {/* And under that, the way to get a conversation moving again. It is
+          offered *whenever nothing is running*, which is a quiet moment between
+          steps as much as it is a run that has stopped, so it sits below
+          whichever of the two above is drawn rather than instead of it.
 
-          Resume first, because it is the one that carries on what Verkstead was
-          already doing: the other is for the thing it was never going to do. */}
+          What Verkstead was never going to do is not here: a steer is what says
+          that, and it is in the menu on the header. */}
       <Resume conversation={props.conversation} />
-      <ManualTaskComposer conversation={props.conversation} />
     </>
   );
 }
@@ -548,8 +511,8 @@ export function Timeline(props: {
 ///
 /// It carries nothing. What to start is recomputed from the conversation's state
 /// and its branch at the moment of the press, which is the whole point of one
-/// button rather than one per way of stopping — steering the work is what the
-/// manual task below is for.
+/// button rather than one per way of stopping — saying something else should
+/// happen is what a steer is for.
 ///
 /// Beside it, where the run stopped because an account ran out of window, the
 /// words the session printed about when that account comes back. Words to read
@@ -617,178 +580,6 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// The way to move a conversation by hand: an instruction, a pairing to run it
 /// under, and a submit.
 ///
-/// Drawn whenever there is a worktree to run in and no session is registered for
-/// it. That is the literal rule and it is deliberate: the gaps between an
-/// unattended run's steps, a wrapping lull, a grilling waiting on a pick, a
-/// finished conversation, and a conversation that has stopped all show it, because the point of it is to get a
-/// stuck conversation moving. After a server restart nothing is running anywhere,
-/// so it shows everywhere, and that is wanted too.
-///
-/// A conversation that has never been grilled and one that was closed have no
-/// worktree, so neither is ever offered it — there is nowhere for a session to
-/// run.
-///
-/// The pairing starts on the conversation's implementation one and picking
-/// another is one-off: it is what this task runs under, and it never becomes the
-/// conversation's own. Nothing here writes it back.
-function ManualTaskComposer(props: {
-  conversation: ConversationView;
-}): JSX.Element {
-  const queries = useQueryClient();
-
-  const [instruction, setInstruction] = createSignal("");
-  const [picked, setPicked] = createSignal<string | null>(null);
-  const [refused, setRefused] = createSignal<ManualTaskStarted | null>(null);
-
-  /// The profile list, read here rather than passed down, the way the setup's
-  /// pickers read it: the control is whole wherever it is drawn.
-  const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
-
-    // And the same merge, for the same picker — see the setup on the brief
-    // card. This one sits under a half-typed instruction while a session is
-    // talking above it, which is the loudest a Nudge ever gets.
-    freshness: { reconcile: "id" },
-  }));
-
-  /// Which pairing is selected: whatever the human picked, and the
-  /// conversation's implementation one until they pick anything.
-  ///
-  /// The empty string is nothing selected, which is where the composer opens on
-  /// a conversation whose implementation profile was chosen before models were
-  /// paired with them: there is no default model anywhere, so the pick is the
-  /// human's to make.
-  const running = () =>
-    picked() ?? pairing.chosen(props.conversation.implementation_pairing);
-
-  /// Whether the composer belongs on this conversation at all.
-  ///
-  /// A worktree to run in and nothing running is the whole of it: a conversation
-  /// that has never been grilled and one that was closed have no worktree, so
-  /// neither is ever offered it — and a conversation Verkstead has finished with
-  /// keeps its worktree, which is exactly where the escape hatch belongs.
-  const offered = () =>
-    props.conversation.worktree !== null && !props.conversation.working;
-
-  const submit = useMutation(() => ({
-    mutationFn: (chosen: string) =>
-      startManualTask(
-        props.conversation.id,
-        instruction(),
-        pairing.choice(chosen),
-      ),
-    onSuccess: (outcome: ManualTaskStarted) => {
-      if (outcome !== "Started") {
-        setRefused(outcome);
-        // Refused against a picture of the world this page read a moment ago:
-        // reading it again is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
-        return;
-      }
-
-      // It is on the timeline now, which is where it is read back from: the box
-      // is emptied so what is in it is always something not yet asked for.
-      setRefused(null);
-      setInstruction("");
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={offered()}>
-      <div class="manual-task-composer">
-        <h2>Do something by hand</h2>
-
-        <label for="manual-task">What should the agent do?</label>
-        {/* A copy of what has been typed gives the field its height — see
-            `.grow`, which the brief's field uses for the same reason. */}
-        <div class="grow" data-value={instruction()}>
-          <textarea
-            id="manual-task"
-            rows="1"
-            placeholder="Rebase this onto main and force-push"
-            value={instruction()}
-            onInput={(ev) => {
-              setInstruction(ev.currentTarget.value);
-              setRefused(null);
-            }}
-          />
-        </div>
-
-        {/* Drawn only once the list is here, the way the setup's pickers are:
-            a select whose value is set before its options exist is a select
-            showing nothing. */}
-        <div class="manual-task-profile">
-          <label for="manual-task-pairing">Run it as</label>
-          <Show
-            when={profiles.data}
-            fallback={
-              <p class="note">
-                {profiles.isError
-                  ? `Could not read the agent profiles: ${profiles.error?.message}`
-                  : "Reading the agent profiles…"}
-              </p>
-            }
-          >
-            {(saved) => (
-              /* A [`Picker`] rather than a `<select>`, the way the setup's
-                 pickers are: what this shows and what the press below runs the
-                 task as are the same pairing, list or no list — see
-                 `src/picking.tsx`. */
-              <Picker
-                id="manual-task-pairing"
-                options={pairing.pairings(saved())}
-                value={pairing.value}
-                label={pairing.label}
-                chosen={running()}
-                pick={setPicked}
-                // The one-off pick is gone from the list: it is dropped, and
-                // `running` falls back to the conversation's own implementation
-                // pairing — which is where the composer opened.
-                gone={() => setPicked(null)}
-                disabled={submit.isPending}
-              />
-            )}
-          </Show>
-        </div>
-
-        <button
-          type="button"
-          class="start-manual-task"
-          disabled={
-            submit.isPending || instruction().trim() === "" || running() === ""
-          }
-          onClick={() => {
-            const chosen = running();
-            if (chosen !== "") {
-              submit.mutate(chosen);
-            }
-          }}
-        >
-          {submit.isPending ? "Starting…" : "Set it going"}
-        </button>
-
-        <p class="note">
-          One session, outside the grilling and the implementation. Nothing about
-          the conversation moves — what it leaves behind is what it commits.
-        </p>
-
-        <Show when={refused()}>
-          {(outcome) => <p class="error">{MANUAL_TASK_REFUSAL[outcome()]}</p>}
-        </Show>
-        <Show when={submit.isError}>
-          <p class="error">
-            The manual task could not be started: {submit.error?.message}
-          </p>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
 /// The pinned events: what stays in view rather than scrolling past with the
 /// record.
 ///
@@ -1210,33 +1001,23 @@ function Notice(props: {
   );
 }
 
-/// What the human asked for by hand: the instruction a Manual Task was set
+/// What somebody asked for by hand, once: the instruction a manual task was set
 /// going with.
 ///
-/// A card and not a line, unlike the notice above it: it is what somebody asked
-/// for in their own words, and the words are the whole of it. Read-only, like
-/// the handoff — it is a moment on the record rather than a document to go back
-/// to, and what a second thought produces is a second Manual Task.
+/// Nothing sets another going. A steer into implementing carries the instruction
+/// now, and the session it starts drives the conversation rather than standing
+/// beside it — so this is a record of something that happened, kept and read
+/// rather than rewritten.
+///
+/// A line and not a card, like the notice above it: it is what was asked for, in
+/// somebody's own words, and there is nothing to open and nothing to answer. It
+/// is rendered markdown all the same, because that is what was typed.
 ///
 /// What the session it started went on to do is not drawn here. That arrives as
 /// the events any work arrives as — what it printed, what it asked, what it
 /// committed — under this one and in the order it happened.
-///
-/// Clamped and openable, as the handoff is: an instruction is as long as whoever
-/// typed it made it, and the events it set going belong directly under it.
-function ManualTask(props: {
-  manual: ManualTaskEvent;
-  selected: boolean;
-  open: () => void;
-}): JSX.Element {
-  return (
-    <Openable kind="manual-task" selected={props.selected} open={props.open}>
-      <div class="event-head">
-        <h2>Manual task</h2>
-      </div>
-      <Clamped class="manual-task-body" html={props.manual.html} />
-    </Openable>
-  );
+function ManualTask(props: { manual: ManualTaskEvent }): JSX.Element {
+  return <div class="manual-task markdown" innerHTML={props.manual.html} />;
 }
 
 /// A move: the Conversation changing hands, said as the transition itself.

@@ -560,9 +560,8 @@ The **folding** is the far end: when a session is started to build, every
 answered Deferred Ask of that Conversation nobody has been told about goes into
 its prompt, oldest first, under the documents the prompt is built from. Each is
 folded once, and that it was folded is recorded rather than worked out from what
-is answered. A Manual Task's session is never folded into — its prompt is the
-instruction and nothing else — and neither is a relaunched grilling, which is
-already primed with everything the Conversation has answered.
+is answered. The one session never folded into is a relaunched grilling, which
+is already primed with everything the Conversation has answered.
 _Avoid_: sync/async ask, hard/soft question, urgent question
 
 ## Question Sets

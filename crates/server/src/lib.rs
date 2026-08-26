@@ -39,7 +39,6 @@ mod grillings;
 /// sessions means saying where they live.
 pub mod handoffs;
 mod limits;
-mod manual;
 mod nudge;
 mod profiles;
 mod push;

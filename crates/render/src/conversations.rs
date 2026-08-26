@@ -332,9 +332,9 @@ pub struct ConversationView {
     /// Whether a session is registered for this Conversation as of this read.
     ///
     /// The same fact the sidebar draws its working indicator from, said here
-    /// because the Timeline has its own use for it: the Manual Task composer is
-    /// offered exactly where nothing is running, and the states it is offered in
-    /// are the ones a session may or may not be running in.
+    /// because the Timeline has its own use for it: Force stop is offered
+    /// exactly where something is running, and the states it is offered in are
+    /// the ones a session may or may not be running in.
     ///
     /// A question about a process rather than about the record, so it is true
     /// only as of the moment it was read — and a restarted server has no
@@ -446,14 +446,15 @@ pub enum TimelineEvent {
     /// other, and what a stopped run waits on is the one Resume.
     Notice(NoticeEvent),
 
-    /// A Manual Task the human set going by hand, rendered inline like the
-    /// handoff — and for the same reason: it is what they asked for, in their
-    /// own words, with nothing of it a details pane would add.
+    /// A Manual Task a Verkstead of before set going by hand, rendered inline
+    /// like the Notice above it — and for its reason: it is a thing that was
+    /// asked for once, with nothing of it a details pane would add and nothing
+    /// on it to press.
     ///
-    /// What the session it started went on to do is not here. That lands as the
-    /// Events any work lands as — what it printed, what it asked, what it
-    /// committed — so this is the instruction alone, which is the part of a
-    /// Manual Task nothing else on the Timeline records.
+    /// Nothing writes another. A steer into Implementing carries the human's
+    /// instruction now, and drives the Conversation with it rather than leaving
+    /// the work standing beside its own session — so what is here is the record
+    /// of something that happened, kept and read rather than rewritten.
     ManualTask(ManualTaskEvent),
 
     /// A Steer the human pressed: which state they moved the Conversation into.
@@ -776,11 +777,10 @@ pub struct NoticeEvent {
     pub html: String,
 }
 
-/// A Manual Task as the page receives it: what the human asked for, and when.
+/// A Manual Task as the page receives it: what was asked for, and when.
 ///
-/// HTML alone, like the handoff and unlike the Brief: it is a moment on the
-/// record rather than a document anybody goes back and edits — what a second
-/// thought produces is a second Manual Task.
+/// HTML alone, like the Notice beside it and unlike the Brief: it is a moment on
+/// the record rather than a document anybody goes back and edits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ManualTaskEvent {
@@ -1447,7 +1447,7 @@ pub fn notice_event(id: i64, at: String, markdown: &str) -> TimelineEvent {
 }
 
 /// A Manual Task as an Event, rendered the same way and for the same reason: it
-/// is what the human asked for, written for somebody to read back.
+/// is what was asked for once, written for somebody to read back.
 pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEvent {
     TimelineEvent::ManualTask(ManualTaskEvent {
         id,
@@ -1459,9 +1459,8 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 /// A Steer as an Event: the state the human sent the Conversation into, and the
 /// instruction they sent it with where they wrote one.
 ///
-/// Rendered the way the Brief and a Manual Task's instruction are, and for the
-/// same reason: it is what the human asked for, written for somebody to read
-/// back.
+/// Rendered the way the Brief is, and for the same reason: it is what the human
+/// asked for, written for somebody to read back.
 pub fn steer_event(
     id: i64,
     at: String,
@@ -1641,72 +1640,9 @@ pub enum GrillingStarted {
     WorktreeRefused,
 }
 
-/// What the human typed into the Manual Task composer: the instruction, and the
-/// Agent Profile to run it under.
-///
-/// The Profile travels with the instruction rather than being read off the
-/// Conversation, because the pick is one-off. The composer starts on the
-/// Conversation's implementation Profile and a different choice belongs to this
-/// submission alone — it never becomes the Conversation's.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ManualTaskSubmission {
-    /// What to do, in the human's own markdown. Nothing here interprets it — it
-    /// goes on the Timeline whole and into the prompt whole.
-    pub instruction: String,
-
-    /// Which saved Profile the one-off session runs as.
-    pub profile_id: i64,
-
-    /// And which of that Profile's models it runs on. The composer prefills the
-    /// Conversation's implementation Pairing and otherwise demands a pick:
-    /// there is no default model anywhere.
-    pub model: String,
-}
-
-/// What became of submitting one.
-///
-/// Named the way [`GrillingStarted`]'s refusals are, and for the same reason:
-/// each of them is something different for the human to go and do, and a single
-/// "cannot start" would leave them guessing which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub enum ManualTaskStarted {
-    /// The instruction is on the Timeline and a session is running on it.
-    Started,
-
-    NoSuchConversation,
-
-    /// It is drafting or closed, so it has no Worktree for a session to run in.
-    /// The two states the composer is never offered in.
-    NowhereToWork,
-
-    /// A session was registered when this arrived, so the composer that was
-    /// pressed was stale. Nothing is queued: an instruction written against a
-    /// world that has since moved may no longer be the thing to do.
-    AlreadyRunning,
-
-    /// Nothing was typed, and an instruction is the whole of what a Manual Task
-    /// is.
-    EmptyInstruction,
-
-    /// The picked Profile has gone — deleted between the page being drawn and
-    /// the press.
-    NoSuchProfile,
-
-    /// It is still there and no longer lists the model picked beside it — its
-    /// list was edited between the page being drawn and the press.
-    NoSuchModel,
-
-    /// The instruction is on the Timeline and no session could be started for
-    /// it. The reason is in the server's log, as a worktree git refused is: this
-    /// is the one refusal with nothing for the human to correct.
-    NotStarted,
-}
-
 /// What became of pressing Resume.
 ///
-/// Named the way [`ManualTaskStarted`]'s refusals are, and for a reason of its
+/// Named the way [`GrillingStarted`]'s refusals are, and for a reason of its
 /// own on top of theirs: Resume is never silent. Either something is running —
 /// which needs no announcement, the session showing up on the Timeline — or
 /// nothing is, and the one place that can say why is the answer to the press.
@@ -1945,7 +1881,7 @@ pub struct SteerSubmission {
 
 /// What became of submitting one.
 ///
-/// Named the way [`ManualTaskStarted`]'s refusals are, and nothing here is about
+/// Named the way [`GrillingStarted`]'s refusals are, and nothing here is about
 /// the state the Conversation was in: the human has looked at the work and said
 /// where it goes, so the source is not something to be refused for. What is left
 /// to be wrong about is the *target* — a state whose work cannot be set going

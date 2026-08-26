@@ -30,11 +30,10 @@ use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Archived, Author, BaseBranchChoice, BranchRename, BriefEdit, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, ManualTaskStarted, ManualTaskSubmission, NewAdoption,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resumed, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TokenEdit, TokenSaved,
-    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    GrillingStarted, Lifecycle, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RepoEntry, Resumed, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -134,19 +133,16 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // for a window is stopped like everything else now, and what starts it
         // again is the one Resume below.
         //
-        // And what the human sets going by hand, wherever nothing is running.
-        // Per Conversation rather than per Event, unlike a Set: a Manual Task
-        // answers nothing on the Timeline — it is a new thing to do, and the
-        // Event it becomes is written by this.
-        .route(
-            "/api/ui/conversations/{id}/manual-task",
-            post(start_manual_task),
-        )
-        // And the press beside it, which is the other way a stopped Conversation
-        // gets going: what Verkstead itself should be doing, worked out again
-        // from where the work now stands. Per Conversation for the same reason,
-        // and with no body at all — there is nothing to say about it beyond
-        // which Conversation it is.
+        // And no route for the one thing the human used to set going by hand
+        // beside the work: a steer into Implementing carries the instruction
+        // now, and the session it starts drives the Conversation rather than
+        // standing next to it — see [`steer`].
+        //
+        // What there is is the press that gets a stopped Conversation going
+        // again: what Verkstead itself should be doing, worked out again from
+        // where the work now stands. Per Conversation rather than per Event, and
+        // with no body at all — there is nothing to say about it beyond which
+        // Conversation it is.
         .route("/api/ui/conversations/{id}/resume", post(resume))
         // And the two presses that stop it, which are Resume's opposite number
         // and take a body for the same reason it does: none. Which Conversation
@@ -867,10 +863,10 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
         blocked_on,
         resets,
         // The same reading the Events above are drawn against, said as a fact
-        // about the Conversation: the Timeline offers the Manual Task composer
-        // exactly where nothing is running, and one Event of a session's is not
-        // the question — a Conversation whose session has ended is not working,
-        // whichever Event it was writing into.
+        // about the Conversation: the Timeline offers Force stop exactly where
+        // something is running, and one Event of a session's is not the question
+        // — a Conversation whose session has ended is not working, whichever
+        // Event it was writing into.
         working: writing.is_some(),
         timeline: timeline
             .into_iter()
@@ -991,10 +987,11 @@ async fn conversation(State(state): State<AppState>, Path(id): Path<String>) -> 
                     store::Event::Notice(markdown) => {
                         verkstead_render::notice_event(event.id, event.at, &markdown)
                     }
-                    // And what the human asked for by hand, rendered like the
-                    // handoff and inline like it: the instruction is the whole
-                    // of what a Manual Task is on the record, and what its
-                    // session did lands beside it as its own Events.
+                    // And a Manual Task a Verkstead of before set going by hand.
+                    // Nothing writes another — a steer into Implementing carries
+                    // the instruction now — and nothing rewrote these: the
+                    // instruction is what was asked for, and it is drawn as the
+                    // line it is with nothing to press on it.
                     store::Event::ManualTask(instruction) => {
                         verkstead_render::manual_task_event(event.id, event.at, &instruction)
                     }
@@ -1419,35 +1416,6 @@ async fn adopt(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "adopting a roadmap stage failed");
             unavailable("the stage could not be adopted")
-        }
-    }
-}
-
-/// `POST /api/ui/conversations/{id}/manual-task` — do this one thing by hand.
-///
-/// The instruction goes on the Timeline and a one-off session starts on it under
-/// the Profile the human picked beside it. Nothing about the Conversation moves:
-/// a Manual Task is outside the pipeline, and what it leaves behind is its
-/// instruction, what its session printed and whatever that committed.
-///
-/// `AlreadyRunning` is an outcome rather than an error, for the reason every
-/// other named outcome here is one: the composer that was pressed was drawn a
-/// moment ago, and an agent having started since is something to say in words
-/// rather than something to retry.
-async fn start_manual_task(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(submission): Json<ManualTaskSubmission>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return Json(ManualTaskStarted::NoSuchConversation).into_response();
-    };
-
-    match crate::manual::submit(&state, id, &submission).await {
-        Ok(outcome) => Json(outcome).into_response(),
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id = id, "starting a manual task failed");
-            unavailable("the manual task could not be started")
         }
     }
 }

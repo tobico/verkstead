@@ -237,8 +237,7 @@ pub(crate) async fn submit(
             // A session started on the instruction, driving the Conversation
             // while it runs and handing the pipeline on from whatever the branch
             // then holds. See [`crate::runner::instructed`], which is what makes
-            // this a driver rather than the errand beside the work a Manual Task
-            // is.
+            // this a driver rather than an errand standing beside the work.
             Some(instruction) => {
                 tokio::spawn(crate::runner::instructed(
                     state.clone(),
