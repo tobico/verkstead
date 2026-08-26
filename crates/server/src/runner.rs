@@ -1246,7 +1246,10 @@ pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) 
 /// session's across the whole of it, the wait on the human included.
 ///
 /// A session ended that way **is a session that finished**: it is
-/// [`Reviewed::Done`], exactly as one that saw itself out is. Where the session
+/// [`Reviewed::Done`], exactly as one that saw itself out is — as long as it said
+/// something. A session ended on its own quiet is one being taken at its word,
+/// and one that never said a word gave none, so that is a stop rather than a
+/// review: see [`SAID_NOTHING`]. Where the session
 /// ends first, how it ended is read exactly as an inline run's is: cleanly means
 /// it did what it was sent to do, and anything else means it did not. Nothing is
 /// refused for and nothing is stopped here — what to do about either of those is
@@ -1273,15 +1276,30 @@ async fn proposing(
     let ended = tokio::select! {
         ended = session.ended() => ended,
         () = quiet_and_nothing_asked(state, conversation_id, event_id, &quiet, pace) => {
+            // Whether that was a session finishing or one that never got going,
+            // which is the whole of what its own words can be asked. Ended
+            // either way — a session with nothing to say is not one to leave
+            // holding the Worktree — and the difference is in what is made of
+            // it.
+            let said_anything = quiet.said_anything();
+
             tracing::info!(
                 conversation_id,
                 event_id,
                 what,
+                said_anything,
                 "the session has gone quiet with nothing of its own open, so it is \
                  being ended",
             );
 
             state.sessions.end(conversation_id).await;
+
+            if !said_anything {
+                return Reviewed::Stopped {
+                    how: SAID_NOTHING.to_owned(),
+                    writing: event_id,
+                };
+            }
 
             return Reviewed::Done;
         }
@@ -1309,6 +1327,23 @@ async fn proposing(
         None => Reviewed::Done,
     }
 }
+
+/// How a session that was ended on quiet without ever having said a word is
+/// recorded.
+///
+/// Read as ending badly rather than as ending, which is the one place this rule
+/// needs a second signal. Every other ending here pairs quiet with something the
+/// session produced — a commit, a backlog, a handoff — so a session that came up
+/// and did nothing satisfies none of them and stops the run. Quiet with nothing
+/// pending is satisfied by pure silence, and a review is exactly the session
+/// whose whole report is its own words: taking silence as *it found nothing* would
+/// settle the review and carry a wrap-up to Done over a branch nobody read, with
+/// nothing on the Timeline saying so.
+///
+/// So it is the human's to look at, and the Notice already says the rest of it —
+/// what the last session said, which is nothing at all.
+const SAID_NOTHING: &str =
+    "the session never said anything, so nothing here says the work was done";
 
 /// Wait until the session has printed nothing for [`Pace::proposing`] *and* has
 /// no Question Set of its own still waiting to be answered.

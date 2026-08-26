@@ -4223,6 +4223,13 @@ const REVIEW_THEN_FIX_AND_IDLE: &str = "    SAYING='reading the branch'\n    \
      printf 'fixed what was accepted and left the rest\\n'\n    \
      sleep 300";
 
+/// One that comes up and never says a word — an agent that fell over before its
+/// first line, or one that never got as far as reading anything.
+///
+/// Silence is the whole of what quiet-with-nothing-pending has to read, so this
+/// is the shape that would satisfy it having done nothing at all.
+const REVIEW_THAT_SAYS_NOTHING: &str = "    sleep 300";
+
 /// And one that never goes quiet at all, which is a session still at work.
 const REVIEW_THAT_KEEPS_TALKING: &str = "    printf 'reading the branch\\n'\n    \
      while :; do sleep 0.1; printf 'still reading\\n'; done";
@@ -4874,6 +4881,63 @@ async fn a_review_that_keeps_talking_is_never_ended_under_it() {
     assert!(
         !review_settled(&fixture).await,
         "and nothing settled a review still being read",
+    );
+}
+
+/// A review session that never says a word is not a review that found nothing.
+///
+/// The one place the quiet rule needs a second signal. Every other ending here
+/// pairs quiet with something the session produced — a commit, a backlog, a
+/// handoff — so a session that came up and did nothing satisfies none of them.
+/// This one is satisfied by pure silence, and a review is exactly the session
+/// whose whole report is its own words: reading silence as *it found nothing*
+/// would settle the review and carry the wrap-up to Done over a branch nobody
+/// read, with nothing on the Timeline saying so.
+///
+/// Green all the way through, so nothing but the review stands between this
+/// wrap-up and Done — which is what makes the stop the whole proof.
+#[tokio::test]
+async fn a_review_that_never_said_anything_stops_the_run_rather_than_settling() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THAT_SAYS_NOTHING),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped
+            .html
+            .contains("Reviewing the branch the pull request is on"),
+        "the step is named as what it was: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("never said anything"),
+        "and the reason is that there was no report to read: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !review_settled(&fixture).await,
+        "a branch nobody said a word about is not a branch that was reviewed",
+    );
+    assert_ne!(
+        fixture.view().await.state,
+        Lifecycle::Done,
+        "so the wrap-up does not carry on over the top of it",
+    );
+    assert_eq!(
+        fixture.view().await.blocked_on,
+        Some(stopped.id),
+        "what is waiting is the human",
     );
 }
 
