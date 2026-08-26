@@ -17,7 +17,7 @@ and roadmap cards gain detail pages, and a mobile navigation bug is fixed.
 - [x] 05: Carousel — [details](05-carousel.md)
 - [x] 06: Sticky session strip — [details](06-sticky-session-strip.md)
 - [x] 07: Menus and pane chrome — [details](07-menus-and-pane-chrome.md)
-- [ ] 08: Brief card — [details](08-brief-card.md)
+- [x] 08: Brief card — [details](08-brief-card.md)
 - [ ] 09: Hover sweep — [details](09-hover-sweep.md)
 - [ ] 10: Commit message block — [details](10-commit-message-block.md)
 - [ ] 11: Locked Sets — [details](11-locked-sets.md)

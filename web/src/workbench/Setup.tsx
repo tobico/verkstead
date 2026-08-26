@@ -95,15 +95,22 @@ export function Setup(props: {
 
   return (
     <section class={styles.conversationSetup} aria-label="Setup">
-      {/* No branch field where the conversation is adopting a roadmap: a stage
+      {/* The branch and the branch it comes off, side by side wherever there
+          is room for two and stacked where there is not — the same row the
+          pairings below are laid out in, because they are the same kind of
+          pair: two short choices about the one thing.
+
+          No branch field where the conversation is adopting a roadmap: a stage
           is worked on its own slug, so the name invented when the row was made
           is discarded when the stage is adopted, and naming it here would be a
           field with nothing behind it. */}
-      <Show when={!props.conversation.adopting && !branched()}>
-        <BranchName conversation={props.conversation} />
-      </Show>
       <Show when={!branched()}>
-        <BaseBranch conversation={props.conversation} />
+        <div class={styles.branches}>
+          <Show when={!props.conversation.adopting}>
+            <BranchName conversation={props.conversation} />
+          </Show>
+          <BaseBranch conversation={props.conversation} />
+        </div>
       </Show>
 
       <Profiles conversation={props.conversation} />
@@ -175,28 +182,19 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
         </Match>
       </Switch>
 
-      {/* That this conversation will grill, which is the server's rule and not
-          a count of the two fields above. An affirmation and nothing else: what
-          is *missing* is the business of the button it gates, at the end of the
-          record below, and said in both places it would be one complaint about
-          the pairings here and the same complaint again there.
+      {/* Nothing is said here about being ready: readiness is the business of
+          the button it gates, at the end of the record below, which is enabled
+          or else explains what is missing. Said up here as well it would be the
+          same verdict twice.
 
-          An adopting conversation never grills, so it is not the line to draw
-          for it — it would read as needing a brief nobody here writes. What
-          stands instead is why both pairings are fixed all the same. */}
-      <Show
-        when={!props.conversation.adopting}
-        fallback={
-          <Note>
-            Both pairings are fixed before adopting: the implementation one is
-            what the work runs under, and the grilling one is carried, because
-            the stages after this one inherit both from it.
-          </Note>
-        }
-      >
-        <Show when={props.conversation.ready_to_grill}>
-          <Note class={`${styles.readiness} ${styles.ready}`}>Ready to grill.</Note>
-        </Show>
+          An adopting conversation never grills at all, and why both pairings
+          are fixed for it all the same is worth a line. */}
+      <Show when={props.conversation.adopting}>
+        <Note>
+          Both pairings are fixed before adopting: the implementation one is
+          what the work runs under, and the grilling one is carried, because
+          the stages after this one inherit both from it.
+        </Note>
       </Show>
     </section>
   );
@@ -500,28 +498,6 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
         pick={(picked) => record.mutate(picked)}
         disabled={record.isPending}
       />
-      <Note>
-        <Show
-          when={props.conversation.base_commit}
-          fallback={
-            <>
-              The work branches from{" "}
-              <span class={styles.defaultBranch}>
-                {props.conversation.repo.default_branch}
-              </span>{" "}
-              as it stands when grilling starts.
-            </>
-          }
-        >
-          {(branch) => (
-            <>
-              Pinned to{" "}
-              <span class={styles.defaultBranch}>{branch()}</span> — the work branches
-              from wherever it stands when grilling starts.
-            </>
-          )}
-        </Show>
-      </Note>
       {/* The list is what there is to pick out of, so a read that failed is
           said rather than drawn as a repository with one branch. */}
       <Show when={branches.isError}>

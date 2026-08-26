@@ -1837,6 +1837,12 @@ describe("a conversation's setup", () => {
     expect(card.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
     expect(card.querySelector(`.${setup.conversationProfiles}`)).toBeTruthy();
 
+    // The two branch fields are one row's to lay out, the way the pairings
+    // below them are; the stylesheet is what wraps it where the pane is narrow.
+    const row = card.querySelector(`.${setup.branches}`)!;
+    expect(row.querySelector(`.${setup.branchName}`)).toBeTruthy();
+    expect(row.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
+
     // Under the words rather than over them: the brief is what the card is,
     // and while it is a draft the words are the field they are typed into.
     const body = container.querySelector(`.${timeline.brief} .${app.grow}`)!;
@@ -2093,6 +2099,9 @@ describe("a conversation's setup", () => {
     expect(picker.value).toBe(OPEN.base_commit);
   });
 
+  /// The rule entry is the whole of what names the branch an unpinned
+  /// conversation starts from: the hint that used to repeat it underneath is
+  /// gone, the dropdown having said it already.
   it("names the branch an unpinned conversation will start from", async () => {
     const rule: ConversationView = { ...OPEN, base_commit: null };
     serving(
@@ -2104,14 +2113,29 @@ describe("a conversation's setup", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Base branch"),
+    )) as HTMLSelectElement;
+
+    expect(picker.value).toBe("");
+    expect(picker.options[0]!.textContent).toContain(OPEN.repo.default_branch);
+    expect(
+      container.querySelector(`.${setup.baseBranch} .${notices.note}`),
+    ).toBeNull();
+  });
+
+  /// Neither wording of the hint under the dropdown survives — the pinned one
+  /// either, which is what the fixture's own conversation would draw.
+  it("says nothing under the dropdown about when the base resolves", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
     await waitFor(() => screen.getByLabelText("Base branch"));
 
     expect(
-      (screen.getByLabelText("Base branch") as HTMLSelectElement).value,
-    ).toBe("");
-    expect(container.querySelector(`.${setup.baseBranch} .${notices.note}`)!.textContent).toContain(
-      OPEN.repo.default_branch,
-    );
+      container.querySelector(`.${setup.baseBranch} .${notices.note}`),
+    ).toBeNull();
+    expect(screen.queryByText(/branches from/)).toBeNull();
   });
 });
 
@@ -2257,21 +2281,25 @@ describe("a conversation's pairings", () => {
     );
   });
 
-  /// A conversation missing either profile is identifiably not ready, and the
-  /// answer is the server's rather than a count of the two fields. What is
-  /// missing is not said here, though: the button at the end of the record is
-  /// the one thing that explains itself, and a verdict up here as well would be
-  /// the same complaint twice.
-  it("says nothing about readiness until there is something to affirm", async () => {
+  /// Readiness is the business of the button at the end of the record, which is
+  /// enabled or else explains what is missing. Said up here as well it would be
+  /// the same verdict twice, so the setup says nothing about it either way.
+  it("says nothing about readiness, ready or not", async () => {
     withConversation(UNCHOSEN);
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
-    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
     expect(screen.queryByText(/Not ready to grill/)).toBeNull();
+    expect(screen.queryByText("Ready to grill.")).toBeNull();
+  });
 
-    // The fixture's own conversation has both, and the server says so.
-    expect(OPEN.ready_to_grill).toBe(true);
+  it("says nothing about readiness when the server says it is ready", async () => {
+    theWorkbench();
+    mount(`/conversations/${OPEN.id}`);
+
+    await waitFor(() => screen.getByLabelText("Grilling"));
+    expect(OPEN.ready_to_grill, "the fixture is the ready one").toBe(true);
+    expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
   /// One row where the pane is wide enough for two, which is the stylesheet's
@@ -2282,14 +2310,6 @@ describe("a conversation's pairings", () => {
 
     const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
     expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(2);
-  });
-
-  it("says it is ready when the server says so", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    await waitFor(() => screen.getByText("Ready to grill."));
-    expect(container.querySelector(`.${setup.readiness}`)!.classList).toContain(setup.ready);
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -2308,10 +2328,9 @@ describe("a conversation's pairings", () => {
       ready_to_grill: false,
     };
     withConversation(broken);
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    mount(`/conversations/${OPEN.id}`);
 
     await waitFor(() => screen.getByText("Its config file is gone."));
-    expect(container.querySelector(`.${setup.readiness}`)).toBeNull();
   });
 
   it("says why a choice was refused, in words", async () => {
