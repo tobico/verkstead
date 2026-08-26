@@ -19,6 +19,7 @@ import type {
   AbandonedRepo,
   Adopted,
   AgentOutputEvent,
+  BacklogPane,
   BriefEvent,
   Capture,
   CommitPane,
@@ -61,6 +62,8 @@ import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
 import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: a commit, a document read whole,
 // one session's record and the terminal it was printed on, and a pull request.
+import backlogPane from "../src/workbench/Backlog.module.css";
+import backlogCss from "../src/workbench/Backlog.module.css?raw";
 import commitPane from "../src/workbench/Commit.module.css";
 // The Diff section the commit pane draws, which is the Set page's own component
 // and so the Set page's own module.
@@ -7036,8 +7039,9 @@ describe("the pinned task list", () => {
   });
 
   /// Nothing pins or unpins one: the set is fixed, so there is no control for
-  /// it and no details pane to open — the whole of a task list is the list.
-  it("asks the human for nothing", async () => {
+  /// it. What the card does have is the one press its whole surface is — the
+  /// documents its entries name, in the details pane.
+  it("is one press and offers nothing else", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
@@ -7045,6 +7049,8 @@ describe("the pinned task list", () => {
 
     expect(list.querySelectorAll("button")).toHaveLength(0);
     expect(list.textContent).not.toContain("Pin");
+    expect(list.getAttribute("role")).toBe("button");
+    expect(list.getAttribute("aria-pressed")).toBe("false");
   });
 
   /// What holds it in view is the block it shares with the header, so that is
@@ -7096,6 +7102,185 @@ describe("the pinned task list", () => {
 
     expect(container.querySelector(`.${timeline.pinned}`)).toBeNull();
     expect(container.querySelector(`.${timeline.taskList}`)).toBeNull();
+  });
+});
+
+/// The backlog opened, as the details pane fetches it: one document per entry,
+/// with the finished tasks' files gone.
+///
+/// Written by hand rather than taken from a fixture: the fixtures are of the
+/// conversation endpoint, and this is a pane's own payload — the same way a
+/// commit's is written above.
+const BACKLOG_PANE: BacklogPane = {
+  feature: BACKLOG.feature,
+  diagrams: true,
+  tasks: BACKLOG.tasks.map((task) => ({
+    number: task.number,
+    title: task.title,
+    html: task.done
+      ? null
+      : `<h1>${task.number}. ${task.title}</h1>\n<h2>What to build</h2>\n` +
+        `<p>The ${task.title.toLowerCase()} part of it.</p>\n` +
+        '<div class="wide"><pre class="mermaid">flowchart LR\n  in --&gt; out\n</pre></div>',
+  })),
+};
+
+/// Where the details pane fetches it from — the conversation alone, there being
+/// no event to name a backlog by.
+const THE_BACKLOG = `/api/ui/conversations/${TASKED.id}/backlog`;
+
+describe("the task list opened", () => {
+  /// What the card is pressed for: the documents its entries name, which is the
+  /// one thing about a backlog the card cannot show.
+  it("draws every task document as its own boxed section, in backlog order", async () => {
+    const fetching = theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${backlogPane.task}`),
+    ];
+
+    expect(sections.map((section) => section.id)).toEqual(
+      BACKLOG.tasks.map((task) => `task-${task.number}`),
+    );
+    expect(
+      sections.map((section) => [
+        section.querySelector(`.${backlogPane.n}`)!.textContent,
+        section.querySelector(`.${backlogPane.what}`)!.textContent,
+      ]),
+    ).toEqual(BACKLOG.tasks.map((task) => [task.number, task.title]));
+
+    // The Preface's own treatment: the heading outside the box, the rendered
+    // markdown in it, put in the page as the server wrote it.
+    const outstanding = sections[BACKLOG.tasks.findIndex((task) => !task.done)]!;
+    const body = outstanding.querySelector(`.${backlogPane.document}`)!;
+
+    expect(body.classList).toContain("markdown");
+    expect(body.querySelector("h2")!.textContent).toBe("What to build");
+    expect(outstanding.querySelector("h2")!.closest(`.${backlogPane.document}`)).toBeNull();
+    expect(backlogCss).toContain(
+      ".document,\n.finished {\n  padding: 1rem;\n  background: var(--card);",
+    );
+
+    expect(askedFor(fetching, THE_BACKLOG)).toBeGreaterThan(0);
+  });
+
+  /// A done task's file is gone from `.tasks/` — which is what says it is done —
+  /// so its entry is drawn with the note rather than with a document.
+  it("says so where the document is finished and removed", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+
+    const sections = [
+      ...container.querySelectorAll(`.${shell.detailsPane} .${backlogPane.task}`),
+    ];
+
+    expect(
+      sections.map((section) => section.querySelector(`.${backlogPane.finished}`) !== null),
+    ).toEqual(BACKLOG.tasks.map((task) => task.done));
+
+    const done = sections[BACKLOG.tasks.findIndex((task) => task.done)]!;
+
+    expect(done.querySelector(`.${backlogPane.finished}`)!.textContent).toBe(
+      "Finished, and the document removed.",
+    );
+    expect(done.querySelector(`.${backlogPane.document}`)).toBeNull();
+  });
+
+  /// The set page's own table of contents, one line per task: a finished one is
+  /// listed too, because it is part of what the backlog is.
+  it("offers a jump to each task", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const nav = await drawn(container, `.${shell.detailsPane} .${contents.contents}`);
+    const lines = [...nav.querySelectorAll(`.${contents.sections} > li a`)];
+
+    expect(lines.map((line) => line.getAttribute("href"))).toEqual(
+      BACKLOG.tasks.map((task) => `#task-${task.number}`),
+    );
+    expect(lines.map((line) => line.textContent)).toEqual(
+      BACKLOG.tasks.map((task) => `${task.number} ${task.title}`),
+    );
+  });
+
+  /// One backlog in two places, so opening either opens the one pane and both
+  /// read as selected while it is open — the pull request's own arrangement.
+  it("opens from the row on the record as well as from the pinned card", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.timeline} .${timeline.taskList}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${backlogPane.task}`);
+
+    const both = [...container.querySelectorAll(`.${timeline.taskList}`)];
+
+    expect(both).toHaveLength(2);
+    expect(both.every((card) => card.classList.contains(timeline.selected!))).toBe(true);
+    expect(both.every((card) => card.getAttribute("aria-pressed") === "true")).toBe(true);
+  });
+
+  /// "← Timeline" is the only way off it: there is no Close anywhere in the
+  /// details panel.
+  it("is titled for the card, and walks back out to the record", async () => {
+    theTasked({}, whenever(THE_BACKLOG, json(BACKLOG_PANE)));
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head}`);
+
+    expect(head.querySelector("h1")!.textContent).toBe("Task list");
+    expect(head.textContent).not.toContain("Close");
+    expect(
+      (await drawn(container, `.${shell.detailsPane} .${backlogPane.feature}`)).textContent,
+    ).toBe(BACKLOG.feature);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${paneHead.back}`));
+
+    await waitFor(() => expect(frame(container).dataset.pane).toBe("timeline"));
+  });
+
+  /// The server refuses cleanly where the worktree or the backlog has gone, and
+  /// the pane says what it was told rather than spinning.
+  it("says what went wrong where there is no backlog left to read", async () => {
+    theTasked(
+      {},
+      whenever(
+        THE_BACKLOG,
+        json({ error: "there is no backlog on that Conversation" }, 404),
+      ),
+    );
+    const { container } = mount(`/conversations/${TASKED.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.pinned} .${timeline.taskList}`),
+    );
+
+    const line = await drawn(container, `.${shell.detailsPane} .${notices.error}`);
+
+    expect(line.textContent).toContain("there is no backlog on that Conversation");
   });
 });
 

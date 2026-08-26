@@ -9,6 +9,7 @@ import type {
   AbandonedRepo,
   Adopted,
   ApiError,
+  BacklogPane,
   Locked,
   BaseRecorded,
   BranchRenamed,
@@ -271,6 +272,15 @@ export function loadCommitPane(
   event: number,
 ): Promise<CommitPane> {
   return get<CommitPane>(`/api/ui/conversations/${id}/commit/${event}`);
+}
+
+/// The backlog opened: every task document `.tasks/` holds, rendered.
+///
+/// Named by the conversation alone, unlike the three panes around it. A backlog
+/// is read off the worktree rather than remembered, so there is no event to
+/// reach it by: there is one backlog per conversation, and this is it.
+export function loadBacklogPane(id: number): Promise<BacklogPane> {
+  return get<BacklogPane>(`/api/ui/conversations/${id}/backlog`);
 }
 
 /// What is on the pull request the finish step opened: its commit list and its

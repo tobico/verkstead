@@ -111,6 +111,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/commit/{event}",
             get(commit_pane),
         )
+        // And the backlog opened, which is every task document `.tasks/` holds.
+        // Named by the Conversation alone: a backlog is read off the Worktree
+        // rather than remembered, so there is no Event id to reach it by — see
+        // [`backlog`].
+        .route("/api/ui/conversations/{id}/backlog", get(backlog))
         // And what is on the pull request the finish step opened, fetched by the
         // pane that shows it — see [`pull_request`]. Fetched rather than
         // remembered, and the reason is stronger here than for either of the two
@@ -1309,6 +1314,44 @@ async fn commit_pane(
     Json(rendered).into_response()
 }
 
+/// `GET /api/ui/conversations/{id}/backlog` — every task document the
+/// Conversation's Worktree holds, rendered.
+///
+/// Its own request rather than a field on the Conversation, exactly as a
+/// commit's diff is: a Timeline is read every time an open page hears the world
+/// moved, and what the entries *say* is worth reading when somebody opens the
+/// card.
+///
+/// No Event id in the path, unlike the three panes around it. The backlog is a
+/// reading of the Worktree rather than a record, so the row that says where it
+/// landed fixes a position and names nothing: there is one backlog per
+/// Conversation, and this is it.
+///
+/// A Conversation with no Worktree, no `.tasks/` or nothing readable in it is
+/// one there is no pane to draw about, which is a 404 for the reason a commit
+/// the repository has lost is one.
+async fn backlog(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as every other id here: one that names no number
+    // names no Conversation.
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_backlog();
+    };
+
+    let worktree = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation.worktree,
+        Ok(None) => return no_such_backlog(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "loading a Conversation failed");
+            return unavailable("the backlog could not be read");
+        }
+    };
+
+    match crate::tasks::documents(worktree).await {
+        Some(pane) => Json(pane).into_response(),
+        None => no_such_backlog(),
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/pull-request/{event}` — what is on the pull
 /// request the finish step opened: its commit list and its comments.
 ///
@@ -2093,6 +2136,17 @@ fn no_such_commit() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such commit on that Conversation"),
+    )
+}
+
+/// And no backlog to open — no Conversation of that id, no Worktree left, or
+/// nothing in it this can read as a list. Worded without telling them apart for
+/// the commit's reason: there is nothing different for the human to do about
+/// any of them.
+fn no_such_backlog() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no backlog on that Conversation"),
     )
 }
 

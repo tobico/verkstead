@@ -17,14 +17,15 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
-    BriefSaved, Capture, CommitPane, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
-    GrillingStarted, Locked, NewAdoption, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
-    Registered, Registration, RepoEntry, Resumed, Screen, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
+    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, GrillingStarted, Locked, NewAdoption,
+    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoEntry,
+    Resumed, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShowingArchived, Shown,
+    Started, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView,
+    Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -133,6 +134,12 @@ fn the_viewers_types_are_written_from_these() {
     // diff is its own payload, rendered by the same renderer an attached Diff
     // goes through — which is why this writes no new Diff types.
     CommitPane::export_all(&config).unwrap();
+
+    // And the backlog opened, which is every task document of it: the entries
+    // ride on the Conversation as the pinned task list, and the documents they
+    // name are their own payload, read off the Worktree when somebody opens the
+    // card.
+    BacklogPane::export_all(&config).unwrap();
 
     // And what the finish step opened. The PR itself rides on the Conversation
     // as a pinned Event — a number, a title and a URL; what is *on* it is its

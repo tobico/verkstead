@@ -294,14 +294,17 @@ remembered is read. The details pane caps its content at the 60rem the Set and
 Settings pages are read at and centres it when the pane is wider, so a pane
 dragged to the width of a window is still a pane a line can be read across.
 
-The details pane is the selected Event and nothing else: with nothing selected
-it is blank, and a narrow layout offers no way to page into it (*settled
-2026-08-24, building workbench-refit*). What a Conversation needs settling
-before it runs — branch, base commit, both Pairings, the readiness verdict —
-rides under the Brief on its timeline card instead, disappearing entirely once
-grilling starts, since the server freezes all of it at that moment. The repo
-name, the worktree path and the conversation state are drawn nowhere: the
-record tells that story.
+The details pane is the one selected thing and nothing else: with nothing
+selected it is blank, and a narrow layout offers no way to page into it
+(*settled 2026-08-24, building workbench-refit*). That is nearly always an
+Event; the backlog is the exception, being read off the worktree rather than
+recorded, so its card names it by a word where every other card names an id.
+
+What a Conversation needs settling before it runs — branch, base commit, both
+Pairings, the readiness verdict — rides under the Brief on its timeline card
+instead, disappearing entirely once grilling starts, since the server freezes
+all of it at that moment. The repo name, the worktree path and the conversation
+state are drawn nowhere: the record tells that story.
 
 Timeline events:
 
@@ -311,7 +314,7 @@ Timeline events:
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
-| Task list | inline, pinned *and* on the record where the backlog landed | — |
+| Task list | inline, pinned *and* on the record where the backlog landed | every task document, each a boxed markdown section in backlog order |
 | Stage list | inline, pinned *and* on the record where the roadmap landed | — |
 | PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
 | Notice | inline, nothing to do about it | — |

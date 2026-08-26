@@ -577,8 +577,9 @@ pub enum PinnedEvent {
 /// at that row — so the identity is on the row and the content is here, and the
 /// card is the same card in both places.
 ///
-/// Nothing opens it: the whole of a task list is the list, which is why the
-/// design gives it no details pane.
+/// It opens all the same, in both of the places it is drawn: what a details
+/// pane shows of it is not the list again but the documents the entries name —
+/// see [`BacklogPane`], which is its own request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TaskListEvent {
@@ -606,6 +607,66 @@ pub struct TaskEntry {
     /// `.tasks/`. That is the done-signal the task runner turns on, and a
     /// checkbox is how an entry is written rather than what says it is done.
     pub done: bool,
+}
+
+/// The backlog opened: every task document of it, rendered.
+///
+/// What the card cannot show. A task list's card is the entries — a number, a
+/// title and a box — and each entry details a document in `.tasks/` that says
+/// what the task is and what *done* means for it. That is what this is: the
+/// documents themselves, in the order the backlog works them.
+///
+/// Its own request rather than a field on the Conversation, for the reason a
+/// commit's diff is one: a Timeline is read every time an open page hears the
+/// world moved, and a backlog is read whole when somebody opens it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct BacklogPane {
+    /// What the backlog is called: `TODO.md`'s heading, which is what the card
+    /// says too. Empty where the list wrote none.
+    pub feature: String,
+
+    /// In the order the list has them, which is the order they get worked in.
+    pub tasks: Vec<TaskDocument>,
+
+    /// Whether any of these documents came out holding a Diagram, and so
+    /// whether the pane carries the client-side renderer at all.
+    ///
+    /// Asked once of all of them, off the HTML above, exactly as a Set's own
+    /// flag is — see [`crate::SetView::diagrams`]. mermaid is megabytes, and the
+    /// pane that asks for the bundle is the one with something to draw with it.
+    pub diagrams: bool,
+}
+
+/// One task's document as the pane draws it: the entry it belongs to, and the
+/// markdown of its file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TaskDocument {
+    /// As the list writes it, zero-padding and all — `01`, the same string the
+    /// card's entry carries.
+    pub number: String,
+
+    pub title: String,
+
+    /// The document rendered and sanitized, or `null` where there is no file to
+    /// render — which is a task that is done, the file going being what says so.
+    /// The pane says as much in words rather than drawing a gap.
+    pub html: Option<String>,
+}
+
+/// What the caller of [`backlog_pane`] hands over for one entry: what the list
+/// says about it, and its document as the file still holds it.
+///
+/// Its own type rather than the server's, because this crate reads no
+/// filesystem — and rather than three parameters, two of which are strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskSource {
+    pub number: String,
+    pub title: String,
+
+    /// The markdown, or `None` where the task's file has gone from `.tasks/`.
+    pub markdown: Option<String>,
 }
 
 /// The roadmap as the Timeline shows it: what it is called, and every stage
@@ -1444,6 +1505,45 @@ pub fn commit_pane(summary: Option<&str>, patch: &str) -> CommitPane {
 /// it on the record where it landed, and both are handed this one reading.
 pub fn task_list(feature: String, tasks: Vec<TaskEntry>) -> TaskListEvent {
     TaskListEvent { feature, tasks }
+}
+
+/// That backlog opened, rendered on the way.
+///
+/// Here rather than in the server for the reason the commit pane's rendering is:
+/// this is the crate with the markdown parser and the sanitizer in it. A task
+/// whose file has gone comes back with nothing to draw rather than with an empty
+/// document — the file going is what says the task is done, and the pane says so
+/// in words.
+///
+/// A document of nothing but whitespace is the same as no document at all, which
+/// is what an empty file left behind would otherwise draw: a box with a gap in
+/// it.
+pub fn backlog_pane(feature: String, read: Vec<TaskSource>) -> BacklogPane {
+    let tasks: Vec<TaskDocument> = read
+        .into_iter()
+        .map(|task| TaskDocument {
+            number: task.number,
+            title: task.title,
+            html: task
+                .markdown
+                .as_deref()
+                .map(crate::markdown::to_html)
+                .filter(|html| !html.trim().is_empty()),
+        })
+        .collect();
+
+    BacklogPane {
+        // Asked of the rendered documents rather than of the markdown they came
+        // from, for the reason a Set's own flag is: the rendering is where a
+        // fence either became a Diagram or did not, and the renderer in the page
+        // reads that same answer out of that same markup.
+        diagrams: tasks
+            .iter()
+            .filter_map(|task| task.html.as_deref())
+            .any(crate::markdown::holds_diagram),
+        feature,
+        tasks,
+    }
 }
 
 /// That backlog as the Event that gets pinned, which is where it is held in

@@ -1,0 +1,64 @@
+/* The backlog, opened: every task document of it, one boxed section at a time.
+   See `Backlog.tsx`.
+
+   Nothing about the markdown itself is here: `.markdown` in `styles/markdown.css`
+   holds the blocks' own rhythm, and the box around it is all that is a section's
+   own. */
+
+/* What the backlog is called, under the header — the same words the card
+   carries, so a pane walked into on a phone says which backlog this is. */
+.feature {
+  margin: 0 0 1rem;
+  color: var(--ink-soft);
+}
+
+/* One task: the heading outside the box and the document inside it, which is
+   what makes this and a Set's Preface look alike. */
+.task {
+  max-width: var(--measure);
+  margin: 0 0 1.5rem;
+  /* Where a jump from the table of contents lands, clear of whatever is pinned
+     across the top edge — `--jump-clear` in `set/Contents.module.css`, which is
+     what does the pinning. A commit's Message reads the same number. */
+  scroll-margin-top: var(--jump-clear);
+}
+
+/* The number leads the heading rather than trailing it, which is the other way
+   round from the card's rows: a card is scanned for which titles are left, and
+   a stack of documents is walked down by number. */
+.task h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.task .n {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.task .what {
+  min-width: 0;
+}
+
+/* The box the rendered markdown sits in. The same box a Set's Preface draws
+   around its body — see `.prefaceBody` in `set/Sheet.module.css`, which is the
+   same five lines and has to stay the same five, because a task document and a
+   Set's Preface are the same kind of thing read the same way. */
+.document,
+.finished {
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* A task whose file has gone, which is what says it is done. In the box where
+   its document would have been, so the section reads as a finished task rather
+   than as a document that would not load. */
+.finished {
+  margin: 0;
+  color: var(--ink-soft);
+  font-style: italic;
+}

@@ -274,6 +274,38 @@ columns: Array<string>, options: Array<OptionView>, };
 export type Author = { name: string, email: string, };
 
 /**
+ * The backlog opened: every task document of it, rendered.
+ *
+ * What the card cannot show. A task list's card is the entries — a number, a
+ * title and a box — and each entry details a document in `.tasks/` that says
+ * what the task is and what *done* means for it. That is what this is: the
+ * documents themselves, in the order the backlog works them.
+ *
+ * Its own request rather than a field on the Conversation, for the reason a
+ * commit's diff is one: a Timeline is read every time an open page hears the
+ * world moved, and a backlog is read whole when somebody opens it.
+ */
+export type BacklogPane = { 
+/**
+ * What the backlog is called: `TODO.md`'s heading, which is what the card
+ * says too. Empty where the list wrote none.
+ */
+feature: string, 
+/**
+ * In the order the list has them, which is the order they get worked in.
+ */
+tasks: Array<TaskDocument>, 
+/**
+ * Whether any of these documents came out holding a Diagram, and so
+ * whether the pane carries the client-side renderer at all.
+ *
+ * Asked once of all of them, off the HTML above, exactly as a Set's own
+ * flag is — see [`crate::SetView::diagrams`]. mermaid is megabytes, and the
+ * pane that asks for the bundle is the one with something to draw with it.
+ */
+diagrams: boolean, };
+
+/**
  * The branch to come off, or `null` to go back to the default-branch rule.
  */
 export type BaseBranchChoice = { 
@@ -1764,6 +1796,23 @@ export type Subscribed = "Stored" | "Incomplete";
 export type Subscription = { endpoint: string, p256dh: string, auth: string, };
 
 /**
+ * One task's document as the pane draws it: the entry it belongs to, and the
+ * markdown of its file.
+ */
+export type TaskDocument = { 
+/**
+ * As the list writes it, zero-padding and all — `01`, the same string the
+ * card's entry carries.
+ */
+number: string, title: string, 
+/**
+ * The document rendered and sanitized, or `null` where there is no file to
+ * render — which is a task that is done, the file going being what says so.
+ * The pane says as much in words rather than drawing a gap.
+ */
+html: string | null, };
+
+/**
  * One task of a backlog: the number it answers to, what it is called, and
  * whether it is done.
  */
@@ -1795,8 +1844,9 @@ done: boolean, };
  * at that row — so the identity is on the row and the content is here, and the
  * card is the same card in both places.
  *
- * Nothing opens it: the whole of a task list is the list, which is why the
- * design gives it no details pane.
+ * It opens all the same, in both of the places it is drawn: what a details
+ * pane shows of it is not the list again but the documents the entries name —
+ * see [`BacklogPane`], which is its own request.
  */
 export type TaskListEvent = { 
 /**

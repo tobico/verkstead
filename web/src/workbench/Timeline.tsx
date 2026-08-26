@@ -28,9 +28,11 @@
 //! pinned block alone.
 //!
 //! An Event that has a full self shows its summary here and is opened in the
-//! details pane, which is why this takes a way of selecting one. Three of them
-//! are documents — the frozen Brief, the handoff and the instruction a steer
-//! carried — and a document's summary is its own opening: the card shows
+//! details pane, which is why this takes a way of selecting one — and so does
+//! the backlog, whose card opens the documents its entries name and which is
+//! selected by a word rather than by an id, having no Event of its own. Three of
+//! them are documents — the frozen Brief, the handoff and the instruction a
+//! steer carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. The
 //! Brief is also the one Event that is written here as well as read: while the
 //! Conversation is drafting it is a field that saves itself rather than a card
@@ -113,6 +115,17 @@ import { Setup } from "./Setup";
 import styles from "./Timeline.module.css";
 import shell from "./Workbench.module.css";
 import { keeping } from "./settling";
+
+/// What the details pane is showing, as the card that opened it names itself.
+///
+/// An event's id, for the kinds of event that have a full self to open. And a
+/// word for the backlog, which has none: it is read off the worktree every time
+/// the conversation is, so the row that says where it landed fixes a position
+/// rather than an identity, and there is one backlog per conversation to name.
+///
+/// One channel for both, so that opening either closes the other — a details
+/// pane shows one thing.
+export type Opening = number | "backlog";
 
 /// How much of a commit's hash the timeline shows.
 ///
@@ -319,8 +332,8 @@ export function Timeline(props: {
   details: () => void;
 
   /// Which Event the details pane is showing, and how to change it.
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
 }): JSX.Element {
   /// The session running now, where there is one: the last output on the record
   /// that is still being written to. The last, because a Conversation runs one
@@ -537,7 +550,16 @@ export function Timeline(props: {
                     the row is a moment that happened, and what it showed is
                     read off a branch that is no longer there. */}
                 <Match when={"TaskList" in event && event.TaskList}>
-                  {(reached) => <TaskListRow reached={reached()} />}
+                  {(reached) => (
+                    <TaskListRow
+                      reached={reached()}
+                      selected={props.selected === "backlog"}
+                      open={() => {
+                        props.select("backlog");
+                        props.details();
+                      }}
+                    />
+                  )}
                 </Match>
                 <Match when={"StageList" in event && event.StageList}>
                   {(reached) => <StageListRow reached={reached()} />}
@@ -717,8 +739,8 @@ function Resume(props: { conversation: ConversationView }): JSX.Element {
 /// is furniture around a card nothing can be turned to.
 function Pinned(props: {
   conversation: ConversationView;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   return (
@@ -798,8 +820,8 @@ type Pane = {
 /// whoever is holding it.
 function Carousel(props: {
   conversation: ConversationView;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   const cards = () => props.conversation.pinned;
@@ -1002,22 +1024,31 @@ function named(event: PinnedEvent): string {
 
 /// One pinned card, whichever of the three kinds it is.
 ///
-/// One of them opens: a pull request has a full self, which is what is on it
-/// right now. Neither list does — what a details pane would show of one is what
-/// is already drawn here.
+/// Two of them open. A pull request has a full self, which is what is on it
+/// right now; a task list opens the documents its entries name, which is the
+/// backlog read at a second depth. The roadmap beside them does not yet.
 ///
 /// Each of the three is on the record as well, at the moment it arrived there,
 /// and the card drawn there is this same card — see the module docs.
 function Card(props: {
   event: PinnedEvent;
-  selected: number | null;
-  select: (event: number) => void;
+  selected: Opening | null;
+  select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   return (
     <Switch>
       <Match when={"TaskList" in props.event && props.event.TaskList}>
-        {(tasks) => <TaskList tasks={tasks()} />}
+        {(tasks) => (
+          <TaskList
+            tasks={tasks()}
+            selected={props.selected === "backlog"}
+            open={() => {
+              props.select("backlog");
+              props.details();
+            }}
+          />
+        )}
       </Match>
       <Match when={"StageList" in props.event && props.event.StageList}>
         {(stages) => <StageList stages={stages()} />}
@@ -1084,10 +1115,16 @@ function PullRequest(props: {
 /// server hands the one it took over twice. Nothing at all where there is
 /// nothing left to read: a worktree that has been taken away leaves the moment
 /// on the record with no list to show for it.
-function TaskListRow(props: { reached: TaskListReached }): JSX.Element {
+function TaskListRow(props: {
+  reached: TaskListReached;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   return (
     <Show when={props.reached.list}>
-      {(tasks) => <TaskList tasks={tasks()} />}
+      {(tasks) => (
+        <TaskList tasks={tasks()} selected={props.selected} open={props.open} />
+      )}
     </Show>
   );
 }
@@ -1121,19 +1158,33 @@ function Box(props: { done: boolean }): JSX.Element {
 /// The backlog: every task of it, and how far through it the work has got.
 ///
 /// The whole list rather than a summary, because the whole list is short and it
-/// is the one thing a conversation being built from a backlog is *about*. There
-/// is nothing to open: the design gives a task list no details pane, since what
-/// a details pane would show is what is already drawn here.
+/// is the one thing a conversation being built from a backlog is *about*.
+///
+/// It opens, and what it opens is not the list again: each entry names a
+/// document in `.tasks/` that says what that task is, and those are what the
+/// details pane holds — see `Backlog.tsx`. The whole card is the press, as a
+/// document's card is, because there is nothing else on it to press.
 ///
 /// Read out of `.tasks/` in the worktree every time the page reads the
 /// conversation, so a task finishing moves this without anybody pressing
 /// anything — in the pinned block and at the row on the record where the
-/// backlog landed alike, both being drawn from the one reading.
-function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
+/// backlog landed alike, both being drawn from the one reading. Drawn twice and
+/// selected once for the reason the pull request beside it is: the two are one
+/// backlog, so opening either opens the one details pane and both read as
+/// selected while it is open.
+function TaskList(props: {
+  tasks: TaskListEvent;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
   const done = () => props.tasks.tasks.filter((task) => task.done).length;
 
   return (
-    <article class={styles.taskList}>
+    <Openable
+      kind={styles.taskList!}
+      selected={props.selected}
+      open={props.open}
+    >
       <div class={styles.eventHead}>
         <h2>Task list</h2>
         <Show when={props.tasks.feature !== ""}>
@@ -1162,7 +1213,7 @@ function TaskList(props: { tasks: TaskListEvent }): JSX.Element {
           )}
         </For>
       </ol>
-    </article>
+    </Openable>
   );
 }
 

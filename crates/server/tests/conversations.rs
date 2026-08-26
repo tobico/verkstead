@@ -20,10 +20,10 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationUnarchived, ConversationView,
-    GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered, ShowingArchived, Started,
-    SteerOpened, TimelineEvent,
+    Adopted, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
+    ConversationView, GrillingStarted, Lifecycle, PinnedEvent, ProfileSaved, Registered,
+    ShowingArchived, Started, SteerOpened, TimelineEvent,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching};
 
@@ -3051,6 +3051,117 @@ async fn a_conversation_with_no_backlog_has_nothing_pinned() {
     grill(&app, id).await;
 
     assert!(opened(&app, id).await.pinned.is_empty());
+}
+
+/// The backlog opened: what the details pane fetches when somebody presses the
+/// task-list card.
+async fn backlog_pane(app: &Router, id: i64) -> BacklogPane {
+    get(app, &format!("/api/ui/conversations/{id}/backlog")).await
+}
+
+/// The card says which tasks there are; the pane says what each of them is. Both
+/// are one reading of `.tasks/`, so the entries line up.
+#[tokio::test]
+async fn the_task_list_opens_as_every_task_document_it_names() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &[]);
+    std::fs::write(
+        worktree.join(".tasks/02-refusal.md"),
+        "# 2. What a refused request is told\n\n\
+         ## What to build\n\n\
+         A `429` with the window in `Retry-After`.\n",
+    )
+    .unwrap();
+
+    let pane = backlog_pane(&app, id).await;
+
+    assert_eq!(pane.feature, "Rate limiting");
+    assert_eq!(
+        pane.tasks
+            .iter()
+            .map(|task| (task.number.as_str(), task.title.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("01", "The counter"),
+            ("02", "What a refused request is told"),
+        ],
+        "the list's own order, which is the order they get worked in",
+    );
+
+    assert_eq!(
+        pane.tasks[0].html, None,
+        "the finished task's file has gone, so there is nothing to render",
+    );
+
+    let html = pane.tasks[1].html.as_deref().expect("that file is there");
+
+    assert!(
+        html.contains("<h1>2. What a refused request is told</h1>"),
+        "rendered by the server, like every other document on this wire: {html}",
+    );
+    assert!(html.contains("<code>429</code>"), "{html}");
+    assert!(!pane.diagrams, "and nothing in it draws");
+}
+
+/// The three ways there is nothing to open, refused the same way: what the human
+/// would do about each of them is the same nothing.
+#[tokio::test]
+async fn a_conversation_with_no_backlog_has_no_pane_to_open() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    // Before there is a worktree at all.
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And with one that holds no `.tasks/`.
+    grill(&app, id).await;
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And once the finished feature's list has been taken away, which is what
+    // the last commit of a backlog does.
+    let worktree = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+    plan(&worktree, BACKLOG, &["02-refusal.md"]);
+    assert!(!backlog_pane(&app, id).await.tasks.is_empty());
+
+    std::fs::remove_dir_all(worktree.join(".tasks")).unwrap();
+    assert_eq!(refused_backlog(&app, id).await, StatusCode::NOT_FOUND);
+
+    // And a Conversation that is not there, or an id out of a URL somebody
+    // typed, which name no backlog either.
+    assert_eq!(refused_backlog(&app, 404).await, StatusCode::NOT_FOUND);
+
+    let (status, _) = fetch(
+        &app,
+        Request::builder()
+            .uri("/api/ui/conversations/nonsense/backlog")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// What the refusal came back as, for the cases where there is no pane.
+async fn refused_backlog(app: &Router, id: i64) -> StatusCode {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .uri(format!("/api/ui/conversations/{id}/backlog"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert!(
+        body.contains("no backlog"),
+        "the refusal should say what is missing, got: {body}"
+    );
+
+    status
 }
 
 /// A roadmap committed on a repository's default branch, as the old tools or a

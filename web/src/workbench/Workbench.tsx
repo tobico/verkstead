@@ -25,14 +25,18 @@
 //! below that breakpoint the page is walked through one pane at a time, so
 //! there is no border to drag and nothing remembered is read.
 //!
-//! Which Event is open is held here rather than in the Timeline, because it is
-//! what the third pane is *about*: the pane is that Event's full self and
-//! nothing else, so with none open it is bare paper. What a Conversation *is* is
-//! not drawn there — the setup it needs is on the Brief card, where it is used —
-//! and the way on to an empty pane is not offered, so a narrow window can only
-//! walk into the pane by opening something. The selection is not in the URL —
-//! an Event opened is a place in a page rather than a page, and a Conversation
-//! whose Timeline has moved on is not one to restore a scroll position into.
+//! What is open is held here rather than in the Timeline, because it is what the
+//! third pane is *about*: the pane is that one thing's full self and nothing
+//! else, so with nothing open it is bare paper. Nearly always that is an Event;
+//! the backlog is the exception, being read off the worktree rather than
+//! recorded, and it names itself by a word instead of an id.
+//!
+//! What a Conversation *is* is not drawn there — the setup it needs is on the
+//! Brief card, where it is used — and the way on to an empty pane is not
+//! offered, so a narrow window can only walk into the pane by opening something.
+//! The selection is not in the URL — what is opened is a place in a page rather
+//! than a page, and a Conversation whose Timeline has moved on is not one to
+//! restore a scroll position into.
 //!
 //! What is *not* held here is the Conversation itself. Reading one, and drawing
 //! the two panes it is read in, is `Reading` below — keyed on the id, so that
@@ -68,12 +72,13 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Asked } from "./Asked";
+import { Backlog } from "./Backlog";
 import { Commit } from "./Commit";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
 import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
-import { Timeline } from "./Timeline";
+import { Timeline, type Opening } from "./Timeline";
 import styles from "./Workbench.module.css";
 import {
   ALL_THREE,
@@ -234,8 +239,10 @@ export function Workbench(): JSX.Element {
 
   const [pane, setPane] = createSignal<Pane>("conversations");
 
-  /// Which Timeline Event the details pane is showing, where one is open.
-  const [event, setEvent] = createSignal<number | null>(null);
+  /// What the details pane is showing, where anything is open: a Timeline
+  /// Event, or the backlog, which has no Event to be named by — see
+  /// [`Opening`].
+  const [event, setEvent] = createSignal<Opening | null>(null);
 
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
@@ -438,9 +445,9 @@ function Reading(props: {
   /// The Conversation to read, or the empty string on the bare workbench.
   id: string;
 
-  /// Which Event the details pane is showing, and how to change it.
-  event: number | null;
-  select: (event: number) => void;
+  /// What the details pane is showing, and how to change it.
+  event: Opening | null;
+  select: (opening: Opening) => void;
 
   /// Which level a narrow window is showing, which is the way back out of the
   /// details pane.
@@ -476,6 +483,10 @@ function Reading(props: {
   /// The pull request is looked for among the pinned events rather than in the
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
+  ///
+  /// The backlog is none of these and is not looked for here at all: it has no
+  /// Event, being read off the worktree every time the Conversation is, so the
+  /// pane draws it from the selection itself — see the `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
 
@@ -596,84 +607,98 @@ function Reading(props: {
             is no way in to. */}
         <Show when={conversation.data}>
           {(conversation) => (
-            <Show when={opened(conversation())}>
-              {(open) => (
-                <Switch>
-                  <Match when={outputIn(open())}>
-                    {(output) => (
-                      <Output
-                        conversation={conversation()}
-                        output={output()}
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  <Match when={setIn(open())}>
-                    {(asked) => (
-                      <Asked
-                        asked={asked()}
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  <Match when={commitIn(open())}>
-                    {(commit) => (
-                      <Commit
-                        conversation={conversation()}
-                        commit={commit()}
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  <Match when={pullRequestIn(open())}>
-                    {(opened) => (
-                      <PullRequest
-                        conversation={conversation()}
-                        opened={opened()}
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  {/* And the three documents, which are one pane: each is
-                      rendered markdown under the heading its card carries, and
-                      the pane is the whole of what the card showed five lines
-                      of. */}
-                  <Match when={briefIn(open())}>
-                    {(brief) => (
-                      <Document
-                        heading="Brief"
-                        html={brief().html}
-                        empty="Nothing was written."
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  <Match when={handoffIn(open())}>
-                    {(handoff) => (
-                      <Document
-                        heading="Handoff"
-                        html={handoff().html}
-                        empty="The grilling wrote nothing down."
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                  {/* The instruction a steer sent a session off with, read the
-                      way every other document the human writes is read. Nothing
-                      opens a steer that carried none. */}
-                  <Match when={steerIn(open())}>
-                    {(steer) => (
-                      <Document
-                        heading="Instruction"
-                        html={steer().html ?? ""}
-                        empty="Nothing was asked for."
-                        back={() => props.pane("timeline")}
-                      />
-                    )}
-                  </Match>
-                </Switch>
-              )}
-            </Show>
+            <Switch>
+              {/* The backlog, which is the one thing this pane draws that is
+                  not an Event: it is read off the worktree every time the
+                  Conversation is, so there is nothing on the record to name it
+                  by and the card names it by the word instead. Ahead of the
+                  Events because it is not among them — [`opened`] looks for an
+                  id, and this selection is not one. */}
+              <Match when={props.event === "backlog"}>
+                <Backlog
+                  conversation={conversation()}
+                  back={() => props.pane("timeline")}
+                />
+              </Match>
+              <Match when={opened(conversation())}>
+                {(open) => (
+                  <Switch>
+                    <Match when={outputIn(open())}>
+                      {(output) => (
+                        <Output
+                          conversation={conversation()}
+                          output={output()}
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    <Match when={setIn(open())}>
+                      {(asked) => (
+                        <Asked
+                          asked={asked()}
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    <Match when={commitIn(open())}>
+                      {(commit) => (
+                        <Commit
+                          conversation={conversation()}
+                          commit={commit()}
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    <Match when={pullRequestIn(open())}>
+                      {(opened) => (
+                        <PullRequest
+                          conversation={conversation()}
+                          opened={opened()}
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    {/* And the three documents, which are one pane: each is
+                        rendered markdown under the heading its card carries, and
+                        the pane is the whole of what the card showed five lines
+                        of. */}
+                    <Match when={briefIn(open())}>
+                      {(brief) => (
+                        <Document
+                          heading="Brief"
+                          html={brief().html}
+                          empty="Nothing was written."
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    <Match when={handoffIn(open())}>
+                      {(handoff) => (
+                        <Document
+                          heading="Handoff"
+                          html={handoff().html}
+                          empty="The grilling wrote nothing down."
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                    {/* The instruction a steer sent a session off with, read the
+                        way every other document the human writes is read. Nothing
+                        opens a steer that carried none. */}
+                    <Match when={steerIn(open())}>
+                      {(steer) => (
+                        <Document
+                          heading="Instruction"
+                          html={steer().html ?? ""}
+                          empty="Nothing was asked for."
+                          back={() => props.pane("timeline")}
+                        />
+                      )}
+                    </Match>
+                  </Switch>
+                )}
+              </Match>
+            </Switch>
           )}
         </Show>
       </section>
