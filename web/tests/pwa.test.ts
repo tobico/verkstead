@@ -59,7 +59,8 @@ describe("the document", () => {
   it("names a favicon at the size a tab draws", () => {
     // A PNG cut to size rather than the artwork itself: the source is far larger
     // than anything serving it, and a browser shrinking it per tab would be both
-    // slower and softer than `tools/generate-icons.sh` was.
+    // slower and softer than `tools/generate-icons.sh` was. Cut from the hammer
+    // alone, too — the full mark has more in it than 32px can hold.
     expect(shell).toContain('rel="icon" href="/icons/icon-32.png"');
   });
 

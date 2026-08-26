@@ -11,15 +11,17 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <!-- The colour the browser chrome takes, so the window reads as a frame
          around the app rather than as a second colour beside it. Kept in step
-         with `theme_color` in the web manifest, which is also the field the iOS
-         icon is flattened onto — see `tools/generate-icons.sh`. -->
+         with `theme_color` in the web manifest. -->
     <meta name="theme-color" content="#21201e" />
     <!-- The artwork is a raster, so the favicon is a PNG cut to the size a tab
-         draws rather than one the browser has to shrink itself — see
-         `tools/generate-icons.sh`. -->
+         draws rather than one the browser has to shrink itself — and cut from
+         the hammer alone, the full mark having more in it than 32px can hold.
+         See `tools/generate-icons.sh`. -->
     <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
     <!-- iOS reads neither the manifest's icons nor a favicon this small, so it
-         gets its own link, to a PNG of the size it wants. -->
+         gets its own link, to a PNG of the size it wants — cut from the one
+         piece of artwork drawn with a field of its own, because iOS composites
+         a transparent icon onto black. -->
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
   </head>
   <body>
